@@ -437,6 +437,21 @@ SECTIONS
         registry.insert<VectorDialect>();
         registry.insert<LLVM::LLVMDialect>();
       });
+  TranslateFromMLIRRegistration registrationPyCtypes(
+      "aie-generate-py", "Generate aie_inc python wrapper",
+      [](ModuleOp module, raw_ostream &output) {
+          return AIETranslateToPyCtypes(module, output);
+      },
+      [](DialectRegistry &registry) {
+        registry.insert<xilinx::AIE::AIEDialect>();
+        registry.insert<func::FuncDialect>();
+        registry.insert<cf::ControlFlowDialect>();
+        registry.insert<DLTIDialect>();
+        registry.insert<arith::ArithDialect>();
+        registry.insert<memref::MemRefDialect>();
+        registry.insert<VectorDialect>();
+        registry.insert<LLVM::LLVMDialect>();
+      });
   TranslateFromMLIRRegistration registrationXJSON(
       "aie-flows-to-json", "Translate AIE flows to JSON",
       [](ModuleOp module, raw_ostream &output) {

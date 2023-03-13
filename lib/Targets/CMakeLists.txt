@@ -8,6 +8,7 @@
 add_subdirectory(AIEVecToCpp)
 
 add_mlir_library(AIETargets
+  AIETargetPyCtypes.cpp
   AIETargets.cpp
   AIETargetXAIEV1.cpp
   AIETargetXAIEV2.cpp

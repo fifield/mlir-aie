@@ -12,6 +12,8 @@
 
 namespace xilinx {
 namespace AIE {
+mlir::LogicalResult AIETranslateToPyCtypes(mlir::ModuleOp module,
+                                           llvm::raw_ostream &output);
 mlir::LogicalResult AIETranslateToXAIEV1(mlir::ModuleOp module,
                                          llvm::raw_ostream &output);
 mlir::LogicalResult AIETranslateToXAIEV2(mlir::ModuleOp module,
