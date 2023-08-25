@@ -147,4 +147,17 @@ def AIEDmaToIpu : Pass<"aie-dma-to-ipu", "AIE::DeviceOp"> {
   ];
 }
 
+def AIEIpuToFunc : Pass<"aie-ipu-to-func", "AIE::DeviceOp"> {
+  let summary = "Convert AIEX.ipu dialect to Func dialect";
+  let description = [{
+    This pass converts AIEX.ipu dialect ops to Func dialect calls.
+  }];
+  let constructor = "xilinx::AIEX::createAIEIpuToFuncPass()";
+  let dependentDialects = [
+    "mlir::func::FuncDialect",
+    "xilinx::AIE::AIEDialect",
+    "xilinx::AIEX::AIEXDialect",
+  ];
+}
+
 #endif
