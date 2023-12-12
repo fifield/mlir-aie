@@ -4,7 +4,7 @@
 Types and operations for AIE vector dialect
 [TOC]
 
-## Operation definition
+## Operations
 
 ### `aievec.add` (::xilinx::aievec::AddOp)
 
@@ -82,6 +82,42 @@ Effects: MemoryEffects::Effect{}
 | `result` | vector of any type values
 
 
+### `aievec.band` (::xilinx::aievec::BandOp)
+
+_AIE vector bitwise and_
+
+
+Syntax:
+
+```
+operation ::= `aievec.band` $lhs `,` $rhs attr-dict `:` type($lhs) `,` type($rhs)
+              `,` type($result)
+```
+
+AMD-specific intrinsic that computes bitwise and of two vectors and returns
+the result.
+`$result = band(`$lhs, $rhs`).
+
+Traits: AlwaysSpeculatableImplTrait
+
+Interfaces: ConditionallySpeculatable, NoMemoryEffect (MemoryEffectOpInterface)
+
+Effects: MemoryEffects::Effect{}
+
+#### Operands:
+
+| Operand | Description |
+| :-----: | ----------- |
+| `lhs` | 512-bit wide vector, of 8-bit signless integer or 16-bit signless integer or 32-bit signless integer or bfloat16 type
+| `rhs` | 512-bit wide vector, of 8-bit signless integer or 16-bit signless integer or 32-bit signless integer or bfloat16 type
+
+#### Results:
+
+| Result | Description |
+| :----: | ----------- |
+| `result` | 512-bit wide vector, of 8-bit signless integer or 16-bit signless integer or 32-bit signless integer or bfloat16 type
+
+
 ### `aievec.bneg` (::xilinx::aievec::BnegOp)
 
 _AIE vector bitwise negation_
@@ -93,7 +129,8 @@ Syntax:
 operation ::= `aievec.bneg` $source attr-dict `:` type($result)
 ```
 
-AMD-specific intrinsic that computes bitwise negation of a vector and returns the result.
+AMD-specific intrinsic that computes bitwise negation of a vector and
+returns the result.
 `$result = bneg(`$source`).
 
 Traits: AlwaysSpeculatableImplTrait
@@ -106,13 +143,49 @@ Effects: MemoryEffects::Effect{}
 
 | Operand | Description |
 | :-----: | ----------- |
-| `source` | vector of any type values
+| `source` | 512-bit wide vector, of 8-bit signless integer or 16-bit signless integer or 32-bit signless integer or bfloat16 type
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `result` | vector of any type values
+| `result` | 512-bit wide vector, of 8-bit signless integer or 16-bit signless integer or 32-bit signless integer or bfloat16 type
+
+
+### `aievec.bor` (::xilinx::aievec::BorOp)
+
+_AIE vector bitwise or_
+
+
+Syntax:
+
+```
+operation ::= `aievec.bor` $lhs `,` $rhs attr-dict `:` type($lhs) `,` type($rhs)
+              `,` type($result)
+```
+
+AMD-specific intrinsic that computes bitwise or of two vectors and returns
+the result.
+`$result = bor(`$lhs, $rhs`).
+
+Traits: AlwaysSpeculatableImplTrait
+
+Interfaces: ConditionallySpeculatable, NoMemoryEffect (MemoryEffectOpInterface)
+
+Effects: MemoryEffects::Effect{}
+
+#### Operands:
+
+| Operand | Description |
+| :-----: | ----------- |
+| `lhs` | 512-bit wide vector, of 8-bit signless integer or 16-bit signless integer or 32-bit signless integer or bfloat16 type
+| `rhs` | 512-bit wide vector, of 8-bit signless integer or 16-bit signless integer or 32-bit signless integer or bfloat16 type
+
+#### Results:
+
+| Result | Description |
+| :----: | ----------- |
+| `result` | 512-bit wide vector, of 8-bit signless integer or 16-bit signless integer or 32-bit signless integer or bfloat16 type
 
 
 ### `aievec.broadcast` (::xilinx::aievec::BroadcastOp)
@@ -183,10 +256,12 @@ _AIE vector bitwise xor_
 Syntax:
 
 ```
-operation ::= `aievec.bxor` $lhs `,` $rhs attr-dict `:` type($lhs) `,` type($rhs) `,` type($result)
+operation ::= `aievec.bxor` $lhs `,` $rhs attr-dict `:` type($lhs) `,` type($rhs)
+              `,` type($result)
 ```
 
-AMD-specific intrinsic that computes bitwise xor of two vectors and returns the result.
+AMD-specific intrinsic that computes bitwise xor of two vectors and returns
+the result.
 `$result = bxor(`$lhs, $rhs`).
 
 Traits: AlwaysSpeculatableImplTrait
@@ -199,14 +274,14 @@ Effects: MemoryEffects::Effect{}
 
 | Operand | Description |
 | :-----: | ----------- |
-| `lhs` | vector of any type values
-| `rhs` | vector of any type values
+| `lhs` | 512-bit wide vector, of 8-bit signless integer or 16-bit signless integer or 32-bit signless integer or bfloat16 type
+| `rhs` | 512-bit wide vector, of 8-bit signless integer or 16-bit signless integer or 32-bit signless integer or bfloat16 type
 
 #### Results:
 
 | Result | Description |
 | :----: | ----------- |
-| `result` | vector of any type values
+| `result` | 512-bit wide vector, of 8-bit signless integer or 16-bit signless integer or 32-bit signless integer or bfloat16 type
 
 
 ### `aievec.cast` (::xilinx::aievec::CastOp)
@@ -435,12 +510,12 @@ Effects: MemoryEffects::Effect{}
 _AIE vector fused multiply-add_
 
 AMD-specific multiply-add operation. It multiplies two 1-D vectors,
-and adds the result to an accumulator. The vector sizes are at least 
-256 bits, and the left operand vector is at least twice the size of 
+and adds the result to an accumulator. The vector sizes are at least
+256 bits, and the left operand vector is at least twice the size of
 right operand vector. For integers, the lhs and rhs are 8/16/32 bits;
 the result and acc are 48-bit or 80-bit accumulator.
 `$result = `$lhs * $rhs + $acc`.
-Note: the same operator can be used as fmsub operator by setting the 
+Note: the same operator can be used as fmsub operator by setting the
 'fmsub' bool to true.
 
 Traits: AlwaysSpeculatableImplTrait
@@ -517,6 +592,57 @@ Effects: MemoryEffects::Effect{}
 | Result | Description |
 | :----: | ----------- |
 | `result` | vector of any type values
+
+
+### `aievec.matmul` (::xilinx::aievec::MatMulOp)
+
+_AIEML matrix-multiply and accummulate_
+
+
+Syntax:
+
+```
+operation ::= `aievec.matmul` $lhs `,` $rhs `,` $acc attr-dict `:` type($lhs) `,`
+              type($rhs) `into` type($acc)
+```
+
+AMD AIEv2-specific intrinsic that performs a matrix multiplications
+between `lhs` and `rhs`, and accumulates the result in `acc`.
+
+Currently, this intrinsic supports the following type combinations:
+
+     lhs                | rhs                | Accumulator
+    :------------------:|:------------------:|:-----------------:
+     `vector<4x16xi8>`  | `vector<16x8xi4>`  | `vector<4x8xi32>`
+     `vector<4x8xi8>`   | `vector<8x8xi8>`   | `vector<4x8xi32>`
+     `vector<4x4xi16>`  | `vector<4x8xi8>`   | `vector<4x8xi32>`
+     `vector<4x2xi16>`  | `vector<2x8xi16>`  | `vector<4x8xi32>`
+     `vector<2x8xi16>`  | `vector<8x8xi8>`   | `vector<2x8xi64>`
+     `vector<4x8xi16>`  | `vector<8x4xi8>`   | `vector<4x4xi64>`
+     `vector<2x4xi16>`  | `vector<4x8xi16>`  | `vector<2x8xi64>`
+     `vector<4x4xi16>`  | `vector<4x4xi16>`  | `vector<4x4xi64>`
+     `vector<4x2xi32>`  | `vector<2x4xi16>`  | `vector<4x4xi64>`
+     `vector<4x8xbf16>` | `vector<8x4xbf16>` | `vector<4x4xf32>`
+
+Traits: AlwaysSpeculatableImplTrait
+
+Interfaces: ConditionallySpeculatable, NoMemoryEffect (MemoryEffectOpInterface)
+
+Effects: MemoryEffects::Effect{}
+
+#### Operands:
+
+| Operand | Description |
+| :-----: | ----------- |
+| `lhs` | a vector compatible with a lhs operand of matrix-multiply and accumulate
+| `rhs` | a vector compatible with a rhs operand of matrix-multiply and accumulate
+| `acc` | a vector compatible with an accumulator of matrix-multiply and accumulate
+
+#### Results:
+
+| Result | Description |
+| :----: | ----------- |
+| `result` | a vector compatible with an accumulator of matrix-multiply and accumulate
 
 
 ### `aievec.max` (::xilinx::aievec::MaxOp)
@@ -912,8 +1038,8 @@ Effects: MemoryEffects::Effect{}
 
 _AIE srs_
 
-AMD-specific shift-round-saturate intrinsic. Moves values from 
-accumulator data type to AIE vector data types. The adjustment in 
+AMD-specific shift-round-saturate intrinsic. Moves values from
+accumulator data type to AIE vector data types. The adjustment in
 precision is controlled by the shift parameter.
 `$result = srs($source, $shift)`
 
@@ -923,18 +1049,12 @@ Interfaces: ConditionallySpeculatable, NoMemoryEffect (MemoryEffectOpInterface)
 
 Effects: MemoryEffects::Effect{}
 
-#### Attributes:
-
-<table>
-<tr><th>Attribute</th><th>MLIR Type</th><th>Description</th></tr>
-<tr><td><code>shift</code></td><td>::mlir::IntegerAttr</td><td>8-bit signless integer attribute whose value is non-negative</td></tr>
-</table>
-
 #### Operands:
 
 | Operand | Description |
 | :-----: | ----------- |
 | `source` | vector of any type values
+| `shift` | integer
 
 #### Results:
 
@@ -947,7 +1067,7 @@ Effects: MemoryEffects::Effect{}
 
 _AIE vector subtract_
 
-AMD-specific advanced sub operation that subtracts two 1-D vectors 
+AMD-specific advanced sub operation that subtracts two 1-D vectors
 with lane selection. The vector sizes are at least 256 bits.
 `$result = `$lhs - $rhs`.
 
@@ -996,7 +1116,7 @@ Syntax:
 operation ::= `aievec.sub_elem` $lhs `,` $rhs attr-dict `:` type($result)
 ```
 
-AMD-specific aie-ml intrinsic that allows you to perform substraction operation 
+AMD-specific aie-ml intrinsic that allows you to perform substraction operation
 on all types of vectors.`$result = `$lhs - $rhs`.
 
 Traits: AlwaysSpeculatableImplTrait
@@ -1066,7 +1186,7 @@ Effects: MemoryEffects::Effect{}
 
 <table>
 <tr><th>Attribute</th><th>MLIR Type</th><th>Description</th></tr>
-<tr><td><code>offset</code></td><td>::mlir::IntegerAttr</td><td>32-bit signed integer attribute</td></tr>
+<tr><td><code>offset</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
 <tr><td><code>index</code></td><td>::mlir::IntegerAttr</td><td>8-bit signless integer attribute whose minimum value is 0 whose maximum value is 1</td></tr>
 </table>
 
