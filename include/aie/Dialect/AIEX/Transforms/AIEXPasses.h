@@ -29,6 +29,7 @@ createAIELowerMulticastPass();
 std::unique_ptr<mlir::OperationPass<AIE::DeviceOp>>
 createAIEBroadcastPacketPass();
 std::unique_ptr<mlir::OperationPass<AIE::DeviceOp>> createAIEDmaToNpuPass();
+std::unique_ptr<mlir::OperationPass<AIE::DeviceOp>> createAIENpuToFuncPass();
 std::unique_ptr<mlir::OperationPass<mlir::ModuleOp>> createAIEXToStandardPass();
 std::unique_ptr<mlir::OperationPass<AIE::DeviceOp>>
 createAIEMaterializeBDChainsPass();

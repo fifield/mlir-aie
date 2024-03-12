@@ -210,4 +210,16 @@ def AIECtrlPacketInferTiles : Pass<"aie-ctrl-packet-infer-tiles", "AIE::DeviceOp
   ];
 }
 
+def AIENpuToFunc : Pass<"aie-npu-to-func", "AIE::DeviceOp"> {
+  let summary = "Convert AIEX.npu dialect to Func dialect";
+  let description = [{
+    This pass converts AIEX.npu dialect ops to Func dialect calls.
+  }];
+  let constructor = "xilinx::AIEX::createAIENpuToFuncPass()";
+  let dependentDialects = [
+    "mlir::func::FuncDialect",
+    "xilinx::AIE::AIEDialect",
+    "xilinx::AIEX::AIEXDialect",
+  ];
+}
 #endif
