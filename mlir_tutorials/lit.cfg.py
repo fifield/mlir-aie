@@ -7,11 +7,9 @@
 # Copyright (C) 2022, Advanced Micro Devices, Inc.
 
 import os
-import platform
 import re
 import shutil
 import subprocess
-import tempfile
 
 import lit.formats
 import lit.util
@@ -24,9 +22,6 @@ from lit.llvm import llvm_config
 config.name = "AIE_TUTORIALS"
 
 config.test_format = lit.formats.ShTest(not llvm_config.use_lit_shell)
-config.environment["PYTHONPATH"] = "{}".format(
-    os.path.join(config.aie_obj_root, "python")
-)
 
 # suffixes: A list of file extensions to treat as test files.
 config.suffixes = [".mlir"]
@@ -156,7 +151,6 @@ if config.enable_chess_tests:
             print(
                 "WARNING: no valid xchess license that is required by some of the lit tests"
             )
-
     else:
         print("Chess not found")
 
