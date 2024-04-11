@@ -6,7 +6,7 @@
 # 
 ##===----------------------------------------------------------------------===##
 
-include ../makefile-common
+include ../../makefile-common
 
 ACDC_AIE = $(dir $(shell which aie-opt))/..
 
@@ -14,19 +14,19 @@ targetname = vector_max
 devicename = ipu
 col = 0
 CHESS_FLAGS=${CHESSCCWRAP2_FLAGS}
-KERNEL_LIB=${ACDC_AIE}/../../aie_kernels/generic/
+KERNEL_LIB=${ACDC_AIE}/../../aie_kernels/aie2/
 
 all: build/final.xclbin build/insts.txt
 
-build/vector_max.o: ${KERNEL_LIB}/vector_max.cc
+build/i32_add_reduce.o: ${KERNEL_LIB}/i32_add_reduce.cc
 	mkdir -p ${@D}
-	cd ${@D} && xchesscc_wrapper ${CHESS_FLAGS} -DBIT_WIDTH=8 -c $< -o ${@F}
+	cd ${@D} && xchesscc_wrapper ${CHESS_FLAGS} -c $< -o ${@F}
 
 build/aie.mlir: aie2.py
 	mkdir -p ${@D}
 	python3 $< ${devicename} ${col} > $@
 
-build/final.xclbin: build/aie.mlir build/vector_max.o
+build/final.xclbin: build/aie.mlir build/i32_add_reduce.o
 	mkdir -p ${@D}
 	cd ${@D} && aiecc.py --aie-generate-cdo --no-compile-host --xclbin-name=${@F} \
 				--aie-generate-ipu --ipu-insts-name=insts.txt $(<:%=../%)
