@@ -12,9 +12,7 @@ ACDC_AIE = $(dir $(shell which aie-opt))/..
 
 SHELL := /bin/bash
 
-targetname = passThroughHardware
-devicename = ipu
-col = 0
+targetname = passThroughDMAs
 LENGTH ?= 4096
 
 all: build/final.xclbin build/insts.txt
@@ -71,4 +69,4 @@ vck5000: build/aie.mlir
 
 
 clean:
-	rm -rf build _build inst aie.mlir.prj core_* test.elf ${targetname}.exe
+	rm -rf build _build inst ${targetname}.exe

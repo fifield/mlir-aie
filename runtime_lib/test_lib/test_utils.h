@@ -10,8 +10,16 @@
 
 // This file contains common helper functions for the generic host code
 
-#ifndef TEST_UTILS_H
-#define TEST_UTILS_H
+#ifndef _TEST_UTILS_H_
+#define _TEST_UTILS_H_
+
+#include <cstdint>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <vector>
+#include <iomanip>
 
 #include <boost/program_options.hpp>
 #include <cmath>
