@@ -17,9 +17,9 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <stdfloat>
 #include <string>
 #include <vector>
-#include <iomanip>
 
 #include <boost/program_options.hpp>
 #include <cmath>
@@ -80,64 +80,21 @@ void parse_options(int argc, const char *argv[], po::options_description &desc,
     std::exit(1);
   }
 
-  check_arg_file_exists(vm, "xclbin");
-  check_arg_file_exists(vm, "instr");
-}
+void init_xrt_load_kernel(xrt::device &device, xrt::kernel &kernel,
+                          int verbosity, std::string xclbinFileName,
+                          std::string kernelNameInXclbin);
 
 // --------------------------------------------------------------------------
 // AIE Specifics
 // --------------------------------------------------------------------------
 
-std::vector<uint32_t> load_instr_sequence(std::string instr_path) {
-  std::ifstream instr_file(instr_path);
-  std::string line;
-  std::vector<uint32_t> instr_v;
-  while (std::getline(instr_file, line)) {
-    std::istringstream iss(line);
-    uint32_t a;
-    if (!(iss >> std::hex >> a)) {
-      throw std::runtime_error("Unable to parse instruction file\n");
-    }
-    instr_v.push_back(a);
-  }
-  return instr_v;
+static inline std::bfloat16_t random_bfloat16_t(std::bfloat16_t scale,
+                                                std::bfloat16_t bias) {
+  return std::bfloat16_t((scale * (float)rand() / (float)(RAND_MAX)) + bias);
 }
 
-// --------------------------------------------------------------------------
-// Matrix / Float / Math
-// --------------------------------------------------------------------------
-
-static inline std::int16_t random_int16_t() {
-  return (std::int16_t)rand() % 0x10000;
-}
-
-// static inline std::bfloat16_t random_bfloat16_t() {
-//   // Random numbers should NOT be uniformly between 0 and 1, because that
-//   // would make the matrix product AB always close to 1.
-//   return std::bfloat16_t(4.0 * (float)rand() / (float)(RAND_MAX));
-// }
-
-// nearly_equal function adapted from Stack Overflow, License CC BY-SA 4.0
-// Original author: P-Gn
-// Source: https://stackoverflow.com/a/32334103
 bool nearly_equal(float a, float b, float epsilon = 128 * FLT_EPSILON,
-                  float abs_th = FLT_MIN)
-// those defaults are arbitrary and could be removed
-{
-  assert(std::numeric_limits<float>::epsilon() <= epsilon);
-  assert(epsilon < 1.f);
-
-  if (a == b)
-    return true;
-
-  auto diff = std::abs(a - b);
-  auto norm =
-      std::min((std::abs(a) + std::abs(b)), std::numeric_limits<float>::max());
-  // or even faster: std::min(std::abs(a + b),
-  // std::numeric_limits<float>::max()); keeping this commented out until I
-  // update figures below
-  return diff < std::max(abs_th, epsilon * norm);
-}
+                  float abs_th = FLT_MIN);
 
 template <typename T>
 void print_matrix(const std::vector<T> matrix, int n_cols,
@@ -197,18 +154,8 @@ void print_matrix(const std::vector<T> matrix, int n_cols,
 #undef print_row
 }
 
-// --------------------------------------------------------------------------
-// Tracing
-// --------------------------------------------------------------------------
-void write_out_trace(char *traceOutPtr, size_t trace_size, std::string path) {
-  std::ofstream fout(path);
-  uint32_t *traceOut = (uint32_t *)traceOutPtr;
-  for (int i = 0; i < trace_size / sizeof(traceOut[0]); i++) {
-    fout << std::setfill('0') << std::setw(8) << std::hex << (int)traceOut[i];
-    fout << std::endl;
-  }
-}
+void write_out_trace(char *traceOutPtr, size_t trace_size, std::string path);
 
 } // namespace test_utils
 
-#endif
+#endif // _TEST_UTILS_H_

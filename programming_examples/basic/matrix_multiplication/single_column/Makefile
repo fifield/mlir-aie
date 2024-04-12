@@ -6,15 +6,15 @@
 # 
 ##===----------------------------------------------------------------------===##
 
-subdir=matrix_vector
-targetname=matrixVectorMultiplication
-kernels=mv
+subdir=single_column
+targetname=matrixMultiplication
+kernels=mm
 
 # Currently does not accept reconfiguring size via these variables; must change
 # in source at aie2.py as well as here
-M=288
-K=288
-N=1
+M=256
+K=128
+N=128
 
 SELF_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
 include ${SELF_DIR}../makefile-common

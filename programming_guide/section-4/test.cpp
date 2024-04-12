@@ -97,9 +97,8 @@ int main(int argc, const char *argv[]) {
   // ------------------------------------------------------
   // Get device, load the xclbin & kernel and register them
   // ------------------------------------------------------
-  // Get a device handle
-  unsigned int device_index = 0;
-  auto device = xrt::device(device_index);
+  xrt::device device;
+  xrt::kernel kernel;
 
   test_utils::init_xrt_load_kernel(device, kernel, verbosity,
                                    vm["xclbin"].as<std::string>(),
@@ -149,7 +148,7 @@ int main(int argc, const char *argv[]) {
   // Sync buffers to update input buffer values
   bo_instr.sync(XCL_BO_SYNC_BO_TO_DEVICE);
   bo_inout0.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-  bo_inout1.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+  // bo_inout1.sync(XCL_BO_SYNC_BO_TO_DEVICE);
   bo_inout2.sync(XCL_BO_SYNC_BO_TO_DEVICE);
 
   // ------------------------------------------------------
@@ -166,20 +165,6 @@ int main(int argc, const char *argv[]) {
   // Main run loop
   // ------------------------------------------------------
   for (unsigned iter = 0; iter < num_iter; iter++) {
-
-  // Run kernel
-  if (verbosity >= 1)
-    std::cout << "Running Kernel.\n";
-  auto run = kernel(bo_instr, instr_v.size(), bo_inout0, bo_inout1);
-  run.wait();
-  bo_inout1.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
-
-  // Copy output results and verify they are correct
-  memcpy(CVec.data(), bufInOut1, (CVec.size() * sizeof(INOUT1_DATATYPE)));
-  if (do_verify) {
-    if (verbosity >= 1) {
-      std::cout << "Running Kernel.\n";
-    }
 
     // Run kernel
     if (verbosity >= 1)
@@ -218,7 +203,9 @@ int main(int argc, const char *argv[]) {
 
     // Write trace values if trace_size > 0
     if (trace_size > 0) {
-      test_utils::write_out_trace(((char *)bufInOut2) + INOUT2_SIZE, trace_size,
+      // test_utils::write_out_trace(((char *)bufInOut2) + INOUT2_SIZE,
+      // trace_size,
+      test_utils::write_out_trace(((char *)bufInOut2), trace_size,
                                   vm["trace_file"].as<std::string>());
     }
 

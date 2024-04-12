@@ -12,10 +12,10 @@ ACDC_AIE = $(dir $(shell which aie-opt))/..
 
 SHELL := /bin/bash
 
+all: build/final.xclbin build/insts.txt
+
 targetname = passThroughDMAs
 LENGTH ?= 4096
-
-all: build/final.xclbin build/insts.txt
 
 build/aie.mlir: aie2.py
 	mkdir -p ${@D}
