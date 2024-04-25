@@ -8,8 +8,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "aie/Dialect/AIEX/IR/AIEXDialect.h"
 #include "aie/Dialect/AIE/IR/AIEDialect.h"
+#include "aie/Dialect/AIEX/IR/AIEXDialect.h"
 #include "aie/Dialect/AIEX/Transforms/AIEXPasses.h"
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -86,16 +86,15 @@ static func::FuncOp getMangledFunction(AIE::DeviceOp device, std::string prefix,
   return fn;
 }
 
-static func::CallOp
-convertOpToFunctionWithId(Operation *op, ArrayRef<Value> operands,
-                          ConversionPatternRewriter &rewriter,
-                          StringRef fnName) {
+static func::CallOp convertOpToFunction(Operation *op, ArrayRef<Value> operands,
+                                        ConversionPatternRewriter &rewriter,
+                                        StringRef fnName) {
   auto loc = op->getLoc();
 
   SmallVector<Value, 16> callops;
   SmallVector<Type, 1> retTys{};
 
-  auto idTy = IntegerType::get(op->getContext(), 32);
+  auto idTy = IntegerType::get(op->getContext(), 64);
   if (auto id_attr = op->getAttrOfType<IntegerAttr>("id")) {
     callops.push_back(rewriter.create<arith::ConstantOp>(loc, idTy, id_attr));
   }
@@ -150,6 +149,22 @@ convertOpToFunctionWithId(Operation *op, ArrayRef<Value> operands,
   return call;
 }
 
+static std::optional<AIE::ShimDMAAllocationOp>
+getAllocOpForSymbol(AIE::DeviceOp dev, StringRef sym_name) {
+  auto sym = dev.lookupSymbol(sym_name);
+  if (!sym)
+    return std::nullopt;
+
+  auto uses = SymbolTable::getSymbolUses(sym, dev);
+  for (auto use : *uses)
+    if (auto infoOp = dyn_cast<AIE::ShimDMAAllocationOp>(use.getUser()))
+      return infoOp;
+
+  return std::nullopt;
+}
+
+namespace {
+
 struct IpuWriteBdExShimTileToFuncPattern
     : public OpConversionPattern<IpuWriteBdExShimTileOp> {
   using OpConversionPattern<IpuWriteBdExShimTileOp>::OpConversionPattern;
@@ -161,7 +176,7 @@ struct IpuWriteBdExShimTileToFuncPattern
   LogicalResult
   matchAndRewrite(IpuWriteBdExShimTileOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    SmallVector<Value, 16> operands{adaptor.getOperands()};
+    SmallVector<Value> operands{adaptor.getOperands()};
     auto loc = op->getLoc();
 
     operands.push_back(
@@ -190,8 +205,8 @@ struct IpuWriteBdExShimTileToFuncPattern
         rewriter.create<arith::ConstantIndexOp>(loc, op.getIterationCurrent()));
     operands.push_back(
         rewriter.create<arith::ConstantIndexOp>(loc, op.getIterationSize()));
-    operands.push_back(rewriter.create<arith::ConstantIndexOp>(
-        loc, op.getIterationStride()));
+    operands.push_back(
+        rewriter.create<arith::ConstantIndexOp>(loc, op.getIterationStride()));
     operands.push_back(
         rewriter.create<arith::ConstantIndexOp>(loc, op.getNextBd()));
     operands.push_back(
@@ -208,8 +223,8 @@ struct IpuWriteBdExShimTileToFuncPattern
         rewriter.create<arith::ConstantIndexOp>(loc, op.getLockAcqVal()));
     operands.push_back(
         rewriter.create<arith::ConstantIndexOp>(loc, op.getLockAcqId()));
-    auto call = convertOpToFunctionWithId(op, operands, rewriter,
-                                          "ipu_writebd_shimtile");
+    auto call =
+        convertOpToFunction(op, operands, rewriter, "ipu_writebd_shimtile");
     if (call)
       return success();
     else
@@ -226,7 +241,7 @@ struct IpuSyncToFuncPattern : public OpConversionPattern<IpuSyncOp> {
   LogicalResult
   matchAndRewrite(IpuSyncOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    SmallVector<Value, 16> operands{adaptor.getOperands()};
+    SmallVector<Value> operands{adaptor.getOperands()};
     auto loc = op->getLoc();
 
     operands.push_back(
@@ -241,7 +256,7 @@ struct IpuSyncToFuncPattern : public OpConversionPattern<IpuSyncOp> {
         rewriter.create<arith::ConstantIndexOp>(loc, op.getColumnNum()));
     operands.push_back(
         rewriter.create<arith::ConstantIndexOp>(loc, op.getRowNum()));
-    auto call = convertOpToFunctionWithId(op, operands, rewriter, "ipu_sync");
+    auto call = convertOpToFunction(op, operands, rewriter, "ipu_sync");
     if (call)
       return success();
     else
@@ -269,8 +284,72 @@ struct IpuWrite32ToFuncPattern : public OpConversionPattern<IpuWrite32Op> {
         rewriter.create<arith::ConstantIndexOp>(loc, op.getAddress()));
     operands.push_back(
         rewriter.create<arith::ConstantIndexOp>(loc, op.getValue()));
+    auto call = convertOpToFunction(op, operands, rewriter, "ipu_write32");
+    if (call)
+      return success();
+    else
+      return failure();
+  }
+};
+
+struct IpuDmaMemcpyNdToFuncPattern
+    : public OpConversionPattern<IpuDmaMemcpyNdOp> {
+  using OpConversionPattern<IpuDmaMemcpyNdOp>::OpConversionPattern;
+
+  IpuDmaMemcpyNdToFuncPattern(MLIRContext *context, PatternBenefit benefit = 1)
+      : OpConversionPattern<IpuDmaMemcpyNdOp>(context, benefit) {}
+
+  LogicalResult
+  matchAndRewrite(IpuDmaMemcpyNdOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    SmallVector<Value> operands;
+    auto loc = op->getLoc();
+    
+    operands.push_back(adaptor.getMemref());
+    auto dev = op->getParentOfType<AIE::DeviceOp>();
+    if (!dev) {
+      op.emitOpError("couldn't get DeviceOp");
+      return failure();
+    }
+
+    auto infoOp = getAllocOpForSymbol(dev, op.getMetadata());
+    if (!infoOp) {
+      op.emitOpError("couldn't find shim_dma_allocation op");
+      return failure();
+    }
+
+    // auto channelDir = infoOp->getChannelDir();
+    // uint32_t ChannelId = infoOp->getChannelIndex();
+    // bool isMM2S = channelDir == AIE::DMAChannelDir::MM2S;
+    // int col = infoOp->getCol();
+
+    SmallVector<arith::ConstantIndexOp, 3> strides = llvm::map_to_vector(
+        llvm::reverse(op.getMixedStrides()), [&](OpFoldResult s) {
+          return rewriter.create<arith::ConstantIndexOp>(
+              loc, getConstantIntValue(s).value());
+        });
+
+    SmallVector<arith::ConstantIndexOp, 4> sizes = llvm::map_to_vector(
+        llvm::reverse(op.getMixedSizes()), [&](OpFoldResult s) {
+          return rewriter.create<arith::ConstantIndexOp>(
+              loc, getConstantIntValue(s).value());
+        });
+
+    SmallVector<arith::ConstantIndexOp, 4> offsets = llvm::map_to_vector(
+        llvm::reverse(op.getMixedOffsets()), [&](OpFoldResult s) {
+          return rewriter.create<arith::ConstantIndexOp>(
+              loc, getConstantIntValue(s).value());
+        });
+
+    operands.insert(operands.end(), offsets.begin(), offsets.end());
+    operands.insert(operands.end(), sizes.begin(), sizes.end());
+    operands.insert(operands.end(), strides.begin(), strides.end());
+
+    //bool b = op.getIssueToken();
+    operands.push_back(
+        rewriter.create<arith::ConstantIndexOp>(loc, op.getIssueToken()));
     auto call =
-        convertOpToFunctionWithId(op, operands, rewriter, "ipu_write32");
+        convertOpToFunction(op, operands, rewriter, "ipu_dma_memcpy_nd");
     if (call)
       return success();
     else
@@ -285,16 +364,21 @@ struct AIEIpuToFuncPass : public AIEIpuToFuncBase<AIEIpuToFuncPass> {
 
     ConversionTarget target(getContext());
     target.addIllegalDialect<AIEXDialect>();
-    target.addLegalDialect<AIE::AIEDialect, memref::MemRefDialect, scf::SCFDialect, func::FuncDialect, arith::ArithDialect>();
+    target.addLegalDialect<AIE::AIEDialect, memref::MemRefDialect,
+                           scf::SCFDialect, func::FuncDialect,
+                           arith::ArithDialect>();
 
     RewritePatternSet patterns(&getContext());
     patterns.insert<IpuWriteBdExShimTileToFuncPattern, IpuSyncToFuncPattern,
-                    IpuWrite32ToFuncPattern>(&getContext());
+                    IpuWrite32ToFuncPattern, IpuDmaMemcpyNdToFuncPattern>(
+        &getContext());
 
     if (failed(applyPartialConversion(device, target, std::move(patterns))))
       signalPassFailure();
   }
 };
+
+} // namespace
 
 std::unique_ptr<OperationPass<AIE::DeviceOp>> AIEX::createAIEIpuToFuncPass() {
   return std::make_unique<AIEIpuToFuncPass>();
