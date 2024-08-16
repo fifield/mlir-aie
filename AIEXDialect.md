@@ -249,6 +249,8 @@ Once configured, a task can be submitted for execution using `aiex.dma_start_con
 
 Traits: `HasParent<RuntimeSequenceOp>`
 
+Interfaces: `OpAsmOpInterface`, `TileElement`
+
 #### Attributes:
 
 <table>
@@ -266,6 +268,36 @@ Traits: `HasParent<RuntimeSequenceOp>`
 | Operand | Description |
 | :-----: | ----------- |
 | `tile` | index
+
+#### Results:
+
+| Result | Description |
+| :----: | ----------- |
+| `result` | index
+
+
+### `aiex.dma_configure_task_for` (::xilinx::AIEX::DMAConfigureTaskForOp)
+
+_As dma_configure_task, but specify tile, direction and channel by reference to a Shim DMA allocation op_
+
+
+Syntax:
+
+```
+operation ::= `aiex.dma_configure_task_for` $alloc regions attr-dict
+```
+
+
+Traits: `HasParent<RuntimeSequenceOp>`
+
+#### Attributes:
+
+<table>
+<tr><th>Attribute</th><th>MLIR Type</th><th>Description</th></tr>
+<tr><td><code>alloc</code></td><td>::mlir::FlatSymbolRefAttr</td><td>flat symbol reference attribute</td></tr>
+<tr><td><code>issue_token</code></td><td>::mlir::BoolAttr</td><td>bool attribute</td></tr>
+<tr><td><code>repeat_count</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
+</table>
 
 #### Results:
 
@@ -315,6 +347,8 @@ Completion of the DMA task, i.e. the data transfer, can be awaited using `aiex.a
 
 Traits: `HasParent<RuntimeSequenceOp>`
 
+Interfaces: `OpAsmOpInterface`, `TileElement`
+
 #### Attributes:
 
 <table>
@@ -334,6 +368,43 @@ Traits: `HasParent<RuntimeSequenceOp>`
 | :-----: | ----------- |
 | `args` | variadic of any type
 | `tile` | index
+
+#### Results:
+
+| Result | Description |
+| :----: | ----------- |
+| `result` | index
+
+
+### `aiex.dma_start_bd_chain_for` (::xilinx::AIEX::DMAStartBdChainForOp)
+
+_As dma_start_bd_chain, but specify tile, direction and channel by reference to a Shim DMA allocation op_
+
+
+Syntax:
+
+```
+operation ::= `aiex.dma_start_bd_chain_for` $symbol `(` $args `)` `:` `(` type($args) `)` ` ` `for` ` ` $alloc attr-dict
+```
+
+
+Traits: `HasParent<RuntimeSequenceOp>`
+
+#### Attributes:
+
+<table>
+<tr><th>Attribute</th><th>MLIR Type</th><th>Description</th></tr>
+<tr><td><code>symbol</code></td><td>::mlir::FlatSymbolRefAttr</td><td>flat symbol reference attribute</td></tr>
+<tr><td><code>alloc</code></td><td>::mlir::FlatSymbolRefAttr</td><td>flat symbol reference attribute</td></tr>
+<tr><td><code>issue_token</code></td><td>::mlir::BoolAttr</td><td>bool attribute</td></tr>
+<tr><td><code>repeat_count</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
+</table>
+
+#### Operands:
+
+| Operand | Description |
+| :-----: | ----------- |
+| `args` | variadic of any type
 
 #### Results:
 
