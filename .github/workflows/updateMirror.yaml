@@ -1,0 +1,37 @@
+# Copyright (C) 2024, Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+name: Update Mirror
+
+on:
+  schedule:
+    - cron: '0 0/4 * * *'
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  update-repo:
+    runs-on: xcorad-ubuntu22
+    steps:
+      - uses: actions/checkout@v3
+        with: 
+          fetch-depth: 0
+      - name: Commit
+        run: |
+          rm -rf update_mirror
+          mkdir update_mirror
+          pushd update_mirror
+
+          git config --global user.name 'Jeff Fifield'
+          git config --global user.email 'jeff.fifield@amd.com'
+
+          # fetch upstream main
+          git remote add upstream https://github.com/Xilinx/mlir-aie || true
+          git fetch upstream
+
+          # push upstream main to main-mirror branch
+          git checkout -b main-mirror upstream/main
+          git push -f origin main-mirror
