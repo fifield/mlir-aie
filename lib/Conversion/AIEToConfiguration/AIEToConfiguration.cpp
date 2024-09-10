@@ -11,7 +11,7 @@
 #include "../PassDetail.h"
 
 #include "aie/Conversion/AIEToConfiguration/AIEToConfiguration.h"
-#include "aie/Targets/AIERTX.h"
+#include "aie/Targets/AIERT.h"
 
 #include "llvm/Support/Debug.h"
 
