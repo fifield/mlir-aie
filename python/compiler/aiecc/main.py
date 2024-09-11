@@ -580,7 +580,7 @@ class FlowRunner:
                 None,
                 [
                     "aie-opt",
-                    "--convert-aie-to-transaction=elf-dir=" + self.tmpdirname + "",
+                    "--convert-aie-to-transaction=elf-dir=" + self.tmpdirname,
                     self.prepend_tmp("input_physical.mlir"),
                     "-o",
                     self.prepend_tmp("input_physical_txn.mlir"),
