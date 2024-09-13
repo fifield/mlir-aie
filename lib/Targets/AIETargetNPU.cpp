@@ -621,7 +621,7 @@ LogicalResult xilinx::AIE::AIETranslateNpuToBinary(
   aie_runtime::txn_init(instructions);
 
   aie_runtime::TxnDeviceInfo devInfo = aie_runtime::txn_device_info(
-      txnDeviceGen(tm), tm.rows(), tm.columns(), tm.getNumMemTileRows());
+      tm.getTxnDeviceGen(), tm.rows(), tm.columns(), tm.getNumMemTileRows());
 
   AIE::RuntimeSequenceOp seq =
       AIE::RuntimeSequenceOp::getForSymbolInDeviceOrError(deviceOp,

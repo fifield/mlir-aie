@@ -260,6 +260,7 @@ static VirtualizedNPU2TargetModel NPU2model4col(4);
 static VirtualizedNPU2TargetModel NPU2model5col(5);
 static VirtualizedNPU2TargetModel NPU2model6col(6);
 static VirtualizedNPU2TargetModel NPU2model7col(7);
+static NPU3TargetModel NPU3Model;
 
 const AIETargetModel &xilinx::AIE::getTargetModel(Operation *op) {
   if (auto t = dyn_cast<AIETarget>(op))
@@ -311,6 +312,8 @@ const AIETargetModel &xilinx::AIE::getTargetModel(AIEDevice device) {
     return NPU2model7col;
   case AIEDevice::xcve3858:
     return VE3858model;
+  case AIEDevice::npu3:
+    return NPU3Model;
   }
   // No default: label above, so -Wswitch still reports a newly added device.
   // This handles values that are not enumerators at all, which

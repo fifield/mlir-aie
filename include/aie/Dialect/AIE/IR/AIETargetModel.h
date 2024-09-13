@@ -156,6 +156,10 @@ public:
   /// Return the target architecture.
   virtual AIEArch getTargetArch() const = 0;
 
+  /// Return the device-generation ID encoded in the TXN header.
+  /// Values follow the transaction ABI, independently of driver configuration.
+  virtual uint8_t getTxnDeviceGen() const = 0;
+
   /// Return the data bus width of the device.
   virtual uint32_t getAddressGenGranularity() const = 0;
 
@@ -716,6 +720,8 @@ public:
 
 class AIE1TargetModel : public AIETargetModel {
 public:
+  uint8_t getTxnDeviceGen() const override { return 1; } // XAIE_DEV_GEN_AIE
+
   AIE1TargetModel(TargetModelKind k) : AIETargetModel(k) {}
 
   AIEArch getTargetArch() const override;
@@ -853,6 +859,8 @@ protected:
   std::unique_ptr<RegisterDatabase> loadRegisterDatabase() const override;
 
 public:
+  uint8_t getTxnDeviceGen() const override { return 2; } // XAIE_DEV_GEN_AIEML
+
   AIE2TargetModel(TargetModelKind k) : AIETargetModel(k) {
     // Device properties initialization
     addModelProperty(AIETargetModel::UsesSemaphoreLocks);
@@ -1017,6 +1025,8 @@ public:
 // AIE2PS base model
 class AIE2PSTargetModel : public AIE2TargetModel {
 public:
+  uint8_t getTxnDeviceGen() const override { return 5; } // XAIE_DEV_GEN_AIE2PS
+
   AIE2PSTargetModel(TargetModelKind k) : AIE2TargetModel(k) {
     // AIE2PS is an NPU but uses CERT ELF, not CDO/xclbin.
     addModelProperty(AIETargetModel::IsNPU);
@@ -1178,6 +1188,8 @@ public:
 
 class BaseNPU1TargetModel : public AIE2TargetModel {
 public:
+  uint8_t getTxnDeviceGen() const override { return 3; } // XAIE_DEV_GEN_AIE2IPU
+
   BaseNPU1TargetModel(TargetModelKind k) : AIE2TargetModel(k) {
     addModelProperty(AIETargetModel::IsNPU);
   }
@@ -1231,6 +1243,8 @@ public:
 
 class BaseNPU2TargetModel : public AIE2TargetModel {
 public:
+  uint8_t getTxnDeviceGen() const override { return 4; } // XAIE_DEV_GEN_AIE2P
+
   BaseNPU2TargetModel(TargetModelKind k) : AIE2TargetModel(k) {
     addModelProperty(AIETargetModel::IsNPU);
   }
@@ -1306,12 +1320,172 @@ public:
   }
 };
 
-/// \brief Device generation ID written into the TXN header
-/// (aie_runtime::TxnDeviceInfo::devGen). Both the static binary emitter and the
-/// generated-C++ builder read it from here, so a new device family is one edit.
-inline uint8_t txnDeviceGen(const AIETargetModel &tm) {
-  return llvm::isa<BaseNPU2TargetModel>(tm) ? 4 : 3;
-}
+class AIE4TargetModel : public AIETargetModel {
+
+  static constexpr Properties properties =
+      AIETargetModel::UsesSemaphoreLocks |
+      AIETargetModel::UsesMultiDimensionalBDs;
+
+public:
+  AIE4TargetModel(TargetModelKind k, Properties p = None)
+      : AIETargetModel(k, p | properties) {}
+
+  AIEArch getTargetArch() const override;
+
+  uint32_t getAddressGenGranularity() const override { return 32; }
+
+  std::optional<TileID> getMemWest(TileID src) const override;
+  std::optional<TileID> getMemEast(TileID src) const override;
+  std::optional<TileID> getMemNorth(TileID src) const override;
+  std::optional<TileID> getMemSouth(TileID src) const override;
+
+  bool isMemWest(int srcCol, int srcRow, int dstCol, int dstRow) const override;
+  bool isMemEast(int srcCol, int srcRow, int dstCol, int dstRow) const override;
+  bool isMemNorth(int srcCol, int srcRow, int dstCol,
+                  int dstRow) const override;
+  bool isMemSouth(int srcCol, int srcRow, int dstCol,
+                  int dstRow) const override;
+
+  bool isLegalMemAffinity(int coreCol, int coreRow, int memCol,
+                          int memRow) const override;
+
+  uint32_t getMemInternalBaseAddress(TileID src) const override {
+    return getMemEastBaseAddress();
+  }
+
+  uint32_t getMemSouthBaseAddress() const override { return 0x80000; }
+  uint32_t getMemWestBaseAddress() const override { return 0xA0000; }
+  uint32_t getMemNorthBaseAddress() const override { return 0xC0000; }
+  uint32_t getMemEastBaseAddress() const override { return 0xE0000; }
+  uint32_t getLocalMemorySize() const override { return 0x00020000; }
+  uint32_t getAccumulatorCascadeSize() const override { return 512; }
+
+  uint32_t getNumLocks(int col, int row) const override {
+    if (isMemTile(col, row))
+      return 64;
+    if (isShimNOCTile(col, row))
+      return 32;
+    return 16;
+  }
+
+  uint32_t getMaxLockValue() const override { return 0x3F; }
+
+  std::optional<uint32_t> getLocalLockAddress(uint32_t lockId,
+                                              TileID tile) const override;
+  std::optional<uint32_t> getLockLocalBaseIndex(int localCol, int localRow,
+                                                int lockCol,
+                                                int lockRow) const override;
+  std::optional<uint32_t> getMemLocalBaseAddress(int localCol, int localRow,
+                                                 int memCol,
+                                                 int memRow) const override;
+
+  uint32_t getNumBDs(int col, int row) const override {
+    // aie4b (medusa) has 32 in single-app mode, with split connectivity.
+    // TODO: aie4z in native mode has 16 private per channel.
+    return isShimNOCTile(col, row) ? 32 : 16;
+  }
+
+  bool isBdChannelAccessible(int col, int row, uint32_t bd_id,
+                             int channel) const override {
+    if (!isShimNOCTile(col, row)) {
+      return true;
+    } else {
+      if (channel < 2) { // even channel number
+        return bd_id < 16;
+      } else {
+        return bd_id >= 16;
+      }
+    }
+  }
+
+  uint32_t getMemTileSize() const override { return 0x00300000; }
+
+  uint32_t getNumBanks(int col, int row) const override {
+    return isMemTile(col, row) ? 24 : 8;
+  }
+
+  uint32_t getNumDestSwitchboxConnections(int col, int row,
+                                          WireBundle bundle) const override;
+  uint32_t getNumSourceSwitchboxConnections(int col, int row,
+                                            WireBundle bundle) const override;
+  uint32_t getNumDestShimMuxConnections(int col, int row,
+                                        WireBundle bundle) const override;
+  uint32_t getNumSourceShimMuxConnections(int col, int row,
+                                          WireBundle bundle) const override;
+  bool isLegalTileConnection(int col, int row, WireBundle srcBundle,
+                             int srcChan, WireBundle dstBundle,
+                             int dstChan) const override;
+
+  uint32_t getColumnShift() const override { return 25; }
+  uint32_t getRowShift() const override { return 20; }
+
+  std::vector<std::pair<uint32_t, uint32_t>>
+  getShimBurstEncodingsAndLengths() const override;
+
+  static bool classof(const AIETargetModel *model) {
+    return model->getKind() >= TK_AIE4_NPU3 && model->getKind() < TK_AIE4_Last;
+  }
+};
+
+class BaseNPU3TargetModel : public AIE4TargetModel {
+  static constexpr Properties properties = AIETargetModel::IsNPU;
+
+public:
+  uint8_t getTxnDeviceGen() const override { return 42; } // XAIE_DEV_GEN_AIE4
+
+  BaseNPU3TargetModel(TargetModelKind k, Properties p = None)
+      : AIE4TargetModel(k, p | properties) {}
+
+  int rows() const override {
+    return 6; /* 1 Shim row, 1 memtile row, and 4 Core rows. */
+  }
+
+  bool isCoreTile(int col, int row) const override { return row > 1; }
+  bool isMemTile(int col, int row) const override { return row == 1; }
+
+  bool isShimPLTile(int col, int row) const override {
+    return false; // No PL
+  }
+
+  bool isShimNOCorPLTile(int col, int row) const override {
+    return isShimNOCTile(col, row) || isShimPLTile(col, row);
+  }
+
+  bool isShimNOCTile(int col, int row) const override { return row == 0; }
+
+  uint32_t getNumMemTileRows() const override { return 1; }
+
+  static bool classof(const AIETargetModel *model) {
+    return model->getKind() >= TK_AIE4_NPU3 && model->getKind() < TK_AIE4_Last;
+  }
+};
+
+// The full Medusa NPU
+class NPU3TargetModel : public BaseNPU3TargetModel {
+public:
+  NPU3TargetModel() : BaseNPU3TargetModel(TK_AIE4_NPU3) {}
+
+  int columns() const override { return 3; }
+
+  static bool classof(const AIETargetModel *model) {
+    return model->getKind() == TK_AIE4_NPU3;
+  }
+};
+
+// The pacifica NPU
+class NPU3zTargetModel : public BaseNPU3TargetModel {
+public:
+  uint8_t getTxnDeviceGen() const override { return 43; } // XAIE_DEV_GEN_AIE4Z
+
+  NPU3zTargetModel() : BaseNPU3TargetModel(TK_AIE4_NPU3Z) {}
+
+  int columns() const override { return 3; }
+
+  static bool classof(const AIETargetModel *model) {
+    return model->getKind() == TK_AIE4_NPU3Z;
+  }
+  AIEArch getTargetArch() const override { return AIEArch::AIE4z; }
+};
 
 } // namespace xilinx::AIE
 

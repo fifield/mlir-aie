@@ -875,7 +875,7 @@ private:
     // reordered there cannot silently mis-encode this generated header.
     std::string header = "aie_runtime::txn_prepend_header(txn, " + countStr +
                          ", aie_runtime::txn_device_info(" +
-                         std::to_string(AIE::txnDeviceGen(tm)) + ", " +
+                         std::to_string(tm.getTxnDeviceGen()) + ", " +
                          std::to_string(tm.rows()) + ", " +
                          std::to_string(tm.columns()) + ", " +
                          std::to_string(tm.getNumMemTileRows()) + "));";

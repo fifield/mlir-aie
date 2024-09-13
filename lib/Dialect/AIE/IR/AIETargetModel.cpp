@@ -1760,6 +1760,363 @@ std::vector<std::pair<uint32_t, uint32_t>>
 BaseNPU2TargetModel::getShimBurstEncodingsAndLengths() const {
   return {std::pair(0, 64), std::pair(1, 128), std::pair(2, 256),
           std::pair(3, 512)};
+
+///
+/// AIE4 TargetModel
+///
+
+AIEArch AIE4TargetModel::getTargetArch() const { return AIEArch::AIE2; }
+
+// Return the tile ID of the memory to the west of the given tile, if it exists.
+std::optional<TileID> AIE4TargetModel::getMemWest(TileID src) const {
+  std::optional<TileID> ret({src.col - 1, src.row});
+  if (!isValidTile(*ret))
+    ret.reset();
+  return ret;
+}
+
+// Return the tile ID of the memory to the east of the given tile (ie self), if
+// it exists.
+std::optional<TileID> AIE4TargetModel::getMemEast(TileID src) const {
+  std::optional ret = src;
+  if (!isValidTile(*ret))
+    ret.reset();
+  return ret;
+}
+
+// Return the tile ID of the memory to the north of the given tile, if it
+// exists.
+std::optional<TileID> AIE4TargetModel::getMemNorth(TileID src) const {
+  std::optional<TileID> ret({src.col, src.row + 1});
+  if (!isValidTile(*ret))
+    ret.reset();
+  return ret;
+}
+
+std::optional<TileID> AIE4TargetModel::getMemSouth(TileID src) const {
+  std::optional<TileID> ret({src.col, src.row - 1});
+  // The first row doesn't have a tile memory south
+  // Memtiles don't have memory adjacency to neighboring core tiles.
+  if (!isValidTile(*ret) || ret->row == 0 || isMemTile(ret->col, ret->row))
+    ret.reset();
+  return ret;
+}
+
+bool AIE4TargetModel::isMemWest(int srcCol, int srcRow, int dstCol,
+                                int dstRow) const {
+  return isWest(srcCol, srcRow, dstCol, dstRow);
+}
+
+bool AIE4TargetModel::isMemEast(int srcCol, int srcRow, int dstCol,
+                                int dstRow) const {
+  return isInternal(srcCol, srcRow, dstCol, dstRow);
+}
+
+bool AIE4TargetModel::isMemNorth(int srcCol, int srcRow, int dstCol,
+                                 int dstRow) const {
+  return isNorth(srcCol, srcRow, dstCol, dstRow);
+}
+
+bool AIE4TargetModel::isMemSouth(int srcCol, int srcRow, int dstCol,
+                                 int dstRow) const {
+  return isSouth(srcCol, srcRow, dstCol, dstRow);
+}
+
+bool AIE4TargetModel::isLegalMemAffinity(int coreCol, int coreRow, int memCol,
+                                         int memRow) const {
+
+  bool IsMemWest = isMemWest(coreCol, coreRow, memCol, memRow);
+  bool IsMemEast = isMemEast(coreCol, coreRow, memCol, memRow);
+  bool IsMemNorth = isMemNorth(coreCol, coreRow, memCol, memRow);
+  bool IsMemSouth = isMemSouth(coreCol, coreRow, memCol, memRow);
+
+  if (isMemTile(coreCol, coreRow))
+    return isEast(coreCol, coreRow, memCol, memRow) ||
+           isInternal(coreCol, coreRow, memCol, memRow) ||
+           isWest(coreCol, coreRow, memCol, memRow);
+  return (IsMemSouth && !isMemTile(memCol, memRow)) || IsMemNorth ||
+         IsMemWest || IsMemEast;
+}
+
+uint32_t
+AIE4TargetModel::getNumDestSwitchboxConnections(int col, int row,
+                                                WireBundle bundle) const {
+  if (isMemTile(col, row))
+    switch (bundle) {
+    case WireBundle::DMA:
+    case WireBundle::North:
+      return 6;
+    case WireBundle::South:
+      return 4;
+    case WireBundle::Ctrl:
+      return 1;
+    default:
+      return 0;
+    }
+
+  if (isShimNOCTile(col, row) || isShimPLTile(col, row))
+    switch (bundle) {
+    case WireBundle::FIFO:
+      return 1;
+    case WireBundle::North:
+      return 6;
+    case WireBundle::West: {
+      if (col == 0)
+        return 0;
+      return 4;
+    }
+    case WireBundle::South:
+      return 6;
+    case WireBundle::East: {
+      if (col == columns() - 1)
+        return 0;
+      return 4;
+    }
+    case WireBundle::Ctrl:
+      return isShimNOCTile(col, row) ? 1 : 0;
+    default:
+      return 0;
+    }
+
+  switch (bundle) {
+  case WireBundle::Core:
+    return 1;
+  case WireBundle::DMA:
+    return 2;
+  case WireBundle::FIFO:
+    return 1;
+  case WireBundle::North: {
+    if (row == rows() - 1)
+      return 0;
+    return 6;
+  }
+  case WireBundle::West: {
+    if (col == 0)
+      return 0;
+    return 4;
+  }
+  case WireBundle::South:
+    return 4;
+  case WireBundle::East: {
+    if (col == columns() - 1)
+      return 0;
+    return 4;
+  }
+  case WireBundle::Ctrl:
+    return 1;
+  default:
+    return 0;
+  }
+}
+
+uint32_t
+AIE4TargetModel::getNumSourceSwitchboxConnections(int col, int row,
+                                                  WireBundle bundle) const {
+  if (isMemTile(col, row))
+    switch (bundle) {
+    case WireBundle::DMA:
+      return 6;
+    case WireBundle::North:
+      return 4;
+    case WireBundle::South:
+      return 6;
+    case WireBundle::Trace:
+    case WireBundle::Ctrl:
+      return 1;
+    default:
+      return 0;
+    }
+
+  if (isShimNOCTile(col, row) || isShimPLTile(col, row))
+    switch (bundle) {
+    case WireBundle::FIFO:
+      return 1;
+    case WireBundle::North:
+      return 4;
+    case WireBundle::West: {
+      if (col == 0)
+        return 0;
+      return 4;
+    }
+    case WireBundle::South:
+      return 8;
+    case WireBundle::East: {
+      if (col == columns() - 1)
+        return 0;
+      return 4;
+    }
+    case WireBundle::Trace:
+      return 1;
+    case WireBundle::Ctrl:
+      return isShimNOCTile(col, row) ? 1 : 0;
+    default:
+      return 0;
+    }
+
+  // compute/core tile
+  switch (bundle) {
+  case WireBundle::Core:
+    return 1;
+  case WireBundle::DMA:
+    return 2;
+  case WireBundle::FIFO:
+    return 1;
+  case WireBundle::North: {
+    if (row == rows() - 1)
+      return 0;
+    return 4;
+  }
+  case WireBundle::West: {
+    if (col == 0)
+      return 0;
+    return 4;
+  }
+  case WireBundle::South:
+    return 6;
+  case WireBundle::East: {
+    if (col == columns() - 1)
+      return 0;
+    return 4;
+  }
+  case WireBundle::Trace:
+    // Port 0: core trace. Port 1: memory trace.
+    return 2;
+  case WireBundle::Ctrl:
+    return 1;
+  default:
+    return 0;
+  }
+}
+
+uint32_t
+AIE4TargetModel::getNumDestShimMuxConnections(int col, int row,
+                                              WireBundle bundle) const {
+  if (isShimNOCorPLTile(col, row))
+    switch (bundle) {
+    case WireBundle::DMA:
+      return 2;
+    case WireBundle::NOC:
+      return 4;
+    case WireBundle::PLIO:
+      return 6;
+    case WireBundle::South:
+      return 8; // Connection to the south port of the stream switch
+    default:
+      return 0;
+    }
+
+  return 0;
+}
+
+uint32_t
+AIE4TargetModel::getNumSourceShimMuxConnections(int col, int row,
+                                                WireBundle bundle) const {
+  if (isShimNOCorPLTile(col, row))
+    switch (bundle) {
+    case WireBundle::DMA:
+      return 2;
+    case WireBundle::NOC:
+      return 4;
+    case WireBundle::PLIO:
+      return 8;
+    case WireBundle::South:
+      return 6; // Connection to the south port of the stream switch
+    default:
+      return 0;
+    }
+
+  return 0;
+}
+
+bool AIE4TargetModel::isLegalTileConnection(int col, int row,
+                                            WireBundle srcBundle, int srcChan,
+                                            WireBundle dstBundle,
+                                            int dstChan) const {
+  // Check Channel Id within the range
+  if (srcChan >= int(getNumSourceSwitchboxConnections(col, row, srcBundle)))
+    return false;
+  if (dstChan >= int(getNumDestSwitchboxConnections(col, row, dstBundle)))
+    return false;
+
+  // Lambda function to check if a bundle is in a list
+  auto isBundleInList = [](WireBundle bundle,
+                           std::initializer_list<WireBundle> bundles) {
+    return std::find(bundles.begin(), bundles.end(), bundle) != bundles.end();
+  };
+
+  // Memtile
+  if (isMemTile(col, row)) {
+    if (srcBundle == WireBundle::DMA) {
+      if (dstBundle == WireBundle::DMA)
+        return srcChan == dstChan;
+      if (isBundleInList(dstBundle, {WireBundle::Ctrl, WireBundle::South,
+                                     WireBundle::North}))
+        return true;
+    }
+    if (srcBundle == WireBundle::Ctrl) {
+      if (dstBundle == WireBundle::DMA)
+        return dstChan == 5;
+      if (isBundleInList(dstBundle, {WireBundle::South, WireBundle::North}))
+        return true;
+    }
+    if (isBundleInList(srcBundle, {WireBundle::South, WireBundle::North})) {
+      if (isBundleInList(dstBundle, {WireBundle::DMA, WireBundle::Ctrl}))
+        return true;
+      if (isBundleInList(dstBundle, {WireBundle::South, WireBundle::North}))
+        return srcChan == dstChan;
+    }
+    if (srcBundle == WireBundle::Trace) {
+      if (dstBundle == WireBundle::DMA)
+        return dstChan == 5;
+      if (dstBundle == WireBundle::South)
+        return true;
+    }
+  }
+  // Shimtile
+  else if (isShimNOCorPLTile(col, row)) {
+    if (srcBundle == WireBundle::Ctrl)
+      return dstBundle != WireBundle::Ctrl;
+    if (isBundleInList(srcBundle, {WireBundle::FIFO, WireBundle::South}))
+      return isBundleInList(dstBundle, {WireBundle::Ctrl, WireBundle::FIFO,
+                                        WireBundle::South, WireBundle::West,
+                                        WireBundle::North, WireBundle::East});
+    if (isBundleInList(srcBundle,
+                       {WireBundle::West, WireBundle::North, WireBundle::East}))
+      return (srcBundle == dstBundle)
+                 ? (srcChan == dstChan)
+                 : isBundleInList(dstBundle,
+                                  {WireBundle::Ctrl, WireBundle::FIFO,
+                                   WireBundle::South, WireBundle::West,
+                                   WireBundle::North, WireBundle::East});
+    if (srcBundle == WireBundle::Trace) {
+      if (isBundleInList(dstBundle, {WireBundle::FIFO, WireBundle::South}))
+        return true;
+      if (isBundleInList(dstBundle, {WireBundle::West, WireBundle::East}))
+        return dstChan == 0;
+    }
+  }
+  // Coretile
+  else if (isCoreTile(col, row)) {
+    if (isBundleInList(srcBundle,
+                       {WireBundle::DMA, WireBundle::FIFO, WireBundle::South,
+                        WireBundle::West, WireBundle::North, WireBundle::East}))
+      if (isBundleInList(dstBundle,
+                         {WireBundle::Core, WireBundle::DMA, WireBundle::Ctrl,
+                          WireBundle::FIFO, WireBundle::South, WireBundle::West,
+                          WireBundle::North, WireBundle::East}))
+        return (srcBundle == dstBundle) ? (srcChan == dstChan) : true;
+    if (srcBundle == WireBundle::Core)
+      return dstBundle != WireBundle::Core;
+    if (srcBundle == WireBundle::Ctrl)
+      return dstBundle != WireBundle::Ctrl && dstBundle != WireBundle::DMA;
+    if (srcBundle == WireBundle::Trace) {
+      if (dstBundle == WireBundle::DMA)
+        return dstChan == 0;
+      if (isBundleInList(dstBundle, {WireBundle::FIFO, WireBundle::South}))
+        return true;
+    }
+  }
+  return false;
 }
 
 bool BaseNPU2TargetModel::isSupportedBlockFormat(
