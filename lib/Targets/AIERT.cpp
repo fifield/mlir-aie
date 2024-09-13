@@ -195,6 +195,9 @@ llvm::raw_ostream &operator<<(llvm::raw_ostream &os,
 #define XAIE_MEM_TILE_ROW_START 1
 #define XAIE_PARTITION_BASE_ADDR 0x0
 
+// /proj/xbuilds/9999.0_INT_0911_0013/installs/lin64/Vitis/2024.2/data/embeddedsw/XilinxProcessorIPLib/drivers/aienginev2_INT_aig_vaie4/driver/src/global/xaiegbl_defs.h
+#define XAIE_DEV_GEN_AIE4               40U
+
 #define NPI_ADDR 0x0
 #define NUM_LOCKS 16
 #define EVEN_BD_NUM_START 0
@@ -277,6 +280,11 @@ xilinx::AIE::AIERTControl::AIERTControl(const AIE::AIETargetModel &tm)
     // Listed here so that a new AIEArch still raises -Wswitch.
     llvm::report_fatal_error("aie-rt configuration is not supported for the "
                              "AIE2PS architecture");
+  case AIEArch::AIE4:
+    devGen = XAIE_DEV_GEN_AIE4;
+    break;
+  default:
+    assert(false);
   }
   aiert->configPtr = XAie_Config{
       /*AieGen*/ devGen,
