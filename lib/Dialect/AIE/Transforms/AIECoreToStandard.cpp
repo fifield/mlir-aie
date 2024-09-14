@@ -49,6 +49,8 @@ static StringRef getArchTargetTriple(AIEArch arch) {
     return "aie2p";
   case AIEArch::AIE2ps:
     return "aie2ps";
+  case AIEArch::AIE4:
+    return "aie4";
   }
   llvm::report_fatal_error("unsupported arch");
 }
@@ -180,6 +182,9 @@ static void declareAIEIntrinsics(AIEArch arch, OpBuilder &builder) {
     return;
   case AIEArch::AIE2p:
     registerIntrinsics(getAIE2pIntrinsics(builder));
+  case AIEArch::AIE4:
+    // XXX: FIXME implement getAIE4Intrisics
+    registerIntrinsics(getAIE2Intrinsics(builder));
     return;
   case AIEArch::AIE2ps:
     // No intrinsic set: checkCoreIntrinsics rejects ops that need one.

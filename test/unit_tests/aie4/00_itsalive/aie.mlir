@@ -8,21 +8,19 @@
 //
 //===----------------------------------------------------------------------===//
 
-// RUN: aie-opt %s | FileCheck %s
+// RUN: %python aiecc.py --no-compile --aiesim %s %S/test.cpp
+// RUN: aie.mlir.prj/aiesim.sh | FileCheck %s
 
-// CHECK: aie.device(npu3)
+// CHECK: AIE4b ISS
+// CHECK: Hello, world.
+// CHECK: Exiting!
 
 module @test00_itsalive {
   aie.device(npu3) {
+    %tile20 = aie.tile(2, 0)
     %tile22 = aie.tile(2, 2)
 
-    %buf22_0 = aie.buffer(%tile22) { sym_name = "a", address = 0 : i32 } : memref<256xi32>
-
-    %core22 = aie.core(%tile22) {
-      %val1 = arith.constant 1 : i32
-      %idx1 = arith.constant 3 : index
-      %2 = arith.addi %val1, %val1 : i32
-      aie.end
-    }
+    aie.flow(%tile20, DMA : 0, %tile22, DMA : 0)
+    aie.flow(%tile22, DMA : 0, %tile20, DMA : 0)
   }
 }

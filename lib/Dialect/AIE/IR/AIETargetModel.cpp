@@ -1765,7 +1765,7 @@ BaseNPU2TargetModel::getShimBurstEncodingsAndLengths() const {
 /// AIE4 TargetModel
 ///
 
-AIEArch AIE4TargetModel::getTargetArch() const { return AIEArch::AIE2; }
+AIEArch AIE4TargetModel::getTargetArch() const { return AIEArch::AIE4; }
 
 // Return the tile ID of the memory to the west of the given tile, if it exists.
 std::optional<TileID> AIE4TargetModel::getMemWest(TileID src) const {
