@@ -21,6 +21,7 @@ extern "C" {
 #include "xaiengine/xaie_locks.h"
 #include "xaiengine/xaie_mem.h"
 #include "xaiengine/xaie_perfcnt.h"
+#include "xaiengine/xaie_noc.h"
 #include "xaiengine/xaie_plif.h"
 #include "xaiengine/xaie_reset.h"
 #include "xaiengine/xaie_ss.h"
@@ -281,7 +282,7 @@ xilinx::AIE::AIERTControl::AIERTControl(const AIE::AIETargetModel &tm)
     llvm::report_fatal_error("aie-rt configuration is not supported for the "
                              "AIE2PS architecture");
   case AIEArch::AIE4:
-    devGen = XAIE_DEV_GEN_AIE4;
+    devGen = XAIE_DEV_GEN_AIE4_MEDUSA;
     break;
   default:
     assert(false);
