@@ -10,9 +10,8 @@
 	url = https://github.com/Xilinx/cmakeModules.git
 [submodule "runtime_lib/xaiengine/aie-rt"]
 	path = third_party/aie-rt
-	url = https://github.com/Xilinx/aie-rt.git
-	ignore = dirty
-	branch = release/main_aig
+	url = https://gitenterprise.xilinx.com/jefff/aie-rt.git
+	branch = phoenix_v2023.2
 [submodule "third_party/bootgen"]
 	path = third_party/bootgen
 	url = https://github.com/Xilinx/bootgen.git
