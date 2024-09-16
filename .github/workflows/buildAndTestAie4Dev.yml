@@ -1,0 +1,81 @@
+name: Build and Test aie4-dev on Ryzen AI
+
+on:
+  push:
+    branches:
+      - aie4-dev
+  pull_request:
+    branches:
+      - aie4-dev
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  # A PR number if a pull request and otherwise the commit hash. This cancels
+  # queued and in-progress runs for the same PR (presubmit) or commit
+  # (postsubmit).
+  group: ci-build-test-aie4-dev-${{ github.event.number || github.sha }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  XILINXD_LICENSE_FILE: /proj/xbuilds/licenses/:2100@aiengine-eng
+  VITIS: /proj/xbuilds/2024.2_INT_daily_latest/installs/lin64/Vitis/2024.2
+  CMAKE_ARGS: |
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_EXE_LINKER_FLAGS_INIT="-fuse-ld=lld" \
+            -DCMAKE_MODULE_LINKER_FLAGS_INIT="-fuse-ld=lld" \
+            -DCMAKE_SHARED_LINKER_FLAGS_INIT="-fuse-ld=lld" \
+            -DXRT_ROOT=/opt/xilinx/xrt \
+            -DAIE_ENABLE_PYTHON_PASSES=OFF \
+            -DAIE_ENABLE_XRT_PYTHON_BINDINGS=ON \
+            -DAIE_INCLUDE_INTEGRATION_TESTS=OFF
+  # -j12 here to reduce the number of parallel chess jobs.
+  LIT_OPTS: -sv --time-tests -j4 --timeout 600 --show-unsupported --show-excluded
+
+jobs:
+  build-tests:
+    name: Run Tests on Ryzen AI
+    runs-on: ryzenai
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: "true"
+
+      - name: Run commands
+        run: |
+
+          pip cache purge
+          source /opt/xilinx/xrt/setup.sh
+          python -m venv aie-venv
+          source aie-venv/bin/activate
+          pip install -r python/requirements.txt
+          pip install -r python/requirements_ml.txt
+
+          VERSION=$(utils/clone-llvm.sh --get-wheel-version)
+          pip -q download mlir==$VERSION \
+            -f https://github.com/Xilinx/mlir-aie/releases/expanded_assets/mlir-distro
+          unzip -q mlir-*.whl
+
+          sed -i 's/\t\tVITIS_DSPLIB_INCLUDE_DIR/\t\t#VITIS_DSPLIB_INCLUDE_DIR/g' cmake/modulesXilinx/FindVitis.cmake
+
+          mkdir build
+          pushd build
+
+          export PATH=${VITIS}/aietools/bin:${VITIS}/bin:$PATH
+          cmake .. -G Ninja \
+            -DPython3_EXECUTABLE=$(which python) \
+            -DCMAKE_MODULE_PATH=$PWD/../cmake/modulesXilinx \
+            -DLLVM_EXTERNAL_LIT=$(which lit) \
+            -DCMAKE_INSTALL_PREFIX=$PWD/../mlir_aie \
+            -DMLIR_DIR=$PWD/../mlir/lib/cmake/mlir \
+            $CMAKE_ARGS
+
+          ninja install
+          ninja check-aie
+
+          popd
