@@ -54,12 +54,24 @@ def PLIOWire : I32EnumAttrCase<"PLIO", 7>;
 def NOCWire : I32EnumAttrCase<"NOC", 8>;
 def TraceWire : I32EnumAttrCase<"Trace", 9>;
 def TileControlWire : I32EnumAttrCase<"TileControl", 10>;
-def Controller32Wire : I32EnumAttrCase<"Controller32", 11>;
+def NorthControlWire:  I32EnumAttrCase<"NorthControl", 11>;
+def SouthControlWire:  I32EnumAttrCase<"SouthControl", 12>;
+def SwitchWire: I32EnumAttrCase<"Switch32", 13>;
+def Control32Wire: I32EnumAttrCase<"Control32", 14>;
+def Trace32Wire: I32EnumAttrCase<"Trace32", 15>;
+def South32Wire: I32EnumAttrCase<"South32", 16>;
+def West32Wire: I32EnumAttrCase<"West32", 17>;
+def North32Wire: I32EnumAttrCase<"North32", 18>;
+def East32Wire: I32EnumAttrCase<"East32", 19>;
+def Switch512Wire: I32EnumAttrCase<"Switch512", 20>;
 
 def WireBundle : I32EnumAttr<"WireBundle", "Bundle of wires",
                              [CoreWire, DMAWire, FIFOWire, SouthWire, WestWire,
                               NorthWire, EastWire, PLIOWire, NOCWire, TraceWire,
-                              TileControlWire, Controller32Wire]> {
+                              TileControlWire, NorthControlWire,
+                              SouthControlWire, SwitchWire, Control32Wire,
+                              Trace32Wire, South32Wire, West32Wire, North32Wire,
+                              East32Wire, Switch512Wire]> {
 
   let cppNamespace = "xilinx::AIE";
 }

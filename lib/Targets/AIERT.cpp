@@ -60,6 +60,9 @@ static const std::map<AieRC, std::string> AIERCTOSTR = {
     {AIERC_STR(XAIE_INVALID_BURST_LENGTH)},
     {AIERC_STR(XAIE_INVALID_BACKEND)},
     {AIERC_STR(XAIE_INSUFFICIENT_BUFFER_SIZE)},
+    {AIERC_STR(XAIE_INVALID_API_POINTER)},
+    {AIERC_STR(XAIE_NOT_SUPPORTED)},
+    {AIERC_STR(XAIE_INVALID_APP_MODE)},
     {AIERC_STR(XAIE_ERR_MAX)}};
 #undef AIERC_STR
 
@@ -76,7 +79,22 @@ static const std::map<xilinx::AIE::WireBundle, StrmSwPortType>
         // missing PLIO from WireBundle
         // missing NOC from WireBundle
         {xilinx::AIE::WireBundle::Trace, StrmSwPortType::TRACE},
-};
+        // {xilinx::AIE::WireBundle::UCTRLR, StrmSwPortType::UCTRLR},
+        {xilinx::AIE::WireBundle::NorthControl, StrmSwPortType::NORTH_CTRL},
+        {xilinx::AIE::WireBundle::SouthControl, StrmSwPortType::SOUTH_CTRL},
+        {xilinx::AIE::WireBundle::Switch32, StrmSwPortType::SWITCH_32b},
+        // {xilinx::AIE::WireBundle::DMA_CTRL, StrmSwPortType::DMA_CTRL},
+        {xilinx::AIE::WireBundle::PLIO, StrmSwPortType::PL},
+        // AIE4 specific 32b switch PortTypes
+        {xilinx::AIE::WireBundle::Control32, StrmSwPortType::_32B_CTRL},
+        {xilinx::AIE::WireBundle::Trace32, StrmSwPortType::_32B_TRACE},
+        {xilinx::AIE::WireBundle::South32, StrmSwPortType::_32B_SOUTH},
+        {xilinx::AIE::WireBundle::West32, StrmSwPortType::_32B_WEST},
+        {xilinx::AIE::WireBundle::North32, StrmSwPortType::_32B_NORTH},
+        {xilinx::AIE::WireBundle::East32, StrmSwPortType::_32B_EAST},
+        {xilinx::AIE::WireBundle::Switch512, StrmSwPortType::_32B_SWITCH_512b},
+        {xilinx::AIE::WireBundle::Controller32, StrmSwPortType::_32B_UCTRLR},
+        {xilinx::AIE::WireBundle::PLIO32, StrmSwPortType::_32B_PL}};
 
 #ifndef NDEBUG
 

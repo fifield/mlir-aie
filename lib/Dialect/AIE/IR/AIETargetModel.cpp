@@ -1838,117 +1838,124 @@ bool AIE4TargetModel::isLegalMemAffinity(int coreCol, int coreRow, int memCol,
          IsMemWest || IsMemEast;
 }
 
+// Manager ports
 uint32_t
 AIE4TargetModel::getNumDestSwitchboxConnections(int col, int row,
                                                 WireBundle bundle) const {
+  // TODO - 32b switch ports
   if (isMemTile(col, row))
     switch (bundle) {
     case WireBundle::DMA:
+      return 8;
     case WireBundle::North:
-      return 6;
+      return 8;
     case WireBundle::South:
       return 4;
-    case WireBundle::Ctrl:
-      return 1;
+    case WireBundle::Control:
+      return 2;
+    case WireBundle::NorthControl:
+      return 2;
+    case WireBundle::Switch32:
+      return 2;
     default:
       return 0;
     }
 
-  if (isShimNOCTile(col, row) || isShimPLTile(col, row))
+  if (isShimNOCTile(col, row))
     switch (bundle) {
-    case WireBundle::FIFO:
-      return 1;
     case WireBundle::North:
-      return 6;
+      return 4;
     case WireBundle::West: {
       if (col == 0)
         return 0;
-      return 4;
+      return 2;
     }
-    case WireBundle::South:
-      return 6;
     case WireBundle::East: {
       if (col == columns() - 1)
         return 0;
-      return 4;
+      return 2;
     }
-    case WireBundle::Ctrl:
-      return isShimNOCTile(col, row) ? 1 : 0;
+    case WireBundle::Control:
+      return 2;
+    case WireBundle::NorthControl:
+      return 2;
+    case WireBundle::Switch32:
+      return 2;
     default:
       return 0;
     }
 
   switch (bundle) {
   case WireBundle::Core:
-    return 1;
+    return 2;
   case WireBundle::DMA:
     return 2;
-  case WireBundle::FIFO:
-    return 1;
   case WireBundle::North: {
     if (row == rows() - 1)
       return 0;
-    return 6;
+    return 8;
   }
   case WireBundle::West: {
     if (col == 0)
       return 0;
-    return 4;
+    return 2;
   }
   case WireBundle::South:
     return 4;
   case WireBundle::East: {
     if (col == columns() - 1)
       return 0;
-    return 4;
+    return 2;
   }
-  case WireBundle::Ctrl:
+  case WireBundle::NorthControl:
+    return 2;
+  case WireBundle::Control:
+    return 1;
+  case WireBundle::Switch32:
     return 1;
   default:
     return 0;
   }
 }
 
+// Subordinate ports
 uint32_t
 AIE4TargetModel::getNumSourceSwitchboxConnections(int col, int row,
                                                   WireBundle bundle) const {
+
   if (isMemTile(col, row))
     switch (bundle) {
     case WireBundle::DMA:
-      return 6;
+      return 10;
     case WireBundle::North:
-      return 4;
     case WireBundle::South:
-      return 6;
-    case WireBundle::Trace:
-    case WireBundle::Ctrl:
-      return 1;
+      return 4;
+    case WireBundle::SouthControl:
+    case WireBundle::Switch32:
+      return 2;
     default:
       return 0;
     }
 
-  if (isShimNOCTile(col, row) || isShimPLTile(col, row))
+  // TODO
+  if (isShimNOCTile(col, row))
     switch (bundle) {
-    case WireBundle::FIFO:
-      return 1;
+    case WireBundle::DMA:
     case WireBundle::North:
       return 4;
     case WireBundle::West: {
       if (col == 0)
         return 0;
-      return 4;
+      return 2;
     }
-    case WireBundle::South:
-      return 8;
     case WireBundle::East: {
       if (col == columns() - 1)
         return 0;
-      return 4;
+      return 2;
     }
-    case WireBundle::Trace:
-      return 1;
-    case WireBundle::Ctrl:
-      return isShimNOCTile(col, row) ? 1 : 0;
+    case WireBundle::SouthControl:
+    case WireBundle::Switch32:
+      return 2;
     default:
       return 0;
     }
@@ -1956,10 +1963,7 @@ AIE4TargetModel::getNumSourceSwitchboxConnections(int col, int row,
   // compute/core tile
   switch (bundle) {
   case WireBundle::Core:
-    return 1;
   case WireBundle::DMA:
-    return 2;
-  case WireBundle::FIFO:
     return 1;
   case WireBundle::North: {
     if (row == rows() - 1)
@@ -1969,19 +1973,18 @@ AIE4TargetModel::getNumSourceSwitchboxConnections(int col, int row,
   case WireBundle::West: {
     if (col == 0)
       return 0;
-    return 4;
+    return 2;
   }
   case WireBundle::South:
-    return 6;
+    return 8;
   case WireBundle::East: {
     if (col == columns() - 1)
       return 0;
-    return 4;
-  }
-  case WireBundle::Trace:
-    // Port 0: core trace. Port 1: memory trace.
     return 2;
-  case WireBundle::Ctrl:
+  }
+  case WireBundle::SouthControl:
+    return 2;
+  case WireBundle::Switch32:
     return 1;
   default:
     return 0;
@@ -2049,18 +2052,18 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
     if (srcBundle == WireBundle::DMA) {
       if (dstBundle == WireBundle::DMA)
         return srcChan == dstChan;
-      if (isBundleInList(dstBundle, {WireBundle::Ctrl, WireBundle::South,
+      if (isBundleInList(dstBundle, {WireBundle::Control, WireBundle::South,
                                      WireBundle::North}))
         return true;
     }
-    if (srcBundle == WireBundle::Ctrl) {
+    if (srcBundle == WireBundle::Control) {
       if (dstBundle == WireBundle::DMA)
         return dstChan == 5;
       if (isBundleInList(dstBundle, {WireBundle::South, WireBundle::North}))
         return true;
     }
     if (isBundleInList(srcBundle, {WireBundle::South, WireBundle::North})) {
-      if (isBundleInList(dstBundle, {WireBundle::DMA, WireBundle::Ctrl}))
+      if (isBundleInList(dstBundle, {WireBundle::DMA, WireBundle::Control}))
         return true;
       if (isBundleInList(dstBundle, {WireBundle::South, WireBundle::North}))
         return srcChan == dstChan;
@@ -2074,10 +2077,10 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
   }
   // Shimtile
   else if (isShimNOCorPLTile(col, row)) {
-    if (srcBundle == WireBundle::Ctrl)
-      return dstBundle != WireBundle::Ctrl;
+    if (srcBundle == WireBundle::Control)
+      return dstBundle != WireBundle::Control;
     if (isBundleInList(srcBundle, {WireBundle::FIFO, WireBundle::South}))
-      return isBundleInList(dstBundle, {WireBundle::Ctrl, WireBundle::FIFO,
+      return isBundleInList(dstBundle, {WireBundle::Control, WireBundle::FIFO,
                                         WireBundle::South, WireBundle::West,
                                         WireBundle::North, WireBundle::East});
     if (isBundleInList(srcBundle,
@@ -2085,7 +2088,7 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
       return (srcBundle == dstBundle)
                  ? (srcChan == dstChan)
                  : isBundleInList(dstBundle,
-                                  {WireBundle::Ctrl, WireBundle::FIFO,
+                                  {WireBundle::Control, WireBundle::FIFO,
                                    WireBundle::South, WireBundle::West,
                                    WireBundle::North, WireBundle::East});
     if (srcBundle == WireBundle::Trace) {
@@ -2101,14 +2104,14 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
                        {WireBundle::DMA, WireBundle::FIFO, WireBundle::South,
                         WireBundle::West, WireBundle::North, WireBundle::East}))
       if (isBundleInList(dstBundle,
-                         {WireBundle::Core, WireBundle::DMA, WireBundle::Ctrl,
+                         {WireBundle::Core, WireBundle::DMA, WireBundle::Control,
                           WireBundle::FIFO, WireBundle::South, WireBundle::West,
                           WireBundle::North, WireBundle::East}))
         return (srcBundle == dstBundle) ? (srcChan == dstChan) : true;
     if (srcBundle == WireBundle::Core)
       return dstBundle != WireBundle::Core;
-    if (srcBundle == WireBundle::Ctrl)
-      return dstBundle != WireBundle::Ctrl && dstBundle != WireBundle::DMA;
+    if (srcBundle == WireBundle::Control)
+      return dstBundle != WireBundle::Control && dstBundle != WireBundle::DMA;
     if (srcBundle == WireBundle::Trace) {
       if (dstBundle == WireBundle::DMA)
         return dstChan == 0;
