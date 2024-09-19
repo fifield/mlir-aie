@@ -8,14 +8,22 @@
 // RUN: aie-opt -convert-aie-to-transaction %s | FileCheck %s
 //
 // expect:
-// blockwrite DMA_BD0_0 0x6AC000
-// blockwrite DMA_BD1_0 0x6AC020
-// write32 DMA_S2MM_0_Start_Queue 0x6ACE04
+// blockwrite tile DMA_BD0_0 0x6AC000
+// blockwrite tile DMA_BD1_0 0x6AC020
+// write32 tile DMA_S2MM_0_Start_Queue 0x6ACE04
+// block write shim DMA_BD0_0 0x18000
+// block write shim DMA_BD1_0 0x18030
+// write32 shim DMA_MM2S_0_Task_Queue 0x18494
+//
+// TODO: verify the data being written then add it to the checks
 //
 // CHECK-LABEL: aiex.runtime_sequence @configure()
 // CHECK: aiex.npu.blockwrite(%{{.*}}) {address = 6995968 : ui32} : memref<6xi32>
 // CHECK: aiex.npu.blockwrite(%{{.*}}) {address = 6996000 : ui32} : memref<6xi32>
 // CHECK: aiex.npu.write32 {address = 6999556 : ui32, value = 0 : ui32}
+// CHECK: aiex.npu.blockwrite(%{{.*}}) {address = 98304 : ui32} : memref<9xi32>
+// CHECK: aiex.npu.blockwrite(%{{.*}}) {address = 98352 : ui32} : memref<9xi32>
+// CHECK: aiex.npu.write32 {address = 99476 : ui32, value = 0 : ui32}
 module @test_dma_to_txn {
   aie.device(npu3) {
     %tile_0_2 = aie.tile(0, 2)
@@ -35,6 +43,28 @@ module @test_dma_to_txn {
       aie.use_lock(%lock_0_2, AcquireGreaterEqual, 1)
       aie.dma_bd(%buf02_1 : memref<256xi32>, 0, 256) {bd_id = 1 : i32, next_bd_id = 0 : i32}
       aie.use_lock(%lock_0_2_0, Release, 1)
+      aie.next_bd ^bb1
+    ^bb3:  // pred: ^bb0
+      aie.end
+    }
+
+    %tile_0_0 = aie.tile(0, 0)
+    %buf00_0 = aie.external_buffer {sym_name = "buf00_0"} : memref<256 x i32>
+    %buf00_1 = aie.external_buffer {sym_name = "buf00_1"} : memref<256 x i32>
+    %lock_0_0 = aie.lock(%tile_0_0, 2)
+    %lock_0_0_0 = aie.lock(%tile_0_0, 0)
+
+    %mem_0_0 = aie.shim_dma(%tile_0_0) {
+      %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
+    ^bb1:  // 2 preds: ^bb0, ^bb2
+      aie.use_lock(%lock_0_0, AcquireGreaterEqual, 1)
+      aie.dma_bd(%buf00_0 : memref<256xi32>, 0, 256) {bd_id = 0 : i32, next_bd_id = 1 : i32}
+      aie.use_lock(%lock_0_0_0, Release, 1)
+      aie.next_bd ^bb2
+    ^bb2:  // pred: ^bb1
+      aie.use_lock(%lock_0_0, AcquireGreaterEqual, 1)
+      aie.dma_bd(%buf00_1 : memref<256xi32>, 0, 256) {bd_id = 1 : i32, next_bd_id = 0 : i32}
+      aie.use_lock(%lock_0_0_0, Release, 1)
       aie.next_bd ^bb1
     ^bb3:  // pred: ^bb0
       aie.end

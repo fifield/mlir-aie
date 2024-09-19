@@ -2039,13 +2039,13 @@ AIE4TargetModel::getNumSourceSwitchboxConnections(int col, int row,
 uint32_t
 AIE4TargetModel::getNumDestShimMuxConnections(int col, int row,
                                               WireBundle bundle) const {
-  return 0;
+  return 2;
 }
 
 uint32_t
 AIE4TargetModel::getNumSourceShimMuxConnections(int col, int row,
                                                 WireBundle bundle) const {
-  return 0;
+  return 4;
 }
 
 // src == subordinate
