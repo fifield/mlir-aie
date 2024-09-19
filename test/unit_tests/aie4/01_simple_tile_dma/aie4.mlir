@@ -9,12 +9,12 @@
 //
 // expect:
 // blockwrite DMA_BD0_0 0x6AC000
-// blockwrite DMA_BD0_1 0x6AC020
+// blockwrite DMA_BD1_0 0x6AC020
 // write32 DMA_S2MM_0_Start_Queue 0x6ACE04
 //
 // CHECK-LABEL: aiex.runtime_sequence @configure()
-// CHECK: aiex.npu.blockwrite(%{{.*}}) {address = 6995968 : ui32}
-// CHECK: aiex.npu.blockwrite(%{{.*}}) {address = 6996000 : ui32}
+// CHECK: aiex.npu.blockwrite(%{{.*}}) {address = 6995968 : ui32} : memref<6xi32>
+// CHECK: aiex.npu.blockwrite(%{{.*}}) {address = 6996000 : ui32} : memref<6xi32>
 // CHECK: aiex.npu.write32 {address = 6999556 : ui32, value = 0 : ui32}
 module @test_dma_to_txn {
   aie.device(npu3) {
@@ -41,4 +41,3 @@ module @test_dma_to_txn {
     }
   }
 }
-
