@@ -2230,10 +2230,8 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
     // DMA subordinate
     if (srcBundle == WireBundle::DMA) {
       if (dstBundle == WireBundle::DMA) {
-        if (srcChan == 0 && dstChan == 0)
-          return true;
-        if (srcChan == 2 && dstChan == 1)
-          return true;
+        if (srcChan == 0 || srcChan == 2)
+          return srcChan == dstChan;
         return false;
       }
       if (isBundleInList(dstBundle,
