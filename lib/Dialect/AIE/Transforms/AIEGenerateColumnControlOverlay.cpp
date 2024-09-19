@@ -43,8 +43,8 @@ struct AIEAssignTileCtrlIDsPass
     DeviceOp device = getOperation();
     const auto &targetModel = device.getTargetModel();
 
-    if (targetModel.getTargetArch() == AIEArch::AIE1)
-      return; // Disable this pass for AIE1; AIE1 support NYI.
+    if (targetModel.getTargetArch() != AIEArch::AIE2)
+      return;
 
     auto tileIDMap =
         targetModel.getTileToControllerIdMap(clColumnWiseUniqueIDs);
@@ -69,7 +69,7 @@ struct AIEGenerateColumnControlOverlayPass
     AIEDialect::IsCtrlPktOverlayAttrHelper marker(&getContext());
     for (DeviceOp device : getOperation().getOps<DeviceOp>())
       if (!marker.isAttrPresent(device) && !device.getOverlayAttr() &&
-          device.getTargetModel().getTargetArch() != AIEArch::AIE1 &&
+          device.getTargetModel().getTargetArch() == AIEArch::AIE2 &&
           (configuration || !collectTokenIssuingTiles({device}).empty()))
         groups[device.getDevice()].push_back(device);
     for (auto &[target, users] : groups)
