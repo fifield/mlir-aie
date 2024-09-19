@@ -1842,21 +1842,26 @@ bool AIE4TargetModel::isLegalMemAffinity(int coreCol, int coreRow, int memCol,
 uint32_t
 AIE4TargetModel::getNumDestSwitchboxConnections(int col, int row,
                                                 WireBundle bundle) const {
-  // TODO - 32b switch ports
+
   if (isMemTile(col, row))
     switch (bundle) {
     case WireBundle::DMA:
-      return 8;
     case WireBundle::North:
       return 8;
     case WireBundle::South:
       return 4;
     case WireBundle::Control:
-      return 2;
     case WireBundle::NorthControl:
-      return 2;
     case WireBundle::Switch32:
       return 2;
+    // 32 bit ports
+    case WireBundle::South32:
+    case WireBundle::North32:
+    case WireBundle::Switch512:
+      return 2;
+    case WireBundle::West32:
+    case WireBundle::East32:
+      return 1;
     default:
       return 0;
     }
@@ -1876,19 +1881,25 @@ AIE4TargetModel::getNumDestSwitchboxConnections(int col, int row,
       return 2;
     }
     case WireBundle::Control:
-      return 2;
     case WireBundle::NorthControl:
-      return 2;
     case WireBundle::Switch32:
       return 2;
+    // 32 bit ports
+    case WireBundle::North32:
+    case WireBundle::PLIO32:
+    case WireBundle::Switch512:
+      return 2;
+    case WireBundle::West32:
+    case WireBundle::East32:
+      return 1;
     default:
       return 0;
     }
 
   switch (bundle) {
   case WireBundle::Core:
-    return 2;
   case WireBundle::DMA:
+  case WireBundle::NorthControl:
     return 2;
   case WireBundle::North: {
     if (row == rows() - 1)
@@ -1907,11 +1918,16 @@ AIE4TargetModel::getNumDestSwitchboxConnections(int col, int row,
       return 0;
     return 2;
   }
-  case WireBundle::NorthControl:
-    return 2;
   case WireBundle::Control:
-    return 1;
   case WireBundle::Switch32:
+    return 1;
+  // 32 bit ports
+  case WireBundle::South32:
+  case WireBundle::North32:
+    return 2;
+  case WireBundle::West32:
+  case WireBundle::East32:
+  case WireBundle::Switch512:
     return 1;
   default:
     return 0;
@@ -1933,11 +1949,20 @@ AIE4TargetModel::getNumSourceSwitchboxConnections(int col, int row,
     case WireBundle::SouthControl:
     case WireBundle::Switch32:
       return 2;
+    // 32-bit ports
+    case WireBundle::Control32:
+    case WireBundle::Trace32:
+    case WireBundle::South32:
+    case WireBundle::North32:
+    case WireBundle::Switch512:
+      return 2;
+    case WireBundle::West32:
+    case WireBundle::East32:
+      return 1;
     default:
       return 0;
     }
 
-  // TODO
   if (isShimNOCTile(col, row))
     switch (bundle) {
     case WireBundle::DMA:
@@ -1956,6 +1981,16 @@ AIE4TargetModel::getNumSourceSwitchboxConnections(int col, int row,
     case WireBundle::SouthControl:
     case WireBundle::Switch32:
       return 2;
+    // 32-bit ports
+    case WireBundle::Control32:
+    case WireBundle::Trace32:
+    case WireBundle::North32:
+    case WireBundle::Switch512:
+    case WireBundle::PLIO32:
+      return 2;
+    case WireBundle::West32:
+    case WireBundle::East32:
+      return 1;
     default:
       return 0;
     }
@@ -1986,6 +2021,16 @@ AIE4TargetModel::getNumSourceSwitchboxConnections(int col, int row,
     return 2;
   case WireBundle::Switch32:
     return 1;
+  // 32-bit ports
+  case WireBundle::Trace32:
+  case WireBundle::South32:
+  case WireBundle::North32:
+    return 2;
+  case WireBundle::Control32:
+  case WireBundle::West32:
+  case WireBundle::East32:
+  case WireBundle::Switch512:
+    return 1;
   default:
     return 0;
   }
@@ -1994,43 +2039,17 @@ AIE4TargetModel::getNumSourceSwitchboxConnections(int col, int row,
 uint32_t
 AIE4TargetModel::getNumDestShimMuxConnections(int col, int row,
                                               WireBundle bundle) const {
-  if (isShimNOCorPLTile(col, row))
-    switch (bundle) {
-    case WireBundle::DMA:
-      return 2;
-    case WireBundle::NOC:
-      return 4;
-    case WireBundle::PLIO:
-      return 6;
-    case WireBundle::South:
-      return 8; // Connection to the south port of the stream switch
-    default:
-      return 0;
-    }
-
   return 0;
 }
 
 uint32_t
 AIE4TargetModel::getNumSourceShimMuxConnections(int col, int row,
                                                 WireBundle bundle) const {
-  if (isShimNOCorPLTile(col, row))
-    switch (bundle) {
-    case WireBundle::DMA:
-      return 2;
-    case WireBundle::NOC:
-      return 4;
-    case WireBundle::PLIO:
-      return 8;
-    case WireBundle::South:
-      return 6; // Connection to the south port of the stream switch
-    default:
-      return 0;
-    }
-
   return 0;
 }
 
+// src == subordinate
+// dst == manager
 bool AIE4TargetModel::isLegalTileConnection(int col, int row,
                                             WireBundle srcBundle, int srcChan,
                                             WireBundle dstBundle,
@@ -2043,80 +2062,326 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
 
   // Lambda function to check if a bundle is in a list
   auto isBundleInList = [](WireBundle bundle,
-                           std::initializer_list<WireBundle> bundles) {
+                           std::initializer_list<WireBundle> bundles) -> bool {
     return std::find(bundles.begin(), bundles.end(), bundle) != bundles.end();
   };
 
+  auto isBundle32 = [&](WireBundle bundle) -> bool {
+    return isBundleInList(bundle, {WireBundle::Control32, WireBundle::Trace32,
+                                   WireBundle::South32, WireBundle::West32,
+                                   WireBundle::North32, WireBundle::East32,
+                                   WireBundle::Switch512, WireBundle::PLIO32});
+  };
+
+  // 32-bit switch is fully connected
+  if (isBundle32(srcBundle) && isBundle32(dstBundle))
+    return true;
+
   // Memtile
   if (isMemTile(col, row)) {
+
+    // DMA Subordinate
     if (srcBundle == WireBundle::DMA) {
-      if (dstBundle == WireBundle::DMA)
+      // DMA -> DMA
+      if ((dstBundle == WireBundle::DMA) &&
+          ((srcChan <= 3) || (srcChan >= 6 && srcChan <= 9)))
         return srcChan == dstChan;
-      if (isBundleInList(dstBundle, {WireBundle::Control, WireBundle::South,
-                                     WireBundle::North}))
+      // DMA -> South
+      if (dstBundle == WireBundle::South) {
+        switch (srcChan) {
+        case 0:
+        case 2:
+          return dstChan == 0;
+        case 1:
+        case 3:
+          return dstChan == 1;
+        case 6:
+        case 8:
+          return dstChan == 2;
+        case 7:
+        case 9:
+          return dstChan == 3;
+        case 4:
+        case 10:
+          return true;
+        default:
+          return false;
+        }
+      }
+      // DMA -> North
+      if (dstBundle == WireBundle::North) {
+        if (srcChan == 4)
+          return dstChan == 0;
+        if (srcChan == 10)
+          return dstChan == 4;
         return true;
-    }
-    if (srcBundle == WireBundle::Control) {
-      if (dstBundle == WireBundle::DMA)
-        return dstChan == 5;
-      if (isBundleInList(dstBundle, {WireBundle::South, WireBundle::North}))
+      }
+      // DMA -> Switch32
+      if (dstBundle == WireBundle::Switch32)
         return true;
-    }
-    if (isBundleInList(srcBundle, {WireBundle::South, WireBundle::North})) {
-      if (isBundleInList(dstBundle, {WireBundle::DMA, WireBundle::Control}))
-        return true;
-      if (isBundleInList(dstBundle, {WireBundle::South, WireBundle::North}))
-        return srcChan == dstChan;
-    }
-    if (srcBundle == WireBundle::Trace) {
-      if (dstBundle == WireBundle::DMA)
-        return dstChan == 5;
-      if (dstBundle == WireBundle::South)
-        return true;
-    }
-  }
-  // Shimtile
-  else if (isShimNOCorPLTile(col, row)) {
-    if (srcBundle == WireBundle::Control)
-      return dstBundle != WireBundle::Control;
-    if (isBundleInList(srcBundle, {WireBundle::FIFO, WireBundle::South}))
-      return isBundleInList(dstBundle, {WireBundle::Control, WireBundle::FIFO,
-                                        WireBundle::South, WireBundle::West,
-                                        WireBundle::North, WireBundle::East});
-    if (isBundleInList(srcBundle,
-                       {WireBundle::West, WireBundle::North, WireBundle::East}))
-      return (srcBundle == dstBundle)
-                 ? (srcChan == dstChan)
-                 : isBundleInList(dstBundle,
-                                  {WireBundle::Control, WireBundle::FIFO,
-                                   WireBundle::South, WireBundle::West,
-                                   WireBundle::North, WireBundle::East});
-    if (srcBundle == WireBundle::Trace) {
-      if (isBundleInList(dstBundle, {WireBundle::FIFO, WireBundle::South}))
-        return true;
-      if (isBundleInList(dstBundle, {WireBundle::West, WireBundle::East}))
-        return dstChan == 0;
-    }
-  }
-  // Coretile
-  else if (isCoreTile(col, row)) {
-    if (isBundleInList(srcBundle,
-                       {WireBundle::DMA, WireBundle::FIFO, WireBundle::South,
-                        WireBundle::West, WireBundle::North, WireBundle::East}))
+      // DMA -> NorthControl, Control
       if (isBundleInList(dstBundle,
-                         {WireBundle::Core, WireBundle::DMA, WireBundle::Control,
-                          WireBundle::FIFO, WireBundle::South, WireBundle::West,
-                          WireBundle::North, WireBundle::East}))
-        return (srcBundle == dstBundle) ? (srcChan == dstChan) : true;
-    if (srcBundle == WireBundle::Core)
-      return dstBundle != WireBundle::Core;
-    if (srcBundle == WireBundle::Control)
-      return dstBundle != WireBundle::Control && dstBundle != WireBundle::DMA;
-    if (srcBundle == WireBundle::Trace) {
+                         {WireBundle::NorthControl, WireBundle::Control})) {
+        if (srcChan == 3 || srcChan == 4)
+          return dstChan == 0;
+        if (srcChan == 9 || srcChan == 10)
+          return dstChan == 1;
+      }
+      return false;
+    }
+
+    // South Subordinate
+    if (srcBundle == WireBundle::South) {
+      // South -> DMA
+      if (dstBundle == WireBundle::DMA) {
+        if (srcChan == 0)
+          return dstChan == 0 || dstChan == 2 || dstChan == 3;
+        if (srcChan == 1)
+          return dstChan == 1 || dstChan == 2 || dstChan == 3;
+        if (srcChan == 2)
+          return dstChan == 4 || dstChan == 6 || dstChan == 7;
+        if (srcChan == 3)
+          return dstChan == 5 || dstChan == 6 || dstChan == 7;
+      }
+      // South -> South
+      if (dstBundle == WireBundle::South)
+        return srcChan == dstChan;
+      // South -> North, Switch32
+      if (isBundleInList(dstBundle, {WireBundle::North, WireBundle::Switch32}))
+        return true;
+      return false;
+    }
+
+    // North Subordinate
+    if (srcBundle == WireBundle::North) {
+      // North -> DMA
+      if (dstBundle == WireBundle::DMA) {
+        if (dstChan <= 1)
+          return true;
+        if (srcChan == 0)
+          return dstChan == 2;
+        if (srcChan == 1)
+          return dstChan == 3;
+        if (srcChan == 2)
+          return dstChan == 4 || dstChan == 5 || dstChan == 6;
+        if (srcChan == 3)
+          return dstChan == 4 || dstChan == 5 || dstChan == 7;
+      }
+      // North -> North
+      if (dstBundle == WireBundle::North) {
+        if (srcChan == 0 && dstChan == 0)
+          return true;
+        if (srcChan == 1 && dstChan == 1)
+          return true;
+        if (srcChan == 2 && dstChan == 4)
+          return true;
+        if (srcChan == 3 && dstChan == 5)
+          return true;
+      }
+      // North -> Control
+      if (dstBundle == WireBundle::Control) {
+        if (srcChan == 1 && dstChan == 0)
+          return true;
+        if (srcChan == 3)
+          return true;
+      }
+      // North -> South, Switch32
+      if (isBundleInList(dstBundle, {WireBundle::South, WireBundle::Switch32}))
+        return true;
+      return false;
+    }
+
+    // SouthControl Subordinate
+    if (srcBundle == WireBundle::SouthControl) {
+      // SouthControl -> DMA
+      if (dstBundle == WireBundle::DMA) {
+        if (srcChan == 0 && dstChan == 3)
+          return true;
+        if (srcChan == 1 && dstChan == 7)
+          return true;
+      }
+      // SouthControl -> NorthControl
+      if (dstBundle == WireBundle::NorthControl)
+        return srcChan == dstChan;
+      // SouthControl -> Control
+      if (dstBundle == WireBundle::Control)
+        return srcChan == 1 || dstChan == 0;
+      // SouthControl -> Switch32
+      if (dstBundle == WireBundle::Switch32)
+        return true;
+      return false;
+    }
+
+    // Switch32 Subordinate
+    if (srcBundle == WireBundle::Switch32) {
+      if (dstBundle == WireBundle::Switch32)
+        return false;
+      if (isBundleInList(dstBundle,
+                         {WireBundle::Control, WireBundle::NorthControl}))
+        return srcChan == dstChan;
+      return true;
+    }
+
+    return false;
+  }
+
+  // Shimtile
+  if (isShimNOCorPLTile(col, row)) {
+    // DMA subordinate
+    if (srcBundle == WireBundle::DMA) {
+      if (dstBundle == WireBundle::DMA) {
+        if (srcChan == 0 && dstChan == 0)
+          return true;
+        if (srcChan == 2 && dstChan == 1)
+          return true;
+        return false;
+      }
+      if (isBundleInList(dstBundle,
+                         {WireBundle::NorthControl, WireBundle::Control})) {
+        if (srcChan <= 1 && dstChan == 0)
+          return true;
+        if (srcChan >= 2 && dstChan == 1)
+          return true;
+        return false;
+      }
+      if (isBundleInList(dstBundle, {WireBundle::West, WireBundle::North,
+                                     WireBundle::East, WireBundle::Switch32}))
+        return true;
+      return false;
+    }
+    // North, East, West subordinate
+    if (isBundleInList(srcBundle, {WireBundle::West, WireBundle::North,
+                                   WireBundle::East})) {
+      if (srcBundle == dstBundle)
+        return srcChan == dstChan;
+      if (isBundleInList(dstBundle,
+                         {WireBundle::DMA, WireBundle::West, WireBundle::North,
+                          WireBundle::East, WireBundle::Switch32}))
+        return true;
+      if (dstBundle == WireBundle::Control) {
+        if (dstChan == 1)
+          return (srcBundle == WireBundle::North) && (srcChan == 3);
+        if (srcBundle == WireBundle::North)
+          return (srcChan == 1) || (srcChan == 3);
+        return true;
+      }
+      if (dstBundle == WireBundle::NorthControl) {
+        if (srcBundle != WireBundle::North)
+          return true;
+        if (srcChan == 3)
+          return true;
+        if (srcChan == 1 && dstChan == 0)
+          return true;
+        return false;
+      }
+      return false;
+    }
+    // Control mm2s subordinate
+    if (srcBundle == WireBundle::Control) {
+      if (isBundleInList(dstBundle, {WireBundle::West, WireBundle::East}))
+        return (srcChan == 0) || (dstChan == 1);
+      if (dstBundle == WireBundle::North) {
+        if (dstChan <= 1)
+          return srcChan == 0;
+        if (dstChan >= 2)
+          return srcChan == 1;
+      }
+      if (isBundleInList(dstBundle,
+                         {WireBundle::NorthControl, WireBundle::Control,
+                          WireBundle::Switch32})) {
+        if (srcChan == dstChan)
+          return true;
+        if (dstBundle == WireBundle::Control)
+          return dstChan == 0;
+        return false;
+      }
+    }
+    // Switch32 subordinate
+    if (srcBundle == WireBundle::Switch32) {
+      if (isBundleInList(dstBundle,
+                         {WireBundle::DMA, WireBundle::West, WireBundle::North,
+                          WireBundle::East, WireBundle::NorthControl}))
+        return true;
+      if (dstBundle == WireBundle::Control)
+        return srcChan == dstChan;
+    }
+    return false;
+  }
+
+  // Coretile
+  if (isCoreTile(col, row)) {
+    // Core subordinate
+    switch (srcBundle) {
+    default:
+      return false;
+    case WireBundle::Core:
+      if (dstBundle == WireBundle::DMA)
+        return dstChan == 1;
+      if (dstBundle == WireBundle::NorthControl)
+        return dstChan == 0;
+      if (isBundleInList(dstBundle,
+                         {WireBundle::South, WireBundle::East, WireBundle::West,
+                          WireBundle::North, WireBundle::Control,
+                          WireBundle::Switch32}))
+        return true;
+      return false;
+    // DMA subordinate
+    case WireBundle::DMA:
       if (dstBundle == WireBundle::DMA)
         return dstChan == 0;
-      if (isBundleInList(dstBundle, {WireBundle::FIFO, WireBundle::South}))
+      if (isBundleInList(dstBundle,
+                         {WireBundle::Core, WireBundle::South, WireBundle::East,
+                          WireBundle::West, WireBundle::North,
+                          WireBundle::NorthControl, WireBundle::Control,
+                          WireBundle::Switch32}))
         return true;
+      return false;
+    // North, South subordinate
+    case WireBundle::North:
+    case WireBundle::South:
+      if (srcBundle == dstBundle) {
+        if (srcChan == 0 || srcChan == 1)
+          return srcChan == dstChan;
+        if (srcChan == 4 || srcChan == 5)
+          return (srcChan - 2) == dstChan;
+        return false;
+      }
+      if (isBundleInList(dstBundle,
+                         {WireBundle::Core, WireBundle::DMA, WireBundle::West,
+                          WireBundle::North, WireBundle::South,
+                          WireBundle::East, WireBundle::Switch32}))
+        return true;
+      return false;
+    // East, West subordinate
+    case WireBundle::East:
+    case WireBundle::West:
+      if (dstBundle == srcBundle)
+        return srcChan == dstChan;
+      if (isBundleInList(dstBundle,
+                         {WireBundle::Core, WireBundle::DMA, WireBundle::South,
+                          WireBundle::East, WireBundle::West, WireBundle::North,
+                          WireBundle::NorthControl, WireBundle::Control,
+                          WireBundle::Switch32}))
+        return true;
+      return false;
+    // SouthControl subordinate
+    case WireBundle::SouthControl:
+      if (isBundleInList(dstBundle, {WireBundle::Core, WireBundle::DMA}))
+        return srcChan == dstChan;
+      if (isBundleInList(dstBundle, {WireBundle::East, WireBundle::West}))
+        return dstChan == 1 || srcChan == 0;
+      if (dstBundle == WireBundle::NorthControl)
+        return srcChan == 1 || dstChan == 0;
+      if (isBundleInList(dstBundle,
+                         {WireBundle::Control, WireBundle::Switch32}))
+        return true;
+      return false;
+    // Switch32 subordinate
+    case (WireBundle::Switch32):
+      return (isBundleInList(
+          dstBundle, {WireBundle::Core, WireBundle::DMA, WireBundle::South,
+                      WireBundle::East, WireBundle::West, WireBundle::North,
+                      WireBundle::NorthControl, WireBundle::Control}));
     }
   }
   return false;
