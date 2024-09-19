@@ -20,8 +20,8 @@ extern "C" {
 #include "xaiengine/xaie_interrupt.h"
 #include "xaiengine/xaie_locks.h"
 #include "xaiengine/xaie_mem.h"
-#include "xaiengine/xaie_perfcnt.h"
 #include "xaiengine/xaie_noc.h"
+#include "xaiengine/xaie_perfcnt.h"
 #include "xaiengine/xaie_plif.h"
 #include "xaiengine/xaie_reset.h"
 #include "xaiengine/xaie_ss.h"
@@ -215,7 +215,7 @@ llvm::raw_ostream &operator<<(llvm::raw_ostream &os,
 #define XAIE_PARTITION_BASE_ADDR 0x0
 
 // /proj/xbuilds/9999.0_INT_0911_0013/installs/lin64/Vitis/2024.2/data/embeddedsw/XilinxProcessorIPLib/drivers/aienginev2_INT_aig_vaie4/driver/src/global/xaiegbl_defs.h
-#define XAIE_DEV_GEN_AIE4               40U
+#define XAIE_DEV_GEN_AIE4 40U
 
 #define NPI_ADDR 0x0
 #define NUM_LOCKS 16
@@ -302,8 +302,6 @@ xilinx::AIE::AIERTControl::AIERTControl(const AIE::AIETargetModel &tm)
   case AIEArch::AIE4:
     devGen = XAIE_DEV_GEN_AIE4_MEDUSA;
     break;
-  default:
-    assert(false);
   }
   aiert->configPtr = XAie_Config{
       /*AieGen*/ devGen,
@@ -609,7 +607,9 @@ static LogicalResult configureBdInBlock(const AIE::AIETargetModel &targetModel,
   if (std::optional<int32_t> oooId = bdOp.getOutOfOrderId())
     TRY_XAIE_API_EMIT_ERROR(bdOp, XAie_DmaSetOutofOrderBdId, &dmaTileBd,
                             static_cast<uint8_t>(*oooId));
-  TRY_XAIE_API_EMIT_ERROR(bdOp, XAie_DmaEnableBd, &dmaTileBd);
+  // In AIE4, Valid_BD is assumed always Enabled
+  if (targetModel.getTargetArch() != AIEArch::AIE4)
+    TRY_XAIE_API_EMIT_ERROR(bdOp, XAie_DmaEnableBd, &dmaTileBd);
   auto tileLoc = XAie_TileLoc(col, row);
   TRY_XAIE_API_EMIT_ERROR(bdOp, XAie_DmaWriteBd, devInst, &dmaTileBd, tileLoc,
                           bdId);
@@ -659,7 +659,7 @@ LogicalResult xilinx::AIE::AIERTControl::pushToBdQueueAndEnable(
                             tileLoc, chNum, direction, bdId, repeatCount,
                             enTokenIssue);
   }
-  if (configureChannel)
+  if (configureChannel && targetModel.getTargetArch() != AIEArch::AIE4)
     TRY_XAIE_API_EMIT_ERROR(op, XAie_DmaChannelEnable, &aiert->devInst, tileLoc,
                             chNum, direction);
   return success();
