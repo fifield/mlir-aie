@@ -5,7 +5,11 @@
 //
 // (c) Copyright 2024 Advanced Micro Devices Inc.
 //
-// RUN: aie-opt -convert-aie-to-transaction %s | FileCheck %s
+// RUN: aie-opt -convert-aie-to-transaction %s -o txn.mlir 
+// RUN: FileCheck --input-file=txn.mlir %s
+// RUN: aie-translate -aie-npu-instgen -aie-output-binary=true -o transaction.bin txn.mlir
+// RUN: aiecc.py --no-compile --no-compile-host --aiesim %s %S/test.cpp
+// RUN: aie4.mlir.prj/aiesim.sh | FileCheck %s --check-prefix=AIESIM
 //
 // expect:
 // blockwrite tile DMA_BD0_0 0x6AC000
@@ -24,13 +28,20 @@
 // CHECK: aiex.npu.blockwrite(%{{.*}}) {address = 98304 : ui32} : memref<9xi32>
 // CHECK: aiex.npu.blockwrite(%{{.*}}) {address = 98352 : ui32} : memref<9xi32>
 // CHECK: aiex.npu.write32 {address = 99476 : ui32, value = 0 : ui32}
+//
+// AIESIM: AIE4b ISS
+// AIESIM: Hello, world.
+//
 module @test_dma_to_txn {
   aie.device(npu3) {
     %tile_0_2 = aie.tile(0, 2)
     %buf02_0 = aie.buffer(%tile_0_2) {address = 2048 : i32, mem_bank = 0 : i32, sym_name = "buf02_0"} : memref<256xi32> 
     %buf02_1 = aie.buffer(%tile_0_2) {address = 17408 : i32, mem_bank = 1 : i32, sym_name = "buf02_1"} : memref<256xi32> 
-    %lock_0_2 = aie.lock(%tile_0_2, 2)
-    %lock_0_2_0 = aie.lock(%tile_0_2, 0)
+    %lock_0_2 = aie.lock(%tile_0_2, 0) { init = 2 : i32 }
+    %lock_0_2_0 = aie.lock(%tile_0_2, 1)
+    %core_0_2 = aie.core(%tile_0_2) {
+      aie.end
+    }
 
     %mem_0_2 = aie.mem(%tile_0_2) {
       %0 = aie.dma_start(S2MM, 0, ^bb1, ^bb3)
@@ -51,9 +62,8 @@ module @test_dma_to_txn {
     %tile_0_0 = aie.tile(0, 0)
     %buf00_0 = aie.external_buffer {sym_name = "buf00_0"} : memref<256 x i32>
     %buf00_1 = aie.external_buffer {sym_name = "buf00_1"} : memref<256 x i32>
-    %lock_0_0 = aie.lock(%tile_0_0, 2)
-    %lock_0_0_0 = aie.lock(%tile_0_0, 0)
-
+    %lock_0_0 = aie.lock(%tile_0_0, 0) { init = 2 : i32 }
+    %lock_0_0_0 = aie.lock(%tile_0_0, 1)
     %mem_0_0 = aie.shim_dma(%tile_0_0) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb2

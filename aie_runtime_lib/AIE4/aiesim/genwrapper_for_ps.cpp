@@ -294,4 +294,15 @@ void destroy_ip(IPBlock *ip) {
   std::cout << "IP-INFO: deleting ip PSIP_ps_i3 " << std::endl;
   delete ip;
 }
+
+#define XAIE_BASE_ADDR 0x20000000000
+
+void NpuWrite32(uint64_t Addr, uint Data) {
+  ess_Write32(XAIE_BASE_ADDR+Addr, Data);
+}
+
+uint NpuRead32(uint64_t Addr) {
+  return ess_Read32(XAIE_BASE_ADDR+Addr);
+}
+
 }
