@@ -305,7 +305,7 @@ xilinx::AIE::AIERTControl::AIERTControl(const AIE::AIETargetModel &tm)
   }
   aiert->configPtr = XAie_Config{
       /*AieGen*/ devGen,
-      /*BaseAddr*/ XAIE_BASE_ADDR,
+      /*BaseAddr*/ 0,
       /*ColShift*/ static_cast<uint8_t>(tm.getColumnShift()),
       /*RowShift*/ static_cast<uint8_t>(tm.getRowShift()),
       /*NumRows*/ static_cast<uint8_t>(deviceRows),
@@ -393,6 +393,13 @@ configureLocksInBdBlock(const AIE::AIETargetModel &targetModel,
       break;
     }
     }
+  }
+
+  if (targetModel.isMemTile(col, row)) {
+    if (acqLockId)
+      acqLockId.value() += 448; // increaseValue
+    if (relLockId)
+      relLockId.value() += 448; // increaseValue
   }
 
   // no RelEn in the arch spec even though the API requires you to set it?
