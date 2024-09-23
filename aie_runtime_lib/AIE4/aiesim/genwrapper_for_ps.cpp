@@ -305,4 +305,54 @@ uint NpuRead32(uint64_t Addr) {
   return ess_Read32(XAIE_BASE_ADDR+Addr);
 }
 
+void NpuWriteTransactionBinary(unsigned char *data, size_t nbytes) {
+  assert(nbytes >= 12);
+  uint32_t major = data[0];
+  uint32_t minor = data[1];
+  uint32_t num_cols = data[4];
+
+  uint32_t num_ops, txn_size;
+  std::memcpy(&num_ops, &data[8], 4);
+  std::memcpy(&txn_size, &data[12], 4);
+
+  uint32_t i = 16;
+
+  uint64_t addr = 0;
+  uint32_t value = 0;
+  uint32_t size = 0;
+  uint32_t mask = 0;
+  const uint32_t *data_ptr = nullptr;
+
+  if (major == 1 && minor == 0) {
+    while (i < nbytes) {
+      uint8_t opc = data[i];
+      if (opc == 0x00) {
+        std::memcpy(&addr, &data[i + 4], 4);
+        std::memcpy(&value, &data[i + 8], 4);
+        i += 12;
+        NpuWrite32(addr, value);
+      } else if (opc == 0x01) {
+        std::memcpy(&addr, &data[i + 4], 4);
+        std::memcpy(&size, &data[i + 8], 4);
+        data_ptr = reinterpret_cast<const uint32_t *>(data + i + 12);
+        i += size;
+        size = size - 12;
+        for (int j = 0; j < size / 4; j++)
+          NpuWrite32(addr + (4 * j), data_ptr[j]);
+      } else if (opc == 0x03) {
+        std::memcpy(&addr, &data[i + 4], 4);
+        std::memcpy(&value, &data[i + 8], 4);
+        std::memcpy(&mask, &data[i + 12], 4);
+        uint32_t r = NpuRead32(addr);
+        uint32_t w = (r & ~mask) | (value & mask);
+        NpuWrite32(addr, w);
+        i += 16;
+      } else {
+        assert(0 && "unhandled transaction binary opcode");
+      }
+    }
+  }
+
 }
+
+} // extern "C"
