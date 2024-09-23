@@ -106,7 +106,15 @@ int main(int argc, char *argv[]) {
   write_transaction_binary(data);
 
   row = 2;
-  uint64_t tile_data_mem = (col << 25) | (row << 20) + 0x0;
+  uint64_t tile_lock_1 = ((col << 25) | ((row + 4) << 20)) + 0x000AE010;
+  int timeout = 0;
+  while (1) {
+    uint32_t l = NpuRead32(tile_lock_1);
+    if (l == 1)
+      break;
+  }
+
+  uint64_t tile_data_mem = ((col << 25) | ((row + 4) << 20)) + 2048;
   uint32_t output[256];
   int errs = 0;
   for (int i = 0; i < 256; i++) {

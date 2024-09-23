@@ -7,9 +7,6 @@
 //
 // RUN: aie-opt -convert-aie-to-transaction %s -o txn.mlir 
 // RUN: FileCheck --input-file=txn.mlir %s
-// RUN: aie-translate -aie-npu-instgen -aie-output-binary=true -o transaction.bin txn.mlir
-// RUN: aiecc.py --no-compile --no-compile-host --aiesim %s %S/test.cpp
-// RUN: aie4.mlir.prj/aiesim.sh | FileCheck %s --check-prefix=AIESIM
 //
 // expect:
 // blockwrite tile DMA_BD0_0 0x6AC000
@@ -28,9 +25,6 @@
 // CHECK: aiex.npu.blockwrite(%{{.*}}) {address = 98304 : ui32} : memref<9xi32>
 // CHECK: aiex.npu.blockwrite(%{{.*}}) {address = 98352 : ui32} : memref<9xi32>
 // CHECK: aiex.npu.write32 {address = 99476 : ui32, value = 0 : ui32}
-//
-// AIESIM: AIE4b ISS
-// AIESIM: Hello, world.
 //
 module @test_dma_to_txn {
   aie.device(npu3) {

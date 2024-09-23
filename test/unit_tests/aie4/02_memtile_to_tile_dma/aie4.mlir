@@ -51,12 +51,12 @@ module @test_dma_to_txn {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb2
       aie.use_lock(%lock_0_1, AcquireGreaterEqual, 1)
-      aie.dma_bd(%buf01_0 : memref<256xi32>, 0, 256) {bd_id = 128 : i32, next_bd_id = 1 : i32}
+      aie.dma_bd(%buf01_0 : memref<256xi32>, 0, 256) {bd_id = 128 : i32, next_bd_id = 129 : i32}
       aie.use_lock(%lock_0_1_0, Release, 1)
       aie.next_bd ^bb2
     ^bb2:  // pred: ^bb1
       aie.use_lock(%lock_0_1, AcquireGreaterEqual, 1)
-      aie.dma_bd(%buf01_1 : memref<256xi32>, 0, 256) {bd_id = 129 : i32, next_bd_id = 0 : i32}
+      aie.dma_bd(%buf01_1 : memref<256xi32>, 0, 256) {bd_id = 129 : i32, next_bd_id = 128 : i32}
       aie.use_lock(%lock_0_1_0, Release, 1)
       aie.next_bd ^bb1
     ^bb3:  // pred: ^bb0

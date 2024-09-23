@@ -1868,6 +1868,8 @@ AIE4TargetModel::getNumDestSwitchboxConnections(int col, int row,
 
   if (isShimNOCTile(col, row))
     switch (bundle) {
+    case WireBundle::DMA:
+      return 2;
     case WireBundle::North:
       return 4;
     case WireBundle::West: {

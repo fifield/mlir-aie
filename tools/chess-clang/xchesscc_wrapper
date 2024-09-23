@@ -36,6 +36,11 @@ elif [ $TARGET == "AIE2P" ]
   then
     AIEARCH=aie2p
     AIETARGET=aie2p
+elif [ $TARGET == "AIE4" ]
+  then
+    EXTRA_DEFS="-D__AIE_ARCH__=42 -D__AIEARCH__=42"
+    AIEARCH=aie4
+    AIETARGET=aie4
 else
     echo "xchesscc_wrapper unknown architecture $TARGET"
     exit 1
