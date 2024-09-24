@@ -7,7 +7,7 @@
 //
 // RUN: aie-opt -aie-create-pathfinder-flows -convert-aie-to-transaction %s -o txn.mlir
 // RUN: aie-translate -aie-npu-instgen -aie-output-binary=true -o transaction.bin txn.mlir
-// RUN: aiecc.py --no-compile --no-compile-host --aiesim %s %S/test.cpp
+// RUN: aiecc.py --no-compile --no-compile-host --aiesim %s %test_utils_flags %S/test.cpp
 // RUN: sh -c 'aie4.mlir.prj/aiesim.sh; exit 0' | FileCheck %s
 //
 // CHECK: AIE4b ISS

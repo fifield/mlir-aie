@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include "memory_allocator.h"
+#include "test_utils.h"
 
 extern "C" {
 
@@ -18,23 +19,6 @@ typedef unsigned int uint;
 void NpuWrite32(uint64_t Addr, uint Data);
 uint NpuRead32(uint64_t Addr);
 void NpuWriteTransactionBinary(unsigned char *data, size_t nbytes);
-
-}
-
-static std::vector<uint8_t> load_instr_binary(std::string instr_path) {
-  std::ifstream instr_file(instr_path);
-  if (!instr_file.is_open()) {
-    std::cerr << "Error: Could not open file " << instr_path << "\n";
-    return {};
-  }
-  // read size of file, reserve space in  instr_v, then read the file into
-  // instr_v
-  instr_file.seekg(0, instr_file.end);
-  int size = instr_file.tellg();
-  instr_file.seekg(0, instr_file.beg);
-  std::vector<uint8_t> instr_v(size);
-  instr_file.read(reinterpret_cast<char *>(instr_v.data()), size);
-  return instr_v;
 }
 
 int main(int argc, char *argv[]) {
@@ -48,8 +32,9 @@ int main(int argc, char *argv[]) {
   mlir_aie_sync_mem_dev(handle);
 
   std::string txn_path = "transaction.bin";
-  std::vector<uint8_t> data = load_instr_binary(txn_path);
-  NpuWriteTransactionBinary(data.data(), data.size());
+  std::vector<uint32_t> data = test_utils::load_instr_binary(txn_path);
+  NpuWriteTransactionBinary(reinterpret_cast<uint8_t *>(data.data()),
+                            data.size() * sizeof(uint32_t));
 
   uint64_t col = 0;
   uint64_t row = 2;
@@ -57,7 +42,7 @@ int main(int argc, char *argv[]) {
   int timeout = 0;
   while (1) {
     uint32_t l = NpuRead32(tile_lock_1);
-    if (l == 1)
+    if (l >= 1)
       break;
   }
 
