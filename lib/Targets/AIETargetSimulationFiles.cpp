@@ -20,12 +20,12 @@ using namespace AIE;
 mlir::LogicalResult AIE::AIETranslateSCSimConfig(mlir::ModuleOp module,
                                                  llvm::raw_ostream &output,
                                                  llvm::StringRef deviceName) {
-  DeviceOp targetOp =
+  DeviceOp deviceOp =
       AIE::DeviceOp::getForSymbolInModuleOrError(module, deviceName);
-  if (!targetOp) {
+  if (!deviceOp) {
     return mlir::failure();
   }
-  AIEArch arch = targetOp.getTargetModel().getTargetArch();
+  AIEArch arch = deviceOp.getTargetModel().getTargetArch();
 
   if (arch == AIEArch::AIE4) {
     output << "{\n"
@@ -184,55 +184,56 @@ must be called first. So, a more practical invocation: aie-opt
 mlir::LogicalResult AIE::AIETranslateShimSolution(mlir::ModuleOp module,
                                                   llvm::raw_ostream &output,
                                                   llvm::StringRef deviceName) {
-  DeviceOp targetOp =
+  DeviceOp deviceOp =
       AIE::DeviceOp::getForSymbolInModuleOrError(module, deviceName);
-  if (!targetOp) {
+  if (!deviceOp) {
     return mlir::failure();
   }
   if (failed(verifyDMAChannelsResolved(targetOp)))
     return mlir::failure();
 
+  std::set<std::pair<uint32_t, uint32_t>> visitedPorts;
+
   // Generate boilerplate header
   output << "{\n";
   output << "  \"Placement\": [\n";
 
-  int shim_MM2S_count = 0;
-
   // For each DMAStartOp in shims, generate a "LogicalInstance" section
-  auto all_shim_ops = targetOp.getOps<ShimDMAOp>();
-  for (ShimDMAOp shimOp : all_shim_ops) {
+  for (ShimDMAOp shimOp : deviceOp.getOps<ShimDMAOp>()) {
     for (DMAStartOp startOp : shimOp.getOps<DMAStartOp>()) {
+
+      int32_t column = shimOp.colIndex();
+      int32_t channel = startOp.getChannelIndex();
+      if (visitedPorts.count({column, channel}))
+        continue;
+
+      int32_t count = visitedPorts.size();
+      if (count > 0)
+        output << ",\n";
+
+      visitedPorts.insert({column, channel});
+
       // For aiesimulator to run, PortName must start at 00 and increase
-      if (startOp.getChannelDir() == DMAChannelDir::MM2S) {
-        if (shim_MM2S_count > 0)
-          output << ",\n";
+      std::string port_name = "M";
+      port_name += count < 10 ? "0" : "";
+      port_name += std::to_string(count);
+      port_name += "_AXI";
 
-        std::string port_name = "";
-        port_name.append("M");
-        port_name.append(shim_MM2S_count < 10 ? "0" : ""); // padding zero
-        port_name.append(std::to_string(shim_MM2S_count++));
-        port_name.append("_AXI");
-        // TODO: How to tell if PortName should be AXI or AXIS?
+      // Generate a Logical Instance line
+      output << "    {\n"
+             << "      \"LogicalInstance\" : { \"InstanceName\" : "
+             << "\"aie_engine_0\", \"PortName\" : \"" << port_name << "\"},\n";
 
-        // Generate a Logical Instance line
-        output << "    {\n"
-               << R"(      "LogicalInstance" : { "InstanceName" : )"
-               << R"("aie_engine_0", "PortName" : ")" << port_name << "\"},\n";
+      // "name" field appears to be arbitrary, but we try to be descriptive
+      std::string physical_name = "";
+      physical_name += "AIE_NOC_X" + std::to_string(column) + "Y0_AIE_NOC_";
+      physical_name += "S_AXI_ch" + std::to_string(channel);
 
-        std::string col = std::to_string(shimOp.colIndex());
-        int ch = startOp.getChannelIndex();
-        std::string channel = std::to_string(ch);
-        // "name" field appears to be arbitrary, but we try to be descriptive
-        std::string physical_name = "";
-        physical_name.append("AIE_NOC_X").append(col).append("Y0_AIE_NOC_");
-        physical_name.append("M_AXI_ch").append(channel);
-
-        // Generate a Physical Instance line
-        output << R"(      "PhysicalInstance" : [{ "name" : ")" << physical_name
-               << R"(", "column" : )" << col << ", \"channel\" : " << channel
-               << " }],\n"
-               << "      \"IsSoft\" : true\n    }";
-      }
+      // Generate a Physical Instance line
+      output << "      \"PhysicalInstance\" : [{ \"name\" : \"" << physical_name
+             << "\", \"column\" : " << column << ", \"channel\" : " << channel
+             << " }],\n"
+             << "      \"IsSoft\" : true\n    }";
     }
   }
 
@@ -256,12 +257,12 @@ mlir::LogicalResult AIE::AIETranslateGraphXPE(mlir::ModuleOp module,
   ./Work/reports/graph.xpe
   */
 
-  DeviceOp targetOp =
+  DeviceOp deviceOp =
       AIE::DeviceOp::getForSymbolInModuleOrError(module, deviceName);
-  if (!targetOp) {
+  if (!deviceOp) {
     return mlir::failure();
   }
-  AIEArch arch = targetOp.getTargetModel().getTargetArch();
+  AIEArch arch = deviceOp.getTargetModel().getTargetArch();
 
   // Generate boilerplate header
   // TODO: date and version should probably not be hardcoded
@@ -289,7 +290,7 @@ mlir::LogicalResult AIE::AIETranslateGraphXPE(mlir::ModuleOp module,
   output << "  <AIE status=\"COMPILER_OUTPUT\">\n";
 
   // Generate design specific info on tiles within the mlir module
-  auto module_tile_ops = targetOp.getOps<TileOp>();
+  auto module_tile_ops = deviceOp.getOps<TileOp>();
   int num_tiles = std::distance(module_tile_ops.begin(), module_tile_ops.end());
   // TODO: clk_freq only 1150 for AIE2
   if (arch == AIEArch::AIE4) {
@@ -306,7 +307,7 @@ mlir::LogicalResult AIE::AIETranslateGraphXPE(mlir::ModuleOp module,
   // Get all CoreOps into a convenient map which can then be referenced by
   // coordinates
   std::map<std::pair<int, int>, std::vector<CoreOp>> coreMap;
-  for (CoreOp coreOp : targetOp.getOps<CoreOp>())
+  for (CoreOp coreOp : deviceOp.getOps<CoreOp>())
     coreMap[std::make_pair(coreOp.colIndex(), coreOp.rowIndex())].push_back(
         coreOp);
 
@@ -327,7 +328,7 @@ mlir::LogicalResult AIE::AIETranslateGraphXPE(mlir::ModuleOp module,
           // AIE2 - xcve2802
           std::to_string(col) << ","
              << std::to_string(
-                    row - targetOp.getTargetModel().getNumMemTileRows() - 1)
+                    row - deviceOp.getTargetModel().getNumMemTileRows() - 1)
              << ")\" "
              // CR coordinates ignores shim and 1 mem row, hence row-2
              // AIE2 - xcve2302
@@ -341,7 +342,7 @@ mlir::LogicalResult AIE::AIETranslateGraphXPE(mlir::ModuleOp module,
           // TODO: does stream_util matter for sim?
           std::to_string(col) << ","
              << std::to_string(row -
-                               targetOp.getTargetModel().getNumMemTileRows())
+                               deviceOp.getTargetModel().getNumMemTileRows())
              << "\">\n";
 
     } else if ((arch == AIEArch::AIE2) || (arch == AIEArch::AIE2p)) {
@@ -351,7 +352,7 @@ mlir::LogicalResult AIE::AIETranslateGraphXPE(mlir::ModuleOp module,
           // AIE2 - xcve2802
           std::to_string(col) << ","
              << std::to_string(
-                    row - targetOp.getTargetModel().getNumMemTileRows() - 1)
+                    row - deviceOp.getTargetModel().getNumMemTileRows() - 1)
              << ")\" "
              // CR coordinates ignores shim and 1 mem row, hence row-2
              // AIE2 - xcve2302
@@ -365,7 +366,7 @@ mlir::LogicalResult AIE::AIETranslateGraphXPE(mlir::ModuleOp module,
           // TODO: does stream_util matter for sim?
           std::to_string(col) << ","
              << std::to_string(row -
-                               targetOp.getTargetModel().getNumMemTileRows())
+                               deviceOp.getTargetModel().getNumMemTileRows())
              << "\">\n";
 
     } else {
@@ -396,9 +397,9 @@ mlir::LogicalResult AIE::AIETranslateGraphXPE(mlir::ModuleOp module,
   }
 
   // For each ShimOp in the module, generate a <SHIM> section
-  for (ShimDMAOp shimOp : targetOp.getOps<ShimDMAOp>()) {
+  for (ShimDMAOp shimOp : deviceOp.getOps<ShimDMAOp>()) {
     if (arch == AIEArch::AIE4) {
-      const auto *noc_label = (targetOp.getTargetModel().isShimNOCTile(
+      const auto *noc_label = (deviceOp.getTargetModel().isShimNOCTile(
                                   shimOp.colIndex(), shimOp.rowIndex()))
                                   ? "AIE_PL_NOC_SIM"
                                   : "AIE_PL_SHIM";
@@ -414,7 +415,7 @@ mlir::LogicalResult AIE::AIETranslateGraphXPE(mlir::ModuleOp module,
              << std::to_string(shimOp.rowIndex()) << "\" "
              << "></SHIM>\n";
     } else if ((arch == AIEArch::AIE2) || (arch == AIEArch::AIE2p)) {
-      const auto *noc_label = (targetOp.getTargetModel().isShimNOCTile(
+      const auto *noc_label = (deviceOp.getTargetModel().isShimNOCTile(
                                   shimOp.colIndex(), shimOp.rowIndex()))
                                   ? "AIE_PL_NOC_SIM"
                                   : "AIE_PL_SHIM";
@@ -451,7 +452,7 @@ mlir::LogicalResult AIE::AIETranslateGraphXPE(mlir::ModuleOp module,
 
       // NOTE: row == 0 assumes shim always row 0
       if (row == 0 ||
-          row > static_cast<int>(targetOp.getTargetModel().getNumMemTileRows()))
+          row > static_cast<int>(deviceOp.getTargetModel().getNumMemTileRows()))
         continue; // Skip regular tiles (handled above)
 
       output << "      <MEM name=\"MEM(" << std::to_string(col) << ", "
@@ -470,7 +471,7 @@ mlir::LogicalResult AIE::AIETranslateGraphXPE(mlir::ModuleOp module,
 
       // NOTE: row == 0 assumes shim always row 0
       if (row == 0 ||
-          row > static_cast<int>(targetOp.getTargetModel().getNumMemTileRows()))
+          row > static_cast<int>(deviceOp.getTargetModel().getNumMemTileRows()))
         continue; // Skip regular tiles (handled above)
 
       output << "      <MEM name=\"MEM(" << std::to_string(col) << ", "

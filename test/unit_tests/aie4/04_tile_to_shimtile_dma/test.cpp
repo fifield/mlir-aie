@@ -47,16 +47,13 @@ int main(int argc, char *argv[]) {
 
   row = 0;
   uint64_t shim_lock_1 = ((col << 25) | (row << 20)) + 0x00010010;
-  int timeout = 300000;
-  while (timeout--) {
+  while (1) {
     uint32_t l = NpuRead32(shim_lock_1);
-    // std::cout << l << "\n";
-    if (l == 1)
+    if (l >= 1)
       break;
   }
 
   mlir_aie_sync_mem_cpu(handle_ddr);
-  int *ddr_ptr_out = mlir_aie_mem_alloc(&xaie, handle_ddr, 256 * sizeof(int));
   uint32_t *output = reinterpret_cast<uint32_t *>(handle_ddr.virtualAddr);
   int errs = 0;
   for (int i = 0; i < 256; i++) {

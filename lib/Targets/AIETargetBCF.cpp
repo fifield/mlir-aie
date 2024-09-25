@@ -131,12 +131,14 @@ LogicalResult AIETranslateToBCF(ModuleOp module, raw_ostream &output,
                targetModel.getMemEastBaseAddress(), std::string("east"));
       output << "// end mapping neighbors tile memory\n\n";
 
-      int addressSpaceSize = targetModel.getCoreDataAddressSpaceSize();
-      int dataMemoryEnd = targetModel.getMemEastBaseAddress() +
-                          targetModel.getLocalMemorySize();
-      output << "_reserved DMb " << utohexstr(dataMemoryEnd) << " "
-             << utohexstr(addressSpaceSize - dataMemoryEnd)
-             << " // And everything else the core can't see\n";
+      uint32_t addressSpaceSize = targetModel.getCoreDataAddressSpaceSize();
+      uint32_t dataMemoryEnd = targetModel.getMemEastBaseAddress() +
+                               targetModel.getLocalMemorySize();
+      if (dataMemoryEnd < addressSpaceSize) {
+        output << "_reserved DMb " << utohexstr(dataMemoryEnd) << " "
+               << utohexstr(addressSpaceSize - dataMemoryEnd)
+               << " // And everything else the core can't see\n";
+      }
 
       if (auto coreOp = tile.getCoreOp()) {
         // `link_files` holds the final-link inputs (object files)
