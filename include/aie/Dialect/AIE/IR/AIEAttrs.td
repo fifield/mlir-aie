@@ -65,6 +65,7 @@ def North32Wire: I32EnumAttrCase<"North32", 18>;
 def East32Wire: I32EnumAttrCase<"East32", 19>;
 def PLIO32Wire: I32EnumAttrCase<"PLIO32", 20>;
 def Switch512Wire: I32EnumAttrCase<"Switch512", 21>;
+def Controller32Wire: I32EnumAttrCase<"Controller32", 22>;
 
 def WireBundle : I32EnumAttr<"WireBundle", "Bundle of wires",
                              [CoreWire, DMAWire, FIFOWire, SouthWire, WestWire,
@@ -72,7 +73,8 @@ def WireBundle : I32EnumAttr<"WireBundle", "Bundle of wires",
                               TileControlWire, NorthControlWire,
                               SouthControlWire, SwitchWire, Control32Wire,
                               Trace32Wire, South32Wire, West32Wire, North32Wire,
-                              East32Wire, PLIO32Wire, Switch512Wire]> {
+                              East32Wire, PLIO32Wire, Switch512Wire,
+                              Controller32Wire]> {
 
   let cppNamespace = "xilinx::AIE";
 }

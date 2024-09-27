@@ -1890,6 +1890,7 @@ AIE4TargetModel::getNumDestSwitchboxConnections(int col, int row,
     case WireBundle::North32:
     case WireBundle::PLIO32:
     case WireBundle::Switch512:
+    case WireBundle::Controller32:
       return 2;
     case WireBundle::West32:
     case WireBundle::East32:
@@ -1989,6 +1990,7 @@ AIE4TargetModel::getNumSourceSwitchboxConnections(int col, int row,
     case WireBundle::North32:
     case WireBundle::Switch512:
     case WireBundle::PLIO32:
+    case WireBundle::Controller32:
       return 2;
     case WireBundle::West32:
     case WireBundle::East32:
