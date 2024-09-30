@@ -35,7 +35,7 @@ int main(int argc, char *argv[]) {
   uint64_t col = 1;
   uint64_t row = 3;
 
-  uint64_t tile_data_mem = ((col << 25) | ((row + 4) << 20)) + 1024;
+  uint64_t tile_data_mem = ((col << 25) | ((row + 4) << 20)) + 1024 + 1024;
   for (int i = 0; i < 256; i++) {
     NpuWrite32(tile_data_mem + (i * 4), 0x0000f00d + i);
   }
@@ -61,7 +61,7 @@ int main(int argc, char *argv[]) {
   }
   std::cout << "Done running\n";
 
-  tile_data_mem = ((col << 25) | ((row + 4) << 20)) + 32768;
+  tile_data_mem = ((col << 25) | ((row + 4) << 20)) + 32768 + 1024;
   int32_t result = NpuRead32(tile_data_mem + (5 * 4));
   std::cout << "result " << result << "\n";
 
@@ -73,9 +73,9 @@ int main(int argc, char *argv[]) {
   val2 += val;
   val2 += val;
   val2 += val;
+  std::cout << "expected " << val2 << "\n";
   if (result != val2)
     errors++;
-
   if (!errors) {
     printf("PASS!\n");
     return 0;
