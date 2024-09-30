@@ -193,6 +193,8 @@ struct ConvertFlowsToInterconnect : OpConversionPattern<FlowOp> {
       rewriter.eraseOp(Op);
       return success();
     }
+    DeviceOp device = flowOp->getParentOfType<DeviceOp>();
+    bool useShimMux = device.getTargetModel().getTargetArch() != AIEArch::AIE4;
     const SwitchSettings &settings = analyzer.routing.settings.at(srcPoint);
     // add connections for all the Switchboxes in SwitchSettings
     for (const auto &[tileId, setting] : settings) {
@@ -200,13 +202,15 @@ struct ConvertFlowsToInterconnect : OpConversionPattern<FlowOp> {
       int row = tileId.row;
       SwitchboxOp swOp = analyzer.getSwitchbox(rewriter, col, row);
       int shimCh = srcChannel;
-      bool isShim = analyzer.getTile(rewriter, tileId).isShimNOCorPLTile();
+      bool emitShimMux =
+          useShimMux &&
+          analyzer.getTile(rewriter, tileId).isShimNOCorPLTile();
 
       // TODO: must reserve N3, N7, S2, S3 for DMA connections
       bool srcUsesShimMux = srcBundle == WireBundle::DMA ||
                             srcBundle == WireBundle::PLIO ||
                             srcBundle == WireBundle::NOC;
-      if (isShim && tileId == srcSbId && srcUsesShimMux) {
+      if (emitShimMux && tileId == srcSbId && srcUsesShimMux) {
 
         shimCh = shimMuxChannelFrom(srcPort);
         ShimMuxOp shimMuxOp = analyzer.getShimMux(rewriter, col);
@@ -219,9 +223,9 @@ struct ConvertFlowsToInterconnect : OpConversionPattern<FlowOp> {
         Port dest = setting.dsts[i];
 
         // A flow can start and end at one shim (see shimMuxChannelFrom).
-        if (isShim && tileId == srcSbId && srcUsesShimMux && src == srcPort)
+        if (emitShimMux && tileId == srcSbId && srcUsesShimMux && src == srcPort)
           src = {WireBundle::South, shimCh};
-        if (isShim && (dest.bundle == WireBundle::DMA ||
+        if (emitShimMux && (dest.bundle == WireBundle::DMA ||
                        dest.bundle == WireBundle::PLIO ||
                        dest.bundle == WireBundle::NOC)) {
           int destCh = shimMuxChannelTo(dest);
