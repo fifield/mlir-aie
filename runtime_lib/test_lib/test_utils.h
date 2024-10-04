@@ -57,7 +57,6 @@ std::string get_kernel_name(const xrt::xclbin &xclbin,
 void init_xrt_load_kernel(xrt::device &device, xrt::kernel &kernel,
                           int verbosity, std::string xclbinFileName,
                           std::string kernelNameInXclbin);
-#endif
 
 static inline std::int16_t random_int16_t(int32_t range = 0x10000) {
   return (std::int16_t)rand() % range;
