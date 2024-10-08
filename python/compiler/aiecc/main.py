@@ -1181,20 +1181,35 @@ def run(mlir_module, args=None):
     if args is not None:
         opts = aie.compiler.aiecc.cl_arguments.parse_args(args)
 
-    opts.aietools_path = ""
-    # Try to find vitis in the path
+    ryzen_ai_version = None
+    opts.aietools_path = None
+
+    try:
+        import ryzen_ai.__about__
+        version = ryzen_ai.__about__.__version__
+        path = os.path.realpath(ryzen_ai.__path__[0])
+        print(f"Found Ryzen AI software version {version} at {path}")
+        # if ryzenai software is pip installed then the path is something like:
+        # <workdir>/venv/lib/python3.10/site-packages/
+        opts.aietools_path = os.path.join([path, ".."])
+    except:
+        print("Ryzen AI software not found.")
+        pass
+
+    # Try to find xchesscc in the path
     xchesscc_path = shutil.which("xchesscc")
     if xchesscc_path:
         xchesscc_bin_path = os.path.dirname(os.path.realpath(xchesscc_path))
         xchesscc_path = os.path.dirname(xchesscc_bin_path)
-        os.environ["AIETOOLS"] = xchesscc_path
-        print("Found xchesscc at " + xchesscc_path)
+        print(f"Found xchesscc at {xchesscc_path}")
         os.environ["PATH"] = os.pathsep.join([os.environ["PATH"], xchesscc_bin_path])
-        opts.aietools_path = xchesscc_path
+        if opts.aietools_path is None:
+            opts.aietools_path = xchesscc_path
     else:
-        print("xchesscc not found...")
+        print("xchesscc not found.")
 
-    # This path should be generated from cmake
+    os.environ["AIETOOLS"] = opts.aietools_path
+
     aie_path = aie.compiler.aiecc.configure.install_path()
     peano_path = os.path.join(opts.peano_install_dir, "bin")
     os.environ["PATH"] = os.pathsep.join([aie_path, os.environ["PATH"]])
