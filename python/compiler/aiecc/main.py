@@ -1191,7 +1191,7 @@ def run(mlir_module, args=None):
         print(f"Found Ryzen AI software version {version} at {path}")
         # if ryzenai software is pip installed then the path is something like:
         # <workdir>/venv/lib/python3.10/site-packages/
-        opts.aietools_path = os.path.join([path, ".."])
+        opts.aietools_path = os.path.join(path, "..")
     except:
         print("Ryzen AI software not found.")
         pass

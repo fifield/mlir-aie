@@ -70,6 +70,12 @@ config.extraAieCcFlags = "@extraAieCcFlags@"
 config.aieHostTarget = "@AIE_RUNTIME_TEST_TARGET@"
 config.aieInstallPrefix = "@CMAKE_INSTALL_PREFIX@"
 
+config.vitis_components = []
+if lit.util.pythonize_bool("@AIETools_AIE_FOUND@"):
+    config.vitis_components.append("AIE")
+if lit.util.pythonize_bool("@AIETools_AIE2_FOUND@"):
+    config.vitis_components.append("AIE2")
+
 # Support substitution of the tools_dir with user parameters. This is
 # used when we can't determine the tool dir at configuration time.
 try:
