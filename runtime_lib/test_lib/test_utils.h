@@ -53,7 +53,6 @@ std::vector<uint32_t> load_instr_binary(std::string instr_path);
 std::string get_kernel_name(const xrt::xclbin &xclbin,
                             const std::string &name_prefix, int verbosity = 0);
 
-#ifdef TEST_UTILS_USE_XRT
 void init_xrt_load_kernel(xrt::device &device, xrt::kernel &kernel,
                           int verbosity, std::string xclbinFileName,
                           std::string kernelNameInXclbin);
