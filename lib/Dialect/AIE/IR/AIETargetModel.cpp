@@ -1838,6 +1838,60 @@ bool AIE4TargetModel::isLegalMemAffinity(int coreCol, int coreRow, int memCol,
          IsMemWest || IsMemEast;
 }
 
+
+std::optional<uint32_t>
+AIE4TargetModel::getLockLocalBaseIndex(int localCol, int localRow, int lockCol,
+                                      int lockRow) const {
+  if (isCoreTile(localCol, localRow)) {
+    if (isMemSouth(localCol, localRow, lockCol, lockRow))
+      return 0;
+    if (isMemWest(localCol, localRow, lockCol, lockRow))
+      return getNumLocks(localCol, localRow);
+    if (isMemNorth(localCol, localRow, lockCol, lockRow))
+      return getNumLocks(localCol, localRow) * 2;
+    if (isMemEast(localCol, localRow, lockCol, lockRow))
+      return getNumLocks(localCol, localRow) * 3;
+  }
+
+  if (isMemTile(localCol, localRow)) {
+    if (localRow != lockRow)
+      return std::nullopt;
+    int colOffset = (lockCol - localCol) + 7;
+    if (colOffset > 14 || colOffset < 0)
+      return std::nullopt;
+    return colOffset * getNumLocks(localCol, localRow);
+  }
+
+  return std::nullopt;
+}
+
+std::optional<uint32_t>
+AIE4TargetModel::getMemLocalBaseAddress(int localCol, int localRow, int memCol,
+                                       int memRow) const {
+  if (isCoreTile(localCol, localRow)) {
+    if (isMemSouth(localCol, localRow, memCol, memRow))
+      return getMemSouthBaseAddress();
+    if (isMemWest(localCol, localRow, memCol, memRow))
+      return getMemWestBaseAddress();
+    if (isMemNorth(localCol, localRow, memCol, memRow))
+      return getMemNorthBaseAddress();
+    if (isMemEast(localCol, localRow, memCol, memRow))
+      return getMemEastBaseAddress();
+  }
+
+  if (isMemTile(localCol, localRow)) {
+    if (localRow != lockRow)
+      return std::nullopt;
+    int colOffset = (lockCol - localCol) + 7;
+    if (colOffset > 14 || colOffset < 0)
+      return std::nullopt;
+    uint32_t base = 0x00B00000;
+    return base + (colOffset * getMemTileSize());
+  }
+
+  return std::nullopt;
+}
+
 // Manager ports
 uint32_t
 AIE4TargetModel::getNumDestSwitchboxConnections(int col, int row,

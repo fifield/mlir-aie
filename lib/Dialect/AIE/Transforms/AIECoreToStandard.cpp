@@ -163,6 +163,21 @@ static auto getAIE2pIntrinsics(OpBuilder &builder) {
   return functions;
 }
 
+static auto getAIE4Intrinsics(OpBuilder &builder) {
+  Type int32Type = IntegerType::get(builder.getContext(), 32);
+  // Type accType = VectorType::get({16}, int32Type);
+  IntrinsicDecls functions = {
+      {"debug_i32", {int32Type}, {}},
+      {"llvm.aie4.acquire",
+       {int32Type, int32Type},
+       {}}, //(%lock_id, %lock_val) -> ()
+      {"llvm.aie4.release",
+       {int32Type, int32Type},
+       {}}, //(%lock_id, %lock_val) -> ()
+  };
+  return functions;
+}
+
 static void declareAIEIntrinsics(AIEArch arch, OpBuilder &builder) {
   auto registerIntrinsics = [&builder](const IntrinsicDecls &functions) {
     for (auto &i : functions) {
@@ -183,8 +198,7 @@ static void declareAIEIntrinsics(AIEArch arch, OpBuilder &builder) {
   case AIEArch::AIE2p:
     registerIntrinsics(getAIE2pIntrinsics(builder));
   case AIEArch::AIE4:
-    // XXX: FIXME implement getAIE4Intrisics
-    registerIntrinsics(getAIE2Intrinsics(builder));
+    registerIntrinsics(getAIE4Intrinsics(builder));
     return;
   case AIEArch::AIE2ps:
     // No intrinsic set: checkCoreIntrinsics rejects ops that need one.
@@ -480,8 +494,11 @@ struct AIEUseLockToStdLowering : OpConversionPattern<UseLockOp> {
         funcName = "llvm.aie.lock.";
       else if (targetModel.getTargetArch() == AIEArch::AIE2)
         funcName = "llvm.aie2.";
-      else
+      else if (targetModel.getTargetArch() == AIEArch::AIE2p)
         funcName = "llvm.aie2p.";
+      else
+        funcName = "llvm.aie4.";
+
       if (useLock.acquire() || useLock.acquireGE())
         funcName += "acquire";
       else if (useLock.release())

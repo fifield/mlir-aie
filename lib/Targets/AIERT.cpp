@@ -395,12 +395,6 @@ configureLocksInBdBlock(const AIE::AIETargetModel &targetModel,
     }
   }
 
-  if (targetModel.isMemTile(col, row)) {
-    if (acqLockId)
-      acqLockId.value() += 448; // increaseValue
-    if (relLockId)
-      relLockId.value() += 448; // increaseValue
-  }
 
   // no RelEn in the arch spec even though the API requires you to set it?
   bool relEn = false;
