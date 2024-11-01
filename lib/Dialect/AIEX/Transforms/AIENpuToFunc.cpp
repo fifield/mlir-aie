@@ -20,10 +20,9 @@ using namespace mlir;
 using namespace xilinx;
 using namespace xilinx::AIEX;
 
-static func::CallOp
-convertOpToFunction(Operation *op, ArrayRef<Value> operands,
-                          ConversionPatternRewriter &rewriter,
-                          StringRef fnName) {
+static func::CallOp convertOpToFunction(Operation *op, ArrayRef<Value> operands,
+                                        ConversionPatternRewriter &rewriter,
+                                        StringRef fnName) {
 
   SmallVector<Type, 16> tys;
   SmallVector<Type, 1> retTys{};
@@ -44,71 +43,124 @@ convertOpToFunction(Operation *op, ArrayRef<Value> operands,
   return call;
 }
 
-struct NpuWriteBdToFuncPattern : public OpConversionPattern<NpuWriteBdOp> {
-  using OpConversionPattern<NpuWriteBdOp>::OpConversionPattern;
+namespace {
 
-  NpuWriteBdToFuncPattern(MLIRContext *context, PatternBenefit benefit = 1)
-      : OpConversionPattern<NpuWriteBdOp>(context, benefit) {}
+struct NpuAddressPatchToFuncPattern
+    : public OpConversionPattern<NpuAddressPatchOp> {
+  using OpConversionPattern<NpuAddressPatchOp>::OpConversionPattern;
+
+  NpuAddressPatchToFuncPattern(MLIRContext *context, PatternBenefit benefit = 1)
+      : OpConversionPattern<NpuAddressPatchOp>(context, benefit) {}
 
   LogicalResult
-  matchAndRewrite(NpuWriteBdOp op, OpAdaptor adaptor,
+  matchAndRewrite(NpuAddressPatchOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    SmallVector<Value, 16> operands{adaptor.getOperands()};
+    auto loc = op->getLoc();
+
+    operands.push_back(
+        rewriter.create<arith::ConstantIndexOp>(loc, op.getAddr()));
+    operands.push_back(
+        rewriter.create<arith::ConstantIndexOp>(loc, op.getArgIdx()));
+    operands.push_back(
+        rewriter.create<arith::ConstantIndexOp>(loc, op.getArgPlus()));
+    auto call = convertOpToFunction(op, operands, rewriter, "address_patch");
+    if (call)
+      return success();
+    else
+      return failure();
+  }
+};
+
+struct NpuBlockWriteToFuncPattern
+    : public OpConversionPattern<NpuBlockWriteOp> {
+  using OpConversionPattern<NpuBlockWriteOp>::OpConversionPattern;
+
+  NpuBlockWriteToFuncPattern(MLIRContext *context, PatternBenefit benefit = 1)
+      : OpConversionPattern<NpuBlockWriteOp>(context, benefit) {}
+
+  LogicalResult
+  matchAndRewrite(NpuBlockWriteOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     SmallVector<Value, 16> operands{adaptor.getOperands()};
     auto loc = op->getLoc();
     const AIE::AIETargetModel &tm =
         op->getParentOfType<AIE::DeviceOp>().getTargetModel();
+    std::optional<int> col = op.getColumn();
+    std::optional<int> row = op.getRow();
+    uint32_t addr = op.getAddress();
+    if (col && row)
+      addr = ((*col & 0xff) << tm.getColumnShift()) |
+             ((*row & 0xff) << tm.getRowShift()) | (addr & 0xFFFFF);
+    operands.push_back(rewriter.create<arith::ConstantIndexOp>(loc, addr));
 
-    uint32_t bd_id = op.getBdId();
-    uint32_t bd_addr = (op.getColumn() << tm.getColumnShift()) |
-                       (op.getRow() << tm.getRowShift()) |
-                       (0x1D000 + bd_id * 0x20);
-    operands.push_back(rewriter.create<arith::ConstantIndexOp>(loc, bd_addr));
+    // Value memref = op.getData();
+    // int64_t width =
+    // cast<MemRefType>(memref.getType()).getElementTypeBitWidth(); if (width !=
+    // 32) {
+    //     op.emitWarning("Only 32-bit data type is supported for now");
+    //     return;
+    // }
+
+    // memref::GetGlobalOp getGlobal =
+    // memref.getDefiningOp<memref::GetGlobalOp>(); if (!getGlobal) {
+    //     op.emitError("Only MemRefs from memref.get_global are supported");
+    //     return;
+    // }
+
+    // auto global = dyn_cast_if_present<memref::GlobalOp>(
+    //     op->getParentOfType<AIE::DeviceOp>().lookupSymbol(getGlobal.getName()));
+    // if (!global) {
+    //     op.emitError("Global symbol not found");
+    //     return;
+    // }
+
+    // auto initVal = global.getInitialValue();
+    // if (!initVal) {
+    //     op.emitError("Global symbol has no initial value");
+    //     return;
+    // }
+
+    // auto data = dyn_cast<DenseIntElementsAttr>(*initVal);
+    // if (!data) {
+    //     op.emitError("Global symbol initial value is not a dense int array");
+    //     return;
+    // }
+
+    auto call = convertOpToFunction(op, operands, rewriter, "npu_blockwrite");
+    if (call)
+      return success();
+    else
+      return failure();
+  }
+};
+
+struct NpuMaskWrite32ToFuncPattern
+    : public OpConversionPattern<NpuMaskWrite32Op> {
+  using OpConversionPattern<NpuMaskWrite32Op>::OpConversionPattern;
+
+  NpuMaskWrite32ToFuncPattern(MLIRContext *context, PatternBenefit benefit = 1)
+      : OpConversionPattern<NpuMaskWrite32Op>(context, benefit) {}
+
+  LogicalResult
+  matchAndRewrite(NpuMaskWrite32Op op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    SmallVector<Value, 16> operands{adaptor.getOperands()};
+    auto loc = op->getLoc();
+    const AIE::AIETargetModel &tm =
+        op->getParentOfType<AIE::DeviceOp>().getTargetModel();
+    std::optional<int> col = op.getColumn();
+    std::optional<int> row = op.getRow();
+    uint32_t addr = op.getAddress();
+    if (col && row)
+      addr = ((*col & 0xff) << tm.getColumnShift()) |
+             ((*row & 0xff) << tm.getRowShift()) | (addr & 0xFFFFF);
+    operands.push_back(rewriter.create<arith::ConstantIndexOp>(loc, addr));
     operands.push_back(
-        rewriter.create<arith::ConstantIndexOp>(loc, op.getBufferLength()));
+        rewriter.create<arith::ConstantIndexOp>(loc, op.getValue()));
     operands.push_back(
-        rewriter.create<arith::ConstantIndexOp>(loc, op.getBufferOffset()));
-    operands.push_back(
-        rewriter.create<arith::ConstantIndexOp>(loc, op.getEnablePacket()));
-    operands.push_back(
-        rewriter.create<arith::ConstantIndexOp>(loc, op.getOutOfOrderId()));
-    operands.push_back(
-        rewriter.create<arith::ConstantIndexOp>(loc, op.getPacketId()));
-    operands.push_back(
-        rewriter.create<arith::ConstantIndexOp>(loc, op.getPacketType()));
-    operands.push_back(
-        rewriter.create<arith::ConstantIndexOp>(loc, op.getD0Size()));
-    operands.push_back(
-        rewriter.create<arith::ConstantIndexOp>(loc, op.getD0Stride()));
-    operands.push_back(
-        rewriter.create<arith::ConstantIndexOp>(loc, op.getD1Size()));
-    operands.push_back(
-        rewriter.create<arith::ConstantIndexOp>(loc, op.getD1Stride()));
-    operands.push_back(
-        rewriter.create<arith::ConstantIndexOp>(loc, op.getD2Stride()));
-    operands.push_back(
-        rewriter.create<arith::ConstantIndexOp>(loc, op.getIterationCurrent()));
-    operands.push_back(
-        rewriter.create<arith::ConstantIndexOp>(loc, op.getIterationSize()));
-    operands.push_back(
-        rewriter.create<arith::ConstantIndexOp>(loc, op.getIterationStride()));
-    operands.push_back(
-        rewriter.create<arith::ConstantIndexOp>(loc, op.getNextBd()));
-    operands.push_back(
-        rewriter.create<arith::ConstantIndexOp>(loc, op.getUseNextBd()));
-    operands.push_back(
-        rewriter.create<arith::ConstantIndexOp>(loc, op.getValidBd()));
-    operands.push_back(
-        rewriter.create<arith::ConstantIndexOp>(loc, op.getLockRelVal()));
-    operands.push_back(
-        rewriter.create<arith::ConstantIndexOp>(loc, op.getLockRelId()));
-    operands.push_back(
-        rewriter.create<arith::ConstantIndexOp>(loc, op.getLockAcqEnable()));
-    operands.push_back(
-        rewriter.create<arith::ConstantIndexOp>(loc, op.getLockAcqVal()));
-    operands.push_back(
-        rewriter.create<arith::ConstantIndexOp>(loc, op.getLockAcqId()));
-    auto call =
-        convertOpToFunction(op, operands, rewriter, "npu_writebd");
+        rewriter.create<arith::ConstantIndexOp>(loc, op.getMask()));
+    auto call = convertOpToFunction(op, operands, rewriter, "npu_maskwrite32");
     if (call)
       return success();
     else
@@ -148,34 +200,6 @@ struct NpuSyncToFuncPattern : public OpConversionPattern<NpuSyncOp> {
   }
 };
 
-struct NpuAddressPatchToFuncPattern
-    : public OpConversionPattern<NpuAddressPatchOp> {
-  using OpConversionPattern<NpuAddressPatchOp>::OpConversionPattern;
-
-  NpuAddressPatchToFuncPattern(MLIRContext *context, PatternBenefit benefit = 1)
-      : OpConversionPattern<NpuAddressPatchOp>(context, benefit) {}
-
-  LogicalResult
-  matchAndRewrite(NpuAddressPatchOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    SmallVector<Value, 16> operands{adaptor.getOperands()};
-    auto loc = op->getLoc();
-
-    operands.push_back(
-        rewriter.create<arith::ConstantIndexOp>(loc, op.getAddr()));
-    operands.push_back(
-        rewriter.create<arith::ConstantIndexOp>(loc, op.getArgIdx()));
-    operands.push_back(
-        rewriter.create<arith::ConstantIndexOp>(loc, op.getArgPlus()));
-    auto call =
-        convertOpToFunction(op, operands, rewriter, "address_patch");
-    if (call)
-      return success();
-    else
-      return failure();
-  }
-};
-
 struct NpuWrite32ToFuncPattern : public OpConversionPattern<NpuWrite32Op> {
   using OpConversionPattern<NpuWrite32Op>::OpConversionPattern;
 
@@ -198,12 +222,45 @@ struct NpuWrite32ToFuncPattern : public OpConversionPattern<NpuWrite32Op> {
     operands.push_back(rewriter.create<arith::ConstantIndexOp>(loc, addr));
     operands.push_back(
         rewriter.create<arith::ConstantIndexOp>(loc, op.getValue()));
-    auto call =
-        convertOpToFunction(op, operands, rewriter, "npu_write32");
+    auto call = convertOpToFunction(op, operands, rewriter, "npu_write32");
     if (call)
       return success();
     else
       return failure();
+  }
+};
+
+struct RuntimeSequenceToFuncPattern
+    : public OpConversionPattern<RuntimeSequenceOp> {
+  using OpConversionPattern<RuntimeSequenceOp>::OpConversionPattern;
+
+  RuntimeSequenceToFuncPattern(MLIRContext *context, PatternBenefit benefit = 1)
+      : OpConversionPattern<RuntimeSequenceOp>(context, benefit) {}
+
+  LogicalResult
+  matchAndRewrite(RuntimeSequenceOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+
+    auto name = op.getSymName();
+    if (!name)
+      return failure();
+
+    SmallVector<Value> operands{adaptor.getOperands()};
+    SmallVector<Type> argTypes;
+    for (auto a : op.getBody().getArguments())
+      argTypes.push_back(a.getType());
+
+    IRMapping mapper;
+    auto newFunc = rewriter.create<func::FuncOp>(
+        op.getLoc(), name->str(),
+        FunctionType::get(rewriter.getContext(), argTypes, {}));
+    newFunc.setPrivate();
+    rewriter.cloneRegionBefore(op.getBody(), newFunc.getBody(),
+                               newFunc.getBody().begin(), mapper);
+    rewriter.setInsertionPointToEnd(&newFunc.getBody().front());
+    rewriter.create<func::ReturnOp>(rewriter.getUnknownLoc(), ValueRange({}));
+    rewriter.eraseOp(op);
+    return success();
   }
 };
 
@@ -219,14 +276,17 @@ struct AIENpuToFuncPass : public AIENpuToFuncBase<AIENpuToFuncPass> {
                            arith::ArithDialect>();
 
     RewritePatternSet patterns(&getContext());
-    patterns.insert<NpuWriteBdToFuncPattern, NpuSyncToFuncPattern,
-                    NpuWrite32ToFuncPattern, NpuAddressPatchToFuncPattern>(
+    patterns.insert<NpuAddressPatchToFuncPattern, NpuBlockWriteToFuncPattern,
+                    NpuMaskWrite32ToFuncPattern, NpuSyncToFuncPattern,
+                    NpuWrite32ToFuncPattern, RuntimeSequenceToFuncPattern>(
         &getContext());
 
     if (failed(applyPartialConversion(device, target, std::move(patterns))))
       signalPassFailure();
   }
 };
+
+} // namespace
 
 std::unique_ptr<OperationPass<AIE::DeviceOp>> AIEX::createAIENpuToFuncPass() {
   return std::make_unique<AIENpuToFuncPass>();
