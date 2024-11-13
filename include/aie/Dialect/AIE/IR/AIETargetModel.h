@@ -107,6 +107,8 @@ public:
     TK_AIE2PS_VE3858 = TK_AIE2_NPU2_Last,
     TK_AIE2PS_Last,
     TK_AIE2_Last = TK_AIE2PS_Last,
+    TK_AIE4_NPU3,
+    TK_AIE4_Last,
   };
 
   // One-hot encoded list of target model properties.
