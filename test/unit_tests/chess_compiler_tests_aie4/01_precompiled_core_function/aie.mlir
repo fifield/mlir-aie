@@ -16,7 +16,7 @@
 // RUN: aie-translate --aie-npu-instgen --aie-output-binary=true transaction.mlir -o transaction.bin
 // RUN: aie.mlir.prj/aiesim.sh | FileCheck %s
 
-// CHECK: AIE4b ISS
+// CHECK: AIE4 ISS
 // CHECK: test start.
 // CHECK: PASS!
 

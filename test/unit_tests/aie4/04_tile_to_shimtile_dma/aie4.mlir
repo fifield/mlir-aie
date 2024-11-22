@@ -5,19 +5,18 @@
 //
 // (c) Copyright 2024 Advanced Micro Devices Inc.
 //
-// RUN: aie-opt -aie-create-pathfinder-flows -convert-aie-to-transaction %s -o txn.mlir
-// RUN: aie-translate -aie-npu-instgen -aie-output-binary=true -o transaction.bin txn.mlir
-// RUN: aiecc.py --no-compile --no-compile-host --aiesim %s %test_utils_flags %S/test.cpp
-// RUN: sh -c 'aie4.mlir.prj/aiesim.sh; exit 0' | FileCheck %s
+// RUN: aiecc.py --xchesscc --xbridge --no-compile-host --aie-generate-txn --aiesim %s %test_utils_flags %S/test.cpp
+// RUN: aie-translate -aie-npu-instgen -aie-output-binary=true -o transaction.bin aie4.mlir.prj/txn.mlir
+// RUN: aie4.mlir.prj/aiesim.sh | FileCheck %s
 //
-// CHECK: AIE4b ISS
+// CHECK: AIE4{{.*}}ISS
 // CHECK: PASS!
 //
 module @test_dma_to_txn {
   aie.device(npu3) {
     %tile_0_2 = aie.tile(0, 2)
-    %buf02_0 = aie.buffer(%tile_0_2) {address = 0 : i32, mem_bank = 0 : i32, sym_name = "buf02_0"} : memref<256xi32>
-    %buf02_1 = aie.buffer(%tile_0_2) {address = 4096 : i32, mem_bank = 1 : i32, sym_name = "buf02_1"} : memref<256xi32>
+    %buf02_0 = aie.buffer(%tile_0_2) {address = 2048 : i32, mem_bank = 0 : i32, sym_name = "buf02_0"} : memref<256xi32>
+    %buf02_1 = aie.buffer(%tile_0_2) {address = 4096 : i32, mem_bank = 0 : i32, sym_name = "buf02_1"} : memref<256xi32>
     %lock_0_2 = aie.lock(%tile_0_2, 0) { init = 1 : i32 }
     %lock_0_2_0 = aie.lock(%tile_0_2, 1)
     %core_0_2 = aie.core(%tile_0_2) {

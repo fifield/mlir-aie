@@ -35,7 +35,7 @@ int main(int argc, char *argv[]) {
     ddr_ptr_in[i] = 0x12345678 + i;
   mlir_aie_sync_mem_dev(handle_ddr);
 
-  uint64_t tile_data_mem = ((col << 25) | ((row + 4) << 20));
+  uint64_t tile_data_mem = ((col << 25) | ((row + 4) << 20)) + 2048;
   for (int i = 0; i < 256; i++) {
     NpuWrite32(tile_data_mem + (i * 4), 0xdeadbeef + i);
   }

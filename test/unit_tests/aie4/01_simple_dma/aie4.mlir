@@ -24,7 +24,7 @@
 // CHECK: aiex.npu.write32 {address = 6999556 : ui32, value = 0 : ui32}
 // CHECK: aiex.npu.blockwrite(%{{.*}}) {address = 98304 : ui32} : memref<9xi32>
 // CHECK: aiex.npu.blockwrite(%{{.*}}) {address = 98352 : ui32} : memref<9xi32>
-// CHECK: aiex.npu.write32 {address = 99476 : ui32, value = 0 : ui32}
+// CHECK: aiex.npu.write32 {address = 99668 : ui32, value = 0 : ui32}
 //
 module @test_dma_to_txn {
   aie.device(npu3) {

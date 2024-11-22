@@ -24,7 +24,7 @@ int main(int argc, char *argv[]) {
 
   uint64_t col = 0;
   uint64_t row = 1;
-  uint64_t memtile_data_mem = (col << 25) | (row << 20) + 0x00100000;
+  uint64_t memtile_data_mem = (col << 25) | (row << 20) + 0x00100000 + 2048;
   for (int i = 0; i < 256; i++)
     NpuWrite32(memtile_data_mem + (4 * i), 0xdeadbeef + i);
 

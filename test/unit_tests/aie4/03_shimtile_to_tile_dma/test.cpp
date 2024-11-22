@@ -47,7 +47,7 @@ int main(int argc, char *argv[]) {
   }
 
   uint32_t output[256];
-  uint64_t tile_data_mem = ((col << 25) | ((row + 4) << 20));
+  uint64_t tile_data_mem = ((col << 25) | ((row + 4) << 20)) + 2048;
   int errs = 0;
   for (int i = 0; i < 256; i++) {
     output[i] = NpuRead32(tile_data_mem + (4 * i));

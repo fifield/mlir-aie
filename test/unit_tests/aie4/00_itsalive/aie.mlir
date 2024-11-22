@@ -11,7 +11,7 @@
 // RUN: %python aiecc.py --no-compile --aiesim %s %S/test.cpp
 // RUN: aie.mlir.prj/aiesim.sh | FileCheck %s
 
-// CHECK: AIE4b ISS
+// CHECK: AIE4{{.*}}ISS
 // CHECK: Hello, world.
 // CHECK: Exiting!
 
