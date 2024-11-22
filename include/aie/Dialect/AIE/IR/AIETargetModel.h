@@ -112,7 +112,8 @@ public:
   };
 
   // One-hot encoded list of target model properties.
-  enum ModelProperty {
+  enum Property {
+    None = 0,
     // Device uses semaphore locks.
     UsesSemaphoreLocks = 1U << 0,
     // Device is an NPU-based device.
@@ -126,10 +127,13 @@ public:
     UsesBDIteration = 1U << 4,
     // Device supports out-of-order S2MM DMA.
     SupportsOutOfOrderDMA = 1U << 5,
+    PropertyLast = 1U << 6,
   };
+  typedef uint32_t Properties;
 
 private:
   const TargetModelKind kind;
+  const Properties properties;
 
   uint32_t ModelProperties = 0;
 
@@ -151,7 +155,8 @@ protected:
 public:
   TargetModelKind getKind() const { return kind; }
 
-  AIETargetModel(TargetModelKind k) : kind(k) {}
+  AIETargetModel(TargetModelKind k, Properties p = None)
+      : kind(k), properties(p) {}
 
   virtual ~AIETargetModel();
 
@@ -653,8 +658,9 @@ public:
   uint32_t getModelProperties() const { return ModelProperties; }
   void addModelProperty(uint32_t prop) { ModelProperties |= prop; }
   // Return true if this device has a given property.
-  bool hasProperty(ModelProperty Prop) const {
-    return (getModelProperties() & Prop) == Prop;
+  bool hasProperty(Property prop) const {
+    assert(prop < AIETargetModel::PropertyLast);
+    return (properties & prop) == prop;
   }
 
   // Return the bit offset of the column within a tile address.
@@ -724,7 +730,8 @@ class AIE1TargetModel : public AIETargetModel {
 public:
   uint8_t getTxnDeviceGen() const override { return 1; } // XAIE_DEV_GEN_AIE
 
-  AIE1TargetModel(TargetModelKind k) : AIETargetModel(k) {}
+  AIE1TargetModel(TargetModelKind k, Properties p = None)
+      : AIETargetModel(k, p) {}
 
   AIEArch getTargetArch() const override;
 
@@ -857,19 +864,21 @@ public:
 };
 
 class AIE2TargetModel : public AIETargetModel {
+
 protected:
   std::unique_ptr<RegisterDatabase> loadRegisterDatabase() const override;
+
+  static constexpr Properties properties =
+      AIETargetModel::UsesSemaphoreLocks |
+      AIETargetModel::UsesMultiDimensionalBDs |
+      AIETargetModel::UsesBDIteration |
+      AIETargetModel::SupportsOutOfOrderDMA;
 
 public:
   uint8_t getTxnDeviceGen() const override { return 2; } // XAIE_DEV_GEN_AIEML
 
-  AIE2TargetModel(TargetModelKind k) : AIETargetModel(k) {
-    // Device properties initialization
-    addModelProperty(AIETargetModel::UsesSemaphoreLocks);
-    addModelProperty(AIETargetModel::UsesMultiDimensionalBDs);
-    addModelProperty(AIETargetModel::UsesBDIteration);
-    addModelProperty(AIETargetModel::SupportsOutOfOrderDMA);
-  }
+  AIE2TargetModel(TargetModelKind k, Properties p = None)
+      : AIETargetModel(k, p | properties) {}
 
   AIEArch getTargetArch() const override;
 
