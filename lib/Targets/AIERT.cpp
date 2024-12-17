@@ -25,6 +25,7 @@ extern "C" {
 #include "xaiengine/xaie_plif.h"
 #include "xaiengine/xaie_reset.h"
 #include "xaiengine/xaie_ss.h"
+#include "xaiengine/xaie_tilectrl.h"
 #include "xaiengine/xaie_txn.h"
 #include "xaiengine/xaiegbl.h"
 #include "xaiengine/xaiegbl_defs.h"
@@ -997,6 +998,15 @@ xilinx::AIE::AIERTControl::addInitConfig(DeviceOp &targetOp,
   if (failed(verifyDMAChannelsResolved(targetOp)))
     return failure();
 
+  // Unset isolation registers for aie4 simulation.
+  if (isa<AIE4TargetModel>(targetOp.getTargetModel())) {
+    for (TileOp tile : targetOp.getOps<TileOp>()) {
+      XAie_LocType tileLoc =
+          XAie_TileLoc(tile.getTileID().col, tile.getTileID().row);
+      TRY_XAIE_API_EMIT_ERROR(tile, _XAie_TileCtrlSetIsolation,
+                              &aiert->devInst, tileLoc, 0);
+    }
+  }
   if (failed(initLocks(targetOp))) {
     return failure();
   }

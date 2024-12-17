@@ -262,7 +262,7 @@ mlir::LogicalResult AIE::AIETranslateGraphXPE(mlir::ModuleOp module,
   if (!deviceOp) {
     return mlir::failure();
   }
-  AIEArch arch = deviceOp.getTargetModel().getTargetArch();
+  const AIETargetModel &target = deviceOp.getTargetModel();
 
   // Generate boilerplate header
   // TODO: date and version should probably not be hardcoded
@@ -270,11 +270,11 @@ mlir::LogicalResult AIE::AIETranslateGraphXPE(mlir::ModuleOp module,
          << "\n";
   output << "<POWERDATA data=\"AI-Engine Compiler\" dataVersion=\"2022.2\" "
             "design=\"graph\" date=\"2023\">\n";
-  if (arch == AIEArch::AIE4) {
+  if (llvm::isa<AIE4TargetModel>(target)) {
     // AIE4 xc10MDS1
     output << " <DEVICE part=\"xc10MDS1\" grade=\"extended\" package=\"die\" "
               "speed=\"-0x\" process=\"typical\" vid=\"No\"></DEVICE>\n";
-  } else if ((arch == AIEArch::AIE2) || (arch == AIEArch::AIE2p)) {
+  } else if (llvm::isa<AIE2TargetModel>(target)) {
     output
         // AIE2 xcve2802
         << " <DEVICE part=\"xcve2802\" grade=\"extended\" package=\"vsvh1760\" "
@@ -282,10 +282,12 @@ mlir::LogicalResult AIE::AIETranslateGraphXPE(mlir::ModuleOp module,
     // AIE2 - xcve2302
     // << " <DEVICE part=\"xcve2302\" grade=\"extended\" package=\"sfva784\" "
     //    "speed=\"-1MP\" process=\"typical\" vid=\"No\"></DEVICE>\n";
-  } else { // AIEArch::AIE1
+  } else if (llvm::isa<AIE1TargetModel>(target)) { // AIEArch::AIE1
     output
         << " <DEVICE part=\"xcvc1902\" grade=\"extended\" package=\"vsva2197\" "
            "speed=\"-2MP\" process=\"typical\" vid=\"No\"></DEVICE>\n";
+  } else {
+    return deviceOp.emitOpError("unsupported aie.device target");
   }
   output << "  <AIE status=\"COMPILER_OUTPUT\">\n";
 
@@ -293,15 +295,17 @@ mlir::LogicalResult AIE::AIETranslateGraphXPE(mlir::ModuleOp module,
   auto module_tile_ops = deviceOp.getOps<TileOp>();
   int num_tiles = std::distance(module_tile_ops.begin(), module_tile_ops.end());
   // TODO: clk_freq only 1150 for AIE2
-  if (arch == AIEArch::AIE4) {
+  if (llvm::isa<AIE4TargetModel>(target)) {
     output << R"(    <AIE_MODULE name="graph" num_tiles=")"
            << std::to_string(num_tiles) << "\" clk_freq=\"1000\">\n";
-  } else if ((arch == AIEArch::AIE2) || (arch == AIEArch::AIE2p)) {
+  } else if (llvm::isa<AIE2TargetModel>(target)) {
     output << R"(    <AIE_MODULE name="graph" num_tiles=")"
            << std::to_string(num_tiles) << "\" clk_freq=\"1150\">\n";
-  } else {
+  } else if (llvm::isa<AIE1TargetModel>(target)) {
     output << R"(    <AIE_MODULE name="graph" num_tiles=")"
            << std::to_string(num_tiles) << "\" clk_freq=\"1250\">\n";
+  } else {
+    return deviceOp.emitOpError("unsupported aie.device target");
   }
 
   // Get all CoreOps into a convenient map which can then be referenced by
@@ -321,7 +325,7 @@ mlir::LogicalResult AIE::AIETranslateGraphXPE(mlir::ModuleOp module,
     if (tileOp.isShimNOCorPLTile() || tileOp.isMemTile())
       continue; // Skip shim and mem tiles (handled below)
 
-    if (arch == AIEArch::AIE4) {
+    if (llvm::isa<AIE4TargetModel>(target)) {
 
       output << "      <TILE name=\"CR(" <<
           // CR coordinates ignores shim, and 2 mem rows hence row-3
@@ -345,7 +349,7 @@ mlir::LogicalResult AIE::AIETranslateGraphXPE(mlir::ModuleOp module,
                                deviceOp.getTargetModel().getNumMemTileRows())
              << "\">\n";
 
-    } else if ((arch == AIEArch::AIE2) || (arch == AIEArch::AIE2p)) {
+    } else if (llvm::isa<AIE2TargetModel>(target)) {
 
       output << "      <TILE name=\"CR(" <<
           // CR coordinates ignores shim, and 2 mem rows hence row-3
@@ -369,7 +373,7 @@ mlir::LogicalResult AIE::AIETranslateGraphXPE(mlir::ModuleOp module,
                                deviceOp.getTargetModel().getNumMemTileRows())
              << "\">\n";
 
-    } else {
+    } else if (llvm::isa<AIE1TargetModel>(target)) {
       output << "      <TILE name=\"CR(" <<
           // CR coordinates ignores shim, hence row-1
           std::to_string(col) << "," << std::to_string(row - 1) << ")\" "
@@ -381,6 +385,8 @@ mlir::LogicalResult AIE::AIETranslateGraphXPE(mlir::ModuleOp module,
           // now
           // TODO: does stream_util matter for sim?
           std::to_string(col) << "," << std::to_string(row) << "\">\n";
+    } else {
+      return deviceOp.emitOpError("unsupported aie.device target");
     }
 
     // If the TileOp has associated Kernels, generate <KERNEL> sections
@@ -398,7 +404,7 @@ mlir::LogicalResult AIE::AIETranslateGraphXPE(mlir::ModuleOp module,
 
   // For each ShimOp in the module, generate a <SHIM> section
   for (ShimDMAOp shimOp : deviceOp.getOps<ShimDMAOp>()) {
-    if (arch == AIEArch::AIE4) {
+    if (llvm::isa<AIE4TargetModel>(target)) {
       const auto *noc_label = (deviceOp.getTargetModel().isShimNOCTile(
                                   shimOp.colIndex(), shimOp.rowIndex()))
                                   ? "AIE_PL_NOC_SIM"
@@ -414,7 +420,7 @@ mlir::LogicalResult AIE::AIETranslateGraphXPE(mlir::ModuleOp module,
              << std::to_string(shimOp.colIndex()) << ","
              << std::to_string(shimOp.rowIndex()) << "\" "
              << "></SHIM>\n";
-    } else if ((arch == AIEArch::AIE2) || (arch == AIEArch::AIE2p)) {
+    } else if (llvm::isa<AIE2TargetModel>(target)) {
       const auto *noc_label = (deviceOp.getTargetModel().isShimNOCTile(
                                   shimOp.colIndex(), shimOp.rowIndex()))
                                   ? "AIE_PL_NOC_SIM"
@@ -430,7 +436,7 @@ mlir::LogicalResult AIE::AIETranslateGraphXPE(mlir::ModuleOp module,
              << std::to_string(shimOp.colIndex()) << ","
              << std::to_string(shimOp.rowIndex()) << "\" "
              << "></SHIM>\n";
-    } else {
+    } else if (llvm::isa<AIE1TargetModel>(target)) {
       output << "      <SHIM name=\"SHIM(" << std::to_string(shimOp.colIndex())
              << ", " << std::to_string(shimOp.rowIndex()) << ")\" " <<
           // TODO: stream_util can be 0 for aiesim purposes?
@@ -441,11 +447,13 @@ mlir::LogicalResult AIE::AIETranslateGraphXPE(mlir::ModuleOp module,
              << std::to_string(shimOp.colIndex()) << ","
              << std::to_string(shimOp.rowIndex()) << "\" "
              << "></SHIM>\n";
+    } else {
+      return deviceOp.emitOpError("unsupported aie.device target");
     }
   }
 
   // For each memTile
-  if (arch == AIEArch::AIE4) {
+  if (llvm::isa<AIE4TargetModel>(target)) {
     for (TileOp tileOp : module_tile_ops) {
       int col = tileOp.colIndex();
       int row = tileOp.rowIndex();
@@ -464,7 +472,7 @@ mlir::LogicalResult AIE::AIETranslateGraphXPE(mlir::ModuleOp module,
              << "," << std::to_string(row - 1) << "\" "
              << "></MEM>\n";
     }
-  } else if ((arch == AIEArch::AIE2) || (arch == AIEArch::AIE2p)) {
+  } else if (llvm::isa<AIE2TargetModel>(target)) {
     for (TileOp tileOp : module_tile_ops) {
       int col = tileOp.colIndex();
       int row = tileOp.rowIndex();
