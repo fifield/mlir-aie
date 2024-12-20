@@ -36,7 +36,7 @@ static func::CallOp convertOpToFunction(Operation *op, ArrayRef<Value> operands,
     auto fnTy = rewriter.getFunctionType(tys, retTys);
     fn = func::FuncOp::create(rewriter.getUnknownLoc(), fnName, fnTy);
     fn.setPrivate();
-    device.push_back(fn);
+    device.insert(device.getBody()->begin(), fn);
   }
   func::CallOp call = rewriter.replaceOpWithNewOp<func::CallOp>(
       op, retTys, SymbolRefAttr::get(fn), operands);
@@ -64,7 +64,7 @@ struct NpuAddressPatchToFuncPattern
         rewriter.create<arith::ConstantIndexOp>(loc, op.getArgIdx()));
     operands.push_back(
         rewriter.create<arith::ConstantIndexOp>(loc, op.getArgPlus()));
-    auto call = convertOpToFunction(op, operands, rewriter, "address_patch");
+    auto call = convertOpToFunction(op, operands, rewriter, "npu_address_patch");
     if (call)
       return success();
     else
