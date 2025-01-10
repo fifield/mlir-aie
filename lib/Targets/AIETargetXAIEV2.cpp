@@ -74,6 +74,30 @@ static std::string wireBundleToPortType(WireBundle bundle) {
     return "PL";
   case WireBundle::TileControl:
     return "CTRL";
+  case WireBundle::NorthControl:
+    return "NORTH_CTRL";
+  case WireBundle::SouthControl:
+    return "SOUTH_CTRL";
+  case WireBundle::Switch32:
+    return "SWITCH_32b";
+  case WireBundle::Control32:
+    return "_32B_CTRL";
+  case WireBundle::Trace32:
+    return "_32B_TRACE";
+  case WireBundle::South32:
+    return "_32B_SOUTH";
+  case WireBundle::West32:
+    return "_32B_WEST";
+  case WireBundle::North32:
+    return "_32B_NORTH";
+  case WireBundle::East32:
+    return "_32B_EAST";
+  case WireBundle::PLIO32:
+    return "_32B_PL";
+  case WireBundle::Switch512:
+    return "_32B_SWITCH_512b";
+  case WireBundle::Controller32:
+    return "_32B_UCTRLR";
   default:
     return stringifyWireBundle(bundle).upper();
   }
