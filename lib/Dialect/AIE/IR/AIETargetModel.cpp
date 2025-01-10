@@ -1904,7 +1904,7 @@ AIE4TargetModel::getNumDestSwitchboxConnections(int col, int row,
       return 8;
     case WireBundle::South:
       return 4;
-    case WireBundle::Control:
+    case WireBundle::TileControl:
     case WireBundle::NorthControl:
     case WireBundle::Switch32:
       return 2;
@@ -1936,7 +1936,7 @@ AIE4TargetModel::getNumDestSwitchboxConnections(int col, int row,
         return 0;
       return 2;
     }
-    case WireBundle::Control:
+    case WireBundle::TileControl:
     case WireBundle::NorthControl:
     case WireBundle::Switch32:
       return 2;
@@ -1975,7 +1975,7 @@ AIE4TargetModel::getNumDestSwitchboxConnections(int col, int row,
       return 0;
     return 2;
   }
-  case WireBundle::Control:
+  case WireBundle::TileControl:
   case WireBundle::Switch32:
     return 1;
   // 32 bit ports
@@ -2179,7 +2179,7 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
         return true;
       // DMA -> NorthControl, Control
       if (isBundleInList(dstBundle,
-                         {WireBundle::NorthControl, WireBundle::Control})) {
+                         {WireBundle::NorthControl, WireBundle::TileControl})) {
         if (srcChan == 3 || srcChan == 4)
           return dstChan == 0;
         if (srcChan == 9 || srcChan == 10)
@@ -2237,7 +2237,7 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
           return true;
       }
       // North -> Control
-      if (dstBundle == WireBundle::Control) {
+      if (dstBundle == WireBundle::TileControl) {
         if (srcChan == 1 && dstChan == 0)
           return true;
         if (srcChan == 3)
@@ -2262,7 +2262,7 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
       if (dstBundle == WireBundle::NorthControl)
         return srcChan == dstChan;
       // SouthControl -> Control
-      if (dstBundle == WireBundle::Control)
+      if (dstBundle == WireBundle::TileControl)
         return srcChan == 1 || dstChan == 0;
       // SouthControl -> Switch32
       if (dstBundle == WireBundle::Switch32)
@@ -2275,7 +2275,7 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
       if (dstBundle == WireBundle::Switch32)
         return false;
       if (isBundleInList(dstBundle,
-                         {WireBundle::Control, WireBundle::NorthControl}))
+                         {WireBundle::TileControl, WireBundle::NorthControl}))
         return srcChan == dstChan;
       return true;
     }
@@ -2293,7 +2293,7 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
         return false;
       }
       if (isBundleInList(dstBundle,
-                         {WireBundle::NorthControl, WireBundle::Control})) {
+                         {WireBundle::NorthControl, WireBundle::TileControl})) {
         if (srcChan <= 1 && dstChan == 0)
           return true;
         if (srcChan >= 2 && dstChan == 1)
@@ -2314,7 +2314,7 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
                          {WireBundle::DMA, WireBundle::West, WireBundle::North,
                           WireBundle::East, WireBundle::Switch32}))
         return true;
-      if (dstBundle == WireBundle::Control) {
+      if (dstBundle == WireBundle::TileControl) {
         if (dstChan == 1)
           return (srcBundle == WireBundle::North) && (srcChan == 3);
         if (srcBundle == WireBundle::North)
@@ -2333,7 +2333,7 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
       return false;
     }
     // Control mm2s subordinate
-    if (srcBundle == WireBundle::Control) {
+    if (srcBundle == WireBundle::TileControl) {
       if (isBundleInList(dstBundle, {WireBundle::West, WireBundle::East}))
         return (srcChan == 0) || (dstChan == 1);
       if (dstBundle == WireBundle::North) {
@@ -2343,11 +2343,11 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
           return srcChan == 1;
       }
       if (isBundleInList(dstBundle,
-                         {WireBundle::NorthControl, WireBundle::Control,
+                         {WireBundle::NorthControl, WireBundle::TileControl,
                           WireBundle::Switch32})) {
         if (srcChan == dstChan)
           return true;
-        if (dstBundle == WireBundle::Control)
+        if (dstBundle == WireBundle::TileControl)
           return dstChan == 0;
         return false;
       }
@@ -2358,7 +2358,7 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
                          {WireBundle::DMA, WireBundle::West, WireBundle::North,
                           WireBundle::East, WireBundle::NorthControl}))
         return true;
-      if (dstBundle == WireBundle::Control)
+      if (dstBundle == WireBundle::TileControl)
         return srcChan == dstChan;
     }
     return false;
@@ -2377,7 +2377,7 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
         return dstChan == 0;
       if (isBundleInList(dstBundle,
                          {WireBundle::South, WireBundle::East, WireBundle::West,
-                          WireBundle::North, WireBundle::Control,
+                          WireBundle::North, WireBundle::TileControl,
                           WireBundle::Switch32}))
         return true;
       return false;
@@ -2388,7 +2388,7 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
       if (isBundleInList(dstBundle,
                          {WireBundle::Core, WireBundle::South, WireBundle::East,
                           WireBundle::West, WireBundle::North,
-                          WireBundle::NorthControl, WireBundle::Control,
+                          WireBundle::NorthControl, WireBundle::TileControl,
                           WireBundle::Switch32}))
         return true;
       return false;
@@ -2416,7 +2416,7 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
       if (isBundleInList(dstBundle,
                          {WireBundle::Core, WireBundle::DMA, WireBundle::South,
                           WireBundle::East, WireBundle::West, WireBundle::North,
-                          WireBundle::NorthControl, WireBundle::Control,
+                          WireBundle::NorthControl, WireBundle::TileControl,
                           WireBundle::Switch32}))
         return true;
       return false;
@@ -2429,7 +2429,7 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
       if (dstBundle == WireBundle::NorthControl)
         return srcChan == 1 || dstChan == 0;
       if (isBundleInList(dstBundle,
-                         {WireBundle::Control, WireBundle::Switch32}))
+                         {WireBundle::TileControl, WireBundle::Switch32}))
         return true;
       return false;
     // Switch32 subordinate
@@ -2437,7 +2437,7 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
       return (isBundleInList(
           dstBundle, {WireBundle::Core, WireBundle::DMA, WireBundle::South,
                       WireBundle::East, WireBundle::West, WireBundle::North,
-                      WireBundle::NorthControl, WireBundle::Control}));
+                      WireBundle::NorthControl, WireBundle::TileControl}));
     }
   }
   return false;
