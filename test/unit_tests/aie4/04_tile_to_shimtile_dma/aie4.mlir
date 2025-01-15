@@ -5,7 +5,7 @@
 //
 // (c) Copyright 2024 Advanced Micro Devices Inc.
 //
-// RUN: aiecc.py --xchesscc --xbridge --no-compile-host --aie-generate-txn --aiesim %s %test_utils_flags %S/test.cpp
+// RUN: aiecc.py --alloc-scheme=basic-sequential --xchesscc --xbridge --no-compile-host --aie-generate-txn --aiesim %s %test_utils_flags %S/test.cpp
 // RUN: aie-translate -aie-npu-instgen -aie-output-binary=true -o transaction.bin aie4.mlir.prj/txn.mlir
 // RUN: aie4.mlir.prj/aiesim.sh | FileCheck %s
 //
@@ -20,11 +20,6 @@ module @test_dma_to_txn {
     %lock_0_2 = aie.lock(%tile_0_2, 0) { init = 1 : i32 }
     %lock_0_2_0 = aie.lock(%tile_0_2, 1)
     %core_0_2 = aie.core(%tile_0_2) {
-      aie.end
-    }
-
-    %tile_0_1 = aie.tile(0, 1)
-    %mem_0_1 = aie.memtile_dma(%tile_0_1) {
       aie.end
     }
 
@@ -46,22 +41,16 @@ module @test_dma_to_txn {
 
     %tile_0_0 = aie.tile(0, 0)
     %buf00_0 = aie.external_buffer {address = 0 : i32, sym_name = "buf00_0"} : memref<256 x i32>
-    %buf00_1 = aie.external_buffer {address = 0 : i32, sym_name = "buf00_1"} : memref<256 x i32>
     %lock_0_0 = aie.lock(%tile_0_0, 0) { init = 1 : i32 }
     %lock_0_0_0 = aie.lock(%tile_0_0, 1)
     %mem_0_0 = aie.shim_dma(%tile_0_0) {
-      %0 = aie.dma_start(S2MM, 0, ^bb1, ^bb3)
-    ^bb1:  // 2 preds: ^bb0, ^bb2
+      %0 = aie.dma_start(S2MM, 0, ^bb1, ^bb2)
+    ^bb1:
       aie.use_lock(%lock_0_0, AcquireGreaterEqual, 1)
-      aie.dma_bd(%buf00_0 : memref<256xi32>, 0, 256) {bd_id = 0 : i32, next_bd_id = 1 : i32}
+      aie.dma_bd(%buf00_0 : memref<256xi32>, 0, 256) {bd_id = 0 : i32}
       aie.use_lock(%lock_0_0_0, Release, 1)
       aie.next_bd ^bb2
-    ^bb2:  // pred: ^bb1
-      aie.use_lock(%lock_0_0, AcquireGreaterEqual, 1)
-      aie.dma_bd(%buf00_0 : memref<256xi32>, 0, 256) {bd_id = 1 : i32, next_bd_id = 2 : i32}
-      aie.use_lock(%lock_0_0_0, Release, 1)
-      aie.next_bd ^bb1
-    ^bb3:  // pred: ^bb0
+    ^bb2:
       aie.end
     }
 

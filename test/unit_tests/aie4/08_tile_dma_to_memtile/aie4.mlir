@@ -12,53 +12,52 @@
 // CHECK: AIE4{{.*}}ISS
 // CHECK: PASS!
 //
-module @test_dma_to_txn {
-  aie.device(npu3) {
-    %tile_0_2 = aie.tile(0, 2)
-    %buf02_0 = aie.buffer(%tile_0_2) {address = 2048 : i32, bank = 0 : i32, sym_name = "buf02_0"} : memref<256xi32>
-    %buf02_1 = aie.buffer(%tile_0_2) {address = 3072 : i32, bank = 0 : i32, sym_name = "buf02_1"} : memref<256xi32>
-    %lock_0_2 = aie.lock(%tile_0_2, 0) { init = 2 : i32 }
-    %lock_0_2_0 = aie.lock(%tile_0_2, 1) { init = 0 : i32 }
 
-    %mem_0_2 = aie.mem(%tile_0_2) {
-      %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
-    ^bb1:  // 2 preds: ^bb0, ^bb2
-      aie.use_lock(%lock_0_2, AcquireGreaterEqual, 1)
-      aie.dma_bd(%buf02_0 : memref<256xi32>, 0, 256) {bd_id = 0 : i32, next_bd_id = 1 : i32}
-      aie.use_lock(%lock_0_2_0, Release, 1)
-      aie.next_bd ^bb2
-    ^bb2:  // pred: ^bb1
-      aie.use_lock(%lock_0_2, AcquireGreaterEqual, 1)
-      aie.dma_bd(%buf02_1 : memref<256xi32>, 0, 256) {bd_id = 1 : i32, next_bd_id = 0 : i32}
-      aie.use_lock(%lock_0_2_0, Release, 1)
-      aie.next_bd ^bb1
-    ^bb3:  // pred: ^bb0
-      aie.end
-    }
+aie.device(npu3) {
+  %tile_0_2 = aie.tile(0, 2)
+  %buf02_0 = aie.buffer(%tile_0_2) {address = 2048 : i32, bank = 0 : i32, sym_name = "buf02_0"} : memref<256xi32>
+  %buf02_1 = aie.buffer(%tile_0_2) {address = 3072 : i32, bank = 0 : i32, sym_name = "buf02_1"} : memref<256xi32>
+  %lock_0_2 = aie.lock(%tile_0_2, 0) { init = 2 : i32 }
+  %lock_0_2_0 = aie.lock(%tile_0_2, 1) { init = 0 : i32 }
 
-    %tile_0_1 = aie.tile(0, 1)
-    %buf01_0 = aie.buffer(%tile_0_1) {address = 2048 : i32, bank = 0 : i32, sym_name = "buf01_0"} : memref<256xi32>
-    %buf01_1 = aie.buffer(%tile_0_1) {address = 3072 : i32, bank = 0 : i32, sym_name = "buf01_1"} : memref<256xi32>
-
-    %lock_0_1 = aie.lock(%tile_0_1, 0) { init = 2 : i32 } 
-    %lock_0_1_0 = aie.lock(%tile_0_1, 1) {init = 0 : i32} 
-
-    %mem_0_1 = aie.memtile_dma(%tile_0_1) {
-      %0 = aie.dma_start(S2MM, 1, ^bb1, ^bb3)
-    ^bb1:  // 2 preds: ^bb0, ^bb2
-      aie.use_lock(%lock_0_1, AcquireGreaterEqual, 1)
-      aie.dma_bd(%buf01_0 : memref<256xi32>, 0, 256) {bd_id = 16 : i32, next_bd_id = 17 : i32}
-      aie.use_lock(%lock_0_1_0, Release, 1)
-      aie.next_bd ^bb2
-    ^bb2:  // pred: ^bb1
-      aie.use_lock(%lock_0_1, AcquireGreaterEqual, 1)
-      aie.dma_bd(%buf01_1 : memref<256xi32>, 0,256) {bd_id = 17 : i32, next_bd_id = 16 : i32}
-      aie.use_lock(%lock_0_1_0, Release, 1)
-      aie.next_bd ^bb1
-    ^bb3:  // pred: ^bb0
-      aie.end
-    }
-
-    aie.flow(%tile_0_2, DMA : 0, %tile_0_1, DMA : 1)
+  %mem_0_2 = aie.mem(%tile_0_2) {
+    %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
+  ^bb1:  // 2 preds: ^bb0, ^bb2
+    aie.use_lock(%lock_0_2, AcquireGreaterEqual, 1)
+    aie.dma_bd(%buf02_0 : memref<256xi32>, 0, 256) {bd_id = 0 : i32, next_bd_id = 1 : i32}
+    aie.use_lock(%lock_0_2_0, Release, 1)
+    aie.next_bd ^bb2
+  ^bb2:  // pred: ^bb1
+    aie.use_lock(%lock_0_2, AcquireGreaterEqual, 1)
+    aie.dma_bd(%buf02_1 : memref<256xi32>, 0, 256) {bd_id = 1 : i32, next_bd_id = 0 : i32}
+    aie.use_lock(%lock_0_2_0, Release, 1)
+    aie.next_bd ^bb1
+  ^bb3:  // pred: ^bb0
+    aie.end
   }
+
+  %tile_0_1 = aie.tile(0, 1)
+  %buf01_0 = aie.buffer(%tile_0_1) {address = 2048 : i32, bank = 0 : i32, sym_name = "buf01_0"} : memref<256xi32>
+  %buf01_1 = aie.buffer(%tile_0_1) {address = 3072 : i32, bank = 0 : i32, sym_name = "buf01_1"} : memref<256xi32>
+
+  %lock_0_1 = aie.lock(%tile_0_1, 0) { init = 2 : i32 } 
+  %lock_0_1_0 = aie.lock(%tile_0_1, 1) {init = 0 : i32} 
+
+  %mem_0_1 = aie.memtile_dma(%tile_0_1) {
+    %0 = aie.dma_start(S2MM, 1, ^bb1, ^bb3)
+  ^bb1:  // 2 preds: ^bb0, ^bb2
+    aie.use_lock(%lock_0_1, AcquireGreaterEqual, 1)
+    aie.dma_bd(%buf01_0 : memref<256xi32>, 0, 256) {bd_id = 16 : i32, next_bd_id = 17 : i32}
+    aie.use_lock(%lock_0_1_0, Release, 1)
+    aie.next_bd ^bb2
+  ^bb2:  // pred: ^bb1
+    aie.use_lock(%lock_0_1, AcquireGreaterEqual, 1)
+    aie.dma_bd(%buf01_1 : memref<256xi32>, 0,256) {bd_id = 17 : i32, next_bd_id = 16 : i32}
+    aie.use_lock(%lock_0_1_0, Release, 1)
+    aie.next_bd ^bb1
+  ^bb3:  // pred: ^bb0
+    aie.end
+  }
+
+  aie.flow(%tile_0_2, DMA : 0, %tile_0_1, DMA : 1)
 }
