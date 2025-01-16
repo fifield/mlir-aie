@@ -15,6 +15,7 @@
 
 // CHECK: test start.
 // CHECK: PASS!
+// XFAIL: *
 
 // aiesim.sh aborts (SIGABRT, no output) under Vitis 2025.1.
 // XFAIL: *

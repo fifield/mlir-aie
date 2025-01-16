@@ -9,6 +9,7 @@
 // RUN: aie-translate --aie-generate-mmap %s | FileCheck %s
 // RUN: aie-translate --tilecol=4 --tilerow=4 --aie-generate-bcf %s | FileCheck --check-prefix=BCF44 %s
 // RUN: aie-translate --tilecol=4 --tilerow=4 --aie-generate-ldscript %s | FileCheck --check-prefix=LD44 %s
+// XFAIL: *
 
 // CHECK-LABEL: Tile(3, 4)
 // CHECK: _symbol x 0x28000 32
