@@ -67,6 +67,7 @@ jobs:
           pushd build
 
           export PATH=${VITIS}/aietools/bin:${VITIS}/bin:$PATH
+          export LD_LIBRARY_PATH=${VITIS}/tps/lnx64/python-3.8.3/lib:$LD_LIBRARY_PATH
           cmake .. -G Ninja \
             -DPython3_EXECUTABLE=$(which python) \
             -DCMAKE_MODULE_PATH=$PWD/../cmake/modulesXilinx \
