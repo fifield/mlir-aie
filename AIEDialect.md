@@ -65,11 +65,11 @@ Interfaces: `InferTypeOpInterface`
 
 _Definition of a Parametrizable Chain of Buffer Descriptors_
 
-This operation allows you to define buffer descriptor chains with parametrizable inputs. 
+This operation allows you to define buffer descriptor chains with parametrizable inputs.
 This is useful for common patterns such as double buffering (ping-pong) that may look identical but use different input/output buffers and locks.
 Currently, only buffers and locks are parametrizable.
 
-Once defined, an abstract BD chain can be used elsewhere using AIEX ops in the runtime sequence. 
+Once defined, an abstract BD chain can be used elsewhere using AIEX ops in the runtime sequence.
 In the future, abstract BD chains will also be usable elsewhere, inside the static configuration.
 At its usage sites, the abstract BD chain will be concretized with the given input arguments.
 
@@ -143,8 +143,8 @@ Syntax:
 operation ::= `aie.cascade_flow` `(` $source_tile `,` $dest_tile `)` attr-dict
 ```
 
-The `aie.cascade_flow` operation represents a cascade connection between two `aie.tile` operations.  
-During lowering, this is replaced by `aie.configure_cascade` operations for each `aie.tile` based on 
+The `aie.cascade_flow` operation represents a cascade connection between two `aie.tile` operations.
+During lowering, this is replaced by `aie.configure_cascade` operations for each `aie.tile` based on
 their relative placement to one another.
 
 Example:
@@ -173,7 +173,7 @@ Syntax:
 operation ::= `aie.configure_cascade` `(` $tile `,` $inputDir `,` $outputDir `)` attr-dict
 ```
 
-An operation to configure the cascade on a single tile in both the input and the output 
+An operation to configure the cascade on a single tile in both the input and the output
 directions.
 
 Example:
@@ -251,7 +251,7 @@ Traits: `HasParent<SwitchboxOp, ShimMuxOp>`
 * PLIO (`PLIO`)
 * NOC (`NOC`)
 * Trace (`Trace`)
-* Ctrl (`Ctrl`){{% /markdown %}}</details></td></tr>
+* TileControl (`TileControl`){{% /markdown %}}</details></td></tr>
 <tr><td><code>source_channel</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute whose minimum value is 0</td></tr>
 <tr><td><code>dest_bundle</code></td><td>xilinx::AIE::WireBundleAttr</td><td><details><summary>Bundle of wires</summary>{{% markdown %}}Enum cases:
 * Core (`Core`)
@@ -264,7 +264,7 @@ Traits: `HasParent<SwitchboxOp, ShimMuxOp>`
 * PLIO (`PLIO`)
 * NOC (`NOC`)
 * Trace (`Trace`)
-* Ctrl (`Ctrl`){{% /markdown %}}</details></td></tr>
+* TileControl (`TileControl`){{% /markdown %}}</details></td></tr>
 <tr><td><code>dest_channel</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute whose minimum value is 0</td></tr>
 </table>
 
@@ -389,7 +389,7 @@ aie.device(xcvc1902) {
 }
 ```
 
-Traits: `HasParent<mlir::ModuleOp>`, `IsolatedFromAbove`, `NoTerminator`, `SingleBlock`, `SymbolTable`
+Traits: `HasParent<mlir::ModuleOp>`, `IsolatedFromAbove`, `SingleBlockImplicitTerminator<EndOp>`, `SingleBlock`, `SymbolTable`
 
 Interfaces: `AIETarget`
 
@@ -405,7 +405,8 @@ Interfaces: `AIETarget`
 * npu1_1col (`npu1_1col`)
 * npu1_2col (`npu1_2col`)
 * npu1_3col (`npu1_3col`)
-* npu1_4col (`npu1_4col`){{% /markdown %}}</details></td></tr>
+* npu1_4col (`npu1_4col`)
+* npu2 (`npu2`){{% /markdown %}}</details></td></tr>
 </table>
 
 
@@ -552,9 +553,9 @@ All strides are expressed in multiples of the element width (just like `len` and
 ## DMA constant padding on AIE-ML Devices
 
 AIE-ML devices can apply constant padding at the buffer descriptor level, described with pairs of padding
-counts before and after a dimension, to all dimensions in the data layout transformations. The padding 
-counts can be supplied to the `dma_bd` through an optional argument, an array of "tuple-like" attributes 
-`bd_pad_layout<const_pad_before, const_pad_after>`, followed by an optional argument `const_val` (default 
+counts before and after a dimension, to all dimensions in the data layout transformations. The padding
+counts can be supplied to the `dma_bd` through an optional argument, an array of "tuple-like" attributes
+`bd_pad_layout<const_pad_before, const_pad_after>`, followed by an optional argument `const_val` (default
 is 0). All counts are expressed in multiples of the element width.
 
 #### Attributes:
@@ -796,7 +797,7 @@ Example:
 * PLIO (`PLIO`)
 * NOC (`NOC`)
 * Trace (`Trace`)
-* Ctrl (`Ctrl`){{% /markdown %}}</details></td></tr>
+* TileControl (`TileControl`){{% /markdown %}}</details></td></tr>
 <tr><td><code>source_channel</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute whose minimum value is 0</td></tr>
 <tr><td><code>dest_bundle</code></td><td>xilinx::AIE::WireBundleAttr</td><td><details><summary>Bundle of wires</summary>{{% markdown %}}Enum cases:
 * Core (`Core`)
@@ -809,7 +810,7 @@ Example:
 * PLIO (`PLIO`)
 * NOC (`NOC`)
 * Trace (`Trace`)
-* Ctrl (`Ctrl`){{% /markdown %}}</details></td></tr>
+* TileControl (`TileControl`){{% /markdown %}}</details></td></tr>
 <tr><td><code>dest_channel</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute whose minimum value is 0</td></tr>
 </table>
 
@@ -981,7 +982,7 @@ Interfaces: `InferTypeOpInterface`
 * PLIO (`PLIO`)
 * NOC (`NOC`)
 * Trace (`Trace`)
-* Ctrl (`Ctrl`){{% /markdown %}}</details></td></tr>
+* TileControl (`TileControl`){{% /markdown %}}</details></td></tr>
 <tr><td><code>dest_channel</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute whose minimum value is 0</td></tr>
 <tr><td><code>keep_pkt_header</code></td><td>::mlir::BoolAttr</td><td>bool attribute</td></tr>
 </table>
@@ -1031,7 +1032,7 @@ Create the memory module for tile %t73 and setup one DMA channel and one Buffer 
 
 Traits: `HasValidBDs`, `HasValidDMAChannels`
 
-Interfaces: `CallableOpInterface`, `FlowEndPoint`, `InferTypeOpInterface`, `OpAsmOpInterface`, `TileElement`
+Interfaces: `FlowEndPoint`, `InferTypeOpInterface`, `OpAsmOpInterface`, `TileElement`
 
 #### Operands:
 
@@ -1082,7 +1083,7 @@ Create a description for tile `%t73` and setup one DMA channel and one Buffer De
 
 Traits: `HasValidBDs`, `HasValidDMAChannels`
 
-Interfaces: `CallableOpInterface`, `FlowEndPoint`, `InferTypeOpInterface`, `OpAsmOpInterface`, `TileElement`
+Interfaces: `FlowEndPoint`, `InferTypeOpInterface`, `OpAsmOpInterface`, `TileElement`
 
 #### Operands:
 
@@ -1153,6 +1154,7 @@ operation ::= `aie.objectfifo` $sym_name
               `,`
               $elemNumber
               `)` attr-dict `:` $elemType
+              custom<ObjectFifoInitValues>(ref($elemNumber), ref($elemType), $initValues)
 ```
 
 The `aie.objectFifo` operation creates a circular buffer established between a producer and one or
@@ -1246,7 +1248,9 @@ Interfaces: `Symbol`
 <tr><td><code>plio</code></td><td>::mlir::BoolAttr</td><td>bool attribute</td></tr>
 <tr><td><code>disable_synchronization</code></td><td>::mlir::BoolAttr</td><td>bool attribute</td></tr>
 <tr><td><code>via_shared_mem</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
-<tr><td><code>memtile_repeat</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
+<tr><td><code>repeat_count</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute whose minimum value is 1</td></tr>
+<tr><td><code>initValues</code></td><td>::mlir::ArrayAttr</td><td>array of ElementsAttr</td></tr>
+<tr><td><code>padDimensions</code></td><td>::xilinx::AIE::BDPadLayoutArrayAttr</td><td></td></tr>
 </table>
 
 #### Operands:
@@ -1564,7 +1568,7 @@ Traits: `HasParent<PacketFlowOp>`
 * PLIO (`PLIO`)
 * NOC (`NOC`)
 * Trace (`Trace`)
-* Ctrl (`Ctrl`){{% /markdown %}}</details></td></tr>
+* TileControl (`TileControl`){{% /markdown %}}</details></td></tr>
 <tr><td><code>channel</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute whose minimum value is 0</td></tr>
 </table>
 
@@ -1588,13 +1592,13 @@ operation ::= `aie.packet_flow` `(` $ID `)` regions attr-dict
 
 A logical packet-switched flow between tiles.  During place and
 route, this is replaced by MasterSets and PacketRules inside
-switchboxes. 
+switchboxes.
 
-The optional attribute keep_pkt_header indicates whether each 
-data packet's packet header gets preserved at the flow's 
+The optional attribute keep_pkt_header indicates whether each
+data packet's packet header gets preserved at the flow's
 destination. The optional attribute priority_route indicates
-whether the packet flow is routed in priority over other flows, 
-so that they always get allocated with the same master, slave 
+whether the packet flow is routed in priority over other flows,
+so that they always get allocated with the same master, slave
 ports, arbiters and master selects (msel).
 
 Example:
@@ -1653,7 +1657,7 @@ Traits: `SingleBlockImplicitTerminator<EndOp>`, `SingleBlock`
 * PLIO (`PLIO`)
 * NOC (`NOC`)
 * Trace (`Trace`)
-* Ctrl (`Ctrl`){{% /markdown %}}</details></td></tr>
+* TileControl (`TileControl`){{% /markdown %}}</details></td></tr>
 <tr><td><code>source_channel</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute whose minimum value is 0</td></tr>
 </table>
 
@@ -1691,7 +1695,7 @@ Traits: `HasParent<PacketFlowOp>`
 * PLIO (`PLIO`)
 * NOC (`NOC`)
 * Trace (`Trace`)
-* Ctrl (`Ctrl`){{% /markdown %}}</details></td></tr>
+* TileControl (`TileControl`){{% /markdown %}}</details></td></tr>
 <tr><td><code>channel</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute whose minimum value is 0</td></tr>
 </table>
 
@@ -2162,7 +2166,7 @@ represented by an [aie.tile](#aietile-aietileop) operation.
 * PLIO (`PLIO`)
 * NOC (`NOC`)
 * Trace (`Trace`)
-* Ctrl (`Ctrl`){{% /markdown %}}</details></td></tr>
+* TileControl (`TileControl`){{% /markdown %}}</details></td></tr>
 <tr><td><code>dest_bundle</code></td><td>xilinx::AIE::WireBundleAttr</td><td><details><summary>Bundle of wires</summary>{{% markdown %}}Enum cases:
 * Core (`Core`)
 * DMA (`DMA`)
@@ -2174,7 +2178,7 @@ represented by an [aie.tile](#aietile-aietileop) operation.
 * PLIO (`PLIO`)
 * NOC (`NOC`)
 * Trace (`Trace`)
-* Ctrl (`Ctrl`){{% /markdown %}}</details></td></tr>
+* TileControl (`TileControl`){{% /markdown %}}</details></td></tr>
 </table>
 
 #### Operands:
@@ -2200,6 +2204,7 @@ Syntax:
 ```
 
 
+
 #### Parameters:
 
 | Parameter | C++ type | Description |
@@ -2219,6 +2224,7 @@ Syntax:
 ```
 
 
+
 #### Parameters:
 
 | Parameter | C++ type | Description |
@@ -2236,17 +2242,18 @@ Syntax:
 
 ```
 #aie.bd_dim_layout<
-  uint16_t,   # size
+  uint32_t,   # size
   uint32_t   # stride
 >
 ```
+
 
 
 #### Parameters:
 
 | Parameter | C++ type | Description |
 | :-------: | :-------: | ----------- |
-| size | `uint16_t` |  |
+| size | `uint32_t` |  |
 | stride | `uint32_t` |  |
 
 ### BDPadLayoutArrayAttr
@@ -2260,6 +2267,7 @@ Syntax:
   ::llvm::ArrayRef<BDPadLayoutAttr>   # value
 >
 ```
+
 
 
 #### Parameters:
@@ -2285,6 +2293,7 @@ Syntax:
 ```
 
 
+
 #### Parameters:
 
 | Parameter | C++ type | Description |
@@ -2308,6 +2317,7 @@ Syntax:
 ```
 
 
+
 #### Parameters:
 
 | Parameter | C++ type | Description |
@@ -2321,7 +2331,9 @@ Syntax:
 
 
 
+
 ### AIE objectFifo type
+
 
 
 
@@ -2337,6 +2349,7 @@ AIE Architecture
 | :----: | :---: | ------ |
 | AIE1 | `1` | AIE1 |
 | AIE2 | `2` | AIE2 |
+| AIE2p | `3` | AIE2p |
 
 ### AIEDevice
 
@@ -2354,6 +2367,7 @@ AIE Device
 | npu1_2col | `6` | npu1_2col |
 | npu1_3col | `7` | npu1_3col |
 | npu1_4col | `8` | npu1_4col |
+| npu2 | `9` | npu2 |
 
 ### CascadeDir
 
@@ -2431,5 +2445,5 @@ Bundle of wires
 | PLIO | `7` | PLIO |
 | NOC | `8` | NOC |
 | Trace | `9` | Trace |
-| Ctrl | `10` | Ctrl |
+| TileControl | `10` | TileControl |
 

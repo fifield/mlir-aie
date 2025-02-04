@@ -2,6 +2,7 @@
 # 'aievec_aie1' Dialect
 
 Types and operations for AIE1 vector dialect
+
 [TOC]
 
 ## Operations
@@ -283,6 +284,7 @@ AIE Architecture
 | :----: | :---: | ------ |
 | AIE1 | `1` | AIE1 |
 | AIE2 | `2` | AIE2 |
+| AIE2p | `3` | AIE2p |
 
 ### AIEDevice
 
@@ -300,6 +302,7 @@ AIE Device
 | npu1_2col | `6` | npu1_2col |
 | npu1_3col | `7` | npu1_3col |
 | npu1_4col | `8` | npu1_4col |
+| npu2 | `9` | npu2 |
 
 ### CascadeDir
 
@@ -377,5 +380,5 @@ Bundle of wires
 | PLIO | `7` | PLIO |
 | NOC | `8` | NOC |
 | Trace | `9` | Trace |
-| Ctrl | `10` | Ctrl |
+| TileControl | `10` | TileControl |
 

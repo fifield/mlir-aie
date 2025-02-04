@@ -41,7 +41,7 @@ Traits: `HasParent<BPIDOp>`
 * PLIO (`PLIO`)
 * NOC (`NOC`)
 * Trace (`Trace`)
-* Ctrl (`Ctrl`){{% /markdown %}}</details></td></tr>
+* TileControl (`TileControl`){{% /markdown %}}</details></td></tr>
 <tr><td><code>channel</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
 </table>
 
@@ -128,7 +128,7 @@ Traits: `SingleBlockImplicitTerminator<AIE::EndOp>`, `SingleBlock`
 * PLIO (`PLIO`)
 * NOC (`NOC`)
 * Trace (`Trace`)
-* Ctrl (`Ctrl`){{% /markdown %}}</details></td></tr>
+* TileControl (`TileControl`){{% /markdown %}}</details></td></tr>
 <tr><td><code>channel</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
 </table>
 
@@ -179,7 +179,7 @@ Example:
 * PLIO (`PLIO`)
 * NOC (`NOC`)
 * Trace (`Trace`)
-* Ctrl (`Ctrl`){{% /markdown %}}</details></td></tr>
+* TileControl (`TileControl`){{% /markdown %}}</details></td></tr>
 <tr><td><code>sourceChannel</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
 <tr><td><code>destBundle</code></td><td>xilinx::AIE::WireBundleAttr</td><td><details><summary>Bundle of wires</summary>{{% markdown %}}Enum cases:
 * Core (`Core`)
@@ -192,7 +192,7 @@ Example:
 * PLIO (`PLIO`)
 * NOC (`NOC`)
 * Trace (`Trace`)
-* Ctrl (`Ctrl`){{% /markdown %}}</details></td></tr>
+* TileControl (`TileControl`){{% /markdown %}}</details></td></tr>
 <tr><td><code>destChannel</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
 </table>
 
@@ -645,7 +645,7 @@ Traits: `HasParent<MulticastOp>`
 * PLIO (`PLIO`)
 * NOC (`NOC`)
 * Trace (`Trace`)
-* Ctrl (`Ctrl`){{% /markdown %}}</details></td></tr>
+* TileControl (`TileControl`){{% /markdown %}}</details></td></tr>
 <tr><td><code>channel</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
 </table>
 
@@ -702,7 +702,7 @@ Traits: `SingleBlockImplicitTerminator<AIE::EndOp>`, `SingleBlock`
 * PLIO (`PLIO`)
 * NOC (`NOC`)
 * Trace (`Trace`)
-* Ctrl (`Ctrl`){{% /markdown %}}</details></td></tr>
+* TileControl (`TileControl`){{% /markdown %}}</details></td></tr>
 <tr><td><code>channel</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
 </table>
 
@@ -870,6 +870,12 @@ Interfaces: `MyOffsetSizeAndStrideOpInterface`
 <tr><td><code>metadata</code></td><td>::mlir::FlatSymbolRefAttr</td><td>flat symbol reference attribute</td></tr>
 <tr><td><code>id</code></td><td>::mlir::IntegerAttr</td><td>64-bit signless integer attribute</td></tr>
 <tr><td><code>issue_token</code></td><td>::mlir::BoolAttr</td><td>bool attribute</td></tr>
+<tr><td><code>d0_zero_before</code></td><td>::mlir::IntegerAttr</td><td>64-bit signless integer attribute</td></tr>
+<tr><td><code>d1_zero_before</code></td><td>::mlir::IntegerAttr</td><td>64-bit signless integer attribute</td></tr>
+<tr><td><code>d2_zero_before</code></td><td>::mlir::IntegerAttr</td><td>64-bit signless integer attribute</td></tr>
+<tr><td><code>d0_zero_after</code></td><td>::mlir::IntegerAttr</td><td>64-bit signless integer attribute</td></tr>
+<tr><td><code>d1_zero_after</code></td><td>::mlir::IntegerAttr</td><td>64-bit signless integer attribute</td></tr>
+<tr><td><code>d2_zero_after</code></td><td>::mlir::IntegerAttr</td><td>64-bit signless integer attribute</td></tr>
 </table>
 
 #### Operands:
@@ -1097,6 +1103,7 @@ writebd operator
 <tr><td><code>d0_stride</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
 <tr><td><code>d1_size</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
 <tr><td><code>d1_stride</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
+<tr><td><code>d2_size</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
 <tr><td><code>d2_stride</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
 <tr><td><code>iteration_current</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
 <tr><td><code>iteration_size</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
@@ -1110,6 +1117,12 @@ writebd operator
 <tr><td><code>lock_acq_enable</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
 <tr><td><code>lock_acq_val</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
 <tr><td><code>lock_acq_id</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
+<tr><td><code>d0_zero_before</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
+<tr><td><code>d1_zero_before</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
+<tr><td><code>d2_zero_before</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
+<tr><td><code>d0_zero_after</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
+<tr><td><code>d1_zero_after</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
+<tr><td><code>d2_zero_after</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
 </table>
 
 
@@ -1171,7 +1184,7 @@ A route operation that routes one herd to another.
 * PLIO (`PLIO`)
 * NOC (`NOC`)
 * Trace (`Trace`)
-* Ctrl (`Ctrl`){{% /markdown %}}</details></td></tr>
+* TileControl (`TileControl`){{% /markdown %}}</details></td></tr>
 <tr><td><code>sourceChannel</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
 <tr><td><code>destBundle</code></td><td>xilinx::AIE::WireBundleAttr</td><td><details><summary>Bundle of wires</summary>{{% markdown %}}Enum cases:
 * Core (`Core`)
@@ -1184,7 +1197,7 @@ A route operation that routes one herd to another.
 * PLIO (`PLIO`)
 * NOC (`NOC`)
 * Trace (`Trace`)
-* Ctrl (`Ctrl`){{% /markdown %}}</details></td></tr>
+* TileControl (`TileControl`){{% /markdown %}}</details></td></tr>
 <tr><td><code>destChannel</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
 </table>
 
@@ -1335,6 +1348,7 @@ AIE Architecture
 | :----: | :---: | ------ |
 | AIE1 | `1` | AIE1 |
 | AIE2 | `2` | AIE2 |
+| AIE2p | `3` | AIE2p |
 
 ### AIEDevice
 
@@ -1352,6 +1366,7 @@ AIE Device
 | npu1_2col | `6` | npu1_2col |
 | npu1_3col | `7` | npu1_3col |
 | npu1_4col | `8` | npu1_4col |
+| npu2 | `9` | npu2 |
 
 ### CascadeDir
 
@@ -1429,5 +1444,5 @@ Bundle of wires
 | PLIO | `7` | PLIO |
 | NOC | `8` | NOC |
 | Trace | `9` | Trace |
-| Ctrl | `10` | Ctrl |
+| TileControl | `10` | TileControl |
 
