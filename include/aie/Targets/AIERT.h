@@ -55,7 +55,8 @@ struct AIERTControl {
                          int repeatCount, uint32_t padValue = 0,
                          bool outOfOrder = false, bool configureChannel = true,
                          bool pushTask = true);
-  mlir::LogicalResult configureLocksAndBd(mlir::Block &block, int col, int row,
+  mlir::LogicalResult configureLocksAndBd(mlir::Block &block, uint32_t channel,
+                                         DMAChannelDir dir, int col, int row,
                                           bool outOfOrder = false);
   mlir::LogicalResult initLocks(DeviceOp &targetOp);
   mlir::LogicalResult initBuffers(DeviceOp &targetOp);

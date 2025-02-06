@@ -41,11 +41,14 @@ void generateXAieDmaSetMultiDimAddr(llvm::raw_ostream &output, int ndims,
                                     int elementWidthInBytes,
                                     const char *errorRet);
 
-llvm::SetVector<mlir::Block *> getOrderedChainOfBlocks(mlir::Region *region);
+llvm::SetVector<std::tuple<mlir::Block *, uint32_t, DMAChannelDir>>
+getOrderedChainOfBlocks(mlir::Region *region);
 
 /// Collect BD blocks that require use_next_bd=0 during configuration.
 llvm::SmallPtrSet<mlir::Block *, 8>
-collectUnchainedBlocks(const llvm::SetVector<mlir::Block *> &blockVector);
+collectUnchainedBlocks(
+    const llvm::SetVector<std::tuple<mlir::Block *, uint32_t, DMAChannelDir>>
+        &blockVector);
 
 /// A buffer's `initial_value` as the bytes to write to its tile memory, in
 /// element order. Every path that delivers that value to the device calls this

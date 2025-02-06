@@ -120,12 +120,12 @@ module @test_dma_to_txn {
       %s2mm0 = aie.dma_start(S2MM, 0, ^bb3, ^bb4)
     ^bb1:
       aie.use_lock(%mem_tile_input_a_read_lock, AcquireGreaterEqual, 1)
-      aie.dma_bd(%mem_tile_input_a_buffer : memref<2048xi32>, 0, 2048) {bd_id = 128 : i32, next_bd_id = 128 : i32}
+      aie.dma_bd(%mem_tile_input_a_buffer : memref<2048xi32>, 0, 2048) {bd_id = 0 : i32, next_bd_id = 0 : i32}
       aie.use_lock(%mem_tile_input_a_write_lock, Release, 1)
       aie.next_bd ^bb1
     ^bb2:
       aie.use_lock(%mem_tile_input_b_read_lock, AcquireGreaterEqual, 1)
-      aie.dma_bd(%mem_tile_input_b_buffer : memref<2048xi32>, 0, 2048) {bd_id = 144 : i32, next_bd_id = 144 : i32}
+      aie.dma_bd(%mem_tile_input_b_buffer : memref<2048xi32>, 0, 2048) {bd_id = 0 : i32, next_bd_id = 0 : i32}
       aie.use_lock(%mem_tile_input_b_write_lock, Release, 1)
       aie.next_bd ^bb1
     ^bb3:  

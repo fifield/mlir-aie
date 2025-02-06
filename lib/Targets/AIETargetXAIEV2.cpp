@@ -119,13 +119,14 @@ static mlir::LogicalResult generateDMAConfig(OpType memOp, raw_ostream &output,
 
   // Get the region's entry block, then start traversing through the chain of
   // blocks.
-  llvm::SetVector<Block *> blockVector =
+  llvm::SetVector<std::tuple<Block *, uint32_t, DMAChannelDir>> blockVector =
       getOrderedChainOfBlocks(&memOp.getBody());
 
   llvm::SmallPtrSet<Block *, 8> unchainedBlocks =
       collectUnchainedBlocks(blockVector);
 
-  for (auto *block : blockVector) {
+  for (auto &t : blockVector) {
+    Block *block = std::get<0>(t);
     bool foundBdPacket = false;
     int packetType = 0;
     int packetID = 0;
@@ -351,7 +352,8 @@ static mlir::LogicalResult generateDMAConfig(OpType memOp, raw_ostream &output,
     }
   }
 
-  for (auto *block : blockVector) {
+  for (auto &t : blockVector) {
+    Block *block = std::get<0>(t);
     for (auto op : block->getOps<DMAStartOp>()) {
       int bdNum = blockMap[op.getDest()];
       StringRef dmaDir = stringifyDMAChannelDir(op.getChannelDir());

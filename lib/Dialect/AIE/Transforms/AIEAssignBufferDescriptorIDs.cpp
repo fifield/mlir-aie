@@ -63,7 +63,11 @@ std::optional<uint32_t> BdIdGenerator::nextBdId(int channelIndex,
 }
 
 void BdIdGenerator::assignBdId(uint32_t bdId) {
-  assert(!alreadyAssigned.count(bdId) && "bdId has already been assigned");
+  // FIXME: safeguard removed because of aie4 memtiles which have private pools
+  // of bds, so different channels have the "same" bd which triggers the assert
+  //assert(!alreadyAssigned.count(bdId) && "bdId has already been assigned");
+  if (alreadyAssigned.count(bdId))
+    return;
   alreadyAssigned.insert(bdId);
 }
 

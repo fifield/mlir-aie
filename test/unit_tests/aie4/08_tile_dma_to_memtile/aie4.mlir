@@ -47,12 +47,12 @@ aie.device(npu3) {
     %0 = aie.dma_start(S2MM, 1, ^bb1, ^bb3)
   ^bb1:  // 2 preds: ^bb0, ^bb2
     aie.use_lock(%lock_0_1, AcquireGreaterEqual, 1)
-    aie.dma_bd(%buf01_0 : memref<256xi32>, 0, 256) {bd_id = 16 : i32, next_bd_id = 17 : i32}
+    aie.dma_bd(%buf01_0 : memref<256xi32>, 0, 256) {bd_id = 0 : i32, next_bd_id = 1 : i32}
     aie.use_lock(%lock_0_1_0, Release, 1)
     aie.next_bd ^bb2
   ^bb2:  // pred: ^bb1
     aie.use_lock(%lock_0_1, AcquireGreaterEqual, 1)
-    aie.dma_bd(%buf01_1 : memref<256xi32>, 0,256) {bd_id = 17 : i32, next_bd_id = 16 : i32}
+    aie.dma_bd(%buf01_1 : memref<256xi32>, 0,256) {bd_id = 1 : i32, next_bd_id = 0 : i32}
     aie.use_lock(%lock_0_1_0, Release, 1)
     aie.next_bd ^bb1
   ^bb3:  // pred: ^bb0

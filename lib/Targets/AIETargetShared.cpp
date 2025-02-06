@@ -133,42 +133,66 @@ void generateXAieDmaSetMultiDimAddr(raw_ostream &output, int ndims,
 }
 
 // Traverse through a chain of blocks.
-llvm::SetVector<Block *> getOrderedChainOfBlocks(Region *region) {
+llvm::SetVector<std::tuple<Block *, uint32_t, DMAChannelDir>>
+getOrderedChainOfBlocks(Region *region) {
   // Get the region's entry block, then start traversing through the chain of
   // blocks.
-  llvm::SetVector<Block *> blockVector;
-  SmallVector<Block *, 16> worklist;
+  llvm::SetVector<std::tuple<Block *, uint32_t, DMAChannelDir>> blockVector;
+  SmallVector<std::tuple<Block *, uint32_t, DMAChannelDir>> worklist;
+
   Block *firstBD = &region->front();
-  blockVector.insert(firstBD);
-  worklist.push_back(firstBD);
+
+  // handle corner case of empty tile containing only an aie.end op
+  if (isa<AIE::EndOp>(firstBD->getTerminator()))
+    return blockVector;
+
+  DMAStartOp dmaStartOp = *firstBD->getOps<DMAStartOp>().begin();
+  uint32_t channel = dmaStartOp.getChannelIndex();
+  DMAChannelDir dir = dmaStartOp.getChannelDir();
+
+  blockVector.insert({firstBD, channel, dir});
+  worklist.push_back({firstBD, channel, dir});
+
   while (!worklist.empty()) {
-    Block *block = worklist.pop_back_val();
-    if (block->empty()) {
+    auto t = worklist.pop_back_val();
+    Block *block = std::get<0>(t);
+    channel = std::get<1>(t);
+    dir = std::get<2>(t);
+    if (block->empty())
       continue;
+    auto terminator = block->getTerminator();
+    if (DMAStartOp s = dyn_cast<DMAStartOp>(terminator)) {
+      channel = s.getChannelIndex();
+      dir = s.getChannelDir();
     }
-    auto successors = block->getTerminator()->getSuccessors();
-    for (auto *i : successors) {
-      if (!blockVector.contains(i)) {
-        blockVector.insert(i);
-        worklist.push_back(i);
-      }
+    auto successors = terminator->getSuccessors();
+    for (auto *succ : successors) {
+      const auto it =
+          std::find_if(blockVector.begin(), blockVector.end(),
+                       [succ](auto &t) { return succ == std::get<0>(t); });
+      if (it != blockVector.end())
+        continue;
+      blockVector.insert({succ, channel, dir});
+      worklist.push_back({succ, channel, dir});
     }
   }
   return blockVector;
 }
 
 llvm::SmallPtrSet<Block *, 8>
-collectUnchainedBlocks(const llvm::SetVector<Block *> &blockVector) {
+collectUnchainedBlocks(const llvm::SetVector<std::tuple<Block *, uint32_t, DMAChannelDir>> &blockVector) {
   // Scoped to this channel only.
   llvm::SmallPtrSet<Block *, 8> channelHeads;
-  for (Block *block : blockVector) {
+  for (auto &t : blockVector) {
+    Block *block = std::get<0>(t);
     for (auto startOp : block->getOps<DMAStartOp>()) {
       channelHeads.insert(startOp.getDest());
     }
   }
 
   llvm::SmallPtrSet<Block *, 8> unchainedBlocks;
-  for (Block *block : blockVector) {
+  for (auto &t : blockVector) {
+    Block *block = std::get<0>(t);
     for (auto startOp : block->getOps<DMAStartOp>()) {
       if (!startOp.getOutOfOrder() && !startOp.getCorePushes()) {
         continue;

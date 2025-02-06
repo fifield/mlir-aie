@@ -418,6 +418,7 @@ configureLocksInBdBlock(const AIE::AIETargetModel &targetModel,
 static LogicalResult configureBdInBlock(const AIE::AIETargetModel &targetModel,
                                         XAie_DevInst *devInst,
                                         XAie_DmaDesc &dmaTileBd, Block &block,
+                                        uint32_t channel, DMAChannelDir dir,
                                         int col, int row, int bdId,
                                         std::optional<int> nextBdId) {
   std::optional<int> packetType;
@@ -613,8 +614,15 @@ static LogicalResult configureBdInBlock(const AIE::AIETargetModel &targetModel,
   if (targetModel.getTargetArch() != AIEArch::AIE4)
     TRY_XAIE_API_EMIT_ERROR(bdOp, XAie_DmaEnableBd, &dmaTileBd);
   auto tileLoc = XAie_TileLoc(col, row);
-  TRY_XAIE_API_EMIT_ERROR(bdOp, XAie_DmaWriteBd, devInst, &dmaTileBd, tileLoc,
-                          bdId);
+  if (isa<AIE4TargetModel>(targetModel) &&
+      targetModel.isMemTile(tileLoc.Col, tileLoc.Row)) {
+    XAie_DmaDirection d = dir == DMAChannelDir::S2MM ? DMA_S2MM : DMA_MM2S;
+    TRY_XAIE_API_EMIT_ERROR(bdOp, XAie_DmaWriteBdPvtBuffPool, devInst,
+                            &dmaTileBd, tileLoc, channel, d, bdId);
+  } else {
+    TRY_XAIE_API_EMIT_ERROR(bdOp, XAie_DmaWriteBd, devInst, &dmaTileBd, tileLoc,
+                            bdId);
+  }
   LLVM_DEBUG(llvm::dbgs() << "\nend configuring bds\n");
   return success();
 };
@@ -668,6 +676,8 @@ LogicalResult xilinx::AIE::AIERTControl::pushToBdQueueAndEnable(
 };
 
 LogicalResult xilinx::AIE::AIERTControl::configureLocksAndBd(Block &block,
+                                                             uint32_t channel,
+                                                             DMAChannelDir dir,
                                                              int col, int row,
                                                              bool outOfOrder) {
   DMABDOp bd = *block.getOps<DMABDOp>().begin();
@@ -690,8 +700,8 @@ LogicalResult xilinx::AIE::AIERTControl::configureLocksAndBd(Block &block,
       outOfOrder ? std::optional<int>() : bd.getNextBdId();
   if (!block.getOps<DMABDOp>().empty() &&
       failed(configureBdInBlock(
-          targetModel, &aiert->devInst, dmaTileBd, block, col, row,
-          *bdId, // NOLINT(bugprone-unchecked-optional-access)
+          targetModel, &aiert->devInst, dmaTileBd, block, channel, dir, col,
+          row, *bdId, // NOLINT(bugprone-unchecked-optional-access)
           nextBdId)))
     return failure();
   return success();
@@ -1030,28 +1040,32 @@ xilinx::AIE::AIERTControl::addInitConfig(DeviceOp &targetOp,
 
     // Get the region's entry block, then start traversing through the chain of
     // blocks.
-    llvm::SetVector<Block *> blockVector =
-        getOrderedChainOfBlocks(&memOp.getOperation()->getRegion(0));
+    llvm::SetVector<std::tuple<Block *, uint32_t, DMAChannelDir>> blockVector =
+        getOrderedChainOfBlocks(&memOp->getRegion(0));
 
     llvm::SmallPtrSet<Block *, 8> unchainedBlocks =
         collectUnchainedBlocks(blockVector);
 
     // handle DMA ops separately
-    auto dmaOps = llvm::to_vector_of<DMAOp>(
-        memOp.getOperation()->getRegion(0).getOps<DMAOp>());
+    auto dmaOps =
+        llvm::to_vector_of<DMAOp>(memOp->getRegion(0).getOps<DMAOp>());
     if (!dmaOps.empty()) {
       for (auto dmaOp : dmaOps)
         for (auto &bdRegion : dmaOp.getBds()) {
           Block &block = bdRegion.getBlocks().front();
-          if (failed(
-                  configureLocksAndBd(block, col, row, dmaOp.getOutOfOrder())))
+          if (failed(configureLocksAndBd(block, dmaOp.getChannelIndex(),
+                                         dmaOp.getChannelDir(), col, row,
+                                         dmaOp.getOutOfOrder())))
             return failure();
         }
     } else {
-      for (Block *block : blockVector) {
+      for (auto &t : blockVector) {
+        Block *block = std::get<0>(t);
+        uint32_t channel = std::get<1>(t);
+        DMAChannelDir dir = std::get<2>(t);
         if (block->getOps<DMABDOp>().empty())
           continue;
-        if (failed(configureLocksAndBd(*block, col, row,
+        if (failed(configureLocksAndBd(*block, channel, dir, col, row,
                                        unchainedBlocks.contains(block))))
           return failure();
       }
@@ -1071,7 +1085,8 @@ xilinx::AIE::AIERTControl::addInitConfig(DeviceOp &targetOp,
           return failure();
       }
     else
-      for (Block *block : blockVector) {
+      for (auto &t : blockVector) {
+        Block *block = std::get<0>(t);
         for (auto op : block->getOps<DMAStartOp>()) {
           DMABDOp bd = *op.getDest()->getOps<DMABDOp>().begin();
           int chNum = op.getChannelIndex();
