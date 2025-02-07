@@ -629,6 +629,50 @@ class LitConfigHelper:
         return config
 
     @staticmethod
+    def detect_mesimulator(llvm_config) -> HardwareConfig:
+        """
+        Detect mesimulator (AIE4) availability from CERVINO_ROOT and ME_ROOT.
+
+        Args:
+            llvm_config: LLVM lit config for setting environment variables
+
+        Returns:
+            HardwareConfig with mesimulator detection results
+        """
+        config = HardwareConfig()
+        me_root = os.getenv("ME_ROOT")
+        cervino_root = os.getenv("CERVINO_ROOT")
+
+        if me_root and cervino_root:
+            print(f"mesimulator found: ME_ROOT={me_root}, CERVINO_ROOT={cervino_root}")
+            config.found = True
+            config.features.append("mesimulator")
+
+            # Set up environment variables
+            config.environment["CERVINO_ROOT"] = cervino_root
+            config.environment["ME_ROOT"] = me_root
+
+            # Update PYTHONPATH with mesimulator paths
+            llvm_config.with_environment("CERVINO_ROOT", cervino_root)
+            llvm_config.with_environment("ME_ROOT", me_root)
+
+            # Extend PYTHONPATH with ME python paths
+            current_pythonpath = llvm_config.config.environment.get("PYTHONPATH", "")
+            me_python = os.path.join(me_root, "python")
+            llvm_config.config.environment["PYTHONPATH"] = "{}:{}".format(
+                current_pythonpath, me_python
+            )
+        elif me_root or cervino_root:
+            print(
+                "WARNING: ME_ROOT or CERVINO_ROOT is set, but not both. "
+                "Both are needed for mesimulator."
+            )
+        else:
+            print("mesimulator not found")
+
+        return config
+
+    @staticmethod
     def detect_opencv(
         opencv_include_dir: str, opencv_lib_dir: str, opencv_libs: str
     ) -> HardwareConfig:

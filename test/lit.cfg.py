@@ -199,6 +199,9 @@ xrt_config = LitConfigHelper.detect_xrt(
 # Detect aiesimulator
 aiesim_config = LitConfigHelper.detect_aiesimulator(config.aie_obj_root)
 
+# Detect mesimulator (AIE4)
+mesim_config = LitConfigHelper.detect_mesimulator(llvm_config)
+
 # Apply all hardware/tool configurations
 LitConfigHelper.apply_config_to_lit(
     config,
@@ -207,6 +210,7 @@ LitConfigHelper.apply_config_to_lit(
         "peano": peano_config,
         "chess": chess_config,
         "aiesim": aiesim_config,
+        "mesim": mesim_config,
     },
 )
 

@@ -6,3 +6,4 @@
 # (c) Copyright 2024 Advanced Micro Devices, Inc.
 
 add_aie_runtime_libs(AIE4)
+add_subdirectory(mesim)
