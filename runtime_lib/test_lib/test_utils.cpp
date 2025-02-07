@@ -8,6 +8,8 @@
 // This file contains common helper functions for the generic host code
 
 #include "test_utils.h"
+#include "memory_allocator.h"
+
 #include <cassert>
 #include <filesystem>
 
@@ -238,14 +240,14 @@ void test_utils::print_test_banner(const char *test_name, const char *message) {
 }
 
 // TODO: Add a timeout
-void test_utils::wait_on_lock(uint64_t lock_addr, uint32_t lock_value, uint32_t (*NpuRead32)(uint64_t)) {
+void test_utils::wait_on_lock(uint64_t lock_addr, uint32_t lock_value,
+                              uint32_t (*mlir_aie_sim_read32)(uint64_t)) {
   while (1) {
-    uint32_t l = NpuRead32(lock_addr);
+    uint32_t l = mlir_aie_sim_read32(lock_addr);
     if (l >= lock_value)
       break;
   }
 }
-
 
 // Function to print each field in a 32-bit register
 void test_utils::print_dma_status_register_fields(const char * reg_name, uint32_t reg_value) {
@@ -287,19 +289,19 @@ void test_utils::print_dma_status_register_fields(const char * reg_name, uint32_
     printf("\n");
 }
 
-
-void test_utils::print_shim_tile_status(uint64_t col, uint32_t (*NpuRead32)(uint64_t)) {
+void test_utils::print_shim_tile_status(
+    uint64_t col, uint32_t (*mlir_aie_sim_read32)(uint64_t)) {
   uint64_t row = 0;
   uint64_t shim_tile_s2mm_status_0 = ((col << 25) | (row  << 20)) + 0x18570; // 0x00009ED0;
   uint64_t shim_tile_s2mm_status_1 = ((col << 25) | (row  << 20)) + 0x58579; //0x00009ED4;
   uint64_t shim_tile_mm2s_status_0 = ((col << 25) | (row  << 20)) + 0x18580; // 0x00009F00;
   uint64_t shim_tile_mm2s_status_1 = ((col << 25) | (row  << 20)) + 0x18584; // 0x00009F04;
 
-  uint32_t s2mm_status_0 = NpuRead32(shim_tile_s2mm_status_0);
-  uint32_t s2mm_status_1 = NpuRead32(shim_tile_s2mm_status_1); 
+  uint32_t s2mm_status_0 = mlir_aie_sim_read32(shim_tile_s2mm_status_0);
+  uint32_t s2mm_status_1 = mlir_aie_sim_read32(shim_tile_s2mm_status_1);
 
-  uint32_t mm2s_status_0 = NpuRead32(shim_tile_mm2s_status_0);
-  uint32_t mm2s_status_1 = NpuRead32(shim_tile_mm2s_status_1);
+  uint32_t mm2s_status_0 = mlir_aie_sim_read32(shim_tile_mm2s_status_0);
+  uint32_t mm2s_status_1 = mlir_aie_sim_read32(shim_tile_mm2s_status_1);
 
   test_utils::print_dma_status_register_fields("Shim tile S2MM0", s2mm_status_0);
   test_utils::print_dma_status_register_fields("Shim tile MM2S0", mm2s_status_0);
@@ -307,25 +309,23 @@ void test_utils::print_shim_tile_status(uint64_t col, uint32_t (*NpuRead32)(uint
 
   for (uint32_t i=0;i<6;i++) {
     uint64_t shim_tile_lock_addr = ((col << 25) | (row  << 20)) + 0x0010000 + (i * 0x0010);
-    uint32_t lock = NpuRead32(shim_tile_lock_addr);
+    uint32_t lock = mlir_aie_sim_read32(shim_tile_lock_addr);
     printf("lock[%d] = 0x%08x\n", i, lock);
   }
 }
 
-void test_utils::print_core_tile_status(uint64_t col, uint64_t row, 
-  uint32_t num_locks, 
-  uint32_t addr_offset_0,
-  uint32_t addr_len_0,
-  uint32_t addr_offset_1,
-  uint32_t addr_len_1,
-  uint32_t (*NpuRead32)(uint64_t)) {
+void test_utils::print_core_tile_status(
+    uint64_t col, uint64_t row, uint32_t num_locks, uint32_t addr_offset_0,
+    uint32_t addr_len_0, uint32_t addr_offset_1, uint32_t addr_len_1,
+    uint32_t (*mlir_aie_sim_read32)(uint64_t)) {
 
   uint64_t core_tile_status = ((col << 25) | ((row + 4)  << 20)) + 0x000A3004;
-  uint32_t reg_value = NpuRead32(core_tile_status);
+  uint32_t reg_value = mlir_aie_sim_read32(core_tile_status);
   printf("Core [%ld, %ld] status = 0x%08x\n", col, row, reg_value);
 
   uint64_t timer_low_addr = ((col << 25) | ((row + 4)  << 20)) + 0x000A0120;
-  printf("Core [%ld, %ld] timer_lo = 0x%08x\n", col, row, NpuRead32(timer_low_addr));
+  printf("Core [%ld, %ld] timer_lo = 0x%08x\n", col, row,
+         mlir_aie_sim_read32(timer_low_addr));
   // Extract fields using bit masks and shifts
   uint8_t core_processor_bus_stall = (reg_value >> 21) & 0x1;          // 21 - 1 bit
   uint8_t core_done = (reg_value >> 20) & 0x1; // 20 - 1 bit
@@ -391,20 +391,20 @@ void test_utils::print_core_tile_status(uint64_t col, uint64_t row,
 
   for (int i=0;i<num_locks;i++) {
     uint64_t core_tile_lock_addr = ((col << 25) | ((row + 4)  << 20)) + 0x00AE000 + (i * 0x0010);
-    printf("Lock[%d] = 0x%08x\n", i, NpuRead32(core_tile_lock_addr));
+    printf("Lock[%d] = 0x%08x\n", i, mlir_aie_sim_read32(core_tile_lock_addr));
   }
 
   if (addr_len_0) {
     for (int i = 0;i<addr_len_0;i++) {
       uint64_t addr = ((col << 25) | ((row + 4)  << 20)) + addr_offset_0 + (i * 4);
-      printf("0x%08x: 0x%08x\n", addr, NpuRead32(addr));
+      printf("0x%08x: 0x%08x\n", addr, mlir_aie_sim_read32(addr));
     }
   }
 
   if (addr_len_1) {
     for (int i = 0;i<addr_len_1;i++) {
       uint64_t addr = ((col << 25) | ((row + 4)  << 20)) + addr_offset_1 + (i * 4);
-      printf("0x%08x: 0x%08x\n", addr, NpuRead32(addr));
+      printf("0x%08x: 0x%08x\n", addr, mlir_aie_sim_read32(addr));
     }
   }
 
@@ -412,28 +412,78 @@ void test_utils::print_core_tile_status(uint64_t col, uint64_t row,
   uint64_t core_tile_s2mm_status_1 = ((col << 25) | ((row + 4)  << 20)) + 0x000ACF04;
   uint64_t core_tile_mm2s_status_0 = ((col << 25) | ((row + 4)  << 20)) + 0x000ACF10;
 
-  uint32_t s2mm_status_0 = NpuRead32(core_tile_s2mm_status_0);
-  uint32_t s2mm_status_1 = NpuRead32(core_tile_s2mm_status_1); 
+  uint32_t s2mm_status_0 = mlir_aie_sim_read32(core_tile_s2mm_status_0);
+  uint32_t s2mm_status_1 = mlir_aie_sim_read32(core_tile_s2mm_status_1);
 
-  uint32_t mm2s_status_0 = NpuRead32(core_tile_mm2s_status_0);
+  uint32_t mm2s_status_0 = mlir_aie_sim_read32(core_tile_mm2s_status_0);
 
   test_utils::print_dma_status_register_fields("Core tile S2MM0", s2mm_status_0);
   test_utils::print_dma_status_register_fields("Core tile S2MM1", s2mm_status_1);
   test_utils::print_dma_status_register_fields("Core tile MM2S0", mm2s_status_0);
   printf("s2mm_status_0 = 0x%08x, s2mm_status_1 = 0x%08x, mm2s_status_0 = 0x%08x\n", s2mm_status_0, s2mm_status_1, mm2s_status_0);
-  printf("Core [%ld, %ld] timer_lo = 0x%08x\n", col, row, NpuRead32(timer_low_addr));
-
+  printf("Core [%ld, %ld] timer_lo = 0x%08x\n", col, row,
+         mlir_aie_sim_read32(timer_low_addr));
 }
 
-void test_utils::wait_for_cycles(uint64_t col, uint64_t row, uint32_t cycles, uint32_t (*NpuRead32)(uint64_t)) {
+void test_utils::wait_for_cycles(uint64_t col, uint64_t row, uint32_t cycles,
+                                 uint32_t (*mlir_aie_sim_read32)(uint64_t)) {
   uint64_t timer_lo_addr = ((col << 25) | ((row + 4) << 20)) + 0x00A0120;
-  uint32_t start = NpuRead32(timer_lo_addr);
+  uint32_t start = mlir_aie_sim_read32(timer_lo_addr);
 
-  uint32_t end = NpuRead32(timer_lo_addr);
+  uint32_t end = mlir_aie_sim_read32(timer_lo_addr);
 
   while ((end - start) < cycles) {
-    end = NpuRead32(timer_lo_addr);
+    end = mlir_aie_sim_read32(timer_lo_addr);
   }
 }
 
+// Unpack transaction binary and write it to the aie array simulation
+void test_utils::write_transaction_binary(unsigned char *data,
+                                          uint64_t nbytes) {
+  assert(nbytes >= 12);
+  uint32_t major = data[0];
+  uint32_t minor = data[1];
+  uint32_t num_cols = data[4];
 
+  uint32_t num_ops, txn_size;
+  std::memcpy(&num_ops, &data[8], 4);
+  std::memcpy(&txn_size, &data[12], 4);
+
+  uint32_t i = 16;
+
+  uint64_t addr = 0;
+  uint32_t value = 0;
+  uint32_t size = 0;
+  uint32_t mask = 0;
+  const uint32_t *data_ptr = nullptr;
+
+  if (major == 1 && minor == 0) {
+    while (i < nbytes) {
+      uint8_t opc = data[i];
+      if (opc == 0x00) {
+        std::memcpy(&addr, &data[i + 4], 4);
+        std::memcpy(&value, &data[i + 8], 4);
+        i += 12;
+        mlir_aie_sim_write32(addr, value);
+      } else if (opc == 0x01) {
+        std::memcpy(&addr, &data[i + 4], 4);
+        std::memcpy(&size, &data[i + 8], 4);
+        data_ptr = reinterpret_cast<const uint32_t *>(data + i + 12);
+        i += size;
+        size = size - 12;
+        for (int j = 0; j < size / 4; j++)
+          mlir_aie_sim_write32(addr + (4 * j), data_ptr[j]);
+      } else if (opc == 0x03) {
+        std::memcpy(&addr, &data[i + 4], 4);
+        std::memcpy(&value, &data[i + 8], 4);
+        std::memcpy(&mask, &data[i + 12], 4);
+        uint32_t r = mlir_aie_sim_read32(addr);
+        uint32_t w = (r & ~mask) | (value & mask);
+        mlir_aie_sim_write32(addr, w);
+        i += 16;
+      } else {
+        assert(0 && "unhandled transaction binary opcode");
+      }
+    }
+  }
+}

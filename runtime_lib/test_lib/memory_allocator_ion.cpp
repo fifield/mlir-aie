@@ -11,6 +11,7 @@
 // have to do it ourselves.
 
 /***************************** Include Files *********************************/
+#include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -224,6 +225,13 @@ void mlir_aie_sync_mem_dev(ext_mem_model_t &handle) {
 
 u64 mlir_aie_get_device_address(struct aie_libxaie_ctx_t *_xaie, void *VA) {
   return (u64)VA; // LibXAIE will take care of converting this for us.
+}
+
+void mlir_aie_sim_write32(uint64_t addr, uint32_t data) {
+  assert(0 && "mlir_aie_sim_write32 is only available in simulation");
+}
+uint32_t mlir_aie_sim_read32(uint64_t addr) {
+  assert(0 && "mlir_aie_sim_read32 is only available in simulation");
 }
 
 /** @} */

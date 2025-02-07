@@ -213,6 +213,10 @@ void print_shim_tile_status(uint64_t , uint32_t (*)(uint64_t));
 void print_core_tile_status(uint64_t , uint64_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t (*)(uint64_t));
 
 void wait_for_cycles(uint64_t, uint64_t, uint32_t, uint32_t (*)(uint64_t));
+
+// Write transaction binary in simulation
+void write_transaction_binary(unsigned char *data, uint64_t nbytes);
+
 } // namespace test_utils
 
 #endif // _TEST_UTILS_H_

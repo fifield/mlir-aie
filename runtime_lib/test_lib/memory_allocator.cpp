@@ -19,7 +19,24 @@ void ess_ReadGM(uint64_t addr, void *data, uint64_t size);
 // Next free simulated DDR physical address.
 static uint64_t nextAlignedAddr = 0;
 
-int *mlir_aie_mem_alloc(aie_libxaie_ctx_t *ctx, ext_mem_model_t &handle,
+extern "C" {
+  
+  void ess_Write32(uint64_t addr, uint32_t Data);
+  uint32_t ess_Read32(uint64_t addr);
+}
+
+#define XAIE_BASE_ADDR 0x20000000000
+
+void mlir_aie_sim_write32(uint64_t addr, uint32_t data) {
+  ess_Write32(XAIE_BASE_ADDR + addr, data);
+}
+
+uint32_t mlir_aie_sim_read32(uint64_t addr) {
+  return ess_Read32(XAIE_BASE_ADDR + addr);
+}
+
+int *mlir_aie_mem_alloc(aie_libxaie_ctx_t *_xaie, ext_mem_model_t &handle,
+
                         int size) {
   int size_bytes = size * sizeof(int);
   handle.virtualAddr = std::malloc(size_bytes);

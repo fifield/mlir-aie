@@ -1,4 +1,9 @@
-// test.cpp
+//===- test.cpp -------------------------------------------------*- C++ -*-===//
+//
+// Copyright (C) 2025, Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
 
 #include <cassert>
 #include <cstring>
@@ -9,16 +14,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "memory_allocator.h"
 #include "test_utils.h"
-
-extern "C" {
-
-void NpuWrite32(uint64_t Addr, unsigned int Data);
-uint NpuRead32(uint64_t Addr);
-void NpuWriteTransactionBinary(unsigned char *data, size_t nbytes);
-
-}
-
 
 // Function to print each field in a 32-bit register
 void print_dma_status_register_fields(char * reg_name, uint32_t reg_value) {
@@ -68,11 +65,11 @@ void print_mem_tile_status(uint64_t col) {
   uint64_t mem_tile_mm2s_status_0 = ((col << 25) | (row  << 20)) + 0x00009F00;
   uint64_t mem_tile_mm2s_status_1 = ((col << 25) | (row  << 20)) + 0x00009F04;
 
-  uint32_t s2mm_status_0 = NpuRead32(mem_tile_s2mm_status_0);
-  uint32_t s2mm_status_1 = NpuRead32(mem_tile_s2mm_status_1); 
+  uint32_t s2mm_status_0 = mlir_aie_sim_read32(mem_tile_s2mm_status_0);
+  uint32_t s2mm_status_1 = mlir_aie_sim_read32(mem_tile_s2mm_status_1);
 
-  uint32_t mm2s_status_0 = NpuRead32(mem_tile_mm2s_status_0);
-  uint32_t mm2s_status_1 = NpuRead32(mem_tile_mm2s_status_1);
+  uint32_t mm2s_status_0 = mlir_aie_sim_read32(mem_tile_mm2s_status_0);
+  uint32_t mm2s_status_1 = mlir_aie_sim_read32(mem_tile_mm2s_status_1);
 
   print_dma_status_register_fields("Mem tile S2MM0", s2mm_status_0);
   print_dma_status_register_fields("Mem tile MM2S0", mm2s_status_0);
@@ -80,7 +77,7 @@ void print_mem_tile_status(uint64_t col) {
 
   for (uint32_t i=0;i<4;i++) {
     uint64_t mem_tile_lock_addr = ((col << 25) | (row  << 20)) + 0x0010000 + (i * 0x0010);
-    uint32_t lock = NpuRead32(mem_tile_lock_addr);
+    uint32_t lock = mlir_aie_sim_read32(mem_tile_lock_addr);
     printf("lock[%d] = 0x%08x\n", i, lock);
   }
 }
@@ -92,24 +89,24 @@ void print_tile_status(uint64_t col, uint64_t row) {
 
   printf("Tile status for col %d, row %d:\n", col, row);
   for (int i = 0; i < 4; i++) {
-    uint32_t ping_in = NpuRead32(tile_ping_in_buffer + (4 * i));
-    uint32_t pong_in = NpuRead32(tile_pong_in_buffer + (4 * i));
-    uint32_t ping_out = NpuRead32(tile_ping_out_buffer + (4 * i));
-    uint32_t pong_out = NpuRead32(tile_pong_out_buffer + (4 * i));
+    uint32_t ping_in = mlir_aie_sim_read32(tile_ping_in_buffer + (4 * i));
+    uint32_t pong_in = mlir_aie_sim_read32(tile_pong_in_buffer + (4 * i));
+    uint32_t ping_out = mlir_aie_sim_read32(tile_ping_out_buffer + (4 * i));
+    uint32_t pong_out = mlir_aie_sim_read32(tile_pong_out_buffer + (4 * i));
     printf("ping_in[%d] = 0x%08x, pong_in[%d] = 0x%08x, ping_out[%d] = 0x%08x, pong_out[%d] = 0x%08x\n", i, ping_in, i, pong_in, i, ping_out, i, pong_out);
   }
 
   for (int i = 0; i < 4; i++) {
     uint64_t lock_addr = ((col << 25) | ((row + 4) << 20)) + 0xae000 + (i * 0x0010);
-    uint32_t lock = NpuRead32(lock_addr);
+    uint32_t lock = mlir_aie_sim_read32(lock_addr);
     printf("lock[%d] = 0x%08x\n", i, lock);
   }
 
   uint64_t tile_s2mm_status_0 = ((col << 25) | ((row + 4)  << 20)) + 0x000ACF00;
   uint64_t tile_mm2s_status_0 = ((col << 25) | ((row + 4)  << 20)) + 0x000ACF10;
 
-  uint32_t s2mm_status_0 = NpuRead32(tile_s2mm_status_0);
-  uint32_t mm2s_status_0 = NpuRead32(tile_mm2s_status_0);
+  uint32_t s2mm_status_0 = mlir_aie_sim_read32(tile_s2mm_status_0);
+  uint32_t mm2s_status_0 = mlir_aie_sim_read32(tile_mm2s_status_0);
 
   print_dma_status_register_fields("Tile S2MM0", s2mm_status_0);
   print_dma_status_register_fields("Tile MM2S0", mm2s_status_0);
@@ -145,12 +142,16 @@ int main(int argc, char *argv[]) {
   uint64_t input_memtile_data_mem  = (col << 25) | (row << 20) + 0x00100000 + input_offset;
   uint64_t output_memtile_data_mem = (col << 25) | (row << 20) + 0x00100000 + output_offset;
   for (int i = 0; i < buffer_size; i++) {
-    NpuWrite32(input_memtile_data_mem  + (4 * i), input_pattern_seed +i);
-    NpuWrite32(output_memtile_data_mem + (4 * i), output_pattern_stomp);
+    mlir_aie_sim_write32(input_memtile_data_mem + (4 * i),
+                         input_pattern_seed + i);
+    mlir_aie_sim_write32(output_memtile_data_mem + (4 * i),
+                         output_pattern_stomp);
   }
   for (int i = 0; i <4; i++) {
-    NpuWrite32(input_memtile_data_mem  + (4 * (buffer_size+i)), input_pattern_stomp);
-    NpuWrite32(output_memtile_data_mem  + (4 * (buffer_size+i)), output_pattern_stomp);
+    mlir_aie_sim_write32(input_memtile_data_mem + (4 * (buffer_size + i)),
+                         input_pattern_stomp);
+    mlir_aie_sim_write32(output_memtile_data_mem + (4 * (buffer_size + i)),
+                         output_pattern_stomp);
   }
 
   printf("Memory tile stomped.\n");
@@ -158,8 +159,8 @@ int main(int argc, char *argv[]) {
   // Check the stomps
   row = 1;
   for (int i = 0; i < output_size; i++) {
-    uint32_t in = NpuRead32(input_memtile_data_mem + (4 * i));
-    uint32_t out = NpuRead32(output_memtile_data_mem + (4 * i));
+    uint32_t in = mlir_aie_sim_read32(input_memtile_data_mem + (4 * i));
+    uint32_t out = mlir_aie_sim_read32(output_memtile_data_mem + (4 * i));
     printf("input[%d] = 0x%08x, output[%d] = 0x%08x\n", i, in, i, out);
   }
 
@@ -170,10 +171,10 @@ int main(int argc, char *argv[]) {
   uint64_t tile_ping_out_buffer = ((col << 25) | ((row + 4) << 20)) + 2560;
   uint64_t tile_pong_out_buffer = ((col << 25) | ((row + 4) << 20)) + 2816;
   for (int i = 0; i < tile_size; i++) {
-    NpuWrite32(tile_ping_in_buffer  + (4 * i), 0xbad11100 + i);
-    NpuWrite32(tile_pong_in_buffer  + (4 * i), 0xbad22200 + i);
-    NpuWrite32(tile_ping_out_buffer + (4 * i), 0xbad33300 + i);
-    NpuWrite32(tile_pong_out_buffer + (4 * i), 0xbad44400 + i);
+    mlir_aie_sim_write32(tile_ping_in_buffer + (4 * i), 0xbad11100 + i);
+    mlir_aie_sim_write32(tile_pong_in_buffer + (4 * i), 0xbad22200 + i);
+    mlir_aie_sim_write32(tile_ping_out_buffer + (4 * i), 0xbad33300 + i);
+    mlir_aie_sim_write32(tile_pong_out_buffer + (4 * i), 0xbad44400 + i);
   }
 
   printf("Tile memory stomped.\n");
@@ -184,8 +185,8 @@ int main(int argc, char *argv[]) {
   // Configure the array
   std::string txn_path = "transaction.bin";
   std::vector<uint32_t> data = test_utils::load_instr_binary(txn_path);
-  NpuWriteTransactionBinary(reinterpret_cast<uint8_t *>(data.data()),
-                            data.size() * sizeof(uint32_t));
+  test_utils::write_transaction_binary(reinterpret_cast<uint8_t *>(data.data()),
+                                       data.size() * sizeof(uint32_t));
 
   printf("Configuration written.\n");
 
@@ -196,7 +197,8 @@ int main(int argc, char *argv[]) {
 
   row = 1;
   uint64_t mem_tile_lock_1 = ((col << 25) | (row  << 20)) + 0x00010010;
-  NpuWrite32(mem_tile_lock_1, 1);  // There's 1 tile of data there now, go for it
+  mlir_aie_sim_write32(mem_tile_lock_1,
+                       1); // There's 1 tile of data there now, go for it
 
   printf("Lock toggled!\n");
   printf("-------------\n\n");
@@ -214,7 +216,7 @@ int main(int argc, char *argv[]) {
   uint64_t tile_lock_1 = ((col << 25) | ((row + 4) << 20)) + 0x000AE010;
   int timeout = 0;
   while (1) {
-    uint32_t l = NpuRead32(tile_lock_1);
+    uint32_t l = mlir_aie_sim_read32(tile_lock_1);
     if (l >= 2)
       break;
   }
@@ -223,7 +225,7 @@ int main(int argc, char *argv[]) {
   row = 1;
   while (1) {
     uint64_t mem_tile_lock_3 = ((col << 25) | (row  << 20)) + 0x00010030;
-    uint32_t l = NpuRead32(mem_tile_lock_3);
+    uint32_t l = mlir_aie_sim_read32(mem_tile_lock_3);
     if (l >= 1)
       break;
 /*
@@ -242,14 +244,15 @@ int main(int argc, char *argv[]) {
   uint32_t output[buffer_size];
   int errs = 0;
   for (int i = 0; i < buffer_size; i++) {
-    output[i] = NpuRead32(output_memtile_data_mem + (4 * i));
+    output[i] = mlir_aie_sim_read32(output_memtile_data_mem + (4 * i));
     if (output[i] != (input_pattern_seed + 1 + i)) {
       errs++;
       printf("error @ %d : %x\n", i, output[i]);
     }
   }
   for (int i=0;i<4;i++) {
-    uint32_t over = NpuRead32(output_memtile_data_mem + (4 * (buffer_size+i)));
+    uint32_t over =
+        mlir_aie_sim_read32(output_memtile_data_mem + (4 * (buffer_size + i)));
     if (over != output_pattern_stomp) {
       errs++;
       printf("error @ over %d : %x\n", i, over);

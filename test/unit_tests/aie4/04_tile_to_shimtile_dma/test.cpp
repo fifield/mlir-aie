@@ -1,4 +1,9 @@
-// test.cpp
+//===- test.cpp -------------------------------------------------*- C++ -*-===//
+//
+// Copyright (C) 2025, Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
 
 #include <cassert>
 #include <cstring>
@@ -12,15 +17,6 @@
 
 #include "memory_allocator.h"
 #include "test_utils.h"
-
-extern "C" {
-
-typedef unsigned int uint;
-void NpuWrite32(uint64_t Addr, uint Data);
-uint NpuRead32(uint64_t Addr);
-void NpuWriteTransactionBinary(unsigned char *data, size_t nbytes);
-
-}
 
 int main(int argc, char *argv[]) {
   printf("Hello, world.\n");
@@ -37,18 +33,18 @@ int main(int argc, char *argv[]) {
 
   uint64_t tile_data_mem = ((col << 25) | ((row + 4) << 20)) + 2048;
   for (int i = 0; i < 256; i++) {
-    NpuWrite32(tile_data_mem + (i * 4), 0xdeadbeef + i);
+    mlir_aie_sim_write32(tile_data_mem + (i * 4), 0xdeadbeef + i);
   }
 
   std::string txn_path = "transaction.bin";
   std::vector<uint32_t> data = test_utils::load_instr_binary(txn_path);
-  NpuWriteTransactionBinary(reinterpret_cast<uint8_t *>(data.data()),
-                            data.size() * sizeof(uint32_t));
+  test_utils::write_transaction_binary(reinterpret_cast<uint8_t *>(data.data()),
+                                       data.size() * sizeof(uint32_t));
 
   row = 0;
   uint64_t shim_lock_1 = ((col << 25) | (row << 20)) + 0x00010010;
   while (1) {
-    uint32_t l = NpuRead32(shim_lock_1);
+    uint32_t l = mlir_aie_sim_read32(shim_lock_1);
     if (l >= 1)
       break;
   }

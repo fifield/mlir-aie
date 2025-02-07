@@ -15,11 +15,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// #if defined(__AIESIM__)
-// #include "xioutils.h"
-// #include <iostream>
-// #endif
-
 extern "C" {
 
 /// Depending on the model of a particular device, this API supports several
@@ -69,6 +64,9 @@ void mlir_aie_sync_mem_dev(ext_mem_model_t &handle);
 /// @param host_address A host-side pointer returned from mlir_aie_mem_alloc
 /// @return The device physical address corresponding to the host pointer
 u64 mlir_aie_get_device_address(aie_libxaie_ctx_t *ctx, void *host_address);
+
+void mlir_aie_sim_write32(uint64_t addr, uint32_t data);
+uint32_t mlir_aie_sim_read32(uint64_t addr);
 
 } // extern "C"
 

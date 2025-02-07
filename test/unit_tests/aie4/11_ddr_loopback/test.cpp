@@ -1,4 +1,9 @@
-// test.cpp
+//===- test.cpp -------------------------------------------------*- C++ -*-===//
+//
+// Copyright (C) 2025, Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
 
 #include <cassert>
 #include <cstring>
@@ -12,14 +17,6 @@
 
 #include "memory_allocator.h"
 #include "test_utils.h"
-
-extern "C" {
-
-typedef unsigned int uint;
-void NpuWrite32(uint64_t Addr, uint32_t Data);
-uint32_t NpuRead32(uint64_t Addr);
-void NpuWriteTransactionBinary(unsigned char *data, size_t nbytes);
-}
 
 #define VERBOSE_TEST 0
 
@@ -51,8 +48,9 @@ int main(int argc, char *argv[]) {
 
 
   if (VERBOSE_TEST) {
-    test_utils::print_shim_tile_status(0, NpuRead32);
-    test_utils::print_core_tile_status(0,2, 4, 512, 4, 640, 4, NpuRead32);
+    test_utils::print_shim_tile_status(0, mlir_aie_sim_read32);
+    test_utils::print_core_tile_status(0, 2, 4, 512, 4, 640, 4,
+                                       mlir_aie_sim_read32);
   }
 
   ////////////////////////////////////////////////////
@@ -61,9 +59,8 @@ int main(int argc, char *argv[]) {
   // Configure the array
   std::string txn_path = "transaction.bin";
   std::vector<uint32_t> data = test_utils::load_instr_binary(txn_path);
-  NpuWriteTransactionBinary(reinterpret_cast<uint8_t *>(data.data()),
-                            data.size() * sizeof(uint32_t));
-
+  test_utils::write_transaction_binary(reinterpret_cast<uint8_t *>(data.data()),
+                                       data.size() * sizeof(uint32_t));
 
   ////////////////////////////////////////////////////
   // TEST START
@@ -75,28 +72,30 @@ int main(int argc, char *argv[]) {
 
   row = 0;
   uint64_t shim_tile_lock_1 = ((col << 25) | (row  << 20)) + 0x00010010;
-  NpuWrite32(shim_tile_lock_1, 1);  // There's 1 tile of data there now, go for it
-
+  mlir_aie_sim_write32(shim_tile_lock_1,
+                       1); // There's 1 tile of data there now, go for it
 
   if (VERBOSE_TEST) {
     printf("Test just started, possibly not completed yet");
-    test_utils::print_shim_tile_status(0, NpuRead32);
-    test_utils::print_core_tile_status(0,2, 4, 2048, 8, 2560, 8, NpuRead32);
+    test_utils::print_shim_tile_status(0, mlir_aie_sim_read32);
+    test_utils::print_core_tile_status(0, 2, 4, 2048, 8, 2560, 8,
+                                       mlir_aie_sim_read32);
   }
 
   ////////////////////////////////////////////////////
   // CHECKING FOR TEST COMPLETION
 
   uint64_t shim_tile_lock_3 = (col << 25) | 0x00010030;
-  test_utils::wait_on_lock(shim_tile_lock_3, 1, NpuRead32);
+  test_utils::wait_on_lock(shim_tile_lock_3, 1, mlir_aie_sim_read32);
 
   // When your lock logic goes wrong, this code below can help
-  //printf("Going to wait for 10,000 cycles\n");
-  //test_utils::wait_for_cycles(0, 2, 10000, NpuRead32);
+  // printf("Going to wait for 10,000 cycles\n");
+  // test_utils::wait_for_cycles(0, 2, 10000, mlir_aie_sim_read32);
 
   if (VERBOSE_TEST) {
-    test_utils::print_shim_tile_status(0, NpuRead32);
-    test_utils::print_core_tile_status(0,2, 4, 2048, 8, 2560, 8, NpuRead32);
+    test_utils::print_shim_tile_status(0, mlir_aie_sim_read32);
+    test_utils::print_core_tile_status(0, 2, 4, 2048, 8, 2560, 8,
+                                       mlir_aie_sim_read32);
   }
 
   // EXECUTION COMPLETE
