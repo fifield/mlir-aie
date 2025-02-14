@@ -101,4 +101,15 @@ lib.set_write32_callback(lib._mesim_write32_cb)
 lib.set_readGM_callback(lib._mesim_readGM_cb)
 lib.set_writeGM_callback(lib._mesim_writeGM_cb)
 
-print(lib.run_main(0, []))
+user_args = ["app"] + os.getenv("MLIR_AIE_MESIM_PROGRAM_ARGS", "").split()
+char_array = ffi.new("char*[]", len(user_args))
+char_pointers = []
+for i, s in enumerate(user_args):
+    # Convert each Python string to a C-style string
+    encoded_string = s.encode("utf-8")
+    c_string = ffi.new("char[]", encoded_string)
+    char_pointers.append(c_string)  # Keep a reference
+    char_array[i] = c_string
+
+exit_code = lib.run_main(len(user_args), char_array)
+sys.exit(exit_code)
