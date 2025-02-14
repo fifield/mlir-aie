@@ -240,8 +240,7 @@ void test_utils::print_test_banner(const char *test_name, const char *message) {
 }
 
 // TODO: Add a timeout
-void test_utils::wait_on_lock(uint64_t lock_addr, uint32_t lock_value,
-                              uint32_t (*mlir_aie_sim_read32)(uint64_t)) {
+void test_utils::wait_on_lock(uint64_t lock_addr, uint32_t lock_value) {
   while (1) {
     uint32_t l = mlir_aie_sim_read32(lock_addr);
     if (l >= lock_value)
@@ -289,8 +288,7 @@ void test_utils::print_dma_status_register_fields(const char * reg_name, uint32_
     printf("\n");
 }
 
-void test_utils::print_shim_tile_status(
-    uint64_t col, uint32_t (*mlir_aie_sim_read32)(uint64_t)) {
+void test_utils::print_shim_tile_status(uint64_t col) {
   uint64_t row = 0;
   uint64_t shim_tile_s2mm_status_0 = ((col << 25) | (row  << 20)) + 0x18570; // 0x00009ED0;
   uint64_t shim_tile_s2mm_status_1 = ((col << 25) | (row  << 20)) + 0x58579; //0x00009ED4;
@@ -316,8 +314,7 @@ void test_utils::print_shim_tile_status(
 
 void test_utils::print_core_tile_status(
     uint64_t col, uint64_t row, uint32_t num_locks, uint32_t addr_offset_0,
-    uint32_t addr_len_0, uint32_t addr_offset_1, uint32_t addr_len_1,
-    uint32_t (*mlir_aie_sim_read32)(uint64_t)) {
+    uint32_t addr_len_0, uint32_t addr_offset_1, uint32_t addr_len_1) {
 
   uint64_t core_tile_status = ((col << 25) | ((row + 4)  << 20)) + 0x000A3004;
   uint32_t reg_value = mlir_aie_sim_read32(core_tile_status);
@@ -425,8 +422,7 @@ void test_utils::print_core_tile_status(
          mlir_aie_sim_read32(timer_low_addr));
 }
 
-void test_utils::wait_for_cycles(uint64_t col, uint64_t row, uint32_t cycles,
-                                 uint32_t (*mlir_aie_sim_read32)(uint64_t)) {
+void test_utils::wait_for_cycles(uint64_t col, uint64_t row, uint32_t cycles) {
   uint64_t timer_lo_addr = ((col << 25) | ((row + 4) << 20)) + 0x00A0120;
   uint32_t start = mlir_aie_sim_read32(timer_lo_addr);
 

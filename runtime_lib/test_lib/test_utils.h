@@ -205,14 +205,15 @@ void write_out_trace(char *traceOutPtr, size_t trace_size, std::string path);
 
 void print_test_banner(const char *, const char *);
 
-void wait_on_lock(uint64_t, uint32_t, uint32_t(*)(uint64_t));
+void wait_on_lock(uint64_t, uint32_t);
 
 // Print utilities
 void print_dma_status_register_fields(const char *, uint32_t);
-void print_shim_tile_status(uint64_t , uint32_t (*)(uint64_t));
-void print_core_tile_status(uint64_t , uint64_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t (*)(uint64_t));
+void print_shim_tile_status(uint64_t);
+void print_core_tile_status(uint64_t, uint64_t, uint32_t, uint32_t, uint32_t,
+                            uint32_t, uint32_t);
 
-void wait_for_cycles(uint64_t, uint64_t, uint32_t, uint32_t (*)(uint64_t));
+void wait_for_cycles(uint64_t, uint64_t, uint32_t);
 
 // Write transaction binary in simulation
 void write_transaction_binary(unsigned char *data, uint64_t nbytes);

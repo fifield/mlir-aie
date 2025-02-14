@@ -42,9 +42,8 @@ int main(int argc, char *argv[]) {
 
 
   if (VERBOSE_TEST) {
-    test_utils::print_shim_tile_status(0, mlir_aie_sim_read32);
-    test_utils::print_core_tile_status(0, 2, 4, 512, 4, 640, 4,
-                                       mlir_aie_sim_read32);
+    test_utils::print_shim_tile_status(0);
+    test_utils::print_core_tile_status(0, 2, 4, 512, 4, 640, 4);
   }
 
   ////////////////////////////////////////////////////
@@ -91,9 +90,8 @@ int main(int argc, char *argv[]) {
 
   if (VERBOSE_TEST) {
     printf("Test just started, possibly not completed yet");
-    test_utils::print_shim_tile_status(0, mlir_aie_sim_read32);
-    test_utils::print_core_tile_status(0, 2, 4, 2048, 8, 2560, 8,
-                                       mlir_aie_sim_read32);
+    test_utils::print_shim_tile_status(0);
+    test_utils::print_core_tile_status(0, 2, 4, 2048, 8, 2560, 8);
   }
 
   ////////////////////////////////////////////////////
@@ -102,16 +100,15 @@ int main(int argc, char *argv[]) {
   printf("Going to wait for lock 0 to increment\n");
 
   uint64_t shim_tile_lock_0 = (col << 25) | 0x00010000;
-  test_utils::wait_on_lock(shim_tile_lock_0, 2, mlir_aie_sim_read32);
+  test_utils::wait_on_lock(shim_tile_lock_0, 2);
 
   // When your lock logic goes wrong, this code below can help
   // printf("Going to wait for 10,000 cycles\n");
-  // test_utils::wait_for_cycles(0, 2, 10000, mlir_aie_sim_read32);
+  // test_utils::wait_for_cycles(0, 2, 10000);
 
   if (VERBOSE_TEST) {
-    test_utils::print_shim_tile_status(0, mlir_aie_sim_read32);
-    test_utils::print_core_tile_status(0, 2, 4, 2048, 8, 2560, 8,
-                                       mlir_aie_sim_read32);
+    test_utils::print_shim_tile_status(0);
+    test_utils::print_core_tile_status(0, 2, 4, 2048, 8, 2560, 8);
   }
 
   // EXECUTION COMPLETE
