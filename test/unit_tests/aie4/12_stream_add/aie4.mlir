@@ -7,7 +7,7 @@
 //
 // RUN: xchesscc_wrapper aie4 -c %S/kernel.cc
 // RUN: aiecc.py --alloc-scheme=basic-sequential --xchesscc --xbridge --no-compile-host --aie-generate-txn --aiesim %s %test_utils_flags %S/test.cpp
-// RUN: aie-translate -aie-npu-instgen -aie-output-binary=true -o transaction.bin aie4.mlir.prj/txn.mlir
+// RUN: aie-translate -aie-npu-to-binary -aie-output-binary=true -o transaction.bin aie4.mlir.prj/txn.mlir
 // RUN: aie4.mlir.prj/aiesim.sh | FileCheck %s
 //
 // CHECK: AIE4{{.*}}ISS
