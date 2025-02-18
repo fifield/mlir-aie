@@ -2097,7 +2097,7 @@ AIE4TargetModel::getNumSourceSwitchboxConnections(int col, int row,
 uint32_t
 AIE4TargetModel::getNumDestShimMuxConnections(int col, int row,
                                               WireBundle bundle) const {
-  return 2;
+  return 8;
 }
 
 uint32_t
