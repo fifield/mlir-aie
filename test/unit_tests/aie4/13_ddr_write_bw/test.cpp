@@ -61,6 +61,7 @@ int main(int argc, char *argv[]) {
   test_utils::write_transaction_binary(reinterpret_cast<uint8_t *>(data.data()),
                                        data.size() * sizeof(uint32_t));
 
+
   // SET UP PERFORMANCE COUNTERS
   // First, the locks we want to look at
   uint64_t locks_event_selection_A_0 = (col << 25) | 0x00010100;
@@ -141,17 +142,17 @@ int main(int argc, char *argv[]) {
     errs++;
   }
 
-  // Lets make sure the input is still there ...
+  // Lets make sure the output is zeros ...
   mlir_aie_sync_mem_cpu(handle_out);
-  uint32_t *ddr_input = reinterpret_cast<uint32_t *>(handle_out.virtualAddr);
+  uint32_t *ddr_output = reinterpret_cast<uint32_t *>(handle_out.virtualAddr);
   for (int i = 0; i < 65536; i++) {
-    if (ddr_input[i] != 0) {
+    if (ddr_output[i] != 0) {
       errs++;
-      printf(" IN: error @ %d : %x\n", i, ddr_input[i]);
+      printf(" OUT: error @ %d : %x\n", i, ddr_output[i]);
     }
     else
       if (VERBOSE_TEST)
-        printf(" IN:   yes @ %d : %x\n", i, ddr_input[i]);
+        printf(" OUT:   yes @ %d : %x\n", i, ddr_output[i]);
   }
 
   if (!errs) {

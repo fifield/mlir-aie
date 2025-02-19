@@ -36,6 +36,9 @@ env:
             -DAIE_INCLUDE_INTEGRATION_TESTS=OFF
   # -j here to reduce the number of parallel chess jobs.
   LIT_OPTS: -sv --time-tests -j16 --timeout 600 --show-unsupported --show-excluded
+  # prebuilt mesimulator
+  ME_ROOT: /proj/rdi/staff/jefff/aie4/pacifica-sim/cervino/aie4
+  CERVINO_ROOT: /proj/rdi/staff/jefff/aie4/pacifica-sim/cervino
 
 jobs:
   build-tests:
@@ -68,6 +71,12 @@ jobs:
 
           export PATH=${VITIS}/aietools/bin:${VITIS}/bin:$PATH
           export LD_LIBRARY_PATH=${VITIS}/tps/lnx64/python-3.8.3/lib:$LD_LIBRARY_PATH
+
+          export LD_LIBRARY_PATH=$CERVINO_ROOT/ext/systemc/systemc-2.3.3/lib-linux64:$LD_LIBRARY_PATH
+          export LD_LIBRARY_PATH=$CERVINO_ROOT/ext/Boost_1_72_0/boost_1_72_0/rdi/lib/gcc8.3.0/lnx64.o:$LD_LIBRARY_PATH
+          export PYTHONPATH=$ME_ROOT/python:$ME_ROOT/applications:$PYTHONPATH
+          export PYTHONPATH=$CERVINO_ROOT/ext/python3/lib/python3.9:$PYTHONPATH
+
           cmake .. -G Ninja \
             -DPython3_EXECUTABLE=$(which python) \
             -DCMAKE_MODULE_PATH=$PWD/../cmake/modulesXilinx \

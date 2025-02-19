@@ -9,12 +9,14 @@
 //===----------------------------------------------------------------------===//
 
 // RUN: %python aiecc.py --no-compile --aiesim %s %S/test.cpp
-// RUN: aie.mlir.prj/aiesim.sh | FileCheck %s
-
-// CHECK: AIE4{{.*}}ISS
-// CHECK: Hello, world.
-// CHECK: Exiting!
-
+// RUN: aie.mlir.prj/aiesim.sh | FileCheck --check-prefix=AIESIM %s
+// RUN: aie.mlir.prj/mesim.sh | FileCheck --check-prefix=MESIM %s
+//
+// AIESIM: AIE4{{.*}}ISS
+// AIESIM: Hello, world.
+// MESIM: device model: {{.*}}aie4
+// MESIM: Hello, world.
+//
 module @test00_itsalive {
   aie.device(npu3) {
     %tile20 = aie.tile(2, 0)

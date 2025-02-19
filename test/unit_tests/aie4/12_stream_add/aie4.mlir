@@ -5,13 +5,18 @@
 //
 // (c) Copyright 2025 Advanced Micro Devices Inc.
 //
+// REQUIRES: mesimulator
+//
 // RUN: xchesscc_wrapper aie4 -c %S/kernel.cc
 // RUN: aiecc.py --alloc-scheme=basic-sequential --xchesscc --xbridge --no-compile-host --aie-generate-txn --aiesim %s %test_utils_flags %S/test.cpp
 // RUN: aie-translate -aie-npu-to-binary -aie-output-binary=true -o transaction.bin aie4.mlir.prj/txn.mlir
-// RUN: aie4.mlir.prj/aiesim.sh | FileCheck %s
+// RUN: aie4.mlir.prj/aiesim.sh | FileCheck --check-prefix=AIESIM %s
+// RUN: aie4.mlir.prj/mesim.sh | FileCheck --check-prefix=MESIM %s
 //
-// CHECK: AIE4{{.*}}ISS
-// CHECK: PASS! 
+// AIESIM: AIE4{{.*}}ISS
+// AIESIM: PASS!
+// MESIM: device model: {{.*}}aie4
+// MESIM: PASS!
 //
 
 module {
