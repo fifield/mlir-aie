@@ -197,6 +197,7 @@ static void declareAIEIntrinsics(AIEArch arch, OpBuilder &builder) {
     return;
   case AIEArch::AIE2p:
     registerIntrinsics(getAIE2pIntrinsics(builder));
+    return;
   case AIEArch::AIE4:
     registerIntrinsics(getAIE4Intrinsics(builder));
     return;
