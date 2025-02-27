@@ -201,9 +201,11 @@ mlir::LogicalResult AIE::AIETranslateShimSolution(mlir::ModuleOp module,
   // For each DMAStartOp in shims, generate a "LogicalInstance" section
   for (ShimDMAOp shimOp : deviceOp.getOps<ShimDMAOp>()) {
     for (DMAStartOp startOp : shimOp.getOps<DMAStartOp>()) {
-
+      (void)startOp;
       int32_t column = shimOp.colIndex();
-      int32_t channel = startOp.getChannelIndex();
+      // limit instances to one per column by setting channel=0 here, otherwise
+      // there are crashes with aiesimulator for aie4
+      int32_t channel = 0;
       if (visitedPorts.count({column, channel}))
         continue;
 

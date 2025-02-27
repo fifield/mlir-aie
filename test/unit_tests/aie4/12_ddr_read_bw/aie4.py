@@ -6,9 +6,10 @@
 # RUN: aiecc.py --alloc-scheme=basic-sequential --xchesscc --xbridge --no-compile-host --aie-generate-txn --aiesim aie4_py.mlir %test_utils_flags %S/test.cpp
 # RUN: aie-translate -aie-npu-to-binary -aie-output-binary=true --aie-sequence-name=configure -o transaction.bin aie4_py.mlir.prj/txn.mlir
 
-# aiesim currently fails with this design.
-# DONT: aie4_py.mlir.prj/aiesim.sh | FileCheck --check-prefix=AIESIM %s
-# DONT: aie4_py.mlir.prj/mesim.sh | FileCheck --check-prefix=MESIM %s
+# REQUIRES: mesimulator
+
+# RUN: aie4_py.mlir.prj/aiesim.sh | FileCheck --check-prefix=AIESIM %s
+# RUN: aie4_py.mlir.prj/mesim.sh | FileCheck --check-prefix=MESIM %s
 
 # AIESIM: PASS!
 # MESIM: PASS!
