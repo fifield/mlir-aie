@@ -27,7 +27,8 @@ mlir::LogicalResult AIE::AIETranslateSCSimConfig(mlir::ModuleOp module,
   }
   AIEArch arch = deviceOp.getTargetModel().getTargetArch();
 
-  if (arch == AIEArch::AIE4) {
+
+  if (arch == AIEArch::AIE4 || arch == AIEArch::AIE4z) {
     output << "{\n"
            << "    \"SimulationConfig\": {\n"
            << "        \"device_json\": {\n"

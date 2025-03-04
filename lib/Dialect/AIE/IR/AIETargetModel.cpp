@@ -1925,7 +1925,10 @@ AIE4TargetModel::getNumDestSwitchboxConnections(int col, int row,
     case WireBundle::DMA:
       return 2;
     case WireBundle::North:
-      return 4;
+      if (isa<NPU3zTargetModel>(this))
+        return 8;
+      else
+        return 4;
     case WireBundle::West: {
       if (col == 0)
         return 0;
@@ -2001,8 +2004,12 @@ AIE4TargetModel::getNumSourceSwitchboxConnections(int col, int row,
     case WireBundle::DMA:
       return 10;
     case WireBundle::North:
-    case WireBundle::South:
       return 4;
+    case WireBundle::South:
+      if (isa<NPU3zTargetModel>(this))
+        return 8;
+      else
+        return 4;
     case WireBundle::SouthControl:
     case WireBundle::Switch32:
       return 2;
@@ -2023,6 +2030,10 @@ AIE4TargetModel::getNumSourceSwitchboxConnections(int col, int row,
   if (isShimNOCTile(col, row))
     switch (bundle) {
     case WireBundle::DMA:
+      if (isa<NPU3zTargetModel>(this))
+        return 8;
+      else
+        return 4;
     case WireBundle::North:
       return 4;
     case WireBundle::West: {
@@ -2097,13 +2108,13 @@ AIE4TargetModel::getNumSourceSwitchboxConnections(int col, int row,
 uint32_t
 AIE4TargetModel::getNumDestShimMuxConnections(int col, int row,
                                               WireBundle bundle) const {
-  return 8;
+  return 10;
 }
 
 uint32_t
 AIE4TargetModel::getNumSourceShimMuxConnections(int col, int row,
                                                 WireBundle bundle) const {
-  return 4;
+  return 10;
 }
 
 // src == subordinate

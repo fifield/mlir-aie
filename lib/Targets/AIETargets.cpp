@@ -117,6 +117,8 @@ LogicalResult AIETranslateToTargetArch(ModuleOp module, raw_ostream &output,
   }
   if (arch == AIEArch::AIE1)
     output << "AIE\n";
+  else if (arch == AIEArch::AIE4z)
+    output << "AIE4\n";
   else
     output << stringifyEnum(arch) << "\n";
   return success();

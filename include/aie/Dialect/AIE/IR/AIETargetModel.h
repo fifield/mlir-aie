@@ -108,6 +108,7 @@ public:
     TK_AIE2PS_Last,
     TK_AIE2_Last = TK_AIE2PS_Last,
     TK_AIE4_NPU3,
+    TK_AIE4_NPU3Z,
     TK_AIE4_Last,
   };
 
@@ -1496,6 +1497,19 @@ public:
     return model->getKind() == TK_AIE4_NPU3Z;
   }
   AIEArch getTargetArch() const override { return AIEArch::AIE4z; }
+};
+
+// The pacifica NPU
+class NPU3zTargetModel : public BaseNPU3TargetModel {
+public:
+  NPU3zTargetModel() : BaseNPU3TargetModel(TK_AIE4_NPU3Z) {}
+
+  int columns() const override { return 3; }
+
+  static bool classof(const AIETargetModel *model) {
+    return model->getKind() == TK_AIE4_NPU3Z;
+  }
+  AIEArch getTargetArch() const { return AIEArch::AIE4z; }
 };
 
 } // namespace xilinx::AIE

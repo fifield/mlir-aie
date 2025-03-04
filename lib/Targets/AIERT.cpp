@@ -303,6 +303,9 @@ xilinx::AIE::AIERTControl::AIERTControl(const AIE::AIETargetModel &tm)
   case AIEArch::AIE4:
     devGen = XAIE_DEV_GEN_AIE4_MEDUSA;
     break;
+  case AIEArch::AIE4z:
+    devGen = XAIE_DEV_GEN_AIE4Z;
+    break;
   }
   aiert->configPtr = XAie_Config{
       /*AieGen*/ devGen,
@@ -611,11 +614,17 @@ static LogicalResult configureBdInBlock(const AIE::AIETargetModel &targetModel,
     TRY_XAIE_API_EMIT_ERROR(bdOp, XAie_DmaSetOutofOrderBdId, &dmaTileBd,
                             static_cast<uint8_t>(*oooId));
   // In AIE4, Valid_BD is assumed always Enabled
-  if (targetModel.getTargetArch() != AIEArch::AIE4)
+  if (!isa<AIE4TargetModel>(targetModel))
     TRY_XAIE_API_EMIT_ERROR(bdOp, XAie_DmaEnableBd, &dmaTileBd);
+
+    
+  // If it's AIE4 mem tile, or an AIE4z shim, then it has a private bd pool and
+  // XAie_DmaWriteBdPvtBuffPool aie-rt is used instead of XAie_DmaWriteBd
   auto tileLoc = XAie_TileLoc(col, row);
   if (isa<AIE4TargetModel>(targetModel) &&
-      targetModel.isMemTile(tileLoc.Col, tileLoc.Row)) {
+      (targetModel.isMemTile(col, row) ||
+       (isa<NPU3zTargetModel>(targetModel) &&
+        targetModel.isShimNOCTile(col, row)))) {
     XAie_DmaDirection d = dir == DMAChannelDir::S2MM ? DMA_S2MM : DMA_MM2S;
     TRY_XAIE_API_EMIT_ERROR(bdOp, XAie_DmaWriteBdPvtBuffPool, devInst,
                             &dmaTileBd, tileLoc, channel, d, bdId);
@@ -669,7 +678,7 @@ LogicalResult xilinx::AIE::AIERTControl::pushToBdQueueAndEnable(
                             tileLoc, chNum, direction, bdId, repeatCount,
                             enTokenIssue);
   }
-  if (configureChannel && targetModel.getTargetArch() != AIEArch::AIE4)
+  if (configureChannel && !isa<AIE4TargetModel>(targetModel))
     TRY_XAIE_API_EMIT_ERROR(op, XAie_DmaChannelEnable, &aiert->devInst, tileLoc,
                             chNum, direction);
   return success();
@@ -1015,6 +1024,18 @@ xilinx::AIE::AIERTControl::addInitConfig(DeviceOp &targetOp,
           XAie_TileLoc(tile.getTileID().col, tile.getTileID().row);
       TRY_XAIE_API_EMIT_ERROR(tile, _XAie_TileCtrlSetIsolation,
                               &aiert->devInst, tileLoc, 0);
+    }
+  }
+  if (isa<NPU3zTargetModel>(targetOp.getTargetModel())) {
+    // set compatability mode
+    uint32_t mode = 0x1; // Native
+    for (TileOp tile : targetOp.getOps<TileOp>()) {
+      if (!tile.isShimNOCTile())
+        continue;
+      uint64_t addr =
+          0x0001A440 |
+          (tile.getCol() << targetOp.getTargetModel().getColumnShift());
+      TRY_XAIE_API_EMIT_ERROR(tile, XAie_Write32, &devInst, addr, mode);
     }
   }
   if (failed(initLocks(targetOp))) {

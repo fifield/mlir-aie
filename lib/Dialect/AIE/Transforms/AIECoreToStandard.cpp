@@ -50,6 +50,7 @@ static StringRef getArchTargetTriple(AIEArch arch) {
   case AIEArch::AIE2ps:
     return "aie2ps";
   case AIEArch::AIE4:
+  case AIEArch::AIE4z:
     return "aie4";
   }
   llvm::report_fatal_error("unsupported arch");
@@ -199,6 +200,7 @@ static void declareAIEIntrinsics(AIEArch arch, OpBuilder &builder) {
     registerIntrinsics(getAIE2pIntrinsics(builder));
     return;
   case AIEArch::AIE4:
+  case AIEArch::AIE4z:
     registerIntrinsics(getAIE4Intrinsics(builder));
     return;
   case AIEArch::AIE2ps:

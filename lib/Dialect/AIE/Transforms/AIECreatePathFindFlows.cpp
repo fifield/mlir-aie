@@ -194,7 +194,7 @@ struct ConvertFlowsToInterconnect : OpConversionPattern<FlowOp> {
       return success();
     }
     DeviceOp device = flowOp->getParentOfType<DeviceOp>();
-    bool useShimMux = device.getTargetModel().getTargetArch() != AIEArch::AIE4;
+    bool useShimMux = !isa<AIE4TargetModel>(device.getTargetModel());
     const SwitchSettings &settings = analyzer.routing.settings.at(srcPoint);
     // add connections for all the Switchboxes in SwitchSettings
     for (const auto &[tileId, setting] : settings) {
