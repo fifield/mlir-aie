@@ -26,12 +26,12 @@ def generate_module():
         tensor_ty = np.ndarray[(N,), np.dtype[np.int32]]
         tile_ty = np.ndarray[(n,), np.dtype[np.int32]]
 
-        num_cols = 1
-        num_shim_channels = 1
+        num_cols = 3
+        num_shim_channels = 8
 
         for col in range(0, num_cols):
             ShimTile = tile(col, 0)
-            CoreTile = [tile(col, i + 2) for i in range(0, 2)]
+            CoreTile = [tile(col, i + 2) for i in range(4)]
 
             for core in CoreTile:
                 ping_in_buffer = [aie.buffer(core, tile_ty) for _ in range(0, 2)]
@@ -68,13 +68,15 @@ def generate_module():
                 )
                 ext_input_buffer.append(external_buffer(tensor_ty))
 
-            flow(ShimTile, WireBundle.DMA, 0, CoreTile[0], WireBundle.DMA, 0)
-            if num_shim_channels > 1:
-                flow(ShimTile, WireBundle.DMA, 1, CoreTile[0], WireBundle.DMA, 1)
-            if num_shim_channels > 2:
-                flow(ShimTile, WireBundle.DMA, 2, CoreTile[1], WireBundle.DMA, 0)
-            if num_shim_channels > 3:
-                flow(ShimTile, WireBundle.DMA, 3, CoreTile[1], WireBundle.DMA, 1)
+            for channel in range(num_shim_channels):
+                flow(
+                    ShimTile,
+                    WireBundle.DMA,
+                    channel,
+                    CoreTile[channel // 2],
+                    WireBundle.DMA,
+                    channel % 2,
+                )
 
             @shim_mem(ShimTile)
             def s(block):
@@ -93,11 +95,7 @@ def generate_module():
                             LockAction.AcquireGreaterEqual,
                             value=1,
                         )
-                        if i < 2:
-                            bd_id = i
-                        else:
-                            bd_id = i #16 + (i - 2)
-                        dma_bd(ext_input_buffer[i], bd_id=bd_id)
+                        dma_bd(ext_input_buffer[i], bd_id=i)
                         use_lock(
                             shim_tile_input_write_lock[i], LockAction.Release, value=1
                         )

@@ -45,8 +45,8 @@ int main(int argc, char *argv[]) {
     std::cout << "ERROR: num_cols must be <= 3\n";
     return -1;
   }
-  if (num_channels > 4) {
-    std::cout << "ERROR: num_channels must be <= 4\n";
+  if (num_channels > 8) {
+    std::cout << "ERROR: num_channels must be <= 8\n";
     return -1;
   }
   std::cout << "num_cols: " << num_cols << ", num_channels: " << num_channels
@@ -150,20 +150,12 @@ int main(int argc, char *argv[]) {
              before_perf_counter_3);
 
     // There's 1 tile of data there now, go for it
-    uint64_t shim_tile_lock_1 = (col << 25) + 0x00010010;
-    uint64_t shim_tile_lock_3 = (col << 25) + 0x00010030;
-    uint64_t shim_tile_lock_5 = (col << 25) + 0x00010050;
-    uint64_t shim_tile_lock_7 = (col << 25) + 0x00010070;
-    mlir_aie_sim_write32(shim_tile_lock_1, 1);
-    if (num_channels == 1)
-      continue;
-    mlir_aie_sim_write32(shim_tile_lock_3, 1);
-    if (num_channels == 2)
-      continue;
-    mlir_aie_sim_write32(shim_tile_lock_5, 1);
-    if (num_channels == 3)
-      continue;
-    mlir_aie_sim_write32(shim_tile_lock_7, 1);
+    // base is lock1 addr
+    uint64_t shim_tile_lock_base = (col << 25) + 0x00010010;
+    for (int i = 0; i < num_channels; i++) {
+      // write every other lock, so 0x20 apart.
+      mlir_aie_sim_write32(shim_tile_lock_base + i*0x20, 1);
+    }
   }
 
   if (VERBOSE_TEST) {
@@ -176,29 +168,14 @@ int main(int argc, char *argv[]) {
   // CHECKING FOR TEST COMPLETION
 
   for (uint32_t col = 0; col < num_cols; col++) {
-    uint64_t shim_tile_lock_0 = (col << 25) | 0x00010000;
-    uint64_t shim_tile_lock_2 = (col << 25) | 0x00010020;
-    uint64_t shim_tile_lock_4 = (col << 25) | 0x00010040;
-    uint64_t shim_tile_lock_6 = (col << 25) | 0x00010060;
-    printf("Going to wait for col %u lock 0 to increment\n", col);
-    test_utils::wait_on_lock(shim_tile_lock_0, 2);
-    if (num_channels == 1)
-      continue;
-    printf("Going to wait for col %u lock 2 to increment\n", col);
-    test_utils::wait_on_lock(shim_tile_lock_2, 2);
-    if (num_channels == 2)
-      continue;
-    printf("Going to wait for col %u lock 4 to increment\n", col);
-    test_utils::wait_on_lock(shim_tile_lock_4, 2);
-    if (num_channels == 3)
-      continue;
-    printf("Going to wait for col %u lock 6 to increment\n", col);
-    test_utils::wait_on_lock(shim_tile_lock_6, 2);
+    // base is lock0 addr
+    uint64_t shim_tile_lock_base = (col << 25) + 0x00010000;
+    for (int i = 0; i < num_channels; i++) {
+      // write every other lock, so 0x20 apart.
+      printf("Going to wait for col %u lock %d to increment\n", col, i*2);
+      test_utils::wait_on_lock(shim_tile_lock_base + i*0x20, 2);
+    }
   }
-
-  // When your lock logic goes wrong, this code below can help
-  // printf("Going to wait for 10,000 cycles\n");
-  // test_utils::wait_for_cycles(0, 2, 10000);
 
   if (VERBOSE_TEST) {
     test_utils::print_shim_tile_status(0);
