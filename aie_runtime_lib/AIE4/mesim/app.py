@@ -9,6 +9,7 @@ from aie_runtime.driver import TCPDriver
 
 import argparse
 import os
+import re
 import sys
 
 from aie.compiler.aiecc.configure import install_path
@@ -18,15 +19,31 @@ from aie.compiler.aiecc.configure import install_path
 parser = argparse.ArgumentParser()
 parser.add_argument("-p", "--port", type=int)
 parser.add_argument("--pkg-dir")
+parser.add_argument("--device-cfg")
 args, extra_args = parser.parse_known_args()
 
 # connect to the port from the command line
 tcpdriver = TCPDriver("localhost", args.port, debug=False)
 
+# Extract the device configuration from the device_cfg filename
+device_cfg = os.path.basename(args.device_cfg)
+match = re.match(
+    r"(?P<device>aie\d.*)_(?P<rows>\d+)r_(?P<columns>\d+)c_(?P<memtiles>\d+)m",
+    device_cfg,
+)
+if match:
+    device = match.group("device")
+    rows = int(match.group("rows"))
+    columns = int(match.group("columns"))
+    memtiles = int(match.group("memtiles"))
+else:
+    raise ValueError(f"Invalid device configuration format: {device_cfg}")
+
 # unlock NPI
 tcpdriver.write_word(0xF70A000C, 0xF9E8D7C6, secure=True)
 # PROTECTED_REG_EN = 1
-tcpdriver.write_word(0xF70A0200, (0x7F << 8) | 0x1, secure=True)
+last_col = columns - 1
+tcpdriver.write_word(0xF70A0200, (last_col << 8) | 0x1, secure=True)
 
 from cffi import FFI
 
