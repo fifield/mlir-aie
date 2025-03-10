@@ -24,8 +24,8 @@ int main(int argc, char *argv[]) {
   
   // Parse command line arguments for columns and channels
   int opt;
-  uint32_t num_cols = 1;
-  uint32_t num_channels = 1;
+  uint32_t num_cols = 3;
+  uint32_t num_channels = 4;
 
 #if defined (__MESIM__)
   while ((opt = getopt(argc, argv, "c:n:")) != -1) {
