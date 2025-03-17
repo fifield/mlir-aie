@@ -27,7 +27,7 @@ def generate_module():
         tile_ty = np.ndarray[(n,), np.dtype[np.int32]]
 
         num_cols = 3
-        num_shim_channels = 2
+        num_shim_channels = 4
 
         for col in range(0, num_cols):
             ShimTile = tile(col, 0)

@@ -1923,9 +1923,12 @@ AIE4TargetModel::getNumDestSwitchboxConnections(int col, int row,
   if (isShimNOCTile(col, row))
     switch (bundle) {
     case WireBundle::DMA:
-      return 2;
+    if (getTargetArch() == AIEArch::AIE4z)
+        return 4;
+      else
+        return 2;
     case WireBundle::North:
-      if (isa<NPU3zTargetModel>(this))
+      if (getTargetArch() == AIEArch::AIE4z)
         return 8;
       else
         return 4;
@@ -2006,7 +2009,7 @@ AIE4TargetModel::getNumSourceSwitchboxConnections(int col, int row,
     case WireBundle::North:
       return 4;
     case WireBundle::South:
-      if (isa<NPU3zTargetModel>(this))
+      if (getTargetArch() == AIEArch::AIE4z)
         return 8;
       else
         return 4;
@@ -2030,7 +2033,7 @@ AIE4TargetModel::getNumSourceSwitchboxConnections(int col, int row,
   if (isShimNOCTile(col, row))
     switch (bundle) {
     case WireBundle::DMA:
-      if (isa<NPU3zTargetModel>(this))
+      if (getTargetArch() == AIEArch::AIE4z)
         return 8;
       else
         return 4;
