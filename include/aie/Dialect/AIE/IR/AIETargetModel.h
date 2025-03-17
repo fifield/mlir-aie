@@ -1509,7 +1509,7 @@ public:
   static bool classof(const AIETargetModel *model) {
     return model->getKind() == TK_AIE4_NPU3Z;
   }
-  AIEArch getTargetArch() const { return AIEArch::AIE4z; }
+  AIEArch getTargetArch() const override { return AIEArch::AIE4z; }
 };
 
 } // namespace xilinx::AIE
