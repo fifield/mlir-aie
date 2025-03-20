@@ -1923,7 +1923,7 @@ AIE4TargetModel::getNumDestSwitchboxConnections(int col, int row,
   if (isShimNOCTile(col, row))
     switch (bundle) {
     case WireBundle::DMA:
-    if (getTargetArch() == AIEArch::AIE4z)
+      if (getTargetArch() == AIEArch::AIE4z)
         return 4;
       else
         return 2;
@@ -2531,6 +2531,12 @@ std::optional<uint32_t> AIE2PSTargetModel::getStreamSwitchPortIndex(
   }
   return AIE2TargetModel::getStreamSwitchPortIndex(col, row, bundle, channel,
                                                    master);
+}
+
+std::vector<std::pair<uint32_t, uint32_t>>
+AIE4TargetModel::getBurstEncodingsAndLengths() const {
+  return {std::pair(0, 64), std::pair(1, 128), std::pair(2, 256),
+          std::pair(3, 512)};
 }
 
 } // namespace AIE
