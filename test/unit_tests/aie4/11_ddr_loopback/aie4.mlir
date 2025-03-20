@@ -86,8 +86,8 @@ module @test_11_ddr_loopback {
     }
 
     %tile_0_0 = aie.tile(0, 0)
-    %ext_input_buffer  = aie.external_buffer{address = 0 : i32, sym_name = "ext_input_buffer"}  : memref<256xi32>
-    %ext_output_buffer = aie.external_buffer{address = 256 : i32, sym_name = "ext_output_buffer"} : memref<256xi32>
+    %ext_input_buffer  = aie.external_buffer{address = 0x80000000 : i64, sym_name = "ext_input_buffer"}  : memref<256xi32>
+    %ext_output_buffer = aie.external_buffer{address = 0x80000400 : i64, sym_name = "ext_output_buffer"} : memref<256xi32>
 
     %shim_tile_input_write_lock  = aie.lock(%tile_0_0, 0) { init = 1 : i32 } 
     %shim_tile_input_read_lock   = aie.lock(%tile_0_0, 1) { init = 0 : i32 } 
@@ -105,7 +105,7 @@ module @test_11_ddr_loopback {
       aie.next_bd ^bb1
     ^bb3:  // 2 preds: ^bb0, ^bb2
       aie.use_lock(%shim_tile_output_write_lock, AcquireGreaterEqual, 1)
-      aie.dma_bd(%ext_output_buffer : memref<256xi32>, 256, 256) {bd_id = 0 : i32, next_bd_id = 0 : i32}
+      aie.dma_bd(%ext_output_buffer : memref<256xi32>, 0, 256) {bd_id = 0 : i32, next_bd_id = 0 : i32}
       aie.use_lock(%shim_tile_output_read_lock, Release, 1)
       aie.next_bd ^bb3
     ^bb4:  // pred: ^bb3

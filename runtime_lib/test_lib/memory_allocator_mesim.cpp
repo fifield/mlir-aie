@@ -28,29 +28,29 @@ void mlir_aie_sim_write32(uint64_t addr, uint32_t data) {
 uint32_t mlir_aie_sim_read32(uint64_t addr) { return mesim_Read32(addr); }
 }
 
+// static variable for tracking current DDR physical addr during MESIM
+static uint64_t nextPhysicalAddr = 0x80000000;
+
 int *mlir_aie_mem_alloc(aie_libxaie_ctx_t *_xaie, ext_mem_model_t &handle,
                         int size) {
-  int size_bytes = size * sizeof(int);
+  uint64_t size_bytes = size * sizeof(int);
   handle.virtualAddr = std::malloc(size_bytes);
   if (handle.virtualAddr) {
     handle.size = size_bytes;
     // assign physical space in SystemC DDR memory controller
-    handle.physicalAddr = nextAlignedAddr;
-    // adjust nextAlignedAddr to the next 128-bit aligned address
-    nextAlignedAddr = nextAlignedAddr + size_bytes;
-    uint64_t gapToAligned = nextAlignedAddr % 16; // 16byte (128bit)
+    handle.physicalAddr = nextPhysicalAddr;
+    // adjust nextPhysicalAddr to the next 128-bit aligned address
+    nextPhysicalAddr = nextPhysicalAddr + size_bytes;
+    uint64_t gapToAligned = nextPhysicalAddr % 16; // 16byte (128bit)
     if (gapToAligned > 0)
-      nextAlignedAddr += (16 - gapToAligned);
+      nextPhysicalAddr += (16 - gapToAligned);
   } else {
-    printf("ExtMemModel: Failed to allocate %d memory.\n", size_bytes);
+    printf("Failed to allocate %d bytes of memory.\n", size_bytes);
+    return nullptr;
   }
 
   _xaie->allocations.push_back(handle);
 
-  std::cout << "ExtMemModel constructor: " << _xaie << " virtual address "
-            << std::hex << handle.virtualAddr << ", physical address "
-            << handle.physicalAddr << ", size " << std::dec << handle.size
-            << std::endl;
   return (int *)handle.virtualAddr;
 }
 

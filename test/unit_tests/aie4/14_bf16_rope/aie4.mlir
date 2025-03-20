@@ -101,9 +101,9 @@ module @test_14_bf16_rope {
     }
 
     %tile_0_0 = aie.tile(0, 0)
-    %input_memory  = aie.external_buffer{address = 0 : i32, sym_name = "input_memory"}  : memref<2048xi32>
-    %sincos_memory  = aie.external_buffer{address = 2048 : i32, sym_name = "sincos_memory"}  : memref<2048xi32>
-    %output_memory  = aie.external_buffer{address = 4096 : i32, sym_name = "output_memory"}  : memref<2048xi32>
+    %input_memory  = aie.external_buffer{address = 0x80000000 : i64, sym_name = "input_memory"}  : memref<2048xi32>
+    %sincos_memory  = aie.external_buffer{address = 0x80002000 : i64, sym_name = "sincos_memory"}  : memref<2048xi32>
+    %output_memory  = aie.external_buffer{address = 0x80004000 : i64, sym_name = "output_memory"}  : memref<2048xi32>
 
     %shim_tile_input_write_lock  = aie.lock(%tile_0_0, 0) { init = 1 : i32 } 
     %shim_tile_input_read_lock   = aie.lock(%tile_0_0, 1) { init = 0 : i32 } 
@@ -125,12 +125,12 @@ module @test_14_bf16_rope {
       aie.next_bd ^bb2
     ^bb3:  
       aie.use_lock(%shim_tile_sincos_read_lock, AcquireGreaterEqual, 1)
-      aie.dma_bd(%sincos_memory : memref<2048xi32>, 2048, 2048) {bd_id = 2 : i32, next_bd_id = 2 : i32}
+      aie.dma_bd(%sincos_memory : memref<2048xi32>, 0, 2048) {bd_id = 2 : i32, next_bd_id = 2 : i32}
       aie.use_lock(%shim_tile_sincos_write_lock, Release, 1)
       aie.next_bd ^bb3
     ^bb4:  
       aie.use_lock(%shim_tile_output_write_lock, AcquireGreaterEqual, 1)
-      aie.dma_bd(%output_memory : memref<2048xi32>, 4096, 2048) {bd_id = 0 : i32, next_bd_id = 0 : i32}
+      aie.dma_bd(%output_memory : memref<2048xi32>, 0, 2048) {bd_id = 0 : i32, next_bd_id = 0 : i32}
       aie.use_lock(%shim_tile_output_read_lock, Release, 1)
       aie.next_bd ^bb4
     ^bb5:

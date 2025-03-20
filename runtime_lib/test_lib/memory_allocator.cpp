@@ -35,10 +35,13 @@ uint32_t mlir_aie_sim_read32(uint64_t addr) {
   return ess_Read32(XAIE_BASE_ADDR + addr);
 }
 
+// static variable for tracking current DDR physical addr during AIESIM
+static uint64_t nextAlignedAddr = 0;
+
 int *mlir_aie_mem_alloc(aie_libxaie_ctx_t *_xaie, ext_mem_model_t &handle,
 
                         int size) {
-  int size_bytes = size * sizeof(int);
+  uint64_t size_bytes = size * sizeof(int);
   handle.virtualAddr = std::malloc(size_bytes);
   if (handle.virtualAddr) {
     handle.size = size_bytes;
@@ -51,14 +54,11 @@ int *mlir_aie_mem_alloc(aie_libxaie_ctx_t *_xaie, ext_mem_model_t &handle,
       nextAlignedAddr += (16 - gapToAligned);
   } else {
     printf("ExtMemModel: Failed to allocate %d memory.\n", size_bytes);
+    return nullptr;
   }
 
   ctx->allocations.push_back(handle);
 
-  std::cout << "ExtMemModel constructor: " << ctx << " virtual address "
-            << std::hex << handle.virtualAddr << ", physical address "
-            << handle.physicalAddr << ", size " << std::dec << handle.size
-            << std::endl;
   return (int *)handle.virtualAddr;
 }
 

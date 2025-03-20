@@ -87,13 +87,11 @@ void mesim_WriteGM(uint64_t address, void *data, uint64_t size) {
   }
   close(fd);
   std::ofstream outputFile(filename);
-  uint32_t index = 0;
   unsigned char *mem_ptr = reinterpret_cast<unsigned char *>(data);
-  for (int i = address; i < address + size; i++) {
+  for (uint32_t i = 0; i < size; i++) {
     outputFile << std::setfill('0') << std::setw(2) << std::hex
                << (uint32_t)mem_ptr[i] << " ";
-    index = (index + 1) % 16;
-    if (index == 0)
+    if ((i+1) % 16 == 0)
       outputFile << std::endl;
   }
   outputFile.close();
@@ -111,7 +109,6 @@ void mesim_ReadGM(uint64_t address, void *data, uint64_t size) {
   close(fd);
   __readGM_cb(address, size, filename);
   std::ifstream inputFilename(filename);
-  uint32_t index = 0;
   unsigned char *mem_ptr = reinterpret_cast<unsigned char *>(data);
 
   std::ifstream inputFile(filename);
@@ -122,15 +119,15 @@ void mesim_ReadGM(uint64_t address, void *data, uint64_t size) {
 
   uint32_t count = 0;
   uint16_t buffer = 0;
-  uint32_t current_address = 0; // address;
+  uint32_t current_offset = 0;
   while (count < size && !inputFile.eof()) {
     std::string line;
     std::getline(inputFile, line);
     std::istringstream iss(line);
     if (line.empty() == false) {
       while (iss >> std::hex >> buffer) {
-        mem_ptr[current_address] = buffer & 0xff;
-        current_address = current_address + 1;
+        mem_ptr[current_offset] = buffer & 0xff;
+        current_offset = current_offset + 1;
       }
       count += 16;
     }

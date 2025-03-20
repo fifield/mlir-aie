@@ -58,7 +58,7 @@ def generate_module():
                 shim_tile_input_read_lock.append(
                     lock(ShimTile, lock_id=(i * 2) + 1, init=0)
                 )
-                ext_input_buffer.append(external_buffer(tensor_ty))
+                ext_input_buffer.append(external_buffer(tensor_ty, address=0x80000000))
 
             for channel in range(num_shim_channels):
                 flow(

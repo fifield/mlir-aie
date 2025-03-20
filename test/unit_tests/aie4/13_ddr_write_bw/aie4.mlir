@@ -38,7 +38,7 @@ module @test_12_ddr_read_bw {
     }
 
     %tile_0_0 = aie.tile(0, 0)
-    %ext_output_buffer  = aie.external_buffer{address = 0 : i32, sym_name = "ext_output_buffer"}  : memref<65536xi32>
+    %ext_output_buffer  = aie.external_buffer{address = 0x80000000 : i64, sym_name = "ext_output_buffer"}  : memref<65536xi32>
 
     %shim_tile_output_write_lock  = aie.lock(%tile_0_0, 0) { init = 0 : i32 } 
     %shim_tile_output_read_lock   = aie.lock(%tile_0_0, 1) { init = 0 : i32 } 
