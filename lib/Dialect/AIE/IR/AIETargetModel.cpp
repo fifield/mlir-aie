@@ -1760,6 +1760,7 @@ std::vector<std::pair<uint32_t, uint32_t>>
 BaseNPU2TargetModel::getShimBurstEncodingsAndLengths() const {
   return {std::pair(0, 64), std::pair(1, 128), std::pair(2, 256),
           std::pair(3, 512)};
+}
 
 ///
 /// AIE4 TargetModel
@@ -2534,7 +2535,7 @@ std::optional<uint32_t> AIE2PSTargetModel::getStreamSwitchPortIndex(
 }
 
 std::vector<std::pair<uint32_t, uint32_t>>
-AIE4TargetModel::getBurstEncodingsAndLengths() const {
+AIE4TargetModel::getShimBurstEncodingsAndLengths() const {
   return {std::pair(0, 64), std::pair(1, 128), std::pair(2, 256),
           std::pair(3, 512)};
 }
