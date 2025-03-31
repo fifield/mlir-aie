@@ -453,7 +453,44 @@ void test_utils::write_transaction_binary(unsigned char *data,
   uint32_t mask = 0;
   const uint32_t *data_ptr = nullptr;
 
-  if (major == 1 && minor == 0) {
+  if (major == 0 && minor == 1) {
+    while (i < nbytes) {
+      uint8_t opc = data[i];
+      if (opc == 0x00) {
+        uint32_t addr0, addr1;
+        std::memcpy(&addr0, &data[i + 8], 4);
+        std::memcpy(&addr1, &data[i + 12], 4);
+        std::memcpy(&value, &data[i + 16], 4);
+        std::memcpy(&size, &data[i + 20], 4);
+        addr = static_cast<uint64_t>(addr1) << 32 | addr0;
+        i += size;
+        mlir_aie_sim_write32(addr, value);
+      } else if (opc == 0x01) {
+        std::memcpy(&addr, &data[i + 8], 4);
+        std::memcpy(&size, &data[i + 12], 4);
+        data_ptr = reinterpret_cast<const uint32_t *>(data + i + 16);
+        i += size;
+        size = size - 16;
+        for (int j = 0; j < size / 4; j++)
+          mlir_aie_sim_write32(addr + (4 * j), data_ptr[j]);
+      } else if (opc == 0x03) {
+        uint32_t addr0, addr1;
+        std::memcpy(&addr0, &data[i + 8], 4);
+        std::memcpy(&addr1, &data[i + 12], 4);
+        std::memcpy(&value, &data[i + 16], 4);
+        std::memcpy(&mask, &data[i + 20], 4);
+        std::memcpy(&size, &data[i + 24], 4);
+        addr = static_cast<uint64_t>(addr1) << 32 | addr0;
+        uint32_t r = mlir_aie_sim_read32(addr);
+        uint32_t w = (r & ~mask) | (value & mask);
+        mlir_aie_sim_write32(addr, w);
+        i += size;
+      } else {
+        assert(0 && "unhandled transaction binary opcode");
+      }
+    }
+  }
+  else if (major == 1 && minor == 0) {
     while (i < nbytes) {
       uint8_t opc = data[i];
       if (opc == 0x00) {
@@ -481,5 +518,8 @@ void test_utils::write_transaction_binary(unsigned char *data,
         assert(0 && "unhandled transaction binary opcode");
       }
     }
+  }
+  else {
+    assert(0 && "unhandled transaction binary version");
   }
 }

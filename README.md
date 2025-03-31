@@ -115,7 +115,7 @@ aiecc.py --aiesim --xchesscc --xbridge --no-compile-host aie.mlir test.cpp
 # Convert aiecc output to configuration data encoded as transaction mlir
 aie-opt --convert-aie-to-transaction='elf-dir=.' aie.mlir.prj/input_physical.mlir -o transaction.mlir
 # Translate transaction mlir to binary
-aie-translate --aie-npu-to-binary --aie-output-binary=true transaction.mlir -o transaction.bin
+aie-translate --aie-npu-to-binary transaction.mlir -o transaction.bin
 # Run the simulation
 aie.mlir.prj/aiesim.sh
 ```

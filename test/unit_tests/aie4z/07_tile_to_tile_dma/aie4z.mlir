@@ -8,7 +8,7 @@
 // REQUIRES: mesimulator
 //
 // RUN: aiecc.py --alloc-scheme=basic-sequential --xchesscc --xbridge --no-compile-host --aie-generate-txn --aiesim %s %test_utils_flags %S/test.cpp
-// RUN: aie-translate -aie-npu-to-binary -aie-output-binary=true -o transaction.bin aie4z.mlir.prj/txn.mlir
+// RUN: aie-translate -aie-npu-to-binary -o transaction.bin aie4z.mlir.prj/txn.mlir
 // RUN: aie4z.mlir.prj/mesim.sh | FileCheck --check-prefix=MESIM %s
 //
 // MESIM: device model: {{.*}}aie4z

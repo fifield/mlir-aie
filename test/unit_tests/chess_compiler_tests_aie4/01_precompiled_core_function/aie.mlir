@@ -13,7 +13,7 @@
 // RUN: xchesscc_wrapper aie4 -c %S/kernel.cc
 // RUN: %PYTHON aiecc.py -v --aiesim --xchesscc --xbridge --no-compile-host %s %test_utils_flags %S/test.cpp
 // RUN: aie-opt --convert-aie-to-transaction='elf-dir=.' aie.mlir.prj/input_physical.mlir -o transaction.mlir
-// RUN: aie-translate --aie-npu-to-binary --aie-output-binary=true transaction.mlir -o transaction.bin
+// RUN: aie-translate --aie-npu-to-binary transaction.mlir -o transaction.bin
 // RUN: aie.mlir.prj/aiesim.sh | FileCheck %s
 
 // CHECK: AIE4{{.*}}ISS
