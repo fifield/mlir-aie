@@ -1306,10 +1306,10 @@ AIE2TargetModel::getShimBurstEncodingsAndLengths() const {
 
 std::optional<uint32_t>
 AIE2TargetModel::getLocalLockAddress(uint32_t lockId, TileID tile) const {
-  auto computeTileBaseAddress = 0x0001F000;
-  auto memTileBaseAddress = 0x000C0000;
-  auto shimTileBaseAddress = 0x00014000;
-  auto lockAddrOffset = 0x10;
+  uint32_t computeTileBaseAddress = 0x0001F000;
+  uint32_t memTileBaseAddress = 0x000C0000;
+  uint32_t shimTileBaseAddress = 0x00014000;
+  uint32_t lockAddrOffset = 0x10;
 
   if (isCoreTile(tile.col, tile.row) &&
       lockId < getNumLocks(tile.col, tile.row))
@@ -1881,9 +1881,9 @@ AIE4TargetModel::getMemLocalBaseAddress(int localCol, int localRow, int memCol,
   }
 
   if (isMemTile(localCol, localRow)) {
-    if (localRow != lockRow)
+    if (localRow != memRow)
       return std::nullopt;
-    int colOffset = (lockCol - localCol) + 7;
+    int colOffset = (memCol - localCol) + 7;
     if (colOffset > 14 || colOffset < 0)
       return std::nullopt;
     uint32_t base = 0x00B00000;
@@ -2538,6 +2538,35 @@ std::vector<std::pair<uint32_t, uint32_t>>
 AIE4TargetModel::getShimBurstEncodingsAndLengths() const {
   return {std::pair(0, 64), std::pair(1, 128), std::pair(2, 256),
           std::pair(3, 512)};
+}
+
+std::optional<uint32_t>
+AIE4TargetModel::getLocalLockAddress(uint32_t lockId, TileID tile) const {
+  uint32_t lockAddrOffset = 0x10;
+
+  if (lockId < getNumLocks(tile.col, tile.row))
+    return std::nullopt;
+
+  if (isCoreTile(tile.col, tile.row)) {
+    uint32_t computeTileBaseAddress = 0x00010000;
+    return computeTileBaseAddress + lockAddrOffset * lockId;
+  }
+
+  if (isMemTile(tile.col, tile.row)) {
+    uint32_t memTileBaseAddress = 0x00010000;
+    if (lockId > 31)
+     memTileBaseAddress = 0x00050000;
+    return memTileBaseAddress + lockAddrOffset * lockId;
+  }
+
+  if (isShimNOCTile(tile.col, tile.row)) {
+    uint32_t shimTileBaseAddress = 0x00010000;
+    if (lockId > 15)
+      shimTileBaseAddress = 0x00050000;
+    return shimTileBaseAddress + lockAddrOffset * lockId;
+  }
+
+  return std::nullopt;
 }
 
 } // namespace AIE

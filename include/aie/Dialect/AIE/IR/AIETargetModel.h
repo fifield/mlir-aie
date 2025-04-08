@@ -349,15 +349,19 @@ public:
   /// Return the lock base index (or offset) in the local tile when accessing a
   /// neighbor's lock or an empty optional if an invalid neighbor is given
   /// Takes into account differences between Memory and Core tiles
-  std::optional<uint32_t> getLockLocalBaseIndex(int localCol, int localRow,
-                                                int lockCol, int lockRow) const;
+  virtual std::optional<uint32_t> getLockLocalBaseIndex(int localCol,
+                                                        int localRow,
+                                                        int lockCol,
+                                                        int lockRow) const;
 
   /// Return the memory base address (or offset) in the local tile when
   /// accessing a neighbor's memory or an empty optional if an invalid neighbor
   /// is given
   /// Takes into account differences between Memory and Core tiles
-  std::optional<uint32_t> getMemLocalBaseAddress(int localCol, int localRow,
-                                                 int memCol, int memRow) const;
+  virtual std::optional<uint32_t> getMemLocalBaseAddress(int localCol,
+                                                         int localRow,
+                                                         int memCol,
+                                                         int memRow) const;
 
   /// Return the size (in bytes) of the local data memory of a core.
   virtual uint32_t getLocalMemorySize() const = 0;
