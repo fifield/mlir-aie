@@ -54,11 +54,16 @@ jobs:
 
           pip cache purge
 
-          python -m venv aie-venv
+          python3.10 -m venv aie-venv
           source aie-venv/bin/activate
+
           pip install -r python/requirements.txt
           pip install -r python/requirements_ml.txt
           HOST_MLIR_PYTHON_PACKAGE_PREFIX=aie pip install -r python/requirements_extras.txt
+
+          # for mesimulator
+          pip install bitstring toml
+
           VERSION=$(utils/clone-llvm.sh --get-wheel-version)
           pip -q download mlir==$VERSION \
             -f https://github.com/Xilinx/mlir-aie/releases/expanded_assets/mlir-distro
@@ -75,7 +80,6 @@ jobs:
           export LD_LIBRARY_PATH=$CERVINO_ROOT/ext/systemc/systemc-2.3.3/lib-linux64:$LD_LIBRARY_PATH
           export LD_LIBRARY_PATH=$CERVINO_ROOT/ext/Boost_1_72_0/boost_1_72_0/rdi/lib/gcc8.3.0/lnx64.o:$LD_LIBRARY_PATH
           export PYTHONPATH=$ME_ROOT/python:$ME_ROOT/applications:$PYTHONPATH
-          export PYTHONPATH=$CERVINO_ROOT/ext/python3/lib/python3.9:$PYTHONPATH
 
           cmake .. -G Ninja \
             -DPython3_EXECUTABLE=$(which python) \
