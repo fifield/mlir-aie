@@ -201,6 +201,7 @@ void print_matrix(const std::vector<T> matrix, int n_cols,
 #undef print_row
 }
 
+  
 void write_out_trace(char *traceOutPtr, size_t trace_size, std::string path);
 
 void print_test_banner(const char *, const char *);
@@ -220,4 +221,22 @@ void write_transaction_binary(unsigned char *data, uint64_t nbytes);
 
 } // namespace test_utils
 
+
+/* Tensor and Matrix processing utilities 
+These include CPU reference implementations for tensor operators 
+and tensor equality tests 
+*/
+
+namespace matrix_utils{
+
+  bool tensor_equal(uint8_t* AIEOutput, uint8_t* cpuOutput, unsigned int numElems);
+  void transpose_cpu(uint8_t* rowMajorInput, uint8_t* transposeResult,
+		     unsigned in_rows, unsigned in_cols);
+  void print_matrix(uint8_t* matrix, unsigned int rows, unsigned int cols);
+  
+}
+
+
 #endif // _TEST_UTILS_H_
+
+

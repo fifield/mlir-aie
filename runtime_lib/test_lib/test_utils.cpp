@@ -548,3 +548,47 @@ void test_utils::write_transaction_binary(unsigned char *data,
     assert(0 && "unhandled transaction binary version");
   }
 }
+
+/* Tensor and Matrix processing utilities
+These include CPU reference implementations for tensor operators
+and tensor equality tests
+*/
+bool matrix_utils::tensor_equal(uint8_t *AIEOutput, uint8_t *cpuOutput,
+                                unsigned int numElems) {
+
+  for (unsigned int i = 0; i < numElems; i++) {
+    if (AIEOutput[i] != cpuOutput[i]) {
+      std::cout << "NOTE: mismatch at index " << i << " with values "
+                << AIEOutput[i] << " : " << cpuOutput[i] << std::endl;
+      return false;
+    }
+  }
+
+  return true;
+}
+
+void matrix_utils::transpose_cpu(uint8_t *rowMajorInput,
+                                 uint8_t *transposeResult, unsigned in_rows,
+                                 unsigned in_cols) {
+
+  // Cols and rows are flipped for the transpose result matrix
+  for (unsigned int i = 0; i < in_cols; i++) {
+    for (unsigned int j = 0; j < in_rows; j++) {
+      unsigned int outIndex = i * in_rows + j; // in_rows is cols for output
+      unsigned int inIndex = j * in_cols + i;
+      transposeResult[outIndex] = rowMajorInput[inIndex];
+    }
+  }
+}
+
+void matrix_utils::print_matrix(uint8_t *matrix, unsigned int rows,
+                                unsigned int cols) {
+
+  for (unsigned int i = 0; i < rows; i++) {
+    for (unsigned int j = 0; j < cols; j++) {
+      unsigned int offset = i * cols + j;
+      std::cout << int(matrix[offset]) << " ";
+    }
+    std::cout << std::endl;
+  }
+}
