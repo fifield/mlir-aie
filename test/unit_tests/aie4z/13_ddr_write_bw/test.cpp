@@ -102,15 +102,16 @@ int main(int argc, char *argv[]) {
     uint64_t locks_event_selection_A_1 = (col << 25) | 0x00010104;
     mlir_aie_sim_write32(locks_event_selection_A_0, 0x00000000);
     mlir_aie_sim_write32(locks_event_selection_A_1, 0x00010000);
-    
+
     // Second set the perf counter start and stop
     // http://cervino-doc/aie4/r0p41.1/tile_links/xregdb_aie4_shim_tile_doc.html#pl_module___Performance_Start_Stop_0_1
-    
+
     uint32_t stop_start_stop_start = 0x00000000;
     uint32_t start = 128; // LockSel0_acq_eq, we will use lock 0
     uint32_t stop = 134;  // LockSel _release, we will use lock 1
     stop_start_stop_start |= (stop << 8) | (start << 0);
-    mlir_aie_sim_write32((uint64_t)((col << 25) | 0x00004000), stop_start_stop_start);
+    mlir_aie_sim_write32((uint64_t)((col << 25) | 0x00004000),
+                         stop_start_stop_start);
   }
 
   ////////////////////////////////////////////////////
@@ -130,7 +131,7 @@ int main(int argc, char *argv[]) {
     uint64_t shim_tile_lock_base = (col << 25) + 0x00010000;
     for (int i = 0; i < num_channels; i++) {
       // write every other lock, so 0x20 apart.
-      mlir_aie_sim_write32(shim_tile_lock_base + i*0x20, 1);
+      mlir_aie_sim_write32(shim_tile_lock_base + i * 0x20, 1);
     }
   }
 
@@ -147,8 +148,8 @@ int main(int argc, char *argv[]) {
     uint64_t shim_tile_lock_base = (col << 25) + 0x00010010;
     for (int i = 0; i < num_channels; i++) {
       // write every other lock, so 0x20 apart.
-      printf("Going to wait for col %d lock %d to increment\n", col, 2*i+1);
-      test_utils::wait_on_lock(shim_tile_lock_base + i*0x20, 1);
+      printf("Going to wait for col %d lock %d to increment\n", col, 2 * i + 1);
+      test_utils::wait_on_lock(shim_tile_lock_base + i * 0x20, 1);
     }
   }
 
@@ -177,7 +178,7 @@ int main(int argc, char *argv[]) {
     float GB_per_sec = bytes_per_cycle; //  Assume 1 GHz clock
 
     printf("Achieved bandwidth: %f GB/s, %2.f%% efficient\n", GB_per_sec,
-          efficiency);
+           efficiency);
   }
   uint32_t errs = 0;
 

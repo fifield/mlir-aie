@@ -9,11 +9,10 @@
 //===----------------------------------------------------------------------===//
 
 extern "C" {
-  void rope(bfloat16 *in,bfloat16 *sincos, bfloat16 *out);
+void rope(bfloat16 *in, bfloat16 *sincos, bfloat16 *out);
 }
 
 void rope(bfloat16 *in, bfloat16 *sincos, bfloat16 *out) {
-  for (int i=0;i<32;i++)
+  for (int i = 0; i < 32; i++)
     out[i] = in[i] * sincos[i];
 }
-

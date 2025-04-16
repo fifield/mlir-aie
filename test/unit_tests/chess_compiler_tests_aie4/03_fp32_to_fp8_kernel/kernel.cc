@@ -18,19 +18,19 @@ extern int8_t vecB[256];
 
 extern "C" void core_1_3() {
 
-  set_rnd( rnd_sym_inf );
+  set_rnd(rnd_sym_inf);
   set_sat();
-  
+
   acquire_greater_equal(LOCK_OFFSET + 3, 1);
 
-  v32accfloat * pA = ( v32accfloat * ) vecA;
-  v32float8 * pO = ( v32float8 * ) vecB;
+  v32accfloat *pA = (v32accfloat *)vecA;
+  v32float8 *pO = (v32float8 *)vecB;
 
-  for ( int i = 0; i < 256/8; i++ ) {
-    v32float8 result = to_v32float8( *pA++ , 0 );   // Second parameter is a mystery ...
+  for (int i = 0; i < 256 / 8; i++) {
+    v32float8 result =
+        to_v32float8(*pA++, 0); // Second parameter is a mystery ...
     *pO++ = result;
   }
-
 
   release(LOCK_OFFSET + 5, 1);
 }

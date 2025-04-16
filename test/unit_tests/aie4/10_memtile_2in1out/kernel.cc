@@ -9,12 +9,11 @@
 //===----------------------------------------------------------------------===//
 
 extern "C" {
-  void eltwise_add(int *a, int *b, int *c);
+void eltwise_add(int *a, int *b, int *c);
 }
 
 void eltwise_add(int *a, int *b, int *c) {
 
-  for (int i=0;i<32;i++)
+  for (int i = 0; i < 32; i++)
     c[i] = a[i] + b[i];
 }
-

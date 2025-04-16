@@ -22,7 +22,8 @@
 
 int main(int argc, char *argv[]) {
 
-  test_utils::print_test_banner("11_ddr_loopback","When you see yourself, are you far away?");
+  test_utils::print_test_banner("11_ddr_loopback",
+                                "When you see yourself, are you far away?");
 
   aie_libxaie_ctx_t xaie;
   ext_mem_model_t handle_in;
@@ -46,7 +47,6 @@ int main(int argc, char *argv[]) {
     ddr_ptr_out[i] = 0xbadbad00 + i;
   mlir_aie_sync_mem_dev(handle_out);
 
-
   if (VERBOSE_TEST) {
     test_utils::print_shim_tile_status(0);
     test_utils::print_core_tile_status(0, 2, 4, 512, 4, 640, 4);
@@ -64,13 +64,13 @@ int main(int argc, char *argv[]) {
   ////////////////////////////////////////////////////
   // TEST START
 
-  // At this point, we need to toggle the shimtile lock to indicate that data has been written
-  // and can be read by the DMA
-  // This is the shim_tile_input_read_lock which the MM2S channel0 0 is blocked on
+  // At this point, we need to toggle the shimtile lock to indicate that data
+  // has been written and can be read by the DMA This is the
+  // shim_tile_input_read_lock which the MM2S channel0 0 is blocked on
   // aie.use_lock(%shim_tile_input_read_lock, AcquireGreaterEqual, 1)
 
   row = 0;
-  uint64_t shim_tile_lock_1 = ((col << 25) | (row  << 20)) + 0x00010010;
+  uint64_t shim_tile_lock_1 = ((col << 25) | (row << 20)) + 0x00010010;
   // There's 1 tile of data there now, go for it
   mlir_aie_sim_write32(shim_tile_lock_1, 1);
 
@@ -99,31 +99,26 @@ int main(int argc, char *argv[]) {
 
   uint32_t errs = 0;
 
-  // Lets test the input 
+  // Lets test the input
   mlir_aie_sync_mem_cpu(handle_in);
   uint32_t *ddr_input = reinterpret_cast<uint32_t *>(handle_in.virtualAddr);
   for (int i = 0; i < 256; i++) {
     if (ddr_input[i] != 0xdeadbeef + i) {
       errs++;
       printf(" IN: error @ %d : %x\n", i, ddr_input[i]);
-    }
-    else
-      if (VERBOSE_TEST)
-        printf(" IN:   yes @ %d : %x\n", i, ddr_input[i]);
+    } else if (VERBOSE_TEST)
+      printf(" IN:   yes @ %d : %x\n", i, ddr_input[i]);
   }
 
-
-  // Lets test the output 
+  // Lets test the output
   mlir_aie_sync_mem_cpu(handle_out);
   uint32_t *ddr_output = reinterpret_cast<uint32_t *>(handle_out.virtualAddr);
   for (int i = 0; i < 256; i++) {
     if (ddr_output[i] != 0xdeadbeef + i + 1) {
       errs++;
       printf("OUT: error @ %d : %x\n", i, ddr_output[i]);
-    }
-    else
-      if (VERBOSE_TEST)
-        printf("OUT:   yes @ %d : %x\n", i, ddr_output[i]);
+    } else if (VERBOSE_TEST)
+      printf("OUT:   yes @ %d : %x\n", i, ddr_output[i]);
   }
 
   if (!errs) {

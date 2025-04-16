@@ -22,7 +22,8 @@
 
 int main(int argc, char *argv[]) {
 
-  test_utils::print_test_banner("13_ddr_write_bw","I wrote The Stand in 3 seconds");
+  test_utils::print_test_banner("13_ddr_write_bw",
+                                "I wrote The Stand in 3 seconds");
 
   aie_libxaie_ctx_t xaie;
   ext_mem_model_t handle_out;
@@ -38,7 +39,6 @@ int main(int argc, char *argv[]) {
   for (int i = 0; i < 65536; i++)
     ddr_ptr_out[i] = i;
   mlir_aie_sync_mem_dev(handle_out);
-
 
   if (VERBOSE_TEST) {
     test_utils::print_shim_tile_status(0);
@@ -61,7 +61,6 @@ int main(int argc, char *argv[]) {
   test_utils::write_transaction_binary(reinterpret_cast<uint8_t *>(data.data()),
                                        data.size() * sizeof(uint32_t));
 
-
   // SET UP PERFORMANCE COUNTERS
   // First, the locks we want to look at
   uint64_t locks_event_selection_A_0 = (col << 25) | 0x00010100;
@@ -73,25 +72,24 @@ int main(int argc, char *argv[]) {
   // http://cervino-doc/aie4/r0p41.1/tile_links/xregdb_aie4_shim_tile_doc.html#pl_module___Performance_Start_Stop_0_1
 
   uint32_t stop_start_stop_start = 0x00000000;
-  uint32_t start = 128;  // LockSel0_acq_eq, we will use lock 0
-  uint32_t stop  = 134;  // LockSel _release, we will use lock 1
+  uint32_t start = 128; // LockSel0_acq_eq, we will use lock 0
+  uint32_t stop = 134;  // LockSel _release, we will use lock 1
   stop_start_stop_start |= (stop << 8) | (start << 0);
   mlir_aie_sim_write32((uint64_t)(0x00004000), stop_start_stop_start);
 
   ////////////////////////////////////////////////////
   // TEST START
 
-  // At this point, we need to toggle the shimtile lock to indicate that data has been written
-  // and can be read by the DMA
-  // This is the shim_tile_input_read_lock which the MM2S channel0 0 is blocked on
+  // At this point, we need to toggle the shimtile lock to indicate that data
+  // has been written and can be read by the DMA This is the
+  // shim_tile_input_read_lock which the MM2S channel0 0 is blocked on
   // aie.use_lock(%shim_tile_input_read_lock, AcquireGreaterEqual, 1)
 
   uint32_t before_perf_counter_0 = mlir_aie_sim_read32(0x00004020);
   printf("Before Perf counter 0: %d\n", before_perf_counter_0);
 
-
   row = 0;
-  uint64_t shim_tile_lock_0 = ((col << 25) | (row  << 20)) + 0x00010000;
+  uint64_t shim_tile_lock_0 = ((col << 25) | (row << 20)) + 0x00010000;
   // There's 1 tile of data there now, go for it
   mlir_aie_sim_write32(shim_tile_lock_0, 1);
 
@@ -123,17 +121,17 @@ int main(int argc, char *argv[]) {
   uint32_t perf_counter_0 = mlir_aie_sim_read32(0x00004020);
   printf("Perf counter 0: %d\n", perf_counter_0);
 
-  uint32_t ideal = 65536*32  / 512;  
+  uint32_t ideal = 65536 * 32 / 512;
   float efficiency = 100.0 * (float)ideal / (float)perf_counter_0;
   // This tells us the cycles, what's the bandwidth?
 
   uint32_t data_volume = 65536 * 4; // bytes
   printf("Transfered %d bytes\n", data_volume);
   float bytes_per_cycle = (float)data_volume / (float)perf_counter_0;
-  float GB_per_sec = bytes_per_cycle ; //  Assume 1 GHz clock
+  float GB_per_sec = bytes_per_cycle; //  Assume 1 GHz clock
 
-  printf("Achieved bandwidth: %f GB/s, %2.f%% efficient\n", GB_per_sec, efficiency);
-
+  printf("Achieved bandwidth: %f GB/s, %2.f%% efficient\n", GB_per_sec,
+         efficiency);
 
   uint32_t errs = 0;
 
@@ -149,10 +147,8 @@ int main(int argc, char *argv[]) {
     if (ddr_output[i] != 0) {
       errs++;
       printf(" OUT: error @ %d : %x\n", i, ddr_output[i]);
-    }
-    else
-      if (VERBOSE_TEST)
-        printf(" OUT:   yes @ %d : %x\n", i, ddr_output[i]);
+    } else if (VERBOSE_TEST)
+      printf(" OUT:   yes @ %d : %x\n", i, ddr_output[i]);
   }
 
   if (!errs) {

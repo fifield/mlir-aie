@@ -1839,10 +1839,9 @@ bool AIE4TargetModel::isLegalMemAffinity(int coreCol, int coreRow, int memCol,
          IsMemWest || IsMemEast;
 }
 
-
 std::optional<uint32_t>
 AIE4TargetModel::getLockLocalBaseIndex(int localCol, int localRow, int lockCol,
-                                      int lockRow) const {
+                                       int lockRow) const {
   if (isCoreTile(localCol, localRow)) {
     if (isMemSouth(localCol, localRow, lockCol, lockRow))
       return 0;
@@ -1868,7 +1867,7 @@ AIE4TargetModel::getLockLocalBaseIndex(int localCol, int localRow, int lockCol,
 
 std::optional<uint32_t>
 AIE4TargetModel::getMemLocalBaseAddress(int localCol, int localRow, int memCol,
-                                       int memRow) const {
+                                        int memRow) const {
   if (isCoreTile(localCol, localRow)) {
     if (isMemSouth(localCol, localRow, memCol, memRow))
       return getMemSouthBaseAddress();
@@ -2555,7 +2554,7 @@ AIE4TargetModel::getLocalLockAddress(uint32_t lockId, TileID tile) const {
   if (isMemTile(tile.col, tile.row)) {
     uint32_t memTileBaseAddress = 0x00010000;
     if (lockId > 31)
-     memTileBaseAddress = 0x00050000;
+      memTileBaseAddress = 0x00050000;
     return memTileBaseAddress + lockAddrOffset * lockId;
   }
 

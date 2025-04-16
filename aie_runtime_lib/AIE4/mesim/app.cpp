@@ -91,7 +91,7 @@ void mesim_WriteGM(uint64_t address, void *data, uint64_t size) {
   for (uint32_t i = 0; i < size; i++) {
     outputFile << std::setfill('0') << std::setw(2) << std::hex
                << (uint32_t)mem_ptr[i] << " ";
-    if ((i+1) % 16 == 0)
+    if ((i + 1) % 16 == 0)
       outputFile << std::endl;
   }
   outputFile.close();

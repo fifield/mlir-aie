@@ -21,13 +21,13 @@
 #define VERBOSE_TEST 0
 
 int main(int argc, char *argv[]) {
-  
+
   // Parse command line arguments for columns and channels
   int opt;
   uint32_t num_cols = 3;
   uint32_t num_channels = 4;
 
-#if defined (__MESIM__)
+#if defined(__MESIM__)
   while ((opt = getopt(argc, argv, "c:n:")) != -1) {
     switch (opt) {
     case 'c':
@@ -49,10 +49,12 @@ int main(int argc, char *argv[]) {
     std::cout << "ERROR: num_channels must be <= 4\n";
     return -1;
   }
-  std::cout << "num_cols: " << num_cols << ", num_channels: " << num_channels << "\n";
+  std::cout << "num_cols: " << num_cols << ", num_channels: " << num_channels
+            << "\n";
 #endif
 
-  test_utils::print_test_banner("12_ddr_read_bw","I read War and Peace in 2 minutes");
+  test_utils::print_test_banner("12_ddr_read_bw",
+                                "I read War and Peace in 2 minutes");
 
   aie_libxaie_ctx_t xaie;
   ext_mem_model_t handle_in;
@@ -66,7 +68,6 @@ int main(int argc, char *argv[]) {
   for (int i = 0; i < 65536; i++)
     ddr_ptr_in[i] = i;
   mlir_aie_sync_mem_dev(handle_in);
-
 
   if (VERBOSE_TEST) {
     test_utils::print_shim_tile_status(0);
@@ -100,44 +101,53 @@ int main(int argc, char *argv[]) {
     // http://cervino-doc/aie4/r0p41.1/tile_links/xregdb_aie4_shim_tile_doc.html#pl_module___Performance_Start_Stop_0_1
 
     uint32_t stop_start_stop_start = 0x00000000;
-    uint32_t start = 128;  // LockSel0_acq_eq, we will use lock 1
-    uint32_t stop  = 54;  // DMA_MM2S_Sel0_finished_BD
+    uint32_t start = 128; // LockSel0_acq_eq, we will use lock 1
+    uint32_t stop = 54;   // DMA_MM2S_Sel0_finished_BD
     stop_start_stop_start |= (stop << 8) | (start << 0);
-    start = 132;  // LockSel1_acq_eq, we will use lock 3
-    stop = 55;  // DMA_MM2S_Sel1_finished_BD
+    start = 132; // LockSel1_acq_eq, we will use lock 3
+    stop = 55;   // DMA_MM2S_Sel1_finished_BD
     stop_start_stop_start |= (stop << 24) | (start << 16);
-    mlir_aie_sim_write32((uint64_t)((col << 25) | 0x00004000), stop_start_stop_start);
+    mlir_aie_sim_write32((uint64_t)((col << 25) | 0x00004000),
+                         stop_start_stop_start);
 
-    
     stop_start_stop_start = 0x00000000;
-    start = 136;  // LockSel2_acq_eq, we will use lock 5
-    stop  = 56;  // DMA_MM2S_Sel2_finished_BD 
+    start = 136; // LockSel2_acq_eq, we will use lock 5
+    stop = 56;   // DMA_MM2S_Sel2_finished_BD
     stop_start_stop_start |= (stop << 8) | (start << 0);
-    start = 140;  // LockSel3_acq_eq, we will use lock 7
-    stop  = 57;  // DMA_MM2S_Sel3_finished_BD 
+    start = 140; // LockSel3_acq_eq, we will use lock 7
+    stop = 57;   // DMA_MM2S_Sel3_finished_BD
     stop_start_stop_start |= (stop << 24) | (start << 16);
-    mlir_aie_sim_write32((uint64_t)((col << 25) | 0x00004004), stop_start_stop_start);
+    mlir_aie_sim_write32((uint64_t)((col << 25) | 0x00004004),
+                         stop_start_stop_start);
   }
 
   ////////////////////////////////////////////////////
   // TEST START
 
-  // At this point, we need to toggle the shimtile lock to indicate that data has been written
-  // and can be read by the DMA
-  // This is the shim_tile_input_read_lock which the MM2S channel0 0 is blocked on
+  // At this point, we need to toggle the shimtile lock to indicate that data
+  // has been written and can be read by the DMA This is the
+  // shim_tile_input_read_lock which the MM2S channel0 0 is blocked on
   // aie.use_lock(%shim_tile_input_read_lock, AcquireGreaterEqual, 1)
   for (uint32_t col = 0; col < num_cols; col++) {
-    uint32_t before_perf_counter_0 = mlir_aie_sim_read32((col << 25) | 0x00004020);
-    uint32_t before_perf_counter_1 = mlir_aie_sim_read32((col << 25) | 0x00004024);
-    uint32_t before_perf_counter_2 = mlir_aie_sim_read32((col << 25) | 0x00004028);
-    uint32_t before_perf_counter_3 = mlir_aie_sim_read32((col << 25) | 0x0000402C);
-    printf("Before Perf counter 0 for column %u: %d\n", col, before_perf_counter_0);
+    uint32_t before_perf_counter_0 =
+        mlir_aie_sim_read32((col << 25) | 0x00004020);
+    uint32_t before_perf_counter_1 =
+        mlir_aie_sim_read32((col << 25) | 0x00004024);
+    uint32_t before_perf_counter_2 =
+        mlir_aie_sim_read32((col << 25) | 0x00004028);
+    uint32_t before_perf_counter_3 =
+        mlir_aie_sim_read32((col << 25) | 0x0000402C);
+    printf("Before Perf counter 0 for column %u: %d\n", col,
+           before_perf_counter_0);
     if (num_channels > 1)
-      printf("Before Perf counter 1 for column %u: %d\n", col, before_perf_counter_1);
+      printf("Before Perf counter 1 for column %u: %d\n", col,
+             before_perf_counter_1);
     if (num_channels > 2)
-      printf("Before Perf counter 2 for column %u: %d\n", col, before_perf_counter_2);
+      printf("Before Perf counter 2 for column %u: %d\n", col,
+             before_perf_counter_2);
     if (num_channels > 3)
-      printf("Before Perf counter 3 for column %u: %d\n", col, before_perf_counter_3);
+      printf("Before Perf counter 3 for column %u: %d\n", col,
+             before_perf_counter_3);
 
     // There's 1 tile of data there now, go for it
     uint64_t shim_tile_lock_1 = (col << 25) + 0x00010010;
@@ -213,37 +223,46 @@ int main(int argc, char *argv[]) {
 
     uint32_t ideal = 65536 * 32 / 512;
     uint32_t data_volume = 65536 * 4; // bytes
-    printf("Transferred %d bytes per channel for column %u\n", data_volume, col);
+    printf("Transferred %d bytes per channel for column %u\n", data_volume,
+           col);
 
     float efficiency = 100.0 * (float)ideal / (float)perf_counter_0;
     float bytes_per_cycle = (float)data_volume / (float)perf_counter_0;
     float GB_per_sec = bytes_per_cycle; // Assume 1 GHz clock
-    printf("Achieved bandwidth for column %u channel 0: %f GB/s, %.2f%% efficient\n", col, GB_per_sec, efficiency);
+    printf("Achieved bandwidth for column %u channel 0: %f GB/s, %.2f%% "
+           "efficient\n",
+           col, GB_per_sec, efficiency);
     if (num_channels == 1)
       continue;
 
     efficiency = 100.0 * (float)ideal / (float)perf_counter_1;
     bytes_per_cycle = (float)data_volume / (float)perf_counter_1;
     GB_per_sec = bytes_per_cycle; // Assume 1 GHz clock
-    printf("Achieved bandwidth for column %u channel 1: %f GB/s, %.2f%% efficient\n", col, GB_per_sec, efficiency);
+    printf("Achieved bandwidth for column %u channel 1: %f GB/s, %.2f%% "
+           "efficient\n",
+           col, GB_per_sec, efficiency);
     if (num_channels == 2)
       continue;
 
     efficiency = 100.0 * (float)ideal / (float)perf_counter_2;
     bytes_per_cycle = (float)data_volume / (float)perf_counter_2;
     GB_per_sec = bytes_per_cycle; // Assume 1 GHz clock
-    printf("Achieved bandwidth for column %u channel 2: %f GB/s, %.2f%% efficient\n", col, GB_per_sec, efficiency);
+    printf("Achieved bandwidth for column %u channel 2: %f GB/s, %.2f%% "
+           "efficient\n",
+           col, GB_per_sec, efficiency);
     if (num_channels == 3)
-        continue;
+      continue;
 
     efficiency = 100.0 * (float)ideal / (float)perf_counter_3;
     bytes_per_cycle = (float)data_volume / (float)perf_counter_3;
     GB_per_sec = bytes_per_cycle; // Assume 1 GHz clock
-    printf("Achieved bandwidth for column %u channel 3: %f GB/s, %.2f%% efficient\n", col, GB_per_sec, efficiency);
+    printf("Achieved bandwidth for column %u channel 3: %f GB/s, %.2f%% "
+           "efficient\n",
+           col, GB_per_sec, efficiency);
 
     // if (efficiency < 80.0) {
-    //   printf("FAIL: Efficiency of %.2f%% for column %u is less than 80%%\n", efficiency, col);
-    //   errs++;
+    //   printf("FAIL: Efficiency of %.2f%% for column %u is less than 80%%\n",
+    //   efficiency, col); errs++;
     // }
   }
 
@@ -254,10 +273,8 @@ int main(int argc, char *argv[]) {
     if (ddr_input[i] != i) {
       errs++;
       printf(" IN: error @ %d : %x\n", i, ddr_input[i]);
-    }
-    else
-      if (VERBOSE_TEST)
-        printf(" IN:   yes @ %d : %x\n", i, ddr_input[i]);
+    } else if (VERBOSE_TEST)
+      printf(" IN:   yes @ %d : %x\n", i, ddr_input[i]);
   }
 
   if (!errs) {

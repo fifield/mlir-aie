@@ -11,10 +11,10 @@
 #include <iostream>
 #include <vector>
 
-#include <stdio.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include "memory_allocator.h"
 #include "test_utils.h"
@@ -30,10 +30,10 @@ float fp8_to_fp32(uint8_t fp8) {
     } else {
       return (sign == 0) ? 0.5 * (1 << mantissa) : -0.5 * (1 << mantissa);
     }
-  } 
-  else {
-    return (sign == 0) ? (1 << (exponent - 7)) * (1 + (mantissa / 8.0)) : -1 * (1 << (exponent - 7)) * (1 + (mantissa / 8.0));
-  } 
+  } else {
+    return (sign == 0) ? (1 << (exponent - 7)) * (1 + (mantissa / 8.0))
+                       : -1 * (1 << (exponent - 7)) * (1 + (mantissa / 8.0));
+  }
 }
 
 bool is_roughly_equal(float a, uint8_t fp8, float tolerance) {
@@ -46,7 +46,6 @@ bool is_roughly_equal(float a, uint8_t fp8, float tolerance) {
   float relative_diff = abs_diff / fmaxf(epsilon, max_magnitude);
 
   return relative_diff < tolerance;
-
 }
 
 int main(int argc, char *argv[]) {
@@ -61,7 +60,8 @@ int main(int argc, char *argv[]) {
   uint64_t row = 3;
 
   uint64_t tile_data_mem = ((col << 25) | ((row + 4) << 20)) + 1024 + 1024;
-  uint64_t output_tile_data_mem = ((col << 25) | ((row + 4) << 20)) + 32768 + 1024;
+  uint64_t output_tile_data_mem =
+      ((col << 25) | ((row + 4) << 20)) + 32768 + 1024;
 
   // We will start from a known seed as this is regression test
   srand(42);
@@ -69,7 +69,7 @@ int main(int argc, char *argv[]) {
   for (int i = 0; i < 256; i++) {
     // Lets make a random float between -100 and 100
     int random = rand() % 200;
-    float f = (float )random - 100.0;
+    float f = (float)random - 100.0;
     int as_int = *(int *)&f;
     mlir_aie_sim_write32(tile_data_mem + (i * 4), as_int);
   }
@@ -103,8 +103,8 @@ int main(int argc, char *argv[]) {
     float f = *(float *)&input;
     int32_t output = mlir_aie_sim_read32(output_tile_data_mem + ((i / 4) * 4));
 
-    // The fp8 numbers are in S.E4.M3 format, S is the sign bit, E is the exponent and M is the mantissa
-    // So the bit pattern is S E E E E M M M
+    // The fp8 numbers are in S.E4.M3 format, S is the sign bit, E is the
+    // exponent and M is the mantissa So the bit pattern is S E E E E M M M
 
     uint8_t expected = (uint8_t)(output >> (i % 4) * 8);
     uint8_t sign = (expected & 0x80) >> 7;
@@ -115,13 +115,13 @@ int main(int argc, char *argv[]) {
 
     if (!roughly_equal) {
       pass = false;
-    } 
+    }
 
     /*
     // Should gate this by a verbose flag
     std::cout << "Sample " << i;
     std::cout << " roughly_equal " << roughly_equal;
-    std::cout << " input " << std::hex << input << std::dec; 
+    std::cout << " input " << std::hex << input << std::dec;
     std::cout << " output " << std::hex << output << std::dec ;
 
     // print the fp8 number as S.E.M with numbers
@@ -131,7 +131,7 @@ int main(int argc, char *argv[]) {
     std::cout << " as floats " << f << " -> " << fp8_to_fp32(expected);
     std::cout << "\n";
     */
-  }  
+  }
 
   if (pass) {
     std::cout << "PASS!\n";

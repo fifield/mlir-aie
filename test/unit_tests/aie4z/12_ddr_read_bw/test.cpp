@@ -154,7 +154,7 @@ int main(int argc, char *argv[]) {
     uint64_t shim_tile_lock_base = (col << 25) + 0x00010010;
     for (int i = 0; i < num_channels; i++) {
       // write every other lock, so 0x20 apart.
-      mlir_aie_sim_write32(shim_tile_lock_base + i*0x20, 1);
+      mlir_aie_sim_write32(shim_tile_lock_base + i * 0x20, 1);
     }
   }
 
@@ -172,8 +172,8 @@ int main(int argc, char *argv[]) {
     uint64_t shim_tile_lock_base = (col << 25) + 0x00010000;
     for (int i = 0; i < num_channels; i++) {
       // write every other lock, so 0x20 apart.
-      printf("Going to wait for col %u lock %d to increment\n", col, i*2);
-      test_utils::wait_on_lock(shim_tile_lock_base + i*0x20, 2);
+      printf("Going to wait for col %u lock %d to increment\n", col, i * 2);
+      test_utils::wait_on_lock(shim_tile_lock_base + i * 0x20, 2);
     }
   }
 

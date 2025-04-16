@@ -30,7 +30,7 @@ int main(int argc, char *argv[]) {
   // Stomp over the data in the memory tile and an overrun pattern
   row = 1;
   uint64_t memtile_data_mem = (col << 25) | (row << 20) + 0x00100000 + 2048;
-  for (int i = 0; i < buffer_size+4; i++) {
+  for (int i = 0; i < buffer_size + 4; i++) {
     mlir_aie_sim_write32(memtile_data_mem + (4 * i), 0xbaadbaad);
   }
 
@@ -40,7 +40,6 @@ int main(int argc, char *argv[]) {
   for (int i = 0; i < buffer_size; i++)
     mlir_aie_sim_write32(tile_data_mem + (4 * i), 0xbeefcafe + i);
   printf("Tile memory stomped.\n");
-
 
   // Configure the array
   std::string txn_path = "transaction.bin";
@@ -63,7 +62,7 @@ int main(int argc, char *argv[]) {
 
   row = 1;
   while (1) {
-    uint64_t mem_tile_lock_1 = ((col << 25) | (row  << 20)) + 0x00010010;
+    uint64_t mem_tile_lock_1 = ((col << 25) | (row << 20)) + 0x00010010;
     uint32_t l = mlir_aie_sim_read32(mem_tile_lock_1);
     if (l >= 2)
       break;
@@ -81,7 +80,7 @@ int main(int argc, char *argv[]) {
       printf("error @ %d : %x\n", i, output[i]);
     }
   }
-  for (int i=0;i<4;i++) {
+  for (int i = 0; i < 4; i++) {
     uint32_t over =
         mlir_aie_sim_read32(memtile_data_mem + (4 * (buffer_size + i)));
     if (over != 0xbaadbaad) {
@@ -89,7 +88,6 @@ int main(int argc, char *argv[]) {
       printf("error @ over %d : %x\n", i, over);
     }
   }
-
 
   if (!errs) {
     printf("PASS!\n");
