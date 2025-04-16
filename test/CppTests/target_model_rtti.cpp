@@ -182,7 +182,7 @@ void test() {
                   AIE::AIE2TargetModel, AIE::VE2302TargetModel,
                   AIE::VE2802TargetModel, AIE::BaseNPU1TargetModel,
                   AIE::VirtualizedNPU1TargetModel, AIE::BaseNPU2TargetModel,
-                  AIE::VirtualizedNPU2TargetModel>(
+                  AIE::NPU2TargetModel, AIE::VirtualizedNPU2TargetModel>(
             AIE::getTargetModel(AIE::AIEDevice::npu3))) {
       throw std::runtime_error("Failed npu3 !isa<>");
     }

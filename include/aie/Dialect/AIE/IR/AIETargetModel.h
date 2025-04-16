@@ -1203,12 +1203,13 @@ public:
 };
 
 class BaseNPU1TargetModel : public AIE2TargetModel {
+  static constexpr Properties properties = AIETargetModel::IsNPU;
+
 public:
   uint8_t getTxnDeviceGen() const override { return 3; } // XAIE_DEV_GEN_AIE2IPU
 
-  BaseNPU1TargetModel(TargetModelKind k) : AIE2TargetModel(k) {
-    addModelProperty(AIETargetModel::IsNPU);
-  }
+  BaseNPU1TargetModel(TargetModelKind k, Properties p = 0)
+      : AIE2TargetModel(k, p | properties) {}
 
   int rows() const override {
     return 6; /* 1 Shim row, 1 memtile row, and 4 Core rows. */
@@ -1228,6 +1229,8 @@ public:
 
 // A sub-portion of the Phoenix NPU
 class VirtualizedNPU1TargetModel : public BaseNPU1TargetModel {
+
+  static constexpr Properties properties = AIETargetModel::IsVirtualized;
   int cols;
 
 public:
@@ -1258,12 +1261,13 @@ public:
 };
 
 class BaseNPU2TargetModel : public AIE2TargetModel {
+  static constexpr Properties properties = AIETargetModel::IsNPU;
+
 public:
   uint8_t getTxnDeviceGen() const override { return 4; } // XAIE_DEV_GEN_AIE2P
 
-  BaseNPU2TargetModel(TargetModelKind k) : AIE2TargetModel(k) {
-    addModelProperty(AIETargetModel::IsNPU);
-  }
+  BaseNPU2TargetModel(TargetModelKind k, Properties p = 0)
+      : AIE2TargetModel(k, p | properties) {}
 
   AIEArch getTargetArch() const override;
   // AIE2P/AIE2PS: a full-width (512-bit) vector access requires 512-bit
@@ -1316,17 +1320,19 @@ public:
 
 // A sub-portion of the Strix NPU
 class VirtualizedNPU2TargetModel : public BaseNPU2TargetModel {
+
+  static constexpr Properties properties = AIETargetModel::IsVirtualized;
   int cols;
 
 public:
-  VirtualizedNPU2TargetModel(int _cols)
-      : BaseNPU2TargetModel(static_cast<TargetModelKind>(
-            static_cast<std::underlying_type_t<TargetModelKind>>(TK_AIE2_NPU2) +
-            _cols)),
-        cols(_cols) {
-    // Device properties initialization
-    addModelProperty(AIETargetModel::IsVirtualized);
-  }
+  VirtualizedNPU2TargetModel(int _cols, Properties p = None)
+      : BaseNPU2TargetModel(
+            static_cast<TargetModelKind>(
+                static_cast<std::underlying_type_t<TargetModelKind>>(
+                    TK_AIE2_NPU2) +
+                _cols),
+            p | properties),
+        cols(_cols) {}
 
   int columns() const override { return cols; }
 
@@ -1493,19 +1499,6 @@ class NPU3zTargetModel : public BaseNPU3TargetModel {
 public:
   uint8_t getTxnDeviceGen() const override { return 43; } // XAIE_DEV_GEN_AIE4Z
 
-  NPU3zTargetModel() : BaseNPU3TargetModel(TK_AIE4_NPU3Z) {}
-
-  int columns() const override { return 3; }
-
-  static bool classof(const AIETargetModel *model) {
-    return model->getKind() == TK_AIE4_NPU3Z;
-  }
-  AIEArch getTargetArch() const override { return AIEArch::AIE4z; }
-};
-
-// The pacifica NPU
-class NPU3zTargetModel : public BaseNPU3TargetModel {
-public:
   NPU3zTargetModel() : BaseNPU3TargetModel(TK_AIE4_NPU3Z) {}
 
   int columns() const override { return 3; }
