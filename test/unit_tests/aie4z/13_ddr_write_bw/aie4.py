@@ -34,8 +34,8 @@ def generate_module():
             CoreTile = [tile(col, i + 2) for i in range(4)]
 
             for core in CoreTile:
-                ping_in_buffer = aie.buffer(core, tile_ty, address = 0)
-                pong_in_buffer = aie.buffer(core, tile_ty, address = 32768)
+                ping_in_buffer = aie.buffer(core, tile_ty, address=0)
+                pong_in_buffer = aie.buffer(core, tile_ty, address=32768)
 
                 @mem(core)
                 def s(block):
