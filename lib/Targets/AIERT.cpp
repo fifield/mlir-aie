@@ -17,6 +17,7 @@ extern "C" {
 #include "xaiengine/xaie_core.h"
 #include "xaiengine/xaie_dma.h"
 #include "xaiengine/xaie_elfloader.h"
+#include "xaiengine/xaie_helper.h"
 #include "xaiengine/xaie_interrupt.h"
 #include "xaiengine/xaie_locks.h"
 #include "xaiengine/xaie_mem.h"
@@ -27,6 +28,7 @@ extern "C" {
 #include "xaiengine/xaie_ss.h"
 #include "xaiengine/xaie_tilectrl.h"
 #include "xaiengine/xaie_txn.h"
+#include "xaiengine/xaie_uc.h"
 #include "xaiengine/xaiegbl.h"
 #include "xaiengine/xaiegbl_defs.h"
 }
@@ -1152,9 +1154,15 @@ LogicalResult xilinx::AIE::AIERTControl::addCoreEnable(DeviceOp &targetOp) {
   return success();
 }
 
-LogicalResult xilinx::AIE::AIERTControl::addAieElf(uint8_t col, uint8_t row,
-                                                   const StringRef elfPath,
-                                                   bool aieSim) {
+LogicalResult AIERTControl::addUcElf(uint32_t col, const StringRef elfPath) {
+  TRY_XAIE_API_LOGICAL_RESULT(XAie_LoadUc, &aiert->devInst,, XAie_TileLoc(col, 0),
+                              elfPath.str().c_str());
+  TRY_XAIE_API_LOGICAL_RESULT(XAie_Write32, &aiert->devInst,, 0x0002C004, 1);
+  return success();
+}
+
+LogicalResult AIERTControl::addCoreElf(uint32_t col, uint32_t row,
+                                       const StringRef elfPath, bool aieSim) {
   TRY_XAIE_API_LOGICAL_RESULT(XAie_CoreDisable, &aiert->devInst,
                               XAie_TileLoc(col, row));
   TRY_XAIE_API_LOGICAL_RESULT(XAie_DmaChannelResetAll, &aiert->devInst,
@@ -1165,7 +1173,7 @@ LogicalResult xilinx::AIE::AIERTControl::addAieElf(uint8_t col, uint8_t row,
   // __AIESIM__ is not defined.
   TRY_XAIE_API_LOGICAL_RESULT(XAie_LoadElf, &aiert->devInst,
                               XAie_TileLoc(col, row), elfPath.str().c_str(),
-                              /*loadSym*/ aieSim);
+                              /*loadSym*/ false);
 
   TRY_XAIE_API_LOGICAL_RESULT(XAie_DmaChannelResetAll, &aiert->devInst,
                               XAie_TileLoc(col, row),
@@ -1314,6 +1322,15 @@ LogicalResult xilinx::AIE::AIERTControl::addAieElfs(DeviceOp &targetOp,
     } else {
       int col = tileOp.colIndex();
       int row = tileOp.rowIndex();
+      if (row == 0 && tileOp->hasAttr("elf_file")) {
+        std::string fileName =
+            tileOp->getAttrOfType<mlir::StringAttr>("elf_file").str();
+        fileName = elfPath.str() + std::string(1, ps) + fileName;
+        std::cout << fileName << "\n";
+        if (failed(addUcElf(col, fileName)))
+          return failure();
+        continue;
+      }
       if (auto coreOp = tileOp.getCoreOp()) {
         std::string fileName;
         if (auto fileAttr = coreOp.getElfFile()) {
@@ -1337,6 +1354,20 @@ LogicalResult xilinx::AIE::AIERTControl::addAieElfs(DeviceOp &targetOp,
           return failure();
       }
     }
+    CoreOp coreOp = tileOp.getCoreOp();
+    if (!coreOp)
+      continue;
+    std::string fileName;
+    if (auto fileAttr = coreOp.getElfFile())
+      fileName = fileAttr->str();
+    else
+      fileName = (llvm::Twine("core_") + std::to_string(col) + "_" +
+                  std::to_string(row) + ".elf")
+                     .str();
+    fileName = elfPath.str() + std::string(1, ps) + fileName;
+    if (failed(addCoreElf(col, row, fileName, aieSim)))
+      return failure();
+  }
   return success();
 }
 

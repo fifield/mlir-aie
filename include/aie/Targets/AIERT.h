@@ -69,8 +69,9 @@ struct AIERTControl {
   mlir::LogicalResult disableCores(DeviceOp &targetOp);
   mlir::LogicalResult resetDmaChannels(DeviceOp &targetOp);
   mlir::LogicalResult addCoreEnable(DeviceOp &targetOp);
-  mlir::LogicalResult addAieElf(uint8_t col, uint8_t row,
-                                const mlir::StringRef elfPath, bool aieSim);
+  mlir::LogicalResult addUcElf(uint32_t col, const mlir::StringRef elfPath);
+  mlir::LogicalResult addCoreElf(uint32_t col, uint32_t row,
+                                 const mlir::StringRef elfPath, bool aieSim);
   mlir::LogicalResult addAieElfs(DeviceOp &targetOp,
                                  const mlir::StringRef elfPath, bool aieSim);
   void startTransaction();

@@ -2139,10 +2139,11 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
   };
 
   auto isBundle32 = [&](WireBundle bundle) -> bool {
-    return isBundleInList(bundle, {WireBundle::Control32, WireBundle::Trace32,
-                                   WireBundle::South32, WireBundle::West32,
-                                   WireBundle::North32, WireBundle::East32,
-                                   WireBundle::Switch512, WireBundle::PLIO32});
+    return isBundleInList(
+        bundle,
+        {WireBundle::Control32, WireBundle::Controller32, WireBundle::Trace32,
+         WireBundle::South32, WireBundle::West32, WireBundle::North32,
+         WireBundle::East32, WireBundle::Switch512, WireBundle::PLIO32});
   };
 
   // 32-bit switch is fully connected

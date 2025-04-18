@@ -405,8 +405,7 @@ static LogicalResult generateTransactions(AIERTControl &ctl,
                                           bool enableElfs, bool enableInit,
                                           bool enableCores,
                                           bool skipCtrlPktOverlay = false) {
-  if (enableElfs && !targetOp.getOps<CoreOp>().empty() &&
-      failed(ctl.addAieElfs(targetOp, workDirPath, aieSim)))
+  if (enableElfs && failed(ctl.addAieElfs(targetOp, workDirPath, aieSim)))
     return failure();
   if (enableInit && failed(ctl.addInitConfig(targetOp, skipCtrlPktOverlay)))
     return failure();
