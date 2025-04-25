@@ -41,8 +41,8 @@ endif()
 
 # test_utils library
 if (BUILD_TEST_UTILS_LIBRARY)
-  add_library(test_utils STATIC test_utils.cpp)
-  set_target_properties(test_utils PROPERTIES PUBLIC_HEADER "test_utils.h;xrt_test_wrapper.h;hrx_test_wrapper.h;cxxopts.hpp;parameter_scratchpad.h")
+  add_library(test_utils STATIC test_utils.cpp cert_utils.cpp)
+  set_target_properties(test_utils PROPERTIES PUBLIC_HEADER "test_utils.h;cert_utils.h;xrt_test_wrapper.h;hrx_test_wrapper.h;cxxopts.hpp;parameter_scratchpad.h")
   add_runtime_pic_flag(test_utils)
 
   # xrt_test_wrapper.h calls init_xrt_load_kernel, so the XRT helpers must be
@@ -67,7 +67,7 @@ if (BUILD_TEST_LIBRARY)
   list(APPEND headers target.h test_library.h memory_allocator.h)
 endif()
 if (STAGE_TEST_UTILS_PAYLOAD)
-  list(APPEND headers test_utils.h xrt_test_wrapper.h hrx_test_wrapper.h parameter_scratchpad.h)
+  list(APPEND headers test_utils.h cert_utils.h xrt_test_wrapper.h hrx_test_wrapper.h parameter_scratchpad.h)
 endif()
 foreach(basefile ${headers})
     set(dest ${CMAKE_CURRENT_BINARY_DIR}/../include/${basefile})
@@ -84,7 +84,7 @@ if (BUILD_TEST_LIBRARY)
   list(APPEND files test_library.cpp)
 endif()
 if (STAGE_TEST_UTILS_PAYLOAD)
-  list(APPEND files test_utils.cpp)
+  list(APPEND files test_utils.cpp cert_utils.cpp)
 endif()
 foreach(basefile ${files})
     set(dest ${CMAKE_CURRENT_BINARY_DIR}/../src/${basefile})
@@ -108,7 +108,7 @@ if (BUILD_TEST_UTILS_LIBRARY)
       PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_PREFIX}/runtime_lib/${AIE_RUNTIME_TARGET}/test_lib/include
   )
 elseif (STAGE_TEST_UTILS_PAYLOAD)
-  install(FILES test_utils.h xrt_test_wrapper.h hrx_test_wrapper.h cxxopts.hpp parameter_scratchpad.h
+  install(FILES test_utils.h cert_utils.h xrt_test_wrapper.h hrx_test_wrapper.h cxxopts.hpp parameter_scratchpad.h
       DESTINATION ${CMAKE_INSTALL_PREFIX}/runtime_lib/${AIE_RUNTIME_TARGET}/test_lib/include
   )
 endif()

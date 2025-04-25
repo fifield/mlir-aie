@@ -1,4 +1,4 @@
-//===- test_utils.h ----------------------------000---*- C++ -*-===//
+//===- test_utils.h ---------------------------------------------*- C++ -*-===//
 //
 // Copyright (C) 2024 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
