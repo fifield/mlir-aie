@@ -36,7 +36,7 @@ uint32_t mlir_aie_sim_read32(uint64_t addr) {
 }
 
 // static variable for tracking current DDR physical addr during AIESIM
-static uint64_t nextAlignedAddr = 0;
+static uint64_t nextAlignedAddr = 0x80000000;
 
 int *mlir_aie_mem_alloc(aie_libxaie_ctx_t *_xaie, ext_mem_model_t &handle,
 
