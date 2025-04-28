@@ -101,20 +101,20 @@ int main(int argc, char *argv[]) {
     // http://cervino-doc/aie4/r0p41.1/tile_links/xregdb_aie4_shim_tile_doc.html#pl_module___Performance_Start_Stop_0_1
 
     uint32_t stop_start_stop_start = 0x00000000;
-    uint32_t start = 128; // LockSel0_acq_eq, we will use lock 1
+    uint32_t start = 129; // LockSel0_acq_ge, we will use lock 1
     uint32_t stop = 54;   // DMA_MM2S_Sel0_finished_BD
     stop_start_stop_start |= (stop << 8) | (start << 0);
-    start = 132; // LockSel1_acq_eq, we will use lock 3
+    start = 133; // LockSel1_acq_ge, we will use lock 3
     stop = 55;   // DMA_MM2S_Sel1_finished_BD
     stop_start_stop_start |= (stop << 24) | (start << 16);
     mlir_aie_sim_write32((uint64_t)((col << 25) | 0x00004000),
                          stop_start_stop_start);
 
     stop_start_stop_start = 0x00000000;
-    start = 136; // LockSel2_acq_eq, we will use lock 5
+    start = 137; // LockSel2_acq_ge, we will use lock 5
     stop = 56;   // DMA_MM2S_Sel2_finished_BD
     stop_start_stop_start |= (stop << 8) | (start << 0);
-    start = 140; // LockSel3_acq_eq, we will use lock 7
+    start = 141; // LockSel3_acq_ge, we will use lock 7
     stop = 57;   // DMA_MM2S_Sel3_finished_BD
     stop_start_stop_start |= (stop << 24) | (start << 16);
     mlir_aie_sim_write32((uint64_t)((col << 25) | 0x00004004),

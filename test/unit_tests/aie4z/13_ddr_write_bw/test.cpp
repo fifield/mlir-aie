@@ -107,8 +107,8 @@ int main(int argc, char *argv[]) {
     // http://cervino-doc/aie4/r0p41.1/tile_links/xregdb_aie4_shim_tile_doc.html#pl_module___Performance_Start_Stop_0_1
 
     uint32_t stop_start_stop_start = 0x00000000;
-    uint32_t start = 128; // LockSel0_acq_eq, we will use lock 0
-    uint32_t stop = 134;  // LockSel _release, we will use lock 1
+    uint32_t start = 129; // LockSel0_acq_ge, we will use lock 0
+    uint32_t stop = 134;  // LockSel0_release, we will use lock 1
     stop_start_stop_start |= (stop << 8) | (start << 0);
     mlir_aie_sim_write32((uint64_t)((col << 25) | 0x00004000),
                          stop_start_stop_start);
