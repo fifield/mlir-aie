@@ -14,6 +14,7 @@
 #include "memory_allocator.h"
 
 #include <cstdint>
+#include <vector>
 
 namespace cert_utils {
 
@@ -31,6 +32,10 @@ void set_partition_size(uint32_t column, uint32_t partition_size);
 
 // Read the firmware state from the cert handshake struct.
 uint32_t get_fw_state(uint32_t column, uint32_t id);
+
+// Enqueue control code buffer, return a handle to the completion signal.
+ext_mem_model_t enqueue_control_code(aie_libxaie_ctx_t *xaie, void *queue,
+                                     std::vector<uint16_t> &control_code);
 
 } // namespace cert_utils
 
