@@ -93,10 +93,10 @@ void *cert_utils::setup_queue(aie_libxaie_ctx_t *xaie, uint32_t column,
     uint16_t *type = reinterpret_cast<uint16_t *>((i * 64) + packet_buffer);
     *type = HOST_QUEUE_PACKET_TYPE_INVALID;
   }
-
   // set host_queue address field to be the buffer address
-  host_queue->capacity = queue_size;
-  host_queue->data_address = reinterpret_cast<uint64_t>(packet_buffer);
+  uint64_t buffer_paddr =
+      (h.physicalAddr - 0x80000000) + sizeof(host_queue_header_t);
+  host_queue->data_address = buffer_paddr;
 
   uint64_t hsa_addr_high_offset = 0xc;
   uint64_t hsa_addr_low_offset = 0x10;

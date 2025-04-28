@@ -9,9 +9,9 @@
 #include <stdio.h>
 #include <unistd.h>
 
+#include "cert_utils.h"
 #include "memory_allocator.h"
 #include "test_utils.h"
-#include "cert_utils.h"
 
 int main(int argc, char *argv[]) {
 
