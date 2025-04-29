@@ -7,7 +7,7 @@ libraries and simulator, like the daily latest head build:
 
 ```bash
 # use nightly build of vitis
-export VITIS=/proj/xbuilds/HEAD_INT_daily_latest/installs/lin64/Vitis/HEAD
+export VITIS=/proj/primebuilds/HEAD_INT_daily_latest/installs/lin64/Vitis/HEAD
 export PATH=${VITIS}/aietools/bin:${VITIS}/bin:$PATH
 export LM_LICENSE_FILE=1757@xsjlicsrvip:2100@aiengine-eng
 ```
@@ -73,6 +73,15 @@ The aie4 tests can be executed using the llvm lit tool. There are some aie4 unit
 tests in `test/unit_tests/aie4` and `test/unit_tests/chess_compiler_tests_aie4`:
 
 ```bash
+# [optional] setup environment for pacifica mesimulator, otherwise tests run on vitis aiesimulator only
+export PACIFICA_SIM_ROOT=<path to pacifica-sim>
+export CERVINO_ROOT=$PACIFICA_SIM_ROOT/cervino
+export ME_ROOT=$PACIFICA_SIM_ROOT/cervino/aie4
+export me_DIR=$ME_ROOT/core_model/sipp/lib
+export LD_LIBRARY_PATH=$CERVINO_ROOT/ext/systemc/systemc-2.3.3/lib-linux64:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=$CERVINO_ROOT/ext/Boost_1_72_0/boost_1_72_0/rdi/lib/gcc8.3.0/lnx64.o:$LD_LIBRARY_PATH
+export PYTHONPATH=$PYTHONPATH:$ME_ROOT/python:$ME_ROOT/applications
+
 # run tests
 cd $BUILD_DIR
 lit -sv test/unit_tests/aie4 test/unit_tests/chess_compiler_tests_aie4
@@ -111,13 +120,13 @@ generated. See the aie4 tests for examples.
 xchesscc_wrapper aie4 -c kernel.cc
 # Build mlir-aie design
 # --aiesim to generate simulation binaries including "host code"
-aiecc.py --aiesim --xchesscc --xbridge --no-compile-host aie.mlir test.cpp
-# Convert aiecc output to configuration data encoded as transaction mlir
-aie-opt --convert-aie-to-transaction='elf-dir=.' aie.mlir.prj/input_physical.mlir -o transaction.mlir
+aiecc.py --aiesim --xchesscc --xbridge --no-compile-host --aie-generate-txn --txn-name=transaction.mlir aie.mlir test.cpp
 # Translate transaction mlir to binary
 aie-translate --aie-npu-to-binary transaction.mlir -o transaction.bin
-# Run the simulation
+# Run the simulation (vitis aiesimulator)
 aie.mlir.prj/aiesim.sh
+# Run the simulation (pacifica mesimulator)
+aie.mlir.prj/mesim.sh
 ```
 
 The simulation will produce a vcd trace called `foo.vcd` which can be viewed with gtkwave.
