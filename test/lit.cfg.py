@@ -26,6 +26,11 @@ from aie_lit_utils import LitConfigHelper, SanitizerLogShTest
 config.name = "AIE_TEST"
 
 config.test_format = lit.formats.ShTest()
+config.environment["PYTHONPATH"] = "{}:{}:{}".format(
+    os.path.join(config.aie_obj_root, "python"),
+    os.path.join(config.aie_obj_root, "aiebu", "aiebu", "share"),
+    os.path.join(config.aie_obj_root, "aiebu", "aiebu", "lib", "python3"),
+)
 
 # suffixes: A list of file extensions to treat as test files.
 config.suffixes = [".mlir", ".py", ".test"]

@@ -421,6 +421,21 @@ void registerAIETranslations() {
                                     npuEmitDispatchShim);
       },
       registerDialects);
+  TranslateFromMLIRRegistration registrationUcDma(
+      "aie-cert-to-asm", "Translate aiex.cert instructions to assembly",
+      [](ModuleOp module, raw_ostream &output) {
+        if (outputBinary == true) {
+          std::string assembly;
+          auto r = AIETranslateToUcDma(module, assembly, sequenceName);
+          if (failed(r))
+            return r;
+          output.write(reinterpret_cast<const char *>(assembly.data()),
+                       assembly.size());
+          return success();
+        }
+        return AIETranslateToUcDma(module, output, sequenceName);
+      },
+      registerDialects);
   TranslateFromMLIRRegistration registrationCtrlPkt(
       "aie-ctrlpkt-to-bin", "Translate aiex.control_packet ops to binary",
       [](ModuleOp module, raw_ostream &output) {

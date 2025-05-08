@@ -1157,7 +1157,8 @@ LogicalResult xilinx::AIE::AIERTControl::addCoreEnable(DeviceOp &targetOp) {
 LogicalResult AIERTControl::addUcElf(uint32_t col, const StringRef elfPath) {
   TRY_XAIE_API_LOGICAL_RESULT(XAie_LoadUc, &aiert->devInst,, XAie_TileLoc(col, 0),
                               elfPath.str().c_str());
-  TRY_XAIE_API_LOGICAL_RESULT(XAie_Write32, &aiert->devInst,, 0x0002C004, 1);
+  TRY_XAIE_API_LOGICAL_RESULT(XAie_Write32, &&aiert->devInst, (col << 25) | 0x0002C004,
+                              1);
   return success();
 }
 

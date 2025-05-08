@@ -97,29 +97,38 @@ std::vector<uint32_t> test_utils::load_instr_sequence(std::string instr_path) {
   return instr_v;
 }
 
-std::vector<uint32_t> test_utils::load_instr_binary(std::string instr_path) {
+template <typename T>
+std::vector<T> test_utils::load_binary(std::string binary_path) {
   // Open file in binary mode
-  std::ifstream instr_file(instr_path, std::ios::binary);
-  if (!instr_file.is_open()) {
-    throw std::runtime_error("Unable to open instruction file\n");
+  std::ifstream bin_file(binary_path, std::ios::binary);
+  if (!bin_file.is_open()) {
+    throw std::runtime_error("Unable to open binary file\n");
   }
 
   // Get the size of the file
-  instr_file.seekg(0, std::ios::end);
-  std::streamsize size = instr_file.tellg();
-  instr_file.seekg(0, std::ios::beg);
+  bin_file.seekg(0, std::ios::end);
+  std::streamsize size = bin_file.tellg();
+  bin_file.seekg(0, std::ios::beg);
 
-  // Check that the file size is a multiple of 4 bytes (size of uint32_t)
-  if (size % 4 != 0) {
-    throw std::runtime_error("File size is not a multiple of 4 bytes\n");
+  // Check that the file size is a multiple of data size
+  if (size % sizeof(T) != 0) {
+    throw std::runtime_error("File size is not a multiple of data size\n");
   }
 
   // Allocate vector and read the binary data
-  std::vector<uint32_t> instr_v(size / 4);
-  if (!instr_file.read(reinterpret_cast<char *>(instr_v.data()), size)) {
+  std::vector<T> bin_v(size / sizeof(T));
+  if (!bin_file.read(reinterpret_cast<char *>(bin_v.data()), size)) {
     throw std::runtime_error("Failed to read instruction file\n");
   }
-  return instr_v;
+  return bin_v;
+}
+
+std::vector<uint8_t> test_utils::load_binary(std::string binary_path) {
+  return load_binary<uint8_t>(binary_path);
+}
+
+std::vector<uint32_t> test_utils::load_instr_binary(std::string instr_path) {
+  return load_binary<uint32_t>(instr_path);
 }
 
 #ifdef TEST_UTILS_USE_XRT

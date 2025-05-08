@@ -46,6 +46,7 @@ void parse_options(int argc, const char *argv[], cxxopts::Options &options,
 
 std::vector<uint32_t> load_instr_sequence(std::string instr_path);
 std::vector<uint32_t> load_instr_binary(std::string instr_path);
+std::vector<uint8_t> load_binary(std::string binary_path);
 
 // Resolve the full name of the first kernel in `xclbin` whose name starts with
 // `name_prefix`, which is what a host's -k argument carries (the packaged name
