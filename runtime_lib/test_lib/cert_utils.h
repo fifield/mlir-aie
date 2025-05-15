@@ -35,7 +35,8 @@ uint32_t get_fw_state(uint32_t column, uint32_t id);
 
 // Enqueue control code buffer, return a handle to the completion signal.
 ext_mem_model_t enqueue_control_code(aie_libxaie_ctx_t *xaie, void *queue,
-                                     std::vector<uint8_t> &control_code);
+                                     std::vector<uint8_t> &control_code,
+                                     std::vector<uint32_t> args = {});
 
 } // namespace cert_utils
 

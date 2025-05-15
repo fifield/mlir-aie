@@ -143,7 +143,8 @@ uint32_t cert_utils::get_fw_state(uint32_t column, uint32_t id) {
 
 ext_mem_model_t
 cert_utils::enqueue_control_code(aie_libxaie_ctx_t *xaie, void *queue,
-                                 std::vector<uint8_t> &control_code) {
+                                 std::vector<uint8_t> &control_code,
+                                 std::vector<uint32_t> args) {
   host_queue_header_t *host_queue =
       reinterpret_cast<host_queue_header_t *>(queue);
 
@@ -179,6 +180,7 @@ cert_utils::enqueue_control_code(aie_libxaie_ctx_t *xaie, void *queue,
 
   exec_buf_t *execution_buffer = reinterpret_cast<exec_buf_t *>(
       (uint8_t *)packet_buffer + sizeof(xrt_packet_header_t));
+  memset(execution_buffer, 0, sizeof(exec_buf_t));
 
   uint64_t control_code_paddr = control_code_h.physicalAddr - 0x80000000;
   execution_buffer->dpu_control_code_host_addr_high =
@@ -186,5 +188,26 @@ cert_utils::enqueue_control_code(aie_libxaie_ctx_t *xaie, void *queue,
   execution_buffer->dpu_control_code_host_addr_low =
       reinterpret_cast<uint64_t>(control_code_paddr) & 0xffffffff;
 
+  // allocate, populate and sync args buffer
+  if (args.size()) {
+    ext_mem_model_t args_h;
+    size_t args_len = (2 + args.size()) * sizeof(uint32_t);
+    uint32_t *args_buf = reinterpret_cast<uint32_t *>(
+        mlir_aie_mem_alloc(xaie, args_h, args_len));
+
+    args_buf[0] = execution_buffer->dpu_control_code_host_addr_low;
+    args_buf[1] = execution_buffer->dpu_control_code_host_addr_high;
+    int idx = 2;
+    for (uint32_t a : args)
+      args_buf[idx++] = a;
+    mlir_aie_sync_mem_dev(args_h);
+
+    uint64_t args_paddr = args_h.physicalAddr - 0x80000000;
+    execution_buffer->args_host_addr_high =
+        reinterpret_cast<uint64_t>(args_paddr) >> 32;
+    execution_buffer->args_host_addr_low =
+        reinterpret_cast<uint64_t>(args_paddr) & 0xffffffff;
+    execution_buffer->args_len = args_len;
+  }
   return signal_h;
 }
