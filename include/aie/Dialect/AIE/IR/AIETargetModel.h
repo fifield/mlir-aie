@@ -1420,6 +1420,14 @@ public:
     }
   }
 
+  uint64_t getDmaBdAddress(int col, int row, uint32_t bd_id, int channel,
+                           AIE::DMAChannelDir direction) const override;
+
+  uint32_t getDmaBdAddressOffset(int col, int row) const override;
+
+  uint32_t getDmaControlAddress(int col, int row, int channel,
+                                AIE::DMAChannelDir direction) const override;
+
   uint32_t getMemTileSize() const override { return 0x00300000; }
 
   uint32_t getNumBanks(int col, int row) const override {

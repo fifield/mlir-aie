@@ -1839,6 +1839,66 @@ bool AIE4TargetModel::isLegalMemAffinity(int coreCol, int coreRow, int memCol,
          IsMemWest || IsMemEast;
 }
 
+uint64_t AIE4TargetModel::getDmaBdAddress(int col, int row, uint32_t bd_id,
+                                          int channel,
+                                          AIE::DMAChannelDir direction) const {
+
+  uint64_t offset = 0;
+  if (isShimNOCTile(col, row)) {
+    uint32_t numBds = 16;
+    if (direction == AIE::DMAChannelDir::MM2S) {
+      offset = 0x00018C40;
+    } else {
+      if (channel == 0) {
+        offset = 0x00018000;
+      } else if (channel == 1) {
+        offset = 0x00058000;
+        channel = 0;
+      } else if (getTargetArch() == AIEArch::AIE4z) {
+        offset = 0x00018640;
+        channel -= 2;
+      } else {
+        llvm_unreachable("Unhandled channel and/or direction in "
+                         "AIE4TargetModel::getDmaBdAddress");
+      }
+    }
+    offset += (channel * numBds * 0x30) + (bd_id * 0x30);
+
+    // } else if (isMemTile(col, row)) {
+    // } else if (isCoreTile(col, row)) { col+= 2
+  } else {
+    llvm_unreachable("unimplemented");
+  }
+  return ((col & 0xff) << getColumnShift()) | ((row & 0xff) << getRowShift()) |
+         offset;
+}
+
+uint32_t AIE4TargetModel::getDmaBdAddressOffset(int col, int row) const {
+  assert(row == 0 && "unimplemented");
+  return 0x4;
+}
+
+uint32_t
+AIE4TargetModel::getDmaControlAddress(int col, int row, int channel,
+                                      AIE::DMAChannelDir direction) const {
+  uint32_t offset = 0;
+  if (isShimNOCTile(col, row)) {
+    if (direction == AIE::DMAChannelDir::S2MM) {
+      uint32_t o[] = {0x00018540, 0x00058540, 0x000185D0, 0x000185D8};
+      offset = o[channel];
+    } else {
+      uint32_t o[] = {0x00018550, 0x00018558, 0x00058550, 0x00058558,
+                      0x000185E0, 0x000185E8, 0x000185F0, 0x000185F8};
+      offset = o[channel];
+    }
+  } else {
+    llvm_unreachable(
+        "AIE4TargetModel::getDmaControlAddress unimplemented tile type");
+  }
+  return ((col & 0xff) << getColumnShift()) | ((row & 0xff) << getRowShift()) |
+         offset;
+}
+
 std::optional<uint32_t>
 AIE4TargetModel::getLockLocalBaseIndex(int localCol, int localRow, int lockCol,
                                        int lockRow) const {
