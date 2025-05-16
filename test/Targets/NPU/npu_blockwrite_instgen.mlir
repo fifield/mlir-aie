@@ -66,7 +66,9 @@ module {
                          lock_rel_val = 4 : i32,
                          next_bd = 5 : i32,
                          use_next_bd = 1 : i32,
-                         valid_bd = 1 : i32}
+                         valid_bd = 1 : i32,
+                         channel = 0 : i32,
+                         direction = 0 : i32}
       // CHECK: 00000000
       // CHECK: 00000000
       // CHECK: 06400DEF

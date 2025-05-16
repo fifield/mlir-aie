@@ -51,7 +51,7 @@ module {
       %0 = aie.dma_start(S2MM, 0, ^bb1, ^bb2)
     ^bb1:
       aie.use_lock(%lock_0_0, AcquireGreaterEqual, 1)
-      aie.dma_bd(%buf00_0 : memref<256xi32>, 0, 256) {bd_id = 0 : i32, next_bd_id = 1 : i32}
+      aie.dma_bd(%buf00_0 : memref<256xi32>, 0, 256) {bd_id = 0 : i32, next_bd_id = 0 : i32}
       aie.use_lock(%lock_0_0_0, Release, 1)
       aie.next_bd ^bb2
     ^bb2:

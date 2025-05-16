@@ -358,7 +358,7 @@ class NamedDevice(Device):
 
 
 for device in AIEDevice:
-    class_name = re.sub(r"NPU(\d+)_(\d+)COL", r"NPU\1Col\2", device.name.upper())
+    class_name = re.sub(r"NPU(\d+)(Z*)_(\d+)COL", r"NPU\1Col\3", device.name.upper())
     globals()[class_name] = type(
         class_name,
         (NamedDevice,),

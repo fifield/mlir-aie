@@ -43,7 +43,9 @@ module {
                          next_bd = 5 : i32,
                          use_next_bd = 1 : i32,
                          valid_bd = 1 : i32,
-                         burst_length = 20 : i32}
+                         burst_length = 20 : i32,
+                         channel = 0 : i32,
+                         direction = 0 : i32}
     }
   }
 }

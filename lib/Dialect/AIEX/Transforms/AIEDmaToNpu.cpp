@@ -549,19 +549,25 @@ public:
     }
 
     // write the buffer descriptor to the array
+    auto channel = IntegerAttr::get(i32ty, infoOp->getChannelIndex());
+    auto dir = IntegerAttr::get(
+        i32ty,
+        static_cast<std::underlying_type_t<AIE::DMAChannelDir>>(channelDir));
     NpuWriteBdOp::create(
-        rewriter, op->getLoc(), column, bd_id, buffer_length, buffer_offset,
-        enable_packet, out_of_order_id, packet_id, packet_type, d0_size,
-        d0_stride, d1_size, d1_stride, d2_size, d2_stride, iteration_current,
-        iteration_size, iteration_stride, next_bd, row, use_next_bd, valid_bd,
-        lock_rel_val, lock_rel_id, lock_acq_enable, lock_acq_val, lock_acq_id,
-        d0_zero_before, d1_zero_before, d2_zero_before, d0_zero_after,
-        d1_zero_after, d2_zero_after, burst_length, axcache);
+        rewriter, op->getLoc(), column, row, channel, dir, bd_id, buffer_length,
+        buffer_offset, enable_packet, out_of_order_id, packet_id, packet_type,
+        d0_size, d0_stride, d1_size, d1_stride, d2_size, d2_stride,
+        iteration_current, iteration_size, iteration_stride, next_bd,
+        use_next_bd, valid_bd, lock_rel_val, lock_rel_id, lock_acq_enable,
+        lock_acq_val, lock_acq_id, d0_zero_before, d1_zero_before,
+        d2_zero_before, d0_zero_after, d1_zero_after, d2_zero_after,
+        burst_length, axcache);
 
     // Resolve the buffer's runtime-sequence arg and emit the address patch
     // (plus any offset-state update).
     int arg_idx = -1;
     if (failed(emitBufferAddressPatch(op, adaptor, rewriter, tileCol, tileRow,
+                                      infoOp->getChannelIndex(), channelDir,
                                       arg_idx)))
       return failure();
 
@@ -600,8 +606,8 @@ public:
   // resolved index.
   LogicalResult emitBufferAddressPatch(NpuDmaMemcpyNdOp op, OpAdaptor adaptor,
                                        ConversionPatternRewriter &rewriter,
-                                       int tileCol, int tileRow,
-                                       int &argIdx) const {
+                                       int tileCol, int tileRow, int channel,
+                                       int dir, int &argIdx) const {
     AIE::RuntimeSequenceOp seqOp =
         op->getParentOfType<AIE::RuntimeSequenceOp>();
     if (!seqOp)
@@ -619,9 +625,9 @@ public:
     argIdx = static_cast<int>(*hostIdx);
 
     const auto &targetModel = AIE::getTargetModel(op);
-    uint64_t patchAddr =
-        targetModel.getDmaBdAddress(tileCol, tileRow, op.getId()) +
-        targetModel.getDmaBdAddressOffset(tileCol, tileRow);
+    uint64_t patchAddr = targetModel.getDmaBdAddress(tileCol, tileRow,
+                                                     op.getId(), channel, dir) +
+                         targetModel.getDmaBdAddressOffset(tileCol, tileRow);
 
     // arg_plus is the buffer byte offset. Constant offsets fold to a constant
     // (byte-identical to the static path); a runtime offset operand is built
@@ -801,57 +807,119 @@ public:
     int col = op.getColumn();
     int row = op.getRow();
 
-    const AIE::DmaBdLayout *layout = tm.getDmaBdLayout(col, row);
-    if (!layout)
-      return op->emitOpError("has no buffer descriptor layout on this tile");
-    if (!tm.isMemTile(col, row) &&
-        (op.getD0ZeroBefore() || op.getD1ZeroBefore() || op.getD2ZeroBefore() ||
-         op.getD0ZeroAfter() || op.getD1ZeroAfter() || op.getD2ZeroAfter()))
-      return op->emitOpError("Zero padding is only available on MemTile");
-
-    std::vector<uint32_t> words(layout->numWords, 0);
-    auto set = [&](const AIE::DmaBdField &field, uint64_t value) {
-      if (field.exists())
-        words[field.word] |= field.place(value);
-    };
-    uint64_t bufferOffset = op.getBufferOffset();
-    if (tm.isCoreTile(col, row))
-      bufferOffset /= 4;
-    set(layout->bufferLength, op.getBufferLength());
-    set(layout->bufferOffset, bufferOffset);
-    set(layout->enablePacket, op.getEnablePacket());
-    set(layout->packetType, op.getPacketType());
-    set(layout->packetId, op.getPacketId());
-    set(layout->outOfOrderId, op.getOutOfOrderId());
-    set(layout->d0Size, op.getD0Size());
-    set(layout->d0Stride, op.getD0Stride());
-    set(layout->d1Size, op.getD1Size());
-    set(layout->d1Stride, op.getD1Stride());
-    set(layout->d2Stride, op.getD2Stride());
-    set(layout->iterationCurrent, op.getIterationCurrent());
-    set(layout->iterationSize, op.getIterationSize());
-    set(layout->iterationStride, op.getIterationStride());
-    set(layout->d0ZeroBefore, op.getD0ZeroBefore());
-    set(layout->d1ZeroBefore, op.getD1ZeroBefore());
-    set(layout->d2ZeroBefore, op.getD2ZeroBefore());
-    set(layout->d0ZeroAfter, op.getD0ZeroAfter());
-    set(layout->d1ZeroAfter, op.getD1ZeroAfter());
-    set(layout->d2ZeroAfter, op.getD2ZeroAfter());
-    if (layout->burstLength.exists())
-      set(layout->burstLength,
-          getShimBurstLengthEncoding(tm, op.getBurstLength()));
-    set(layout->axcache, op.getAxcacheOrDefault());
-    set(layout->nextBd, op.getNextBd());
-    set(layout->useNextBd, op.getUseNextBd());
-    set(layout->validBd, op.getValidBd());
-    set(layout->lockRelValue, op.getLockRelVal());
-    set(layout->lockRelId, op.getLockRelId());
-    set(layout->lockAcqEnable, op.getLockAcqEnable());
-    set(layout->lockAcqValue, op.getLockAcqVal());
-    set(layout->lockAcqId, op.getLockAcqId());
-
     uint32_t bd_id = op.getBdId();
-    uint64_t bd_addr = tm.getDmaBdAddress(col, row, bd_id);
+    auto dir = static_cast<AIE::DMAChannelDir>(op.getDirection());
+    uint64_t bd_addr =
+        tm.getDmaBdAddress(col, row, bd_id, op.getChannel(), dir);
+
+    std::vector<uint32_t> words;
+    if (isa<AIE::AIE4TargetModel>(tm)) {
+      if (!tm.isShimNOCTile(col, row))
+        return op->emitOpError(
+            "AIE4 buffer descriptors are only supported on shim tiles");
+      if (op.getD0ZeroBefore() || op.getD1ZeroBefore() ||
+          op.getD2ZeroBefore() || op.getD0ZeroAfter() || op.getD1ZeroAfter() ||
+          op.getD2ZeroAfter())
+        return op->emitOpError("Zero padding is only available on MemTile");
+      words.assign(9, 0);
+
+      // DMA_BDX_0
+      // TODO: AxUSER, KeyIdx, Base_Address_High
+      words[0] = 0;
+
+      // DMA_BDX_1
+      words[1] = op.getBufferOffset();
+
+      // DMA_BDX_2
+      words[2] = op.getBufferLength();
+
+      // DMA_BDX_3
+      words[3] = (op.getLockAcqId() & 0x1f) << 27;
+      words[3] |= (op.getLockAcqEnable() & 0x1) << 26;
+      words[3] |= (getShimBurstLengthEncoding(tm, op.getBurstLength()) & 0x3)
+                  << 24;
+      words[3] |= (op.getD1Size() & 0xfff) << 12;
+      words[3] |= op.getD2Size() & 0xfff;
+
+      // DMA_BDX_4
+      words[4] = (op.getD0Size() & 0xfff) << 19;
+      words[4] |= (op.getLockRelVal() & 0x7f) << 12;
+      words[4] |= (op.getLockRelId() & 0x1f) << 7;
+      words[4] |= op.getLockAcqVal() & 0x7f;
+
+      // DMA_BDX_5
+      // TODO: AxQoS
+      words[5] = (op.getEnablePacket() & 0x1) << 31;
+      words[5] |= (op.getNextBd() & 0xf) << 27;
+      words[5] |= (op.getUseNextBd() & 0x1) << 26;
+      // words[5] |= (AxQoS & 0x2) << 22;
+      words[5] |= op.getD1Stride() & 0x3fffff;
+
+      // DMA_BDX_6
+      // TODO: Enable_Compression, TLAST_Suppress, Data_Reuse
+      words[6] = (op.getIterationCurrent() & 0x3f) << 24;
+      words[6] |= op.getD2Stride() & 0x3fffff;
+
+      // DMA_BDX_7
+      // TODO: AxCache
+      words[7] = (op.getIterationSize() & 0x3f) << 22;
+      words[7] |= op.getIterationStride() & 0x3fffff;
+
+      // DMA_BDX_8
+      // TODO: D3_Stepsize, IO_Coherence
+      words[8] = (op.getOutOfOrderId() & 0xf) << 5;
+      words[8] |= op.getPacketId() & 0x1f;
+    } else {
+      const AIE::DmaBdLayout *layout = tm.getDmaBdLayout(col, row);
+      if (!layout)
+        return op->emitOpError("has no buffer descriptor layout on this tile");
+      if (!tm.isMemTile(col, row) &&
+          (op.getD0ZeroBefore() || op.getD1ZeroBefore() ||
+           op.getD2ZeroBefore() || op.getD0ZeroAfter() || op.getD1ZeroAfter() ||
+           op.getD2ZeroAfter()))
+        return op->emitOpError("Zero padding is only available on MemTile");
+
+      words.assign(layout->numWords, 0);
+      auto set = [&](const AIE::DmaBdField &field, uint64_t value) {
+        if (field.exists())
+          words[field.word] |= field.place(value);
+      };
+      uint64_t bufferOffset = op.getBufferOffset();
+      if (tm.isCoreTile(col, row))
+        bufferOffset /= 4;
+      set(layout->bufferLength, op.getBufferLength());
+      set(layout->bufferOffset, bufferOffset);
+      set(layout->enablePacket, op.getEnablePacket());
+      set(layout->packetType, op.getPacketType());
+      set(layout->packetId, op.getPacketId());
+      set(layout->outOfOrderId, op.getOutOfOrderId());
+      set(layout->d0Size, op.getD0Size());
+      set(layout->d0Stride, op.getD0Stride());
+      set(layout->d1Size, op.getD1Size());
+      set(layout->d1Stride, op.getD1Stride());
+      set(layout->d2Stride, op.getD2Stride());
+      set(layout->iterationCurrent, op.getIterationCurrent());
+      set(layout->iterationSize, op.getIterationSize());
+      set(layout->iterationStride, op.getIterationStride());
+      set(layout->d0ZeroBefore, op.getD0ZeroBefore());
+      set(layout->d1ZeroBefore, op.getD1ZeroBefore());
+      set(layout->d2ZeroBefore, op.getD2ZeroBefore());
+      set(layout->d0ZeroAfter, op.getD0ZeroAfter());
+      set(layout->d1ZeroAfter, op.getD1ZeroAfter());
+      set(layout->d2ZeroAfter, op.getD2ZeroAfter());
+      if (layout->burstLength.exists())
+        set(layout->burstLength,
+            getShimBurstLengthEncoding(tm, op.getBurstLength()));
+      set(layout->axcache, op.getAxcacheOrDefault());
+      set(layout->nextBd, op.getNextBd());
+      set(layout->useNextBd, op.getUseNextBd());
+      set(layout->validBd, op.getValidBd());
+      set(layout->lockRelValue, op.getLockRelVal());
+      set(layout->lockRelId, op.getLockRelId());
+      set(layout->lockAcqEnable, op.getLockAcqEnable());
+      set(layout->lockAcqValue, op.getLockAcqVal());
+      set(layout->lockAcqId, op.getLockAcqId());
+    }
 
     memref::GlobalOp global = nullptr;
     {

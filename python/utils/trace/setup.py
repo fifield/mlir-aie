@@ -104,6 +104,7 @@ def configure_shimtile_dma_aie2(
         out_of_order_id=0,
         packet_id=packet_id,  # used for mm2s xfer, direction=1
         packet_type=packet_type,  # used for mm2s xfer, direction=1
+        channel=channel,
         column=int(shim.col),
         d0_size=0,
         d0_stride=0,
@@ -117,6 +118,7 @@ def configure_shimtile_dma_aie2(
         d2_stride=0,
         d2_zero_after=0,
         d2_zero_before=0,
+        direction=0,
         burst_length=shim_burst_length,
         iteration_current=0,
         iteration_size=0,

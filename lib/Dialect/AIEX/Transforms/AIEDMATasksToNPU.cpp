@@ -286,7 +286,8 @@ struct AIEDMATasksToNPUPass
   }
 
   LogicalResult setAddressForSingleBD(OpBuilder &builder, AIE::DMABDOp &bd_op,
-                                      AIE::TileOp &tile,
+                                      AIE::TileOp &tile, int channel,
+                                      AIE::DMAChannelDir channelDir,
                                       OpFoldResult bdId = {}) {
     const AIE::AIETargetModel &target_model = AIE::getTargetModel(bd_op);
     auto buf = bd_op.getBuffer();
@@ -593,7 +594,8 @@ struct AIEDMATasksToNPUPass
   // buildBdWords picks the layout from the tile.
   LogicalResult
   rewriteSingleBDDynamic(OpBuilder &builder, Block &block, AIE::DMABDOp bd_op,
-                         AIE::TileOp &tile,
+                         AIE::TileOp &tile, int channel,
+                         AIE::DMAChannelDir channelDir,
                          std::optional<xilinx::AIE::PacketInfoAttr> packet,
                          Value runtimeBdId = nullptr, bool outOfOrder = false) {
     const auto &target_model = AIE::getTargetModel(bd_op);
@@ -742,12 +744,13 @@ struct AIEDMATasksToNPUPass
     Value bdBase =
         getBdRegisterBase(builder, loc, target_model, col, row, bdIdOfr);
     NpuBlockWriteValuesOp::create(builder, loc, bdBase, bdWords);
-    return setAddressForSingleBD(builder, bd_op, tile, bdIdOfr);
+    return setAddressForSingleBD(builder, bd_op, tile, channel, channelDir,
+                                 bdIdOfr);
   }
 
   LogicalResult
   rewriteSingleBD(OpBuilder &builder, Block &block, AIE::TileOp &tile,
-                  AIE::DMAChannelDir channelDir,
+                  int channel, AIE::DMAChannelDir channelDir,
                   std::optional<xilinx::AIE::PacketInfoAttr> packet,
                   bool outOfOrder = false) {
     AIE::DMABDOp bd_op = getBdForBlock(block);
@@ -809,8 +812,9 @@ struct AIEDMATasksToNPUPass
               bd_op, sizesRev, stridesRev, elemWidth,
               target_model.getAddressGenGranularity())))
         return failure();
-      return rewriteSingleBDDynamic(builder, block, bd_op, tile, packet,
-                                    runtimeBdId, outOfOrder);
+      return rewriteSingleBDDynamic(builder, block, bd_op, tile, channel,
+                                    channelDir, packet, runtimeBdId,
+                                    outOfOrder);
     }
 
     // Static path: bd_id is a pinned attribute (the dynamic/runtime-bd_id path
@@ -1019,8 +1023,8 @@ struct AIEDMATasksToNPUPass
     BdTemplateFields f = *fieldsOr; // NOLINT
 
     NpuWriteBdOp::create(
-        builder, bd_op.getLoc(), tile.getCol(), bd_id, len_addr_granularity,
-        offset,
+        builder, bd_op.getLoc(), tile.getCol(), tile.getRow(), channel, dir,
+        bd_id, len_addr_granularity, offset,
         /*enable_packet=*/f.enable_packet,
         /*out_of_order_id=*/f.out_of_order_id,
         /*packet_id=*/f.packet_id,
@@ -1032,7 +1036,6 @@ struct AIEDMATasksToNPUPass
         /*iteration_size=*/iteration_size,
         /*iteration_stride=*/iteration_stride,
         /*next_bd=*/f.next_bd_id,
-        /*row=*/tile.getRow(),
         /*use_next_bd=*/f.use_next_bd,
         /*valid_bd=*/1,
         /*lock_rel_val=*/f.lock_rel_val, /*lock_rel_id=*/f.lock_rel_id,
@@ -1047,7 +1050,8 @@ struct AIEDMATasksToNPUPass
         target_model.isShimNOCTile(tile.getCol(), tile.getRow())
             ? builder.getI32IntegerAttr(bd_op.getAxcacheOrDefault())
             : IntegerAttr());
-    if (failed(setAddressForSingleBD(builder, bd_op, tile)))
+    if (failed(
+            setAddressForSingleBD(builder, bd_op, tile, channel, channelDir)))
       return failure();
 
     // A length_state_table_idx adds the runtime length to the BD's
@@ -1216,8 +1220,8 @@ struct AIEDMATasksToNPUPass
       if (shouldSkipBlock(block)) {
         continue;
       }
-      if (failed(rewriteSingleBD(builder, block, tile, channelDir, packet,
-                                 op.getOutOfOrder()))) {
+      if (failed(rewriteSingleBD(builder, block, tile, op.getChannel(),
+                                 channelDir, packet, op.getOutOfOrder()))) {
         return failure();
       }
     }

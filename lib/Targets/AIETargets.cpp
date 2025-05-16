@@ -426,14 +426,14 @@ void registerAIETranslations() {
       [](ModuleOp module, raw_ostream &output) {
         if (outputBinary == true) {
           std::string assembly;
-          auto r = AIETranslateToUcDma(module, assembly, sequenceName);
+          auto r = AIETranslateToUcDma(module, assembly);
           if (failed(r))
             return r;
           output.write(reinterpret_cast<const char *>(assembly.data()),
                        assembly.size());
           return success();
         }
-        return AIETranslateToUcDma(module, output, sequenceName);
+        return AIETranslateToUcDma(module, output);
       },
       registerDialects);
   TranslateFromMLIRRegistration registrationCtrlPkt(
