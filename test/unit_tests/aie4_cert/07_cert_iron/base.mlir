@@ -10,8 +10,7 @@
 // RUN: %python %S/vector_vector_mul.py --output aie4.mlir
 // RUN: mkdir -p project0/
 // RUN: cp %aie_obj_root/third_party/cert/main/cert_medusa.elf project0/cert_medusa.elf
-// RUN: aiecc.py --tmpdir=project0 --xchesscc --xbridge --no-compile-host  --aie-generate-txn --txn-name=transaction.mlir %s
-// RUN: aie-translate -aie-npu-to-binary -aie-output-binary=true -o transaction.bin transaction.mlir
+// RUN: aiecc.py --tmpdir=project0 --xchesscc --xbridge --no-compile-host  --aie-generate-txn --txn-name=transaction.bin %s
 // RUN: aiecc.py --tmpdir=project1 --xchesscc --xbridge --no-compile-host --aie-generate-elf --aiesim aie4.mlir %test_utils_flags %S/test.cpp
 // RUN: project1/mesim.sh | FileCheck --check-prefix=MESIM %s
 //

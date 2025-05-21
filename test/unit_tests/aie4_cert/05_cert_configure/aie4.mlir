@@ -9,7 +9,7 @@
 //
 // RUN: aiecc.py --tmpdir=project --alloc-scheme=basic-sequential --xchesscc --xbridge --no-compile-host --aie-generate-elf --aiesim %s %test_utils_flags %S/test.cpp
 // RUN: aie-opt --convert-aie-to-transaction='elf-dir=%aie_obj_root/third_party/cert/main' %S/base.mlir -o transaction.mlir
-// RUN: aie-translate -aie-npu-to-binary -aie-output-binary=true -o transaction.bin transaction.mlir
+// RUN: aie-translate -aie-npu-to-binary -o transaction.bin transaction.mlir
 // RUN: project/mesim.sh | FileCheck --check-prefix=MESIM %s
 //
 // MESIM: device model: {{.*}}aie4
