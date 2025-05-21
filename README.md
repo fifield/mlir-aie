@@ -7,7 +7,7 @@ libraries and simulator, like the daily latest head build:
 
 ```bash
 # use nightly build of vitis
-export VITIS=/proj/primebuilds/HEAD_INT_daily_latest/installs/lin64/Vitis/HEAD
+export VITIS=/proj/primebuilds/HEAD_INT_daily_latest/installs/lin64/HEAD/Vitis
 export PATH=${VITIS}/aietools/bin:${VITIS}/bin:$PATH
 export LM_LICENSE_FILE=1757@xsjlicsrvip:2100@aiengine-eng
 ```
