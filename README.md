@@ -1,6 +1,90 @@
 # AIE4 Branch README
 
-## Building
+## Quick setup from pre-built wheel
+
+The quickest way to get started with aie4-dev branch is to use a prebuilt wheel.
+The
+[`utils/pacifica_setup.sh`](https://gitenterprise.xilinx.com/XRLabs/mlir-aie/blob/aie4-dev/utils/pacifica_setup.sh)
+script can be used to install from the latest nightly wheel, or used as an example:
+
+```bash
+# The setup script will pip install mlir-aie and its
+# dependencies, so create and activate a fresh venv
+python3 -m venv venv
+source venv/bin/activate
+
+# install mlir-aie from wheel using the example setup script
+git clone -b aie4-dev --single-branch https://gitenterprise.xilinx.com/XRLabs/mlir-aie.git
+mlir-aie/utils/pacifica_setup.sh
+```
+
+The `pacifica_setup.sh` script will create an environment setup script named
+`pacifia_env.sh`. This script sets up the environment for mlir-aie (iron), 
+mesimulato and vitis. It can be used directly or used as an example.
+
+Source the envrionment setup script and try an example:
+
+```bash
+# setup environment
+source pacifica_env.sh
+
+# build programming example
+cd mlir-aie/programming_examples/aie4/ddr_read_bw
+make
+
+# make will build the project in the 'project' directory
+# run the simulation:
+project/mesim.sh
+```
+The simulator will print a lot of information, including printfs from the
+application's host code (`test.cpp`). The output for the above example should
+include something like this:
+
+```
+Achieved bandwidth for column 0 channel 0: 63.719982 GB/s, 99.56% efficient
+...
+PASS!
+```
+The aiecc generated mesimulator wrapper supports passing args to the user host
+code. Try the example again with more columns and channels:
+```bash
+# run the ddr_read_bw example with 3 columns, 4 channels per column
+project/mesim.sh -c 3 -n 4
+```
+Output:
+```
+...
+num_cols: 3, num_channels: 4
+...
+Perf counter 0 for column 0: 23159
+Perf counter 1 for column 0: 23839
+Perf counter 2 for column 0: 23846
+Perf counter 3 for column 0: 23853
+Transferred 262144 bytes per channel for column 0
+Achieved bandwidth for column 0 channel 0: 11.319314 GB/s, 17.69% efficient
+Achieved bandwidth for column 0 channel 1: 10.996434 GB/s, 17.18% efficient
+Achieved bandwidth for column 0 channel 2: 10.993206 GB/s, 17.18% efficient
+Achieved bandwidth for column 0 channel 3: 10.989981 GB/s, 17.17% efficient
+Perf counter 0 for column 1: 23875
+Perf counter 1 for column 1: 24174
+Perf counter 2 for column 1: 24181
+Perf counter 3 for column 1: 24188
+Transferred 262144 bytes per channel for column 1
+Achieved bandwidth for column 1 channel 0: 10.979854 GB/s, 17.16% efficient
+Achieved bandwidth for column 1 channel 1: 10.844048 GB/s, 16.94% efficient
+Achieved bandwidth for column 1 channel 2: 10.840908 GB/s, 16.94% efficient
+Achieved bandwidth for column 1 channel 3: 10.837770 GB/s, 16.93% efficient
+Perf counter 0 for column 2: 24203
+Perf counter 1 for column 2: 24254
+Perf counter 2 for column 2: 24261
+Perf counter 3 for column 2: 24260
+Transferred 262144 bytes per channel for column 2
+Achieved bandwidth for column 2 channel 0: 10.831054 GB/s, 16.92% efficient
+Achieved bandwidth for column 2 channel 1: 10.808279 GB/s, 16.89% efficient
+Achieved bandwidth for column 2 channel 2: 10.805161 GB/s, 16.88% efficient
+...
+```
+## Building from Source
 
 This branch must be built against a version of Vitis containing the aie4
 libraries and simulator, like the daily latest head build:

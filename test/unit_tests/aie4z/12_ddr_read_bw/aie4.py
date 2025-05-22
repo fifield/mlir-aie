@@ -5,8 +5,7 @@
 # REQUIRES: mesimulator
 
 # RUN: %python %s > aie4_py.mlir
-# RUN: aiecc.py --alloc-scheme=basic-sequential --xchesscc --xbridge --no-compile-host --aie-generate-txn --aiesim aie4_py.mlir %test_utils_flags %S/test.cpp
-# RUN: aie-translate -aie-npu-to-binary --aie-sequence-name=configure -o transaction.bin aie4_py.mlir.prj/txn.mlir
+# RUN: aiecc.py --xchesscc --xbridge --aie-generate-txn --txn-name=transaction.bin --aiesim aie4_py.mlir %test_utils_flags %S/test.cpp
 # RUN: aie4_py.mlir.prj/mesim.sh | FileCheck --check-prefix=MESIM %s
 
 # MESIM: PASS!
