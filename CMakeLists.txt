@@ -496,7 +496,7 @@ if(NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
 endif()
 
 # add third_party/cert as an ExternalProject
-find_program(MB_GCC "mb-gcc" ${VITIS_ROOT}/gnu/microblaze/lin/bin)
+find_program(MB_GCC "mb-gcc")
 if(NOT MB_GCC)
 	message(WARNING "Unable to find mb-gcc, not building CERT.")
   # copy the checked-in cert binaries to build and install area
