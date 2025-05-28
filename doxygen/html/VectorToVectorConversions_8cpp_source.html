@@ -573,7 +573,7 @@ $(document).ready(function() { init_codefold(0); });
 <div class="line"><a id="l00483" name="l00483"></a><span class="lineno">  483</span>    <span class="comment">// map.</span></div>
 <div class="line"><a id="l00484" name="l00484"></a><span class="lineno">  484</span>    <span class="keywordflow">if</span> (!adaptor.getPermutationMap().isMinorIdentity() || adaptor.getMask())</div>
 <div class="line"><a id="l00485" name="l00485"></a><span class="lineno">  485</span>      <span class="keywordflow">return</span> failure();</div>
-<div class="line"><a id="l00486" name="l00486"></a><span class="lineno">  486</span>    VectorType vectorTy = cast&lt;VectorType&gt;(adaptor.getVector().getType());</div>
+<div class="line"><a id="l00486" name="l00486"></a><span class="lineno">  486</span>    VectorType vectorTy = cast&lt;VectorType&gt;(adaptor.getValueToStore().getType());</div>
 <div class="line"><a id="l00487" name="l00487"></a><span class="lineno">  487</span>    <span class="keywordflow">if</span> (vectorTy.getRank() &lt; 2)</div>
 <div class="line"><a id="l00488" name="l00488"></a><span class="lineno">  488</span>      <span class="keywordflow">return</span> failure();</div>
 <div class="line"><a id="l00489" name="l00489"></a><span class="lineno">  489</span>    <span class="comment">// Work only on bufferized reads</span></div>
@@ -590,7 +590,7 @@ $(document).ready(function() { init_codefold(0); });
 <div class="line"><a id="l00500" name="l00500"></a><span class="lineno">  500</span>    AffineMap layout = memRefTy.getLayout().getAffineMap();</div>
 <div class="line"><a id="l00501" name="l00501"></a><span class="lineno">  501</span>    <span class="keyword">auto</span> newVector = rewriter</div>
 <div class="line"><a id="l00502" name="l00502"></a><span class="lineno">  502</span>                         .create&lt;vector::ShapeCastOp&gt;(</div>
-<div class="line"><a id="l00503" name="l00503"></a><span class="lineno">  503</span>                             writeOp.getLoc(), newVectorTy, adaptor.getVector())</div>
+<div class="line"><a id="l00503" name="l00503"></a><span class="lineno">  503</span>                             writeOp.getLoc(), newVectorTy, adaptor.getValueToStore())</div>
 <div class="line"><a id="l00504" name="l00504"></a><span class="lineno">  504</span>                         .getResult();</div>
 <div class="line"><a id="l00505" name="l00505"></a><span class="lineno">  505</span>    <span class="keyword">auto</span> newIndices =</div>
 <div class="line"><a id="l00506" name="l00506"></a><span class="lineno">  506</span>        collapseInnerMostDimIndices(rewriter, writeOp.getLoc(), vecShape.size(),</div>
@@ -738,7 +738,7 @@ $(document).ready(function() { init_codefold(0); });
 <div class="foldopen" id="foldopen00639" data-start="{" data-end="}">
 <div class="line"><a id="l00639" name="l00639"></a><span class="lineno"><a class="line" href="structConvertLeadingUnitDimInsertToReshapePattern.html#aec1aab1e1e629f85e8117330fb858a9d">  639</a></span>  LogicalResult <a class="code hl_function" href="structConvertLeadingUnitDimInsertToReshapePattern.html#aec1aab1e1e629f85e8117330fb858a9d">matchAndRewrite</a>(vector::InsertOp insOp,</div>
 <div class="line"><a id="l00640" name="l00640"></a><span class="lineno">  640</span>                                PatternRewriter &amp;rewriter)<span class="keyword"> const override </span>{</div>
-<div class="line"><a id="l00641" name="l00641"></a><span class="lineno">  641</span>    <span class="keyword">auto</span> insSrcTy = dyn_cast&lt;VectorType&gt;(insOp.getSourceType());</div>
+<div class="line"><a id="l00641" name="l00641"></a><span class="lineno">  641</span>    <span class="keyword">auto</span> insSrcTy = dyn_cast&lt;VectorType&gt;(insOp.getValueToStoreType());</div>
 <div class="line"><a id="l00642" name="l00642"></a><span class="lineno">  642</span>    <span class="keywordflow">if</span> (!insSrcTy)</div>
 <div class="line"><a id="l00643" name="l00643"></a><span class="lineno">  643</span>      <span class="keywordflow">return</span> failure();</div>
 <div class="line"><a id="l00644" name="l00644"></a><span class="lineno">  644</span> </div>
@@ -767,7 +767,7 @@ $(document).ready(function() { init_codefold(0); });
 <div class="line"><a id="l00667" name="l00667"></a><span class="lineno">  667</span>      <span class="keywordflow">return</span> failure();</div>
 <div class="line"><a id="l00668" name="l00668"></a><span class="lineno">  668</span> </div>
 <div class="line"><a id="l00669" name="l00669"></a><span class="lineno">  669</span>    rewriter.replaceOpWithNewOp&lt;vector::ShapeCastOp&gt;(</div>
-<div class="line"><a id="l00670" name="l00670"></a><span class="lineno">  670</span>        insOp, insOp.getDestVectorType(), insOp.getSource());</div>
+<div class="line"><a id="l00670" name="l00670"></a><span class="lineno">  670</span>        insOp, insOp.getDestVectorType(), insOp.getValueToStore());</div>
 <div class="line"><a id="l00671" name="l00671"></a><span class="lineno">  671</span>    <span class="keywordflow">return</span> success();</div>
 <div class="line"><a id="l00672" name="l00672"></a><span class="lineno">  672</span>  }</div>
 </div>
@@ -1069,7 +1069,7 @@ $(document).ready(function() { init_codefold(0); });
 <div class="ttc" id="anamespacexilinx_1_1aievec_html_a0e692a149f961ca40847f466b29d249b"><div class="ttname"><a href="namespacexilinx_1_1aievec.html#a0e692a149f961ca40847f466b29d249b">xilinx::aievec::getTransferReadAlignmentOffset</a></div><div class="ttdeci">std::optional&lt; int64_t &gt; getTransferReadAlignmentOffset(TransferReadLikeOp readOp, mlir::VectorType vType, int64_t alignment)</div></div>
 <div class="ttc" id="anamespacexilinx_1_1aievec_html_a54f5be063fa08846cc3e338485cfe1bd"><div class="ttname"><a href="namespacexilinx_1_1aievec.html#a54f5be063fa08846cc3e338485cfe1bd">xilinx::aievec::getElementSizeInBits</a></div><div class="ttdeci">int32_t getElementSizeInBits(mlir::VectorType type)</div><div class="ttdef"><b>Definition</b> <a href="AIEVecUtils_8h_source.html#l00049">AIEVecUtils.h:49</a></div></div>
 <div class="ttc" id="anamespacexilinx_1_1aievec_html_ab1f8999b97003cad3c4ec8b406953395"><div class="ttname"><a href="namespacexilinx_1_1aievec.html#ab1f8999b97003cad3c4ec8b406953395">xilinx::aievec::buildCanonicalizeVectorForAIEVec</a></div><div class="ttdeci">void buildCanonicalizeVectorForAIEVec(mlir::OpPassManager &amp;pm, const CanonicalizeVectorForAIEVecOptions &amp;options)</div></div>
-<div class="ttc" id="anamespacexilinx_html"><div class="ttname"><a href="namespacexilinx.html">xilinx</a></div><div class="ttdef"><b>Definition</b> <a href="AIEToConfiguration_8h_source.html#l00021">AIEToConfiguration.h:21</a></div></div>
+<div class="ttc" id="anamespacexilinx_html"><div class="ttname"><a href="namespacexilinx.html">xilinx</a></div><div class="ttdef"><b>Definition</b> <a href="AIEToConfiguration_8h_source.html#l00018">AIEToConfiguration.h:18</a></div></div>
 <div class="ttc" id="anamespacexilinx_html_a9a8ae05083c78f38dbbdcda3b7540275"><div class="ttname"><a href="namespacexilinx.html#a9a8ae05083c78f38dbbdcda3b7540275">xilinx::TargetBackend</a></div><div class="ttdeci">TargetBackend</div><div class="ttdef"><b>Definition</b> <a href="Dialect_2AIEVec_2Pipelines_2Passes_8h_source.html#l00027">Passes.h:27</a></div></div>
 <div class="ttc" id="anamespacexilinx_html_aff3fe97ec80fed475662ca415d95f0a3"><div class="ttname"><a href="namespacexilinx.html#aff3fe97ec80fed475662ca415d95f0a3">xilinx::AIEArch</a></div><div class="ttdeci">AIEArch</div><div class="ttdef"><b>Definition</b> <a href="Dialect_2AIEVec_2Pipelines_2Passes_8h_source.html#l00021">Passes.h:21</a></div></div>
 <div class="ttc" id="astructCanonicalizeVectorForAIEVecPass_html"><div class="ttname"><a href="structCanonicalizeVectorForAIEVecPass.html">CanonicalizeVectorForAIEVecPass</a></div><div class="ttdef"><b>Definition</b> <a href="VectorToVectorConversions_8cpp_source.html#l00776">VectorToVectorConversions.cpp:777</a></div></div>
@@ -1117,7 +1117,7 @@ $(document).ready(function() { init_codefold(0); });
 </div><!-- fragment --></div><!-- contents -->
 <!-- start footer part -->
 <hr class="footer"/><address class="footer"><small>
-Generated on Tue Feb 11 2025 19:48:00 for MLIR-AIE by&#160;<a href="https://www.doxygen.org/index.html"><img class="footer" src="doxygen.svg" width="104" height="31" alt="doxygen"/></a> 1.9.8
+Generated on Wed May 28 2025 19:56:13 for MLIR-AIE by&#160;<a href="https://www.doxygen.org/index.html"><img class="footer" src="doxygen.svg" width="104" height="31" alt="doxygen"/></a> 1.9.8
 </small></address>
 </body>
 </html>
