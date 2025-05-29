@@ -69,23 +69,18 @@ int main(int argc, char *argv[]) {
   cert_utils::set_alive(column, 0);
 
   // wait for the completion signal to be set to state 'completed'
-  uint32_t completion = 0;
-  while (completion != 4 /* HSA_CMD_STATE_COMPLETED */) {
+  uint64_t completion = 0;
+  while (completion == 0 ) {
     mlir_aie_sync_mem_cpu(signal_h);
-    completion = *reinterpret_cast<uint32_t *>(signal_h.virtualAddr);
+    completion = *reinterpret_cast<uint64_t *>(signal_h.virtualAddr);
     std::cout << "completion signal: " << completion << "\n";
-    if (completion == 5 /* HSA_CMD_STATE_ERROR */)
-      break;
-    if (completion == 6 /* HSA_CMD_STATE_ABORT */)
-      break;
-    if (completion >= 8 /* timeout, noresponse, skerror, skcrashed */)
-      break;
+    if (completion == 4 /* HSA_CMD_STATE_COMPLETED */) {
+      std::cout << "PASS!\n";
+      return 0;
+    }
     sleep(1);
   }
-  if (completion == 4) {
-    std::cout << "PASS!\n";
-    return 0;
-  }
+  std::cout << "unexpected completion signal value: " << completion << "\n";
   std::cout << "failed.\n";
   return 1;
 }

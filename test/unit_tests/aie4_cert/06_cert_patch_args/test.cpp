@@ -29,7 +29,7 @@ int main(int argc, char *argv[]) {
 
   // allocate data buffer and init to non-zero values
   ext_mem_model_t data_h;
-  int *data_in = mlir_aie_mem_alloc(&xaie, data_h, 256 * sizeof(int));
+  int *data_in = mlir_aie_mem_alloc(&xaie, data_h, 256 * 2);
   for (int i = 0; i < 256; i++)
     data_in[i] = 0x12345678 + i;
   mlir_aie_sync_mem_dev(data_h);
@@ -72,12 +72,10 @@ int main(int argc, char *argv[]) {
   control_code.insert(control_code.end(), control_data.begin(),
                       control_data.end());
 
-  std::vector<uint32_t> args;
+  std::vector<uint32_t> args(2, 0);
   // arg0 will be &data_in[4] from cert perspective, so data should
   // get written with an offset of 4 * sizeof(uint32_t)
-  uint64_t addr = (data_h.physicalAddr - 0x80000000) + (4 * sizeof(uint32_t));
-  args.push_back(addr & 0xFFFFFFFF);
-  args.push_back(addr >> 32);
+  args[0] = (data_h.physicalAddr - 0x80000000) + (4 * sizeof(uint32_t));
 
   ext_mem_model_t signal_h =
       cert_utils::enqueue_control_code(&xaie, queue, control_code, args);
@@ -89,18 +87,13 @@ int main(int argc, char *argv[]) {
   cert_utils::set_alive(column, 0);
 
   // wait for the completion signal to be set to state 'completed'
-  uint32_t completion = 0;
-  while (completion != 4 /* HSA_CMD_STATE_COMPLETED */) {
+  uint64_t completion = 0;
+  while (completion == 0 ) {
     mlir_aie_sync_mem_cpu(signal_h);
-    completion = *reinterpret_cast<uint32_t *>(signal_h.virtualAddr);
+    completion = *reinterpret_cast<uint64_t *>(signal_h.virtualAddr);
     std::cout << "completion signal: " << completion << "\n";
-    if (completion == 5 /* HSA_CMD_STATE_ERROR */)
-      break;
-    if (completion == 6 /* HSA_CMD_STATE_ABORT */)
-      break;
-    if (completion >= 8 /* timeout, noresponse, skerror, skcrashed */)
-      break;
-    sleep(1);
+    if (!completion) 
+      sleep(1);
   }
 
   if (completion != 4) {

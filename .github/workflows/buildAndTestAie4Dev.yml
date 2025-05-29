@@ -72,6 +72,7 @@ jobs:
 
           sed -i 's/\t\tVITIS_DSPLIB_INCLUDE_DIR/\t\t#VITIS_DSPLIB_INCLUDE_DIR/g' cmake/modulesXilinx/FindVitis.cmake
 
+          rm -rf build
           mkdir build
           pushd build
 

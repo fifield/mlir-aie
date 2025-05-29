@@ -26,7 +26,7 @@ int main(int argc, char *argv[]) {
 
   aie_libxaie_ctx_t xaie;
   ext_mem_model_t handle;
-  int *ddr_ptr_in = mlir_aie_mem_alloc(&xaie, handle, 256 * sizeof(int));
+  int *ddr_ptr_in = mlir_aie_mem_alloc(&xaie, handle, 256);
   for (int i = 0; i < 256; i++)
     ddr_ptr_in[i] = 0xdeadbeef + i;
   mlir_aie_sync_mem_dev(handle);

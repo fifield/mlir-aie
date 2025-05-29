@@ -39,11 +39,8 @@ int *mlir_aie_mem_alloc(aie_libxaie_ctx_t *_xaie, ext_mem_model_t &handle,
     handle.size = size_bytes;
     // assign physical space in SystemC DDR memory controller
     handle.physicalAddr = nextPhysicalAddr;
-    // adjust nextPhysicalAddr to the next 128-bit aligned address
-    nextPhysicalAddr = nextPhysicalAddr + size_bytes;
-    uint64_t gapToAligned = nextPhysicalAddr % 16; // 16byte (128bit)
-    if (gapToAligned > 0)
-      nextPhysicalAddr += (16 - gapToAligned);
+    // adjust nextPhysicalAddr to the next 16byte (128-bit) aligned address
+    nextPhysicalAddr = (nextPhysicalAddr + size_bytes + 15) & ~0xFULL;
   } else {
     printf("Failed to allocate %d bytes of memory.\n", size_bytes);
     return nullptr;

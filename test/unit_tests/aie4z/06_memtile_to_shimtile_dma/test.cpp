@@ -27,7 +27,7 @@ int main(int argc, char *argv[]) {
   aie_libxaie_ctx_t xaie;
   ext_mem_model_t handle_ddr;
   handle_ddr.physicalAddr = 0;
-  int *ddr_ptr_in = mlir_aie_mem_alloc(&xaie, handle_ddr, 256 * sizeof(int));
+  int *ddr_ptr_in = mlir_aie_mem_alloc(&xaie, handle_ddr, 256);
   for (int i = 0; i < 256; i++)
     ddr_ptr_in[i] = 0x12345678 + i;
   mlir_aie_sync_mem_dev(handle_ddr);

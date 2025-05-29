@@ -128,8 +128,8 @@ void mesim_ReadGM(uint64_t address, void *data, uint64_t size) {
       while (iss >> std::hex >> buffer) {
         mem_ptr[current_offset] = buffer & 0xff;
         current_offset = current_offset + 1;
+        count++;
       }
-      count += 16;
     }
   }
   assert((count >= size) && "File has less bytes than specified in size field "

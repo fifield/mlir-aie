@@ -74,7 +74,7 @@ void *cert_utils::setup_queue(aie_libxaie_ctx_t *xaie, uint32_t column,
 
   // allocate a buffer to hold the queue
   void *queue_allocation = reinterpret_cast<void *>(mlir_aie_mem_alloc(
-      xaie, h, sizeof(host_queue_header_t) + (queue_size * 64)));
+      xaie, h, (sizeof(host_queue_header_t) + (queue_size * 64) + 3) / 4));
 
   host_queue_header_t *host_queue =
       reinterpret_cast<host_queue_header_t *>(queue_allocation);
@@ -163,19 +163,18 @@ cert_utils::enqueue_control_code(aie_libxaie_ctx_t *xaie, void *queue,
 
   // allocate completion signal and set it to 0
   ext_mem_model_t signal_h;
-  uint32_t *completion_signal =
-      (uint32_t *)mlir_aie_mem_alloc(xaie, signal_h, sizeof(uint32_t));
+  uint64_t *completion_signal = (uint64_t *)mlir_aie_mem_alloc(
+      xaie, signal_h, sizeof(uint64_t) / sizeof(uint32_t));
   *completion_signal = 0;
   mlir_aie_sync_mem_dev(signal_h);
   xrt_header->completion_signal = signal_h.physicalAddr - 0x80000000;
 
   // allocate, populate and sync control code buffer
   ext_mem_model_t control_code_h;
-  uint8_t *control_code_buf = reinterpret_cast<uint8_t *>(mlir_aie_mem_alloc(
-      xaie, control_code_h, control_code.size() * sizeof(uint8_t)));
+  uint8_t *control_code_buf = reinterpret_cast<uint8_t *>(
+      mlir_aie_mem_alloc(xaie, control_code_h, (control_code.size() + 3) / 4));
 
-  std::memcpy(control_code_buf, control_code.data(),
-              control_code.size() * sizeof(uint8_t));
+  std::memcpy(control_code_buf, control_code.data(), control_code.size());
   mlir_aie_sync_mem_dev(control_code_h);
 
   exec_buf_t *execution_buffer = reinterpret_cast<exec_buf_t *>(
@@ -191,7 +190,7 @@ cert_utils::enqueue_control_code(aie_libxaie_ctx_t *xaie, void *queue,
   // allocate, populate and sync args buffer
   if (args.size()) {
     ext_mem_model_t args_h;
-    size_t args_len = (2 + args.size()) * sizeof(uint32_t);
+    size_t args_len = 2 + args.size();
     uint32_t *args_buf = reinterpret_cast<uint32_t *>(
         mlir_aie_mem_alloc(xaie, args_h, args_len));
 
@@ -207,7 +206,7 @@ cert_utils::enqueue_control_code(aie_libxaie_ctx_t *xaie, void *queue,
         reinterpret_cast<uint64_t>(args_paddr) >> 32;
     execution_buffer->args_host_addr_low =
         reinterpret_cast<uint64_t>(args_paddr) & 0xffffffff;
-    execution_buffer->args_len = args_len;
+    execution_buffer->args_len = args_len * sizeof(uint32_t);
   }
   return signal_h;
 }

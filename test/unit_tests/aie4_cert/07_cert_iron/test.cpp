@@ -26,7 +26,7 @@ int main(int argc, char *argv[]) {
 
   aie_libxaie_ctx_t xaie;
   ext_mem_model_t handle;
-  int *ddr_ptr_in = mlir_aie_mem_alloc(&xaie, handle, 3 * 256 * sizeof(int));
+  int *ddr_ptr_in = mlir_aie_mem_alloc(&xaie, handle, 3 * 256);
   for (int i = 0; i < 256 * 2; i++)
     ddr_ptr_in[i] = 5 + i;
   for (int i = 256 * 2; i < 256 * 3; i++)
@@ -73,33 +73,25 @@ int main(int argc, char *argv[]) {
   cert_utils::set_alive(column, 0);
 
   // wait for the completion signal to be set to state 'completed'
-  uint32_t completion = 0;
-  uint32_t count = 0;
-  while (completion != 4 /* HSA_CMD_STATE_COMPLETED */) {
+  uint64_t completion = 0;
+  while (completion == 0 ) {
     mlir_aie_sync_mem_cpu(signal_h);
-    completion = *reinterpret_cast<uint32_t *>(signal_h.virtualAddr);
+    completion = *reinterpret_cast<uint64_t *>(signal_h.virtualAddr);
     std::cout << "completion signal: " << completion << "\n";
-    if (completion == 5 /* HSA_CMD_STATE_ERROR */)
-      break;
-    if (completion == 6 /* HSA_CMD_STATE_ABORT */)
-      break;
-    if (completion >= 8 /* timeout, noresponse, skerror, skcrashed */)
-      break;
-    sleep(1);
-    if (count++ > 300)
-      break;
+    if (!completion) 
+      sleep(1);
   }
 
   if (completion != 4) {
     std::cout << "packet failed.\n";
-    // return 1;
+    return 1;
   }
 
   mlir_aie_sync_mem_cpu(handle);
   uint32_t *output = reinterpret_cast<uint32_t *>(handle.virtualAddr);
   int errs = 0;
   for (int i = 0; i < 16; i++) {
-    printf("error @ %d : %x\n", i, output[i]);
+    printf("data @ %d : %x\n", i, output[i]);
   }
   for (int i = 0; i < 256; i++) {
     if (output[i + 512] != (5 + i) * (256 + 5 + i)) {
