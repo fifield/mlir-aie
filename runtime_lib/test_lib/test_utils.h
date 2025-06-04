@@ -25,6 +25,7 @@
 #endif
 #include <ctime>
 #include <iomanip>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -202,7 +203,6 @@ void print_matrix(const std::vector<T> matrix, int n_cols,
 #undef print_row
 }
 
-  
 void write_out_trace(char *traceOutPtr, size_t trace_size, std::string path);
 
 void print_test_banner(const char *, const char *);
@@ -222,22 +222,136 @@ void write_transaction_binary(unsigned char *data, uint64_t nbytes);
 
 } // namespace test_utils
 
-
-/* Tensor and Matrix processing utilities 
-These include CPU reference implementations for tensor operators 
-and tensor equality tests 
+/* Tensor and Matrix processing utilities
+These include CPU reference implementations for tensor operators
+and tensor equality tests
 */
 
-namespace matrix_utils{
+namespace matrix_utils {
 
-  bool tensor_equal(uint8_t* AIEOutput, uint8_t* cpuOutput, unsigned int numElems);
-  void transpose_cpu(uint8_t* rowMajorInput, uint8_t* transposeResult,
-		     unsigned in_rows, unsigned in_cols);
-  void print_matrix(uint8_t* matrix, unsigned int rows, unsigned int cols);
-  
+void pack_int8_to_uint32(uint32_t *sim_mem, const int8_t *input,
+                         size_t num_bytes);
+
+template <typename T>
+bool is_tensor_equal(T *AIEOutput, T *cpuOutput, unsigned int numElems) {
+
+  for (unsigned int i = 0; i < numElems; i++) {
+    if (AIEOutput[i] != cpuOutput[i]) {
+      std::cout << "NOTE: mismatch at index " << i << " with values "
+                << AIEOutput[i] << " : " << cpuOutput[i] << std::endl;
+      return false;
+    }
+  }
+
+  return true;
 }
 
+template <typename T>
+void transpose_cpu(T *rowMajorInput, T *transposeResult, unsigned in_rows,
+                   unsigned in_cols) {
+
+  // Cols and rows are flipped for the transpose result matrix
+  for (unsigned int i = 0; i < in_cols; i++) {
+    for (unsigned int j = 0; j < in_rows; j++) {
+      unsigned int outIndex = i * in_rows + j; // in_rows is cols for output
+      unsigned int inIndex = j * in_cols + i;
+      transposeResult[outIndex] = rowMajorInput[inIndex];
+    }
+  }
+}
+
+template <typename T>
+void print_matrix(T *matrix, unsigned int rows, unsigned int cols) {
+
+  for (unsigned int i = 0; i < rows; i++) {
+    for (unsigned int j = 0; j < cols; j++) {
+      unsigned int offset = i * cols + j;
+      std::cout << int(matrix[offset]) << " ";
+    }
+    std::cout << std::endl;
+  }
+}
+
+template <typename T>
+void matmulCPU(T *inputMatrix, T *weightsMatrix, int32_t *outputArray,
+               unsigned int M, unsigned int N, unsigned int K,
+               unsigned int K_outer) {
+
+  for (unsigned int k_outer = 0; k_outer < K_outer; k_outer++) {
+    unsigned int A_K_stride = k_outer * M * K;
+    unsigned int B_K_stride = k_outer * N * K;
+    for (unsigned int i = 0; i < M; i++) {
+      for (unsigned int j = 0; j < N; j++) {
+        int sum = 0;
+        for (unsigned int k = 0; k < K; k++) {
+          unsigned int A_index = A_K_stride + (i * K) + k;
+          unsigned int B_index = B_K_stride + (j * K) + k;
+          int A_val = int(inputMatrix[A_index]);
+          int B_val = int(weightsMatrix[B_index]);
+          sum += A_val * B_val;
+        }
+
+        unsigned int C_index = i * N + j;
+        outputArray[C_index] = outputArray[C_index] + sum;
+      }
+    }
+  }
+}
+
+template <typename T> void init_matrix_to_zeros(T *matrix, size_t num_elems) {
+
+  for (size_t i = 0; i < num_elems; i++) {
+    matrix[i] = static_cast<T>(0);
+  }
+}
+
+template <typename T> void init_matrix_to_ones(T *matrix, size_t num_elems) {
+
+  for (size_t i = 0; i < num_elems; i++) {
+    matrix[i] = static_cast<T>(2);
+  }
+}
+
+template <typename T>
+void init_matrix_with_val(T *matrix, size_t num_elems, T val) {
+
+  for (size_t i = 0; i < num_elems; i++) {
+    matrix[i] = static_cast<T>(val);
+  }
+}
+
+template <typename T>
+void init_matrix_random(T *matrix, size_t num_elems, T min_val, T max_val) {
+  std::random_device rd;
+  std::mt19937 gen(rd());
+
+  if constexpr (std::is_integral<T>::value) {
+    std::uniform_int_distribution<T> dist(min_val, max_val);
+    for (std::size_t i = 0; i < num_elems; ++i) {
+      matrix[i] = dist(gen);
+    }
+  } else if constexpr (std::is_floating_point<T>::value) {
+    std::uniform_real_distribution<T> dist(min_val, max_val);
+    for (std::size_t i = 0; i < num_elems; ++i) {
+      matrix[i] = dist(gen);
+    }
+  }
+}
+
+enum class InitType { Ones, Random };
+
+template <typename T>
+void init_matrix(T *matrix, size_t num_elems, T min, T max, InitType type) {
+  switch (type) {
+  case InitType::Ones:
+    matrix_utils::init_matrix_to_ones(matrix, num_elems);
+    break;
+  case InitType::Random:
+    matrix_utils::init_matrix_random(matrix, num_elems, min, max);
+    break;
+  }
+}
+
+} // namespace matrix_utils
 
 #endif // _TEST_UTILS_H_
-
-

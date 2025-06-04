@@ -562,42 +562,21 @@ void test_utils::write_transaction_binary(unsigned char *data,
 These include CPU reference implementations for tensor operators
 and tensor equality tests
 */
-bool matrix_utils::tensor_equal(uint8_t *AIEOutput, uint8_t *cpuOutput,
-                                unsigned int numElems) {
 
-  for (unsigned int i = 0; i < numElems; i++) {
-    if (AIEOutput[i] != cpuOutput[i]) {
-      std::cout << "NOTE: mismatch at index " << i << " with values "
-                << AIEOutput[i] << " : " << cpuOutput[i] << std::endl;
-      return false;
+void matrix_utils::pack_int8_to_uint32(uint32_t *sim_mem, const int8_t *input,
+                                       size_t num_bytes) {
+
+  size_t num_words = (num_bytes + 3) / 4; // Round up to nearest 4 bytes
+  for (size_t i = 0; i < num_words; ++i) {
+    uint32_t word = 0;
+    for (int j = 0; j < 4; ++j) {
+      size_t idx = i * 4 + j;
+      if (idx < num_bytes) {
+        // Cast to uint8_t to avoid sign extension
+        word |= ((uint32_t)((uint8_t)input[idx])) << (8 * j);
+      }
     }
-  }
 
-  return true;
-}
-
-void matrix_utils::transpose_cpu(uint8_t *rowMajorInput,
-                                 uint8_t *transposeResult, unsigned in_rows,
-                                 unsigned in_cols) {
-
-  // Cols and rows are flipped for the transpose result matrix
-  for (unsigned int i = 0; i < in_cols; i++) {
-    for (unsigned int j = 0; j < in_rows; j++) {
-      unsigned int outIndex = i * in_rows + j; // in_rows is cols for output
-      unsigned int inIndex = j * in_cols + i;
-      transposeResult[outIndex] = rowMajorInput[inIndex];
-    }
-  }
-}
-
-void matrix_utils::print_matrix(uint8_t *matrix, unsigned int rows,
-                                unsigned int cols) {
-
-  for (unsigned int i = 0; i < rows; i++) {
-    for (unsigned int j = 0; j < cols; j++) {
-      unsigned int offset = i * cols + j;
-      std::cout << int(matrix[offset]) << " ";
-    }
-    std::cout << std::endl;
+    sim_mem[i] = word;
   }
 }

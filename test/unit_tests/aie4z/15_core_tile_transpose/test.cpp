@@ -79,7 +79,7 @@ int main(int argc, char ** argv)
   cout << "\n\n+ CPU Matrix After AIE 16x16 transpose \n";
   matrix_utils::print_matrix(cpuResult, rows, cols);
     
-  if (matrix_utils::tensor_equal(outputArray, cpuResult, output_size)){
+  if (matrix_utils::is_tensor_equal(outputArray, cpuResult, output_size)){
     cout << "PASS \n";
   }
   else{
