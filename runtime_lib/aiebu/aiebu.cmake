@@ -13,8 +13,7 @@ function(add_aiebu SRCPATH BUILDPATH INSTALLPATH)
     COMMAND ${CMAKE_COMMAND} -E chdir ${SRCPATH}/build ./build.sh
     COMMAND ${CMAKE_COMMAND} -E make_directory ${BUILDPATH}
     COMMAND ${CMAKE_COMMAND} -E rm -rf ${BUILDPATH}/aiebu
-    COMMAND tar -xzf ${SRCPATH}/build/Release/AIEBU-3.2-Linux.tar.gz -C ${BUILDPATH}
-    COMMAND ${CMAKE_COMMAND} -E rename ${BUILDPATH}/AIEBU-3.2-Linux ${BUILDPATH}/aiebu
+    COMMAND tar --strip-components=1 -xzf ${SRCPATH}/build/Release/AIEBU-3.2-Linux.tar.gz -C ${BUILDPATH}
     WORKING_DIRECTORY ${SRCPATH}
     DEPENDS ${SRCPATH}
     COMMENT "Building AIEBU"
@@ -25,8 +24,7 @@ function(add_aiebu SRCPATH BUILDPATH INSTALLPATH)
     COMMAND ${CMAKE_COMMAND} -E echo "Installing AIEBU to ${INSTALLPATH}"
     COMMAND ${CMAKE_COMMAND} -E make_directory ${INSTALLPATH}
     COMMAND ${CMAKE_COMMAND} -E rm -rf ${INSTALLPATH}/aiebu
-    COMMAND tar -xzf ${SRCPATH}/build/Release/AIEBU-3.2-Linux.tar.gz -C ${INSTALLPATH}
-    COMMAND ${CMAKE_COMMAND} -E rename ${INSTALLPATH}/AIEBU-3.2-Linux ${INSTALLPATH}/aiebu
+    COMMAND tar --strip-components=1 -xzf ${SRCPATH}/build/Release/AIEBU-3.2-Linux.tar.gz -C ${INSTALLPATH}
     DEPENDS ${SRCPATH}/build/Release/AIEBU-3.2-Linux.tar.gz
     COMMENT "Installing AIEBU"
   )

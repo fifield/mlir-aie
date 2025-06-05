@@ -51,7 +51,6 @@ cat > pacifica_env.sh <<EOF
 export MLIR_AIE_DIR=${MLIR_AIE_INSTALL_DIR}
 export PATH=${MLIR_AIE_INSTALL_DIR}/bin:\$PATH 
 export PYTHONPATH=${MLIR_AIE_INSTALL_DIR}/python:\$PYTHONPATH
-export PYTHONPATH=${MLIR_AIE_INSTALL_DIR}/aiebu/aiebu/share:\$PYTHONPATH
 export LD_LIBRARY_PATH=${MLIR_AIE_INSTALL_DIR}/lib:\$LD_LIBRARY_PATH
 
 # setup environment for simulator
