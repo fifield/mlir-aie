@@ -16,9 +16,6 @@ void ess_WriteGM(uint64_t addr, const void *data, uint64_t size);
 void ess_ReadGM(uint64_t addr, void *data, uint64_t size);
 }
 
-// Next free simulated DDR physical address.
-static uint64_t nextAlignedAddr = 0;
-
 extern "C" {
   
   void ess_Write32(uint64_t addr, uint32_t Data);
@@ -38,9 +35,8 @@ uint32_t mlir_aie_sim_read32(uint64_t addr) {
 // static variable for tracking current DDR physical addr during AIESIM
 static uint64_t nextAlignedAddr = 0x80000000;
 
-int *mlir_aie_mem_alloc(aie_libxaie_ctx_t *_xaie, ext_mem_model_t &handle,
-
-                        int size) {
+uint32_t *mlir_aie_mem_alloc(aie_libxaie_ctx_t *_xaie, ext_mem_model_t &handle,
+                             int size) {
   uint64_t size_bytes = size * sizeof(int);
   handle.virtualAddr = std::malloc(size_bytes);
   if (handle.virtualAddr) {
@@ -53,17 +49,18 @@ int *mlir_aie_mem_alloc(aie_libxaie_ctx_t *_xaie, ext_mem_model_t &handle,
     if (gapToAligned > 0)
       nextAlignedAddr += (16 - gapToAligned);
   } else {
-    printf("ExtMemModel: Failed to allocate %d memory.\n", size_bytes);
+    printf("ExtMemModel: Failed to allocate %ld memory.\n", size_bytes);
     return nullptr;
   }
 
   ctx->allocations.push_back(handle);
 
-  return (int *)handle.virtualAddr;
+  return (uint32_t *)handle.virtualAddr;
 }
 
-void mlir_aie_sync_mem_cpu(ext_mem_model_t &handle) {
-  ess_ReadGM(handle.physicalAddr, handle.virtualAddr, handle.size);
+uint32_t *mlir_aie_sync_mem_cpu(ext_mem_model_t &handle) {
+  aiesim_ReadGM(handle.physicalAddr, handle.virtualAddr, handle.size);
+  return (uint32_t *)handle.virtualAddr;
 }
 
 void mlir_aie_sync_mem_dev(ext_mem_model_t &handle) {

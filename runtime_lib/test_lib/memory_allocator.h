@@ -37,9 +37,9 @@ extern "C" {
 /// @param handle External memory model handle for tracking the allocation
 /// @param size The number of 32-bit words to allocate
 /// @return A host-side pointer that can write into the allocated buffer
-/// @note This is a minimal allocator intended for test use.
-int *mlir_aie_mem_alloc(aie_libxaie_ctx_t *ctx, ext_mem_model_t &handle,
-                        int size);
+/// @todo This is at best a quick hack and should be replaced
+uint32_t *mlir_aie_mem_alloc(aie_libxaie_ctx_t *ctx, ext_mem_model_t &handle,
+                             int size);
 
 /// @brief Synchronize the buffer from the device to the host CPU.
 /// This is expected to be called after the device writes data into
@@ -48,7 +48,8 @@ int *mlir_aie_mem_alloc(aie_libxaie_ctx_t *ctx, ext_mem_model_t &handle,
 /// processor cache associated with the buffer.
 /// @param handle External memory model handle identifying the buffer to
 /// synchronize
-void mlir_aie_sync_mem_cpu(ext_mem_model_t &handle);
+/// @return A host-side pointer that can write into the allocated buffer
+uint32_t *mlir_aie_sync_mem_cpu(ext_mem_model_t &handle);
 
 /// @brief Synchronize the buffer from the host CPU to the device.
 /// This is expected to be called after the host writes data into

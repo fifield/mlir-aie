@@ -34,9 +34,17 @@ void set_partition_size(uint32_t column, uint32_t partition_size);
 uint32_t get_fw_state(uint32_t column, uint32_t id);
 
 // Enqueue control code buffer, return a handle to the completion signal.
+// Arguments are raw 32-bit integers passed directly to the runtime
 ext_mem_model_t enqueue_control_code(aie_libxaie_ctx_t *xaie, void *queue,
                                      std::vector<uint8_t> &control_code,
-                                     std::vector<uint32_t> args = {});
+                                     std::vector<uint32_t> args);
+
+// Enqueue control code buffer, return a handle to the completion signal.
+// Arguments are ext_mem_model_t handles (buffers) populated by
+// mlir_aie_mem_alloc.
+ext_mem_model_t enqueue_control_code(aie_libxaie_ctx_t *xaie, void *queue,
+                                     std::vector<uint8_t> &control_code,
+                                     std::vector<ext_mem_model_t> args = {});
 
 } // namespace cert_utils
 

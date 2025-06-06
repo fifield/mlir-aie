@@ -31,10 +31,6 @@ int main(int argc, char *argv[]) {
     std::cout << "fw_state: " << fw_state << "\n";
   } while (fw_state != 0);
 
-  // dummy allocation so that subsequent allocations are not paddr=zero
-  ext_mem_model_t dummy;
-  (void)mlir_aie_mem_alloc(&xaie, dummy, 128);
-
   ext_mem_model_t queue_h;
   cert_utils::setup_queue(&xaie, column, queue_h, 64);
 

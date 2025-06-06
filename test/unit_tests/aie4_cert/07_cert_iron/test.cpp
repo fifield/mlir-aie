@@ -25,13 +25,17 @@
 int main(int argc, char *argv[]) {
 
   aie_libxaie_ctx_t xaie;
-  ext_mem_model_t handle;
-  int *ddr_ptr_in = mlir_aie_mem_alloc(&xaie, handle, 3 * 256);
-  for (int i = 0; i < 256 * 2; i++)
-    ddr_ptr_in[i] = 5 + i;
-  for (int i = 256 * 2; i < 256 * 3; i++)
-    ddr_ptr_in[i] = (0xdead << 16) | (i - (256 * 2) + 1);
-  mlir_aie_sync_mem_dev(handle);
+  std::vector<ext_mem_model_t> buffers(3);
+  uint32_t *ddr_ptr_in0 = mlir_aie_mem_alloc(&xaie, buffers[0], 256);
+  uint32_t *ddr_ptr_in1 = mlir_aie_mem_alloc(&xaie, buffers[1], 256);
+  uint32_t *ddr_ptr_out = mlir_aie_mem_alloc(&xaie, buffers[2], 256);
+  for (int i = 0; i < 256; i++) {
+    ddr_ptr_in0[i] = 5 + i;
+    ddr_ptr_in1[i] = 256 + 5 + i;
+    ddr_ptr_out[i] = (0xdead << 16) | (i - (256 * 2) + 1);
+  }
+  for (auto &h : buffers)
+    mlir_aie_sync_mem_dev(h);
 
   std::string txn_path = "transaction.bin";
   std::vector<uint32_t> data = test_utils::load_instr_binary(txn_path);
@@ -59,12 +63,9 @@ int main(int argc, char *argv[]) {
   // is what the firmware expects in memory.
   control_code.insert(control_code.end(), control_data.begin(),
                       control_data.end());
-  std::vector<uint32_t> args(6, 0);
-  args[0] = handle.physicalAddr - 0x80000000;
-  args[2] = args[0] + (256 * sizeof(int32_t));
-  args[4] = args[2] + (256 * sizeof(int32_t));
+
   ext_mem_model_t signal_h =
-      cert_utils::enqueue_control_code(&xaie, queue, control_code, args);
+      cert_utils::enqueue_control_code(&xaie, queue, control_code, buffers);
   mlir_aie_sync_mem_dev(queue_h);
 
   const uint32_t partition_size = 3;
@@ -74,11 +75,10 @@ int main(int argc, char *argv[]) {
 
   // wait for the completion signal to be set to state 'completed'
   uint64_t completion = 0;
-  while (completion == 0 ) {
-    mlir_aie_sync_mem_cpu(signal_h);
-    completion = *reinterpret_cast<uint64_t *>(signal_h.virtualAddr);
+  while (completion == 0) {
+    completion = *reinterpret_cast<uint64_t *>(mlir_aie_sync_mem_cpu(signal_h));
     std::cout << "completion signal: " << completion << "\n";
-    if (!completion) 
+    if (!completion)
       sleep(1);
   }
 
@@ -87,16 +87,12 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  mlir_aie_sync_mem_cpu(handle);
-  uint32_t *output = reinterpret_cast<uint32_t *>(handle.virtualAddr);
+  uint32_t *output = mlir_aie_sync_mem_cpu(buffers[2]);
   int errs = 0;
-  for (int i = 0; i < 16; i++) {
-    printf("data @ %d : %x\n", i, output[i]);
-  }
   for (int i = 0; i < 256; i++) {
-    if (output[i + 512] != (5 + i) * (256 + 5 + i)) {
+    if (output[i] != (5 + i) * (256 + 5 + i)) {
       errs++;
-      printf("error @ %d : %x\n", i, output[i + 512]);
+      printf("error @ %d : %x\n", i, output[i]);
     }
   }
 

@@ -97,8 +97,8 @@ int main(int argc, char *argv[]) {
 
 #define DMA_COUNT 256
   ext_mem_model_t buf0, buf1;
-  int *mem_ptr0 = mlir_aie_mem_alloc(_xaie, buf0, DMA_COUNT);
-  int *mem_ptr1 = mlir_aie_mem_alloc(_xaie, buf1, DMA_COUNT + 1);
+  uint32_t *mem_ptr0 = mlir_aie_mem_alloc(_xaie, buf0, DMA_COUNT);
+  uint32_t *mem_ptr1 = mlir_aie_mem_alloc(_xaie, buf1, DMA_COUNT + 1);
 
   for (int i = 0; i < DMA_COUNT + 1; i++) {
     if (i == 0) {

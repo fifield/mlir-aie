@@ -29,8 +29,8 @@ int main(int argc, char *argv[]) {
 
   // allocate data buffer and init to non-zero values
   ext_mem_model_t data_h;
-  int *data_in = mlir_aie_mem_alloc(&xaie, data_h, 256 * 2);
-  for (int i = 0; i < 256; i++)
+  uint32_t *data_in = mlir_aie_mem_alloc(&xaie, data_h, 256 * 2);
+  for (int i = 0; i < 256 * 2; i++)
     data_in[i] = 0x12345678 + i;
   mlir_aie_sync_mem_dev(data_h);
 
@@ -72,10 +72,8 @@ int main(int argc, char *argv[]) {
   control_code.insert(control_code.end(), control_data.begin(),
                       control_data.end());
 
-  std::vector<uint32_t> args(2, 0);
-  // arg0 will be &data_in[4] from cert perspective, so data should
-  // get written with an offset of 4 * sizeof(uint32_t)
-  args[0] = (data_h.physicalAddr - 0x80000000) + (4 * sizeof(uint32_t));
+  std::vector<ext_mem_model_t> args;
+  args.push_back(data_h);
 
   ext_mem_model_t signal_h =
       cert_utils::enqueue_control_code(&xaie, queue, control_code, args);
@@ -89,8 +87,7 @@ int main(int argc, char *argv[]) {
   // wait for the completion signal to be set to state 'completed'
   uint64_t completion = 0;
   while (completion == 0 ) {
-    mlir_aie_sync_mem_cpu(signal_h);
-    completion = *reinterpret_cast<uint64_t *>(signal_h.virtualAddr);
+    completion = *reinterpret_cast<uint64_t *>(mlir_aie_sync_mem_cpu(signal_h));
     std::cout << "completion signal: " << completion << "\n";
     if (!completion) 
       sleep(1);
@@ -101,12 +98,11 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  mlir_aie_sync_mem_cpu(data_h);
-  uint32_t *data_out = reinterpret_cast<uint32_t *>(data_h.virtualAddr);
+  uint32_t *data_out = mlir_aie_sync_mem_cpu(data_h);
   int errs = 0;
   // start checking at offset 4, it should be the data sent from the memtile
-  for (int i = 4; i < 256; i++) {
-    if (data_out[i] != 0xdeadbeef + (i - 4)) {
+  for (int i = 8; i < 256; i++) {
+    if (data_out[i] != 0xdeadbeef + (i - 8)) {
       errs++;
       printf("error @ %d : %x\n", i, data_out[i]);
     }

@@ -26,7 +26,7 @@ int main(int argc, char *argv[]) {
 
   aie_libxaie_ctx_t xaie;
   ext_mem_model_t handle;
-  int *ddr_ptr_in = mlir_aie_mem_alloc(&xaie, handle, 256);
+  uint32_t *ddr_ptr_in = mlir_aie_mem_alloc(&xaie, handle, 256);
   for (int i = 0; i < 256; i++)
     ddr_ptr_in[i] = 0xdeadbeef + i;
   mlir_aie_sync_mem_dev(handle);
@@ -68,11 +68,10 @@ int main(int argc, char *argv[]) {
 
   // wait for the completion signal to be set to state 'completed'
   uint64_t completion = 0;
-  while (completion == 0 ) {
-    mlir_aie_sync_mem_cpu(signal_h);
-    completion = *reinterpret_cast<uint64_t *>(signal_h.virtualAddr);
+  while (completion == 0) {
+    completion = *reinterpret_cast<uint64_t *>(mlir_aie_sync_mem_cpu(signal_h));
     std::cout << "completion signal: " << completion << "\n";
-    if (!completion) 
+    if (!completion)
       sleep(1);
   }
 

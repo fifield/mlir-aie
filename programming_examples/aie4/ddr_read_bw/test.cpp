@@ -25,6 +25,9 @@ int main(int argc, char *argv[]) {
   uint32_t num_cols = 1;
   uint32_t num_channels = 1;
 
+// When compiled for mesimulator, the host code can accept command line
+// arguments. These are to the mesim.sh script on the command line and passed
+// through to this main()
 #if defined(__MESIM__)
   while ((opt = getopt(argc, argv, "c:n:")) != -1) {
     switch (opt) {
@@ -59,7 +62,7 @@ int main(int argc, char *argv[]) {
   // SETUP EXTERNAL MEMORY
 
   // Write an input pattern to DDR
-  int *ddr_ptr_in = mlir_aie_mem_alloc(&xaie, handle_in, 65536);
+  uint32_t *ddr_ptr_in = mlir_aie_mem_alloc(&xaie, handle_in, 65536);
   for (int i = 0; i < 65536; i++)
     ddr_ptr_in[i] = i;
   mlir_aie_sync_mem_dev(handle_in);

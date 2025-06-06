@@ -33,7 +33,7 @@
 #define XAIE_128BIT_ALIGN_MASK 0xFF
 
 // Allocate memory for the AIE device
-int *mlir_aie_mem_alloc(struct aie_libxaie_ctx_t *ctx, ext_mem_model_t &handle,
+uint32_t *mlir_aie_mem_alloc(struct aie_libxaie_ctx_t *ctx, ext_mem_model_t &handle,
                         int size) {
   int RC;
   int Fd, Ret;
@@ -119,7 +119,7 @@ int *mlir_aie_mem_alloc(struct aie_libxaie_ctx_t *ctx, ext_mem_model_t &handle,
   }
 
   close(Fd);
-  return (int *)VAddr;
+  return (uint32_t *)VAddr;
 
 error_map:
   munmap(VAddr, size);
@@ -191,7 +191,7 @@ error_ion:
 // }
 
 // Sync the memory for CPU
-void mlir_aie_sync_mem_cpu(ext_mem_model_t &handle) {
+uint32_t *mlir_aie_sync_mem_cpu(ext_mem_model_t &handle) {
   struct dma_buf_sync Sync;
   int Ret;
 
@@ -201,9 +201,11 @@ void mlir_aie_sync_mem_cpu(ext_mem_model_t &handle) {
   if (Ret != 0) {
     XAIE_ERROR("Failed to sync, %s.\n", strerror(errno));
     // return XAIE_ERR;
+    return nullptr;
   }
 
   // return XAIE_OK;
+  return (uint32_t *)handle.virtualAddr;
 }
 
 // Sync the memory for Device

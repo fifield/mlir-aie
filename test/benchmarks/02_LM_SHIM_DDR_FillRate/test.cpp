@@ -47,7 +47,7 @@ int main(int argc, char *argv[]) {
     mlir_aie_configure_dmas(_xaie);
 
     ext_mem_model_t buf0;
-    int *ddr_ptr = mlir_aie_mem_alloc(_xaie, buf0, DMA_COUNT);
+    uint32_t *ddr_ptr = mlir_aie_mem_alloc(_xaie, buf0, DMA_COUNT);
     for (int i = 0; i < DMA_COUNT; i++) {
       *(ddr_ptr + i) = 0xdeadbeef;
     }

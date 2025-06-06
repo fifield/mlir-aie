@@ -66,12 +66,11 @@ int main(int argc, char *argv[]) {
   cert_utils::set_alive(column, 0);
 
   // wait for the completion signal to be set to state 'completed'
-  uint32_t completion = 0;
-  while (completion == 0 ) {
-    mlir_aie_sync_mem_cpu(signal_h);
-    completion = *reinterpret_cast<uint64_t *>(signal_h.virtualAddr);
+  uint64_t completion = 0;
+  while (completion == 0) {
+    completion = *reinterpret_cast<uint64_t *>(mlir_aie_sync_mem_cpu(signal_h));
     std::cout << "completion signal: " << completion << "\n";
-    if (!completion) 
+    if (!completion)
       sleep(1);
   }
   if (completion != 4) {

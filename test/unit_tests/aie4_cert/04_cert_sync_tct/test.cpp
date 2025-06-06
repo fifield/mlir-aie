@@ -27,7 +27,7 @@ int main(int argc, char *argv[]) {
 
   ext_mem_model_t handle_ddr;
   handle_ddr.physicalAddr = 0;
-  int *ddr_ptr_in = mlir_aie_mem_alloc(&xaie, handle_ddr, 256);
+  uint32_t *ddr_ptr_in = mlir_aie_mem_alloc(&xaie, handle_ddr, 256);
   for (int i = 0; i < 256; i++)
     ddr_ptr_in[i] = 0x12345678 + i;
   mlir_aie_sync_mem_dev(handle_ddr);
@@ -51,10 +51,6 @@ int main(int argc, char *argv[]) {
     std::cout << "fw_state: " << fw_state << "\n";
   } while (fw_state != 0);
 
-  // dummy allocation so that subsequent allocations are not paddr=zero
-  ext_mem_model_t dummy_h;
-  (void)mlir_aie_mem_alloc(&xaie, dummy_h, 64);
-
   ext_mem_model_t queue_h;
   void *queue = cert_utils::setup_queue(&xaie, column, queue_h, 64);
 
@@ -73,11 +69,10 @@ int main(int argc, char *argv[]) {
 
   // wait for the completion signal to be set to state 'completed'
   uint32_t completion = 0;
-  while (completion == 0 ) {
-    mlir_aie_sync_mem_cpu(signal_h);
-    completion = *reinterpret_cast<uint64_t *>(signal_h.virtualAddr);
+  while (completion == 0) {
+    completion = *reinterpret_cast<uint64_t *>(mlir_aie_sync_mem_cpu(signal_h));
     std::cout << "completion signal: " << completion << "\n";
-    if (!completion) 
+    if (!completion)
       sleep(1);
   }
 
@@ -93,8 +88,7 @@ int main(int argc, char *argv[]) {
       break;
   }
 
-  mlir_aie_sync_mem_cpu(handle_ddr);
-  uint32_t *output = reinterpret_cast<uint32_t *>(handle_ddr.virtualAddr);
+  uint32_t *output = mlir_aie_sync_mem_cpu(handle_ddr);
   int errs = 0;
   for (int i = 0; i < 256; i++) {
     if (output[i] != 0xdeadbeef + i) {

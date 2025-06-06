@@ -35,7 +35,7 @@ int main(int argc, char *argv[]) {
   // SETUP EXTERNAL MEMORY
 
   // Write an input pattern to DDR, it'll get overwritten with zeroes
-  int *ddr_ptr_out = mlir_aie_mem_alloc(&xaie, handle_out, 65536);
+  uint32_t *ddr_ptr_out = mlir_aie_mem_alloc(&xaie, handle_out, 65536);
   for (int i = 0; i < 65536; i++)
     ddr_ptr_out[i] = i;
   mlir_aie_sync_mem_dev(handle_out);
@@ -141,8 +141,7 @@ int main(int argc, char *argv[]) {
   }
 
   // Lets make sure the output is zeros ...
-  mlir_aie_sync_mem_cpu(handle_out);
-  uint32_t *ddr_output = reinterpret_cast<uint32_t *>(handle_out.virtualAddr);
+  uint32_t *ddr_output = mlir_aie_sync_mem_cpu(handle_out);
   for (int i = 0; i < 65536; i++) {
     if (ddr_output[i] != 0) {
       errs++;

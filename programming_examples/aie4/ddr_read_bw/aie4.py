@@ -5,31 +5,38 @@
 import numpy as np
 
 from aie.dialects.aie import *
-from aie.dialects.aiex import *
 from aie.extras.context import mlir_mod_ctx
 
 
+# Main function to generate the MLIR-AIE module for DDR read bandwidth test
 def generate_module():
     @device(AIEDevice.npu3z)
     def d():
-        N = 64 * 1024
-        n = 1024
+        # Define buffer sizes and types
+        N = 64 * 1024  # Total size for external buffer
+        n = 1024  # Size for tile-local buffer
         tensor_ty = np.ndarray[(N,), np.dtype[np.int32]]
         tile_ty = np.ndarray[(n,), np.dtype[np.int32]]
 
         num_cols = 3
         num_shim_channels = 8
 
+        # Iterate over columns in the device
         for col in range(num_cols):
-            ShimTile = tile(col, 0)
-            CoreTile = [tile(col, i + 2) for i in range(4)]
+            ShimTile = tile(col, 0)  # SHIM tile at row 0
+            CoreTile = [
+                tile(col, i + 2) for i in range(4)
+            ]  # Four core tiles per column
 
+            # Set up ping-pong buffers and DMA for each core tile
             for core in CoreTile:
                 ping_in_buffer = [buffer(core, tile_ty) for _ in range(2)]
                 pong_in_buffer = [buffer(core, tile_ty) for _ in range(2)]
 
+                # Define memory and DMA operations for core tile
                 @mem(core)
                 def s(block):
+                    # DMA channel 0: ping-pong transfer
                     with block[0]:
                         dma_start(DMAChannelDir.S2MM, 0, dest=block[1], chain=block[3])
                     with block[1]:
@@ -38,6 +45,7 @@ def generate_module():
                     with block[2]:
                         dma_bd(pong_in_buffer[0])
                         next_bd(block[1])
+                    # DMA channel 1: ping-pong transfer
                     with block[3]:
                         dma_start(DMAChannelDir.S2MM, 1, dest=block[4], chain=block[6])
                     with block[4]:
@@ -49,6 +57,7 @@ def generate_module():
                     with block[6]:
                         EndOp()
 
+            # Set up locks and external buffers (addresses) for each SHIM tile DMA channel
             shim_tile_input_write_lock = []
             shim_tile_input_read_lock = []
             ext_input_buffer = []
@@ -59,6 +68,7 @@ def generate_module():
                 )
                 ext_input_buffer.append(external_buffer(tensor_ty, address=0x80000000))
 
+            # Define flows from SHIM DMA channels to core tiles
             for channel in range(num_shim_channels):
                 flow(
                     ShimTile,
@@ -69,6 +79,7 @@ def generate_module():
                     channel % 2,
                 )
 
+            # Define DMA operations for SHIM tile
             @shim_mem(ShimTile)
             def s(block):
                 for i in range(num_shim_channels):
@@ -95,6 +106,7 @@ def generate_module():
                     EndOp()
 
 
+# Create MLIR-AIE module context and generate the module
 with mlir_mod_ctx() as ctx:
     # generate mlir-aie module
     generate_module()

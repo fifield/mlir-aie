@@ -64,8 +64,8 @@ int main(int argc, char *argv[]) {
   // SETUP EXTERNAL MEMORY
 
   // Write an input pattern to DDR
-  int *ddr_ptr_in = mlir_aie_mem_alloc(&xaie, handle_in, 65536);
-  for (int i = 0; i < 65536; i++)
+  uint32_t *ddr_ptr_in = mlir_aie_mem_alloc(&xaie, handle_in, 65536);
+  for (uint32_t i = 0; i < 65536; i++)
     ddr_ptr_in[i] = i;
   mlir_aie_sync_mem_dev(handle_in);
 
@@ -267,8 +267,7 @@ int main(int argc, char *argv[]) {
   }
 
   // Lets make sure the input is still there ...
-  mlir_aie_sync_mem_cpu(handle_in);
-  uint32_t *ddr_input = reinterpret_cast<uint32_t *>(handle_in.virtualAddr);
+  uint32_t *ddr_input = mlir_aie_sync_mem_cpu(handle_in);
   for (int i = 0; i < 65536; i++) {
     if (ddr_input[i] != i) {
       errs++;

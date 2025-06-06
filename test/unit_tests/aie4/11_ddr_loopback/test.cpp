@@ -36,13 +36,13 @@ int main(int argc, char *argv[]) {
   // SETUP EXTERNAL MEMORY
 
   // Write an input pattern to DDR
-  int *ddr_ptr_in = mlir_aie_mem_alloc(&xaie, handle_in, 256);
+  uint32_t *ddr_ptr_in = mlir_aie_mem_alloc(&xaie, handle_in, 256);
   for (int i = 0; i < 256; i++)
     ddr_ptr_in[i] = 0xdeadbeef + i;
   mlir_aie_sync_mem_dev(handle_in);
 
   // Write an output pattern to DDR which will get overwritten
-  int *ddr_ptr_out = mlir_aie_mem_alloc(&xaie, handle_out, 256);
+  uint32_t *ddr_ptr_out = mlir_aie_mem_alloc(&xaie, handle_out, 256);
   for (int i = 0; i < 256; i++)
     ddr_ptr_out[i] = 0xbadbad00 + i;
   mlir_aie_sync_mem_dev(handle_out);
@@ -100,8 +100,7 @@ int main(int argc, char *argv[]) {
   uint32_t errs = 0;
 
   // Lets test the input
-  mlir_aie_sync_mem_cpu(handle_in);
-  uint32_t *ddr_input = reinterpret_cast<uint32_t *>(handle_in.virtualAddr);
+  uint32_t *ddr_input = mlir_aie_sync_mem_cpu(handle_in);
   for (int i = 0; i < 256; i++) {
     if (ddr_input[i] != 0xdeadbeef + i) {
       errs++;
@@ -111,8 +110,7 @@ int main(int argc, char *argv[]) {
   }
 
   // Lets test the output
-  mlir_aie_sync_mem_cpu(handle_out);
-  uint32_t *ddr_output = reinterpret_cast<uint32_t *>(handle_out.virtualAddr);
+  uint32_t *ddr_output = mlir_aie_sync_mem_cpu(handle_out);
   for (int i = 0; i < 256; i++) {
     if (ddr_output[i] != 0xdeadbeef + i + 1) {
       errs++;

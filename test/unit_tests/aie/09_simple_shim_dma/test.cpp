@@ -34,7 +34,7 @@ int main(int argc, char *argv[]) {
 
 #define DMA_COUNT 512
   ext_mem_model_t buf0;
-  int *mem_ptr = mlir_aie_mem_alloc(_xaie, buf0, DMA_COUNT);
+  uint32_t *mem_ptr = mlir_aie_mem_alloc(_xaie, buf0, DMA_COUNT);
   for (int i = 0; i < DMA_COUNT; i++) {
     *(mem_ptr + i) = i + 1;
   }

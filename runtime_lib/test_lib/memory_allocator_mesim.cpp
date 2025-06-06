@@ -11,7 +11,8 @@
 
 #include "memory_allocator.h"
 
-#include <assert.h>
+#include <cassert>
+#include <cstdint>
 #include <iostream>
 
 extern "C" {
@@ -31,8 +32,8 @@ uint32_t mlir_aie_sim_read32(uint64_t addr) { return mesim_Read32(addr); }
 // static variable for tracking current DDR physical addr during MESIM
 static uint64_t nextPhysicalAddr = 0x80000000;
 
-int *mlir_aie_mem_alloc(aie_libxaie_ctx_t *_xaie, ext_mem_model_t &handle,
-                        int size) {
+uint32_t *mlir_aie_mem_alloc(aie_libxaie_ctx_t *_xaie, ext_mem_model_t &handle,
+                             int size) {
   uint64_t size_bytes = size * sizeof(int);
   handle.virtualAddr = std::malloc(size_bytes);
   if (handle.virtualAddr) {
@@ -42,17 +43,18 @@ int *mlir_aie_mem_alloc(aie_libxaie_ctx_t *_xaie, ext_mem_model_t &handle,
     // adjust nextPhysicalAddr to the next 16byte (128-bit) aligned address
     nextPhysicalAddr = (nextPhysicalAddr + size_bytes + 15) & ~0xFULL;
   } else {
-    printf("Failed to allocate %d bytes of memory.\n", size_bytes);
+    std::cout << "Failed to allocate " << size_bytes << " bytes of memory.\n";
     return nullptr;
   }
 
   _xaie->allocations.push_back(handle);
 
-  return (int *)handle.virtualAddr;
+  return (uint32_t *)handle.virtualAddr;
 }
 
-void mlir_aie_sync_mem_cpu(ext_mem_model_t &handle) {
+uint32_t *mlir_aie_sync_mem_cpu(ext_mem_model_t &handle) {
   mesim_ReadGM(handle.physicalAddr, handle.virtualAddr, handle.size);
+  return (uint32_t *)handle.virtualAddr;
 }
 
 void mlir_aie_sync_mem_dev(ext_mem_model_t &handle) {
@@ -70,7 +72,7 @@ u64 mlir_aie_get_device_address(aie_libxaie_ctx_t *_xaie, void *VA) {
     if (i.virtualAddr == VA)
       return i.physicalAddr;
   }
-  printf("ERROR: cannot get device address for allocation!\n");
+  std::cout << "ERROR: cannot get device address for allocation!\n";
   assert(false);
   return 0;
 }

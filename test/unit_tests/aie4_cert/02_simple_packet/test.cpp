@@ -40,10 +40,6 @@ int main(int argc, char *argv[]) {
     std::cout << "fw_state: " << fw_state << "\n";
   } while (fw_state != 0);
 
-  // dummy allocation so that subsequent allocations are not paddr=zero
-  ext_mem_model_t dummy_h;
-  (void)mlir_aie_mem_alloc(&xaie, dummy_h, 64);
-
   ext_mem_model_t queue_h;
   void *queue = cert_utils::setup_queue(&xaie, column, queue_h, 64);
 
@@ -70,9 +66,8 @@ int main(int argc, char *argv[]) {
 
   // wait for the completion signal to be set to state 'completed'
   uint64_t completion = 0;
-  while (completion == 0 ) {
-    mlir_aie_sync_mem_cpu(signal_h);
-    completion = *reinterpret_cast<uint64_t *>(signal_h.virtualAddr);
+  while (completion == 0) {
+    completion = *reinterpret_cast<uint64_t *>(mlir_aie_sync_mem_cpu(signal_h));
     std::cout << "completion signal: " << completion << "\n";
     if (completion == 4 /* HSA_CMD_STATE_COMPLETED */) {
       std::cout << "PASS!\n";

@@ -72,7 +72,7 @@ int main(int argc, char *argv[]) {
   float golden[4096];
 
   // Write an input pattern to DDR
-  int *ddr_ptr_in = mlir_aie_mem_alloc(&xaie, handle_in, 2048);
+  uint32_t *ddr_ptr_in = mlir_aie_mem_alloc(&xaie, handle_in, 2048);
   for (int i = 0; i < 2048; i++) {
     input[i * 2] = dis(gen);
     input[i * 2 + 1] = dis(gen);
@@ -80,7 +80,7 @@ int main(int argc, char *argv[]) {
   }
   mlir_aie_sync_mem_dev(handle_in);
 
-  int *ddr_table_in = mlir_aie_mem_alloc(&xaie, handle_table, 2048);
+  uint32_t *ddr_table_in = mlir_aie_mem_alloc(&xaie, handle_table, 2048);
   for (int i = 0; i < 2048; i++) {
     weights[i * 2] = dis(gen);
     weights[i * 2 + 1] = dis(gen);
@@ -92,7 +92,7 @@ int main(int argc, char *argv[]) {
     golden[i] = input[i] * weights[i];
 
   // Write an output pattern to DDR which will get overwritten
-  int *ddr_ptr_out = mlir_aie_mem_alloc(&xaie, handle_out, 2048);
+  uint32_t *ddr_ptr_out = mlir_aie_mem_alloc(&xaie, handle_out, 2048);
   for (int i = 0; i < 2048; i++)
     ddr_ptr_out[i] = 0xbadbad00 + i;
   mlir_aie_sync_mem_dev(handle_out);
@@ -160,8 +160,7 @@ int main(int argc, char *argv[]) {
   // These test seems redundant but we do want to detect if somehow the output
   // overwrites and destroys the inputs
 
-  mlir_aie_sync_mem_cpu(handle_in);
-  uint32_t *ddr_input = reinterpret_cast<uint32_t *>(handle_in.virtualAddr);
+  uint32_t *ddr_input = mlir_aie_sync_mem_cpu(handle_in);
 
   for (int i = 0; i < 128; i++) {
     uint32_t word = ddr_input[i];
@@ -182,9 +181,7 @@ int main(int argc, char *argv[]) {
              input[i * 2 + 1]);
   }
 
-  mlir_aie_sync_mem_cpu(handle_table);
-  uint32_t *ddr_table_input =
-      reinterpret_cast<uint32_t *>(handle_table.virtualAddr);
+  uint32_t *ddr_table_input = mlir_aie_sync_mem_cpu(handle_table);
 
   for (int i = 0; i < 128; i++) {
     uint32_t word = ddr_table_input[i];
@@ -207,8 +204,7 @@ int main(int argc, char *argv[]) {
   }
 
   // Now lets test the output
-  mlir_aie_sync_mem_cpu(handle_out);
-  uint32_t *ddr_output = reinterpret_cast<uint32_t *>(handle_out.virtualAddr);
+  uint32_t *ddr_output = mlir_aie_sync_mem_cpu(handle_out);
   for (int i = 0; i < 2048; i++) {
     uint32_t word = ddr_output[i];
     float lower = getLower(word);

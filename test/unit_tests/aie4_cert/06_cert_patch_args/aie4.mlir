@@ -20,23 +20,17 @@ module {
 
     %tile_0_1 = aie.tile(0, 1)
     %buf01_0 = aie.buffer(%tile_0_1) {address = 2048 : i32, mem_bank = 0 : i32, sym_name = "buf01_0"} : memref<256xi32>
-    %buf01_1 = aie.buffer(%tile_0_1) {address = 4096 : i32, mem_bank = 0 : i32, sym_name = "buf01_1"} : memref<256xi32>
     %lock_0_1_0 = aie.lock(%tile_0_1, 0) { init = 1 : i32 }
     %lock_0_1_1 = aie.lock(%tile_0_1, 1)
 
     %mem_0_1 = aie.memtile_dma(%tile_0_1) {
-      %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
-    ^bb1:  // 2 preds: ^bb0, ^bb2
+      %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb2)
+    ^bb1:
       aie.use_lock(%lock_0_1_0, AcquireGreaterEqual, 1)
-      aie.dma_bd(%buf01_0 : memref<256xi32>, 0, 256) {bd_id = 0 : i32, next_bd_id = 1 : i32}
+      aie.dma_bd(%buf01_0 : memref<256xi32>, 0, 256) {bd_id = 0 : i32}
       aie.use_lock(%lock_0_1_1, Release, 1)
       aie.next_bd ^bb2
-    ^bb2:  // pred: ^bb1
-      aie.use_lock(%lock_0_1_0, AcquireGreaterEqual, 1)
-      aie.dma_bd(%buf01_1 : memref<256xi32>, 0, 256) {bd_id = 1 : i32, next_bd_id = 0 : i32}
-      aie.use_lock(%lock_0_1_1, Release, 1)
-      aie.next_bd ^bb1
-    ^bb3:  // pred: ^bb0
+    ^bb2:
       aie.end
     }
 

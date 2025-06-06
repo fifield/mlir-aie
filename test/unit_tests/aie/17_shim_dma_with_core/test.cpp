@@ -103,8 +103,8 @@ int main(int argc, char *argv[]) {
   */
 #define DMA_COUNT 512
   ext_mem_model_t buf0, buf1;
-  int *ddr_ptr_in = mlir_aie_mem_alloc(_xaie, buf0, DMA_COUNT);
-  int *ddr_ptr_out = mlir_aie_mem_alloc(_xaie, buf1, DMA_COUNT);
+  uint32_t *ddr_ptr_in = mlir_aie_mem_alloc(_xaie, buf0, DMA_COUNT);
+  uint32_t *ddr_ptr_out = mlir_aie_mem_alloc(_xaie, buf1, DMA_COUNT);
   for (int i = 0; i < DMA_COUNT; i++) {
     *(ddr_ptr_in + i) = i;
     *(ddr_ptr_out + i) = 0;

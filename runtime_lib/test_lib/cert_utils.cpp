@@ -74,7 +74,16 @@ void *cert_utils::setup_queue(aie_libxaie_ctx_t *xaie, uint32_t column,
 
   // allocate a buffer to hold the queue
   void *queue_allocation = reinterpret_cast<void *>(mlir_aie_mem_alloc(
-      xaie, h, (sizeof(host_queue_header_t) + (queue_size * 64) + 3) / 4));
+      xaie, h,
+      (128 + sizeof(host_queue_header_t) + (queue_size * 64) + 3) / 4));
+  // The firmware does not like the queue to be at address 0x80000000 (zero), so
+  // we add 128 bytes to the physical address to avoid that, since the queue is
+  // often the first thing allocated in host code. An extra 128-bytes is
+  // allocated above.
+  if (h.physicalAddr == 0x80000000) {
+    h.physicalAddr += 128;
+    h.size -= 128;
+  }
 
   host_queue_header_t *host_queue =
       reinterpret_cast<host_queue_header_t *>(queue_allocation);
@@ -144,6 +153,18 @@ uint32_t cert_utils::get_fw_state(uint32_t column, uint32_t id) {
 ext_mem_model_t
 cert_utils::enqueue_control_code(aie_libxaie_ctx_t *xaie, void *queue,
                                  std::vector<uint8_t> &control_code,
+                                 std::vector<ext_mem_model_t> args) {
+  std::vector<uint32_t> int_args;
+  for (auto &a : args) {
+    int_args.push_back(a.physicalAddr - 0x80000000); // addr low
+    int_args.push_back(0);                           // addr_ high
+  }
+  return enqueue_control_code(xaie, queue, control_code, int_args);
+}
+
+ext_mem_model_t
+cert_utils::enqueue_control_code(aie_libxaie_ctx_t *xaie, void *queue,
+                                 std::vector<uint8_t> &control_code,
                                  std::vector<uint32_t> args) {
   host_queue_header_t *host_queue =
       reinterpret_cast<host_queue_header_t *>(queue);
@@ -191,8 +212,7 @@ cert_utils::enqueue_control_code(aie_libxaie_ctx_t *xaie, void *queue,
   if (args.size()) {
     ext_mem_model_t args_h;
     size_t args_len = 2 + args.size();
-    uint32_t *args_buf = reinterpret_cast<uint32_t *>(
-        mlir_aie_mem_alloc(xaie, args_h, args_len));
+    uint32_t *args_buf = mlir_aie_mem_alloc(xaie, args_h, args_len);
 
     args_buf[0] = execution_buffer->dpu_control_code_host_addr_low;
     args_buf[1] = execution_buffer->dpu_control_code_host_addr_high;
