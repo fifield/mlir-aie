@@ -66,7 +66,7 @@ int main(int argc, const char *argv[]) {
   auto kernel = xrt::kernel(context, kernelName);
 
   auto bo_instr = xrt::bo(device, instr_v.size() * sizeof(int),
-                           XCL_BO_FLAGS_CACHEABLE, kernel.group_id(1));
+                          XCL_BO_FLAGS_CACHEABLE, kernel.group_id(1));
   auto bo_inA = xrt::bo(device, IN_SIZE * sizeof(IN_DATATYPE),
                         XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(4));
   auto bo_out = xrt::bo(device, OUT_SIZE * sizeof(OUT_DATATYPE),
@@ -77,7 +77,7 @@ int main(int argc, const char *argv[]) {
   IN_DATATYPE *bufInA = bo_inA.map<IN_DATATYPE *>();
   std::vector<IN_DATATYPE> srcVecA;
   for (int i = 0; i < IN_SIZE; i++)
-    srcVecA.push_back(1);
+    srcVecA.push_back(i + 1);
   memcpy(bufInA, srcVecA.data(), (srcVecA.size() * sizeof(IN_DATATYPE)));
 
   void *bufInstr = bo_instr.map<void *>();
@@ -116,17 +116,12 @@ int main(int argc, const char *argv[]) {
 
   int errors = 0;
 
-  for (uint32_t i = 0; i < 64; i++) {
-    for (uint32_t j = 0; j < 64; j++) {
-      uint32_t ref = 1 + 12;
-      if (*(bufOut + i * 64 + j) != ref) {
-        std::cout << "Error in output " << std::to_string(bufOut[i * 64 + j])
-                  << " != " << ref << std::endl;
-        errors++;
-      }
-      // else
-      //   std::cout << "Correct output " << std::to_string(bufOut[i * 64 + j])
-      //             << " == " << ref << std::endl;
+  for (uint32_t i = 0; i < OUT_SIZE; i++) {
+    OUT_DATATYPE ref = srcVecA[i] + 12;
+    if (*(bufOut + i) != ref) {
+      std::cout << "Error in output " << std::to_string(bufOut[i])
+                << " != " << (int)ref << std::endl;
+      errors++;
     }
   }
 
