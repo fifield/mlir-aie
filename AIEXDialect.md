@@ -1280,6 +1280,31 @@ Similar to UseLockOp, this operation can be understood as "blocking" op.
 
 
 
+## Types
+
+### BlockFloatType
+
+_AIEX type representing a block floating point type._
+
+Syntax:
+
+```
+!aiex.bfp<
+  ::llvm::StringRef   # block_type
+>
+```
+
+This is a type representing a block floating point.
+It is meant to eventually be lowered into a standard type further down the pipeline.
+It the meantime, it can be used for blocked fp related dataflow adaptations.
+Available types are v8bfp16ebs8 and v16bfp16ebs16.
+
+#### Parameters:
+
+| Parameter | C++ type | Description |
+| :-------: | :-------: | ----------- |
+| block_type | `::llvm::StringRef` |  |
+
 ## Enums
 
 ### AIEArch
@@ -1309,15 +1334,14 @@ _AIE Device_
 | npu1_1col | `5` | npu1_1col |
 | npu1_2col | `6` | npu1_2col |
 | npu1_3col | `7` | npu1_3col |
-| npu1_4col | `8` | npu1_4col |
-| npu2 | `9` | npu2 |
-| npu2_1col | `10` | npu2_1col |
-| npu2_2col | `11` | npu2_2col |
-| npu2_3col | `12` | npu2_3col |
-| npu2_4col | `13` | npu2_4col |
-| npu2_5col | `14` | npu2_5col |
-| npu2_6col | `15` | npu2_6col |
-| npu2_7col | `16` | npu2_7col |
+| npu2 | `8` | npu2 |
+| npu2_1col | `9` | npu2_1col |
+| npu2_2col | `10` | npu2_2col |
+| npu2_3col | `11` | npu2_3col |
+| npu2_4col | `12` | npu2_4col |
+| npu2_5col | `13` | npu2_5col |
+| npu2_6col | `14` | npu2_6col |
+| npu2_7col | `15` | npu2_7col |
 
 ### CascadeDir
 
