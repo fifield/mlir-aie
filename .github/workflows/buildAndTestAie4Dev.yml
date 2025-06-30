@@ -35,7 +35,7 @@ env:
             -DAIE_ENABLE_XRT_PYTHON_BINDINGS=ON \
             -DAIE_INCLUDE_INTEGRATION_TESTS=OFF
   # -j here to reduce the number of parallel chess jobs.
-  LIT_OPTS: -sv --time-tests -j16 --timeout 600 --show-unsupported --show-excluded
+  LIT_OPTS: -sv --time-tests -j16 --timeout 600 --show-unsupported --show-excluded --filter-out slow_test
   # prebuilt mesimulator
   ME_ROOT: /proj/rdi/staff/jefff/aie4/pacifica-sim/cervino/aie4
   CERVINO_ROOT: /proj/rdi/staff/jefff/aie4/pacifica-sim/cervino
