@@ -19,6 +19,7 @@ inline __attribute__((always_inline)) void matrix_staged_load(v128int8 *q,
     __attribute__((overloadable)) {
 
   v128int8 *pB = q;
+  #pragma unroll
   for (size_t i = 0; i < 32; i++) {
     insert_staging(*pB, i, mode);
     pB++;
@@ -57,7 +58,7 @@ void matmul(int8_t *restrict inIterA, int8_t *restrict inIterB,
 
       #pragma unroll
       for (unsigned int i = 0; i < M; i++) {
-        unsigned int offset = (k * 4 + i) * 64;
+        unsigned int offset = (k * M + i) * 64;
         v64int8 input_vector = *((v64int8 *)((int8_t *)inIterA + offset));
 
         acc[i] = mac_conf(input_vector, 1, 1, acc[i], zero_acc);
