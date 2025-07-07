@@ -67,7 +67,7 @@ export LD_LIBRARY_PATH=\$CERVINO_ROOT/ext/Boost_1_72_0/boost_1_72_0/rdi/lib/gcc8
 export PYTHONPATH=\$PYTHONPATH:\$ME_ROOT/python:\$ME_ROOT/applications
 
 # setup environment for vitis
-export VITIS=/proj/primebuilds/HEAD_INT_daily_latest/installs/lin64/HEAD/Vitis
+export VITIS=/proj/primebuilds/HEAD_PRIME_daily_latest/installs/lin64/HEAD/Vitis
 export PATH=\${VITIS}/aietools/bin:\${VITIS}/bin:\$PATH
 export XILINXD_LICENSE_FILE=/proj/xbuilds/licenses/:2100@aiengine4-eng
 export LM_LICENSE_FILE=1757@xsjlicsrvip:2100@aiengine-eng
