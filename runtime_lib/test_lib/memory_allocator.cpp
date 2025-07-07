@@ -16,12 +16,6 @@ void ess_WriteGM(uint64_t addr, const void *data, uint64_t size);
 void ess_ReadGM(uint64_t addr, void *data, uint64_t size);
 }
 
-extern "C" {
-  
-  void ess_Write32(uint64_t addr, uint32_t Data);
-  uint32_t ess_Read32(uint64_t addr);
-}
-
 #define XAIE_BASE_ADDR 0x20000000000
 
 void mlir_aie_sim_write32(uint64_t addr, uint32_t data) {
@@ -59,7 +53,7 @@ uint32_t *mlir_aie_mem_alloc(aie_libxaie_ctx_t *_xaie, ext_mem_model_t &handle,
 }
 
 uint32_t *mlir_aie_sync_mem_cpu(ext_mem_model_t &handle) {
-  aiesim_ReadGM(handle.physicalAddr, handle.virtualAddr, handle.size);
+  ess_ReadGM(handle.physicalAddr, handle.virtualAddr, handle.size);
   return (uint32_t *)handle.virtualAddr;
 }
 

@@ -1,5 +1,15 @@
+//===- genwrapper_for_ps.mlir ----------------------------------*- MLIR -*-===//
+//
+// This file is licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// (c) Copyright 2024 Advanced Micro Devices, Inc.
+//
+//===----------------------------------------------------------------------===//
 #include <adf/wrapper/wrapper.h>
 #include <xtlm.h>
+#include <xioutils.h>
 #define BUSWIDTH 128
 
 extern int main(int argc, char *argv[]);
@@ -269,25 +279,23 @@ void PSIP_ps_i3::response_process() {
   }
 }
 extern "C" {
-void ess_Write32(uint64 Addr, uint Data) {
+void aiesim_Write32(uint64_t Addr, uint32_t Data) {
   (PSIP_ps_i3::getInstance())->write32(Addr, Data);
 }
-uint32 ess_Read32(uint64 Addr) {
+uint32_t aiesim_Read32(uint64_t Addr) {
   return ((PSIP_ps_i3::getInstance())->read32(Addr));
 }
-void ess_Write128(uint64_t Addr, uint32_t *Data) {
-  (PSIP_ps_i3::getInstance())->write128(Addr, Data);
-}
-void ess_Read128(uint64_t Addr, uint32_t *Data) {
-  (PSIP_ps_i3::getInstance())->read128(Addr, Data);
-}
-void ess_WriteGM(uint64 addr, const void *data, uint64_t size) {
+void aiesim_WriteGM(uint64_t addr, const void *data, uint64_t size) {
   (PSIP_ps_i3::getInstance())->writeGM(addr, data, size);
 }
-void ess_ReadGM(uint64 addr, void *data, uint64_t size) {
+void aiesim_ReadGM(uint64_t addr, void *data, uint64_t size) {
   (PSIP_ps_i3::getInstance())->readGM(addr, data, size);
 }
 IPBlock *create_ip(sc_module_name name) {
+  setWrite32Ptr(aiesim_Write32);
+  setRead32Ptr(aiesim_Read32);
+  setWriteGMPtr(aiesim_WriteGM);
+  setReadGMPtr(aiesim_ReadGM);
   return (PSIP_ps_i3::createInstance(name));
 }
 void destroy_ip(IPBlock *ip) {
