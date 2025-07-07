@@ -10,6 +10,7 @@ function(add_aiebu SRCPATH BUILDPATH INSTALLPATH)
   add_custom_command(
     OUTPUT ${SRCPATH}/build/Release/AIEBU-3.2-Linux.tar.gz
     COMMAND ${CMAKE_COMMAND} -E echo "Building AIEBU in ${SRCPATH} ${BUILDPATH}"
+    COMMAND sed -i 's/master\\/markdown/master\\/src\\/markdown_graphviz_svg\\/markdown/g' ${SRCPATH}/src/python/CMakeLists.txt
     COMMAND ${CMAKE_COMMAND} -E chdir ${SRCPATH}/build ./build.sh
     COMMAND ${CMAKE_COMMAND} -E make_directory ${BUILDPATH}
     COMMAND ${CMAKE_COMMAND} -E rm -rf ${BUILDPATH}/aiebu
