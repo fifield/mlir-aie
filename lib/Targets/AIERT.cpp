@@ -217,9 +217,6 @@ llvm::raw_ostream &operator<<(llvm::raw_ostream &os,
 #define XAIE_MEM_TILE_ROW_START 1
 #define XAIE_PARTITION_BASE_ADDR 0x0
 
-// /proj/xbuilds/9999.0_INT_0911_0013/installs/lin64/Vitis/2024.2/data/embeddedsw/XilinxProcessorIPLib/drivers/aienginev2_INT_aig_vaie4/driver/src/global/xaiegbl_defs.h
-#define XAIE_DEV_GEN_AIE4 40U
-
 #define NPI_ADDR 0x0
 #define NUM_LOCKS 16
 #define EVEN_BD_NUM_START 0
@@ -423,8 +420,9 @@ configureLocksInBdBlock(const AIE::AIETargetModel &targetModel,
 static LogicalResult configureBdInBlock(const AIE::AIETargetModel &targetModel,
                                         XAie_DevInst *devInst,
                                         XAie_DmaDesc &dmaTileBd, Block &block,
-                                        uint32_t channel, DMAChannelDir dir,
-                                        int col, int row, int bdId,
+                                        uint32_t channel,
+                                        AIE::DMAChannelDir dir, int col,
+                                        int row, int bdId,
                                         std::optional<int> nextBdId) {
   std::optional<int> packetType;
   std::optional<int> packetID;
@@ -451,7 +449,7 @@ static LogicalResult configureBdInBlock(const AIE::AIETargetModel &targetModel,
     uint8_t secure = 0;
     // workaround for aie-rt behavior in xaie_dma.c where it expects different
     // values for aie4
-    if (isa<AIE4TargetModel>(targetModel))
+    if (isa<AIE::AIE4TargetModel>(targetModel))
       burstLen = burstLen / 4;
     TRY_XAIE_API_EMIT_ERROR(bdOp, XAie_DmaSetAxi, &dmaTileBd, smid,
                             burstLen / 16, qOs, cache, secure);
@@ -620,18 +618,17 @@ static LogicalResult configureBdInBlock(const AIE::AIETargetModel &targetModel,
     TRY_XAIE_API_EMIT_ERROR(bdOp, XAie_DmaSetOutofOrderBdId, &dmaTileBd,
                             static_cast<uint8_t>(*oooId));
   // In AIE4, Valid_BD is assumed always Enabled
-  if (!isa<AIE4TargetModel>(targetModel))
+  if (!isa<AIE::AIE4TargetModel>(targetModel))
     TRY_XAIE_API_EMIT_ERROR(bdOp, XAie_DmaEnableBd, &dmaTileBd);
 
-    
   // If it's AIE4 mem tile, or an AIE4z shim, then it has a private bd pool and
   // XAie_DmaWriteBdPvtBuffPool aie-rt is used instead of XAie_DmaWriteBd
   auto tileLoc = XAie_TileLoc(col, row);
-  if (isa<AIE4TargetModel>(targetModel) &&
+  if (isa<AIE::AIE4TargetModel>(targetModel) &&
       (targetModel.isMemTile(col, row) ||
-       (isa<NPU3zTargetModel>(targetModel) &&
+       (isa<AIE::NPU3zTargetModel>(targetModel) &&
         targetModel.isShimNOCTile(col, row)))) {
-    XAie_DmaDirection d = dir == DMAChannelDir::S2MM ? DMA_S2MM : DMA_MM2S;
+    XAie_DmaDirection d = dir == AIE::DMAChannelDir::S2MM ? DMA_S2MM : DMA_MM2S;
     TRY_XAIE_API_EMIT_ERROR(bdOp, XAie_DmaWriteBdPvtBuffPool, devInst,
                             &dmaTileBd, tileLoc, channel, d, bdId);
   } else {
@@ -1041,7 +1038,7 @@ xilinx::AIE::AIERTControl::addInitConfig(DeviceOp &targetOp,
       uint64_t addr =
           0x0001A440 |
           (tile.getCol() << targetOp.getTargetModel().getColumnShift());
-      TRY_XAIE_API_EMIT_ERROR(tile, XAie_Write32, &devInst, addr, mode);
+      TRY_XAIE_API_EMIT_ERROR(tile, XAie_Write32, &aiert->devInst, addr, mode);
     }
   }
   if (failed(initLocks(targetOp))) {
@@ -1154,16 +1151,18 @@ LogicalResult xilinx::AIE::AIERTControl::addCoreEnable(DeviceOp &targetOp) {
   return success();
 }
 
-LogicalResult AIERTControl::addUcElf(uint32_t col, const StringRef elfPath) {
-  TRY_XAIE_API_LOGICAL_RESULT(XAie_LoadUc, &aiert->devInst,, XAie_TileLoc(col, 0),
-                              elfPath.str().c_str());
-  TRY_XAIE_API_LOGICAL_RESULT(XAie_Write32, &&aiert->devInst, (col << 25) | 0x0002C004,
-                              1);
+LogicalResult xilinx::AIE::AIERTControl::addUcElf(uint32_t col,
+                                                  const StringRef elfPath) {
+  TRY_XAIE_API_LOGICAL_RESULT(XAie_LoadUc, &aiert->devInst,
+                              XAie_TileLoc(col, 0), elfPath.str().c_str());
+  TRY_XAIE_API_LOGICAL_RESULT(XAie_Write32, &aiert->devInst,
+                              (col << 25) | 0x0002C004, 1);
   return success();
 }
 
-LogicalResult AIERTControl::addCoreElf(uint32_t col, uint32_t row,
-                                       const StringRef elfPath, bool aieSim) {
+LogicalResult xilinx::AIE::AIERTControl::addCoreElf(uint32_t col, uint32_t row,
+                                                    const StringRef elfPath,
+                                                    bool aieSim) {
   TRY_XAIE_API_LOGICAL_RESULT(XAie_CoreDisable, &aiert->devInst,
                               XAie_TileLoc(col, row));
   TRY_XAIE_API_LOGICAL_RESULT(XAie_DmaChannelResetAll, &aiert->devInst,
@@ -1358,16 +1357,23 @@ LogicalResult xilinx::AIE::AIERTControl::addAieElfs(DeviceOp &targetOp,
     CoreOp coreOp = tileOp.getCoreOp();
     if (!coreOp)
       continue;
-    std::string fileName;
-    if (auto fileAttr = coreOp.getElfFile())
-      fileName = fileAttr->str();
-    else
-      fileName = (llvm::Twine("core_") + std::to_string(col) + "_" +
-                  std::to_string(row) + ".elf")
-                     .str();
-    fileName = elfPath.str() + std::string(1, ps) + fileName;
-    if (failed(addCoreElf(col, row, fileName, aieSim)))
-      return failure();
+    }
+    if (auto coreOp = tileOp.getCoreOp()) {
+      std::string fileName;
+      if (auto fileAttr = coreOp.getElfFile()) {
+        fileName = fileAttr->str();
+      } else {
+        coreOp.emitOpError()
+            << "Expected lowered ELF file to be given as attribute "
+                "`elf_file` for this core. Compile cores first.";
+        return failure();
+      }
+      if (failed(addAieElf(
+              col, row,
+              (llvm::Twine(elfPath) + std::string(1, ps) + fileName).str(),
+              aieSim)))
+        return failure();
+    }
   }
   return success();
 }
@@ -1382,6 +1388,13 @@ void xilinx::AIE::AIERTControl::dmaUpdateBdAddr(int col, int row, size_t addr,
 void xilinx::AIE::AIERTControl::startTransaction() {
   aiert->txnCmdLocs.clear();
   aiert->txnOpLocs.clear();
+
+  // Workaround this problem:
+  //  [AIE ERROR] _XAie_LoadDataMemSection():337: Unable to turn ECC On for Data
+  //  Memory XAie_LoadElf failed with XAIE_FEATURE_NOT_SUPPORTED
+  TRY_XAIE_API_FATAL_ERROR(XAie_TurnEccOff, &aiert->devInst);
+
+
   TRY_XAIE_API_FATAL_ERROR(XAie_StartTransaction, &aiert->devInst,
                            XAIE_TRANSACTION_DISABLE_AUTO_FLUSH);
 }

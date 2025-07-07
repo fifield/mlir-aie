@@ -1234,15 +1234,14 @@ class VirtualizedNPU1TargetModel : public BaseNPU1TargetModel {
   int cols;
 
 public:
-  VirtualizedNPU1TargetModel(int _cols)
-      : BaseNPU1TargetModel(static_cast<TargetModelKind>(
-            static_cast<std::underlying_type_t<TargetModelKind>>(
-                TK_AIE2_NPU1_1Col) +
-            _cols - 1)),
-        cols(_cols) {
-    // Device properties initialization
-    addModelProperty(AIETargetModel::IsVirtualized);
-  }
+  VirtualizedNPU1TargetModel(int _cols, Properties p = 0)
+      : BaseNPU1TargetModel(
+            static_cast<TargetModelKind>(
+                static_cast<std::underlying_type_t<TargetModelKind>>(
+                    TK_AIE2_NPU1_1Col) +
+                _cols - 1),
+            p | properties),
+        cols(_cols) {}
 
   int columns() const override { return cols; }
 

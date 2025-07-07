@@ -792,12 +792,6 @@ LogicalResult xilinx::AIE::generateAndInsertConfigOps(
   if (failed(ctl.setIOBackend(aieSim, xaieDebug)))
     return failure();
 
-  // FIXME:
-  // Workaround this problem:
-  //  [AIE ERROR] _XAie_LoadDataMemSection():337: Unable to turn ECC On for Data
-  //  Memory XAie_LoadElf failed with XAIE_FEATURE_NOT_SUPPORTED
-  XAie_TurnEccOff(&ctl.devInst);
-
   // start collecting transations
   ctl.startTransaction();
 
