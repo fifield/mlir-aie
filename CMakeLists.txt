@@ -515,6 +515,7 @@ else()
   message(STATUS "Found mb-gcc, building CERT: ${MB_GCC}")
   execute_process(
       COMMAND sed -i "s/master\\/markdown/master\\/src\\/markdown_graphviz_svg\\/markdown/" ${PROJECT_SOURCE_DIR}/third_party/cert/specification/CMakeLists.txt
+      COMMAND sed -i "s/$(MAKE)/make/" ${PROJECT_SOURCE_DIR}/third_party/cert/main/CMakeLists.txt
   )
   ExternalProject_Add(third_party_cert
     PREFIX ${CMAKE_BINARY_DIR}/third_party/cert
