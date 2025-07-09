@@ -450,7 +450,7 @@ void test() {
     throw std::runtime_error(
         "Failed npu3z property check for 'IsVirtualized' returns true");
   }
-  if (AIE::getTargetModel(AIE::AIEDevice::npu3z).columns() != 3) {
+  if (AIE::getTargetModel(AIE::AIEDevice::npu3z).columns() != 9) {
     throw std::runtime_error("Failed npu3z columns");
   }
   if (AIE::getTargetModel(AIE::AIEDevice::npu3z).rows() != 6) {

@@ -38,6 +38,10 @@ function(add_aie_runtime_libs arch)
     list(APPEND INSTALLS aie_bank_placement.h)
   endif()
 
+  if(${arch} STREQUAL "AIE4")
+    list(APPEND INSTALLS aie4z_4r_9c_1m.json)
+  endif()
+
   foreach(file ${INSTALLS})
       add_custom_target(aie-copy-${arch}-runtime-libs-${file} ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${file})
       add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${file}

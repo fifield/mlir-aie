@@ -1508,7 +1508,7 @@ public:
 
   NPU3zTargetModel() : BaseNPU3TargetModel(TK_AIE4_NPU3Z) {}
 
-  int columns() const override { return 3; }
+  int columns() const override { return 9; }
 
   static bool classof(const AIETargetModel *model) {
     return model->getKind() == TK_AIE4_NPU3Z;
