@@ -27,7 +27,7 @@ template <typename T> struct InitTestCase {
 
 int main(int argc, char **argv) {
 
-  unsigned int M = 4;
+  unsigned int M = 64;
   unsigned int tile_N = 64;
   unsigned int tile_K = 64;
   unsigned int K_outer = 4;
@@ -52,19 +52,22 @@ int main(int argc, char **argv) {
   // First function of the pair initializes A
   // Second function initializes B
   std::vector<std::pair<InitTestCase<int8_t>, InitTestCase<int8_t>>> testCases =
-      {{{-127, 127, InitType::Random}, {-127, 127, InitType::Random}},
-       {{0, 0, InitType::Ones}, {0, 0, InitType::Ones}}};
+      {{{0, 0, InitType::Ones}, {0, 0, InitType::Ones}},
+       {{-127, 127, InitType::Random}, {-127, 127, InitType::Random}}};
 
   aie_libxaie_ctx_t xaie;
 
   uint32_t *A_ptr_in;
   uint32_t *B_ptr_in;
+  uint32_t *C_ptr_out;
 
   ext_mem_model_t A_handle;
   ext_mem_model_t B_handle;
+  ext_mem_model_t C_handle;
 
-  A_ptr_in = (uint32_t*) mlir_aie_mem_alloc(&xaie, A_handle, act_size_i32);
-  B_ptr_in = (uint32_t*) mlir_aie_mem_alloc(&xaie, B_handle, wghts_size_i32);
+  A_ptr_in = (uint32_t *)mlir_aie_mem_alloc(&xaie, A_handle, act_size_i32);
+  B_ptr_in = (uint32_t *)mlir_aie_mem_alloc(&xaie, B_handle, wghts_size_i32);
+  C_ptr_out = (uint32_t *)mlir_aie_mem_alloc(&xaie, C_handle, out_size_i32);
 
   std::cout << "** Loading transaction binary" << std::endl;
   std::string txn_path = "transaction.bin";
@@ -122,22 +125,25 @@ int main(int argc, char **argv) {
     std::cout << "Assign Shim B-Read Lock \n";
     mlir_aie_sim_write32(shim_b_read_lock, 1);
 
+    uint64_t shim_c_write_lock =
+        ((shim_col << 25) | (shim_row << 20)) + 0x00010060;
+
     std::cout << "Wait for completion \n";
     while (1) {
-      uint32_t lock3 = mlir_aie_sim_read32(tile_lock_3);
+      uint32_t lock3 = mlir_aie_sim_read32(shim_c_write_lock);
       if (lock3 >= 1)
         break;
     }
     std::cout << "Done running\n";
 
-    std::cout << "- Clear Output lock for next test iteration\n";
-    mlir_aie_sim_write32(tile_lock_3, 0);
+    // sync data from device to host memory
+    mlir_aie_sync_mem_cpu(C_handle);
 
-    uint64_t tile_data_mem_C =
-        ((tile_col << 25) | ((tile_row + 4) << 20)) + 65536;
+    std::cout << "- Clear Shim output lock for next test iteration\n";
+    mlir_aie_sim_write32(shim_c_write_lock, 0);
+
     for (int i = 0; i < out_size_i32; i++) {
-      int32_t val = mlir_aie_sim_read32(tile_data_mem_C + (4 * i));
-      C[i] = val;
+      C[i] = C_ptr_out[i];
     }
 
     // test_utils::print_shim_tile_status(0);

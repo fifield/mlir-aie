@@ -23,17 +23,17 @@ inline void get_ss_v128_weight_staging(int stream_id, uint5_t reg_idx,
 inline __attribute__((always_inline)) void matrix_stream_load(int mul_mode) {
 
   constexpr unsigned stream_id = 1; // using stream 1 for weights and 0 for acts
-#pragma unroll
+  #pragma unroll
   for (size_t reg_idx = 0; reg_idx < 32; reg_idx++) {
     get_ss_v128_weight_staging(stream_id, reg_idx, mul_mode);
   }
 }
 
 extern "C" {
-void matmul(int32_t *restrict outIterC);
+void matmul();
 }
 
-void matmul(int32_t *restrict outIterC) {
+void matmul() {
 
   constexpr unsigned int K_outer = 4;
   constexpr unsigned int M = 4;
@@ -62,13 +62,17 @@ void matmul(int32_t *restrict outIterC) {
       zero_acc = 0; // Accumulation mode set after first iteration
     }
 
-  v64acc32 *restrict pOut = (v64acc32 *)outIterC;
-
   #pragma unroll
-  for (unsigned l = 0; l < M; l++) {
-    *pOut++ = acc[l];
+  for (unsigned i = 0; i < M; i++) {
+    #pragma unroll
+    for (unsigned j = 0; j < 2; j++) {
+      v32acc32 acc1024b = extract_v32acc32(acc[i], j);
+      #pragma unroll
+      for (unsigned k = 0; k < 2; k++) {
+        v16acc32 acc512b = extract_v16acc32(acc1024b, k);
+        v16int32 out512b = v16int32(acc512b);
+        put_ms(out512b);
+      }
+    }
   }
 }
-
-// unsigned int offset = (k * M + i) * 64;
-// v64int8 input_vector = *((v64int8 *)((int8_t *)inIterA + offset));
