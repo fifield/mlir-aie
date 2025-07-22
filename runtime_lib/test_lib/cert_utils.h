@@ -14,6 +14,7 @@
 #include "memory_allocator.h"
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace cert_utils {
@@ -45,6 +46,8 @@ ext_mem_model_t enqueue_control_code(aie_libxaie_ctx_t *xaie, void *queue,
 ext_mem_model_t enqueue_control_code(aie_libxaie_ctx_t *xaie, void *queue,
                                      std::vector<uint8_t> &control_code,
                                      std::vector<ext_mem_model_t> args = {});
+
+std::vector<uint8_t> load_ctrl_pages_from_elf(const std::string &elf_path);
 
 } // namespace cert_utils
 

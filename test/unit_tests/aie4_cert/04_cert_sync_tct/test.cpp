@@ -54,10 +54,9 @@ int main(int argc, char *argv[]) {
   ext_mem_model_t queue_h;
   void *queue = cert_utils::setup_queue(&xaie, column, queue_h, 64);
 
-  // Read control code from file "ctrltext.0.0.bin"
-  std::string control_code_path = "project1/ctrltext.0.0.bin";
   std::vector<uint8_t> control_code =
-      test_utils::load_binary(control_code_path);
+      cert_utils::load_ctrl_pages_from_elf("aie4.elf");
+
   ext_mem_model_t signal_h =
       cert_utils::enqueue_control_code(&xaie, queue, control_code);
   mlir_aie_sync_mem_dev(queue_h);

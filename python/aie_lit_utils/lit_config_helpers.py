@@ -1075,7 +1075,7 @@ class LitConfigHelper:
                 f"-I{test_lib_include} -L{test_lib_lib} -ltest_lib",
             )
         )
-        test_utils_flags = f"-I{test_lib_include} -L{test_lib_lib} -ltest_utils"
+        test_utils_flags = f"-I{test_lib_include} -L{test_lib_lib} -ltest_utils -lelf"
         config_obj.substitutions.append(
             (
                 "%test_utils_flags",

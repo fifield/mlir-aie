@@ -46,17 +46,9 @@ int main(int argc, char *argv[]) {
   ext_mem_model_t queue_h;
   void *queue = cert_utils::setup_queue(&xaie, column, queue_h, 64);
 
-  std::string control_code_path = "project/ctrltext.0.0.bin";
   std::vector<uint8_t> control_code =
-      test_utils::load_binary(control_code_path);
-  std::string control_data_path = "project/ctrldata.0.0.bin";
-  std::vector<uint8_t> control_data =
-      test_utils::load_binary(control_data_path);
+      cert_utils::load_ctrl_pages_from_elf("aie4.elf");
 
-  // Concatenate control_code and control_data into a single vector, since that
-  // is what the firmware expects in memory.
-  control_code.insert(control_code.end(), control_data.begin(),
-                      control_data.end());
   ext_mem_model_t signal_h =
       cert_utils::enqueue_control_code(&xaie, queue, control_code);
   mlir_aie_sync_mem_dev(queue_h);

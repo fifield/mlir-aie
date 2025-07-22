@@ -12,6 +12,14 @@
 
 #include <cassert>
 #include <cstring>
+#include <fcntl.h>
+#include <gelf.h>
+#include <iostream>
+#include <libelf.h>
+#include <map>
+#include <string>
+#include <unistd.h>
+#include <vector>
 
 namespace {
 
@@ -229,4 +237,74 @@ cert_utils::enqueue_control_code(aie_libxaie_ctx_t *xaie, void *queue,
     execution_buffer->args_len = args_len * sizeof(uint32_t);
   }
   return signal_h;
+}
+
+// Extract control sections from an ELF file into a map of of section names
+// and their corresponding byte arrays.
+std::map<std::string, std::vector<uint8_t>>
+extract_ctrl_sections(const std::string &elf_path) {
+  std::map<std::string, std::vector<uint8_t>> ctrl_sections;
+  if (elf_version(EV_CURRENT) == EV_NONE) {
+    std::cerr << "ELF library initialization failed!" << std::endl;
+    return ctrl_sections;
+  }
+
+  int fd = open(elf_path.c_str(), O_RDONLY, 0);
+  if (fd < 0) {
+    std::cerr << "Failed to open ELF file: " << elf_path << std::endl;
+    return ctrl_sections;
+  }
+
+  Elf *elf = elf_begin(fd, ELF_C_READ, nullptr);
+  if (!elf) {
+    std::cerr << "elf_begin() failed!" << std::endl;
+    close(fd);
+    return ctrl_sections;
+  }
+
+  size_t shstrndx;
+  if (elf_getshdrstrndx(elf, &shstrndx) != 0) {
+    std::cerr << "elf_getshdrstrndx() failed!" << std::endl;
+    elf_end(elf);
+    close(fd);
+    return ctrl_sections;
+  }
+
+  Elf_Scn *scn = nullptr;
+  while ((scn = elf_nextscn(elf, scn)) != nullptr) {
+    GElf_Shdr shdr;
+    if (gelf_getshdr(scn, &shdr) != &shdr)
+      continue;
+    const char *name = elf_strptr(elf, shstrndx, shdr.sh_name);
+    if (!name)
+      continue;
+    if (strstr(name, "ctrltext") || strstr(name, "ctrldata")) {
+      Elf_Data *data = elf_getdata(scn, nullptr);
+      if (data && data->d_buf && data->d_size > 0) {
+        const uint8_t *buf = reinterpret_cast<const uint8_t *>(data->d_buf);
+        std::cout << "Extracted section: " << name << std::endl;
+        ctrl_sections.insert(
+            {name, std::vector<uint8_t>(buf, buf + data->d_size)});
+      }
+    }
+  }
+
+  elf_end(elf);
+  close(fd);
+  return ctrl_sections;
+}
+
+std::vector<uint8_t>
+cert_utils::load_ctrl_pages_from_elf(const std::string &elf_path) {
+  std::vector<uint8_t> ctrl_pages;
+  auto sections = extract_ctrl_sections(elf_path);
+  for (unsigned i = 0; i < sections.size() / 2; i++) {
+    const auto &text_section = sections[".ctrltext.0." + std::to_string(i)];
+    const auto &data_section = sections[".ctrldata.0." + std::to_string(i)];
+    ctrl_pages.insert(ctrl_pages.end(), text_section.begin(),
+                      text_section.end());
+    ctrl_pages.insert(ctrl_pages.end(), data_section.begin(),
+                      data_section.end());
+  }
+  return ctrl_pages;
 }

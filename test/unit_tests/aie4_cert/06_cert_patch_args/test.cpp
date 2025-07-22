@@ -58,19 +58,8 @@ int main(int argc, char *argv[]) {
   void *queue = cert_utils::setup_queue(&xaie, column, queue_h, 64);
 
   // load control code
-  std::string control_code_path = "project1/ctrltext.0.0.bin";
   std::vector<uint8_t> control_code =
-      test_utils::load_binary(control_code_path);
-
-  // load control code data
-  std::string control_data_path = "project1/ctrldata.0.0.bin";
-  std::vector<uint8_t> control_data =
-      test_utils::load_binary(control_data_path);
-
-  // Concatenate control_code and control_data into a single vector, since that
-  // is what the firmware expects in memory.
-  control_code.insert(control_code.end(), control_data.begin(),
-                      control_data.end());
+      cert_utils::load_ctrl_pages_from_elf("aie4.elf");
 
   std::vector<ext_mem_model_t> args;
   args.push_back(data_h);
@@ -86,10 +75,10 @@ int main(int argc, char *argv[]) {
 
   // wait for the completion signal to be set to state 'completed'
   uint64_t completion = 0;
-  while (completion == 0 ) {
+  while (completion == 0) {
     completion = *reinterpret_cast<uint64_t *>(mlir_aie_sync_mem_cpu(signal_h));
     std::cout << "completion signal: " << completion << "\n";
-    if (!completion) 
+    if (!completion)
       sleep(1);
   }
 
