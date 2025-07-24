@@ -11,9 +11,7 @@
 // REQUIRES: valid_xchess_license, aietools_aie4, !hsa
 
 // RUN: xchesscc_wrapper aie4 -c %S/kernel.cc
-// RUN: %PYTHON aiecc.py -v --aiesim  --alloc-scheme=basic-sequential  --xchesscc --xbridge --no-compile-host %s %test_utils_flags %S/test.cpp
-// RUN: aie-opt --convert-aie-to-transaction='elf-dir=.' aie.mlir.prj/input_physical.mlir -o transaction.mlir
-// RUN: aie-translate --aie-npu-to-binary transaction.mlir -o transaction.bin
+// RUN: %PYTHON aiecc.py --alloc-scheme=basic-sequential --xchesscc --xbridge --no-compile-host --aie-generate-txn --txn-name=transaction.bin --aiesim %s %test_utils_flags %S/test.cpp
 // RUN: aie.mlir.prj/aiesim.sh | FileCheck %s
 
 // CHECK: PASS
