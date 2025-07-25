@@ -115,6 +115,12 @@ struct AIEAssignRuntimeSequenceBDIDsPass
     return std::nullopt;
   }
 
+  struct StaticBd {
+    uint32_t channel;
+    AIE::DMAChannelDir dir;
+    uint32_t id;
+  };
+
   // The BD ids each device's static DMAs take, by tile. Generators restart
   // at every PDI load, so this is read once per tile per load.
   //
@@ -126,21 +132,51 @@ struct AIEAssignRuntimeSequenceBDIDsPass
   // manager merges adjacent device nests; a parallel build needs these
   // summaries computed at module scope before the nest.
   llvm::DenseMap<Operation *,
-                 llvm::DenseMap<AIE::TileID, SmallVector<uint32_t>>>
+                 llvm::DenseMap<AIE::TileID, SmallVector<StaticBd>>>
       staticBdIds;
 
   // Mark every BD id a static DMA already took on `tile`, so this allocator
   // doesn't hand the same id to a runtime-sequence task.
   void seedFromStaticBds(AIE::DeviceOp device, AIE::TileOp tile,
                          BdIdGenerator &gen) {
-    auto [it, inserted] = staticBdIds.try_emplace(device);
-    if (inserted)
-      for (AIE::DmaBody program : device.getOps<AIE::DmaBody>())
-        llvm::append_range(it->second[program.getTileID()],
-                           AIE::getAssignedBdIds(program));
-    for (uint32_t id : it->second.lookup(tile.getTileID()))
-      if (!gen.bdIdAlreadyAssigned(id))
-        gen.assignBdId(id);
+    auto [cached, inserted] = staticBdIds.try_emplace(device);
+    if (inserted) {
+      for (AIE::DmaBody program : device.getOps<AIE::DmaBody>()) {
+        auto &reservations = cached->second[program.getTileID()];
+        DenseMap<Block *, std::pair<uint32_t, AIE::DMAChannelDir>> channels;
+        Region &body = program.getDmaBody();
+        for (Block &block : body)
+          for (AIE::DMAStartOp start : block.getOps<AIE::DMAStartOp>()) {
+            Block *next = start.getDest();
+            while (next && !channels.contains(next)) {
+              channels[next] = {start.getChannelIndex(), start.getChannelDir()};
+              next =
+                  next->hasNoSuccessors() ? nullptr : next->getSuccessors()[0];
+            }
+          }
+        for (AIE::DMAOp dma : body.getOps<AIE::DMAOp>())
+          for (Region &bdRegion : dma.getBds())
+            for (Block &block : bdRegion)
+              channels[&block] = {dma.getChannelIndex(), dma.getChannelDir()};
+        body.walk([&](AIE::DMABDOp bd) {
+          if (auto id = bd.getBdId()) {
+            auto it = channels.find(bd->getBlock());
+            if (it != channels.end()) {
+              auto [channel, dir] = it->second;
+              reservations.push_back({channel, dir, *id});
+            } else {
+              // An unclassified static BD must remain reserved in every pool.
+              for (uint32_t channel = 0; channel < 16; ++channel)
+                for (AIE::DMAChannelDir dir :
+                     {AIE::DMAChannelDir::S2MM, AIE::DMAChannelDir::MM2S})
+                  reservations.push_back({channel, dir, *id});
+            }
+          }
+        });
+      }
+    }
+    for (const StaticBd &bd : cached->second[tile.getTileID()])
+      gen.assignBdId(tile.getRow(), bd.channel, bd.dir, bd.id);
   }
 
   BdIdGenerator &getGeneratorForTile(AIE::TileOp tile) {
@@ -369,7 +405,9 @@ struct AIEAssignRuntimeSequenceBDIDsPass
                  "ids and an odd channel only the high half.";
           return WalkResult::interrupt();
         }
-        if (gen.bdIdAlreadyAssigned(bd_op.getBdId().value())) {
+        if (gen.bdIdAlreadyAssigned(tile.getRow(), op.getChannel(),
+                                    op.getDirection(),
+                                    bd_op.getBdId().value())) {
           op.emitOpError("Specified buffer descriptor ID ")
               << bd_op.getBdId().value()
               << " is already in use. Release the earlier task first: "
@@ -381,7 +419,8 @@ struct AIEAssignRuntimeSequenceBDIDsPass
           return WalkResult::interrupt();
         }
         checkReallocation(tile, bd_op.getBdId().value(), bd_op);
-        gen.assignBdId(bd_op.getBdId().value());
+        gen.assignBdId(tile.getRow(), op.getChannel(), op.getDirection(),
+                       bd_op.getBdId().value());
       }
       return WalkResult::advance();
     });
@@ -419,9 +458,11 @@ struct AIEAssignRuntimeSequenceBDIDsPass
       // BDs by channel parity (isBdChannelAccessible: an even channel can
       // only submit ids below 24, an odd channel only 24 and above).
       uint32_t alignment = bd_op == alignedHead ? 4 : 1;
-      std::optional<int32_t> next_id = gen.nextBdId(op.getChannel(), alignment);
+      std::optional<int32_t> next_id = gen.nextBdId(
+          tile.getRow(), op.getChannel(), op.getDirection(), alignment);
       while (!next_id && reclaimBds && succeeded(reclaimFor(op)))
-        next_id = gen.nextBdId(op.getChannel(), alignment);
+        next_id = gen.nextBdId(tile.getRow(), op.getChannel(),
+                               op.getDirection(), alignment);
       if (!next_id) {
         auto diag =
             op.emitOpError()
@@ -652,13 +693,17 @@ struct AIEAssignRuntimeSequenceBDIDsPass
         unloaded.contains(task_op))
       return success();
     BdIdGenerator &gen = getGeneratorForTile(task_op.getTileOp());
+    AIE::TileOp tile = task_op.getTileOp();
     WalkResult result = task_op.walk<WalkOrder::PreOrder>([&](AIE::DMABDOp bd) {
       if (!bd.getBdId().has_value()) {
         bd.emitOpError("Free called on BD chain with unassigned IDs.");
         return WalkResult::interrupt();
       }
-      if (gen.bdIdAlreadyAssigned(bd.getBdId().value())) {
-        gen.freeBdId(bd.getBdId().value());
+      if (gen.bdIdAlreadyAssigned(tile.getRow(), task_op.getChannel(),
+                                  task_op.getDirection(),
+                                  bd.getBdId().value())) {
+        gen.freeBdId(tile.getRow(), task_op.getChannel(),
+                     task_op.getDirection(), bd.getBdId().value());
       } else {
         freeOp->emitOpError("frees buffer descriptor ID ")
             << bd.getBdId().value()
@@ -760,7 +805,10 @@ struct AIEAssignRuntimeSequenceBDIDsPass
     };
     auto take = [&](DMAConfigureTaskOp task) {
       BdIdGenerator &gen = getGeneratorForTile(tile);
-      task.walk([&](AIE::DMABDOp bd) { gen.freeBdId(*bd.getBdId()); });
+      task.walk([&](AIE::DMABDOp bd) {
+        gen.freeBdId(tile.getRow(), task.getChannel(), task.getDirection(),
+                     *bd.getBdId());
+      });
       reclaimed.insert(task);
       releasedTasks.insert(task);
       pendingAwaitReleases.erase(task);

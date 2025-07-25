@@ -45,12 +45,14 @@ BdIdGenerator::BdIdGenerator(int col, int row,
                              const AIETargetModel &targetModel)
     : col(col), row(row), targetModel(targetModel) {}
 
-std::optional<uint32_t> BdIdGenerator::nextBdId(int channelIndex,
+std::optional<uint32_t> BdIdGenerator::nextBdId(uint32_t row,
+                                                uint32_t channelIndex,
+                                                DMAChannelDir dir,
                                                 uint32_t alignment) {
   uint32_t bdId = 0;
   uint32_t maxBdId = targetModel.getNumBDs(col, row) - 1;
   // Find the next free BD ID. This is not an efficient algorithm, but doesn't
-  for (; (bdIdAlreadyAssigned(bdId) ||
+  for (; (bdIdAlreadyAssigned(row, channelIndex, dir, bdId) ||
           !targetModel.isBdChannelAccessible(col, row, bdId, channelIndex)) &&
          bdId <= maxBdId;
        bdId += alignment)
@@ -58,24 +60,51 @@ std::optional<uint32_t> BdIdGenerator::nextBdId(int channelIndex,
   if (bdId > maxBdId) {
     return std::nullopt;
   }
-  assignBdId(bdId);
+  assignBdId(row, channelIndex, dir, bdId);
   return std::optional<uint32_t>(bdId);
 }
 
-void BdIdGenerator::assignBdId(uint32_t bdId) {
-  // FIXME: safeguard removed because of aie4 memtiles which have private pools
-  // of bds, so different channels have the "same" bd which triggers the assert
-  // assert(!alreadyAssigned.count(bdId) && "bdId has already been assigned");
-  if (alreadyAssigned.count(bdId))
-    return;
-  alreadyAssigned.insert(bdId);
+namespace {
+
+uint32_t getChannelOffset(const AIE::AIETargetModel &tm, uint32_t row,
+                          uint32_t channelIndex, DMAChannelDir dir) {
+  if (isa<AIE::AIE4TargetModel>(tm) && tm.isMemTile(0, row)) {
+    if (dir == DMAChannelDir::S2MM) {
+      channelIndex += 16;
+    }
+  } else {
+    channelIndex = 0;
+  }
+  return channelIndex;
 }
 
-bool BdIdGenerator::bdIdAlreadyAssigned(uint32_t bdId) {
-  return alreadyAssigned.count(bdId);
+} // namespace
+
+void BdIdGenerator::assignBdId(uint32_t row, uint32_t channelIndex,
+                               DMAChannelDir dir, uint32_t bdId) {
+  channelIndex = getChannelOffset(targetModel, row, channelIndex, dir);
+  alreadyAssigned[channelIndex].insert(bdId);
+  LLVM_DEBUG(llvm::dbgs() << "Assigned BD ID " << bdId << " to channel "
+                          << channelIndex << "\n");
 }
 
-void BdIdGenerator::freeBdId(uint32_t bdId) { alreadyAssigned.erase(bdId); }
+bool BdIdGenerator::bdIdAlreadyAssigned(uint32_t row, uint32_t channelIndex,
+                                        DMAChannelDir dir, uint32_t bdId) {
+  channelIndex = getChannelOffset(targetModel, row, channelIndex, dir);
+  bool assigned = alreadyAssigned[channelIndex].count(bdId);
+  LLVM_DEBUG(llvm::dbgs() << "Checking if BD ID " << bdId
+                          << " is already assigned to channel " << channelIndex
+                          << ": " << (assigned ? "Yes" : "No") << "\n");
+  return assigned;
+}
+
+void BdIdGenerator::freeBdId(uint32_t row, uint32_t channelIndex,
+                             AIE::DMAChannelDir dir, uint32_t bdId) {
+  channelIndex = getChannelOffset(targetModel, row, channelIndex, dir);
+  alreadyAssigned[channelIndex].erase(bdId);
+}
+
+namespace {
 
 // Read the head buffer-descriptor id and (biased) START_QUEUE repeat count of
 // the resident DMA channel (dir, channel) on `tile`, off the placed
@@ -184,25 +213,62 @@ struct AIEAssignBufferDescriptorIDsPass
             continue;
           if (auto reserved = tile->getAttrOfType<DenseI32ArrayAttr>(
                   "aiex.reserved_bd_ids"))
-            for (int32_t bdId : reserved.asArrayRef()) {
-              auto id = static_cast<uint32_t>(bdId);
-              if (!gen.bdIdAlreadyAssigned(id))
-                gen.assignBdId(id);
-            }
+            for (int32_t bdId : reserved.asArrayRef())
+              // The reservation attribute predates per-channel allocation and
+              // consequently contains no channel/direction information. Keep
+              // its tile-wide exclusion semantics by reserving each ID in
+              // every possible channel pool. On targets with one shared pool,
+              // these insertions all map to the same set.
+              for (uint32_t channel = 0; channel < 16; ++channel)
+                for (DMAChannelDir dir :
+                     {DMAChannelDir::S2MM, DMAChannelDir::MM2S})
+                  gen.assignBdId(row, channel, dir,
+                                 static_cast<uint32_t>(bdId));
         }
       }
+      // Associate with each block the channel index specified by the
+      // dma_start
+      DenseMap<Block *, std::pair<uint32_t, AIE::DMAChannelDir>>
+          blockChannelMap;
+      for (Block &block : memOp.getOperation()->getRegion(0)) {
+        for (auto op : block.getOps<DMAStartOp>()) {
+          blockChannelMap[&block] = {op.getChannelIndex(), op.getChannelDir()};
+          Block *dest = op.getDest();
+          while (dest) {
+            blockChannelMap[dest] = {op.getChannelIndex(), op.getChannelDir()};
+            if (dest->hasNoSuccessors())
+              break;
+            dest = dest->getSuccessors()[0];
+            if (blockChannelMap.contains(dest))
+              dest = nullptr;
+          }
+        }
+      }
+
+      auto dmaOps = memOp.getOperation()->getRegion(0).getOps<DMAOp>();
+      for (auto dmaOp : dmaOps) {
+        auto bdRegions = dmaOp.getBds();
+        for (auto &bdRegion : bdRegions) {
+          for (auto &block : bdRegion.getBlocks())
+            blockChannelMap[&block] = {dmaOp.getChannelIndex(),
+                                       dmaOp.getChannelDir()};
+        }
+      }
+
       bool bdIdCollision = false;
       memOp->walk<WalkOrder::PreOrder>([&](DMABDOp bd) {
         if (!bd.getBdId().has_value())
           return;
         uint32_t bdId = bd.getBdId().value();
-        if (gen.bdIdAlreadyAssigned(bdId)) {
+        auto channelIndex = blockChannelMap[bd->getBlock()].first;
+        auto channelDir = blockChannelMap[bd->getBlock()].second;
+        if (gen.bdIdAlreadyAssigned(row, channelIndex, channelDir, bdId)) {
           bd.emitOpError() << "assigned bd_id " << bdId
                            << " is already used by another BD on this tile";
           bdIdCollision = true;
           return;
         }
-        gen.assignBdId(bdId);
+        gen.assignBdId(row, channelIndex, channelDir, bdId);
       });
       if (bdIdCollision)
         return signalPassFailure();
@@ -211,28 +277,31 @@ struct AIEAssignBufferDescriptorIDsPass
     struct Assignment {
       DMABDOp bd;
       int col, row, channel;
+      DMAChannelDir dir;
     };
     SmallVector<Assignment> assignments;
     std::map<int32_t, SmallVector<size_t>> receiversOfTag;
     for (TileElement memOp : memOps) {
-      DenseMap<Block *, int> channels;
+      DenseMap<Block *, std::pair<int, DMAChannelDir>> channels;
       Region &region = memOp->getRegion(0);
       for (Block &block : region)
         for (auto start : block.getOps<DMAStartOp>()) {
           Block *dest = start.getDest();
           while (dest && !channels.contains(dest)) {
-            channels[dest] = start.getChannelIndex();
+            channels[dest] = {start.getChannelIndex(), start.getChannelDir()};
             dest = dest->hasNoSuccessors() ? nullptr : dest->getSuccessor(0);
           }
         }
       memOp->walk([&](DMABDOp bd) {
         auto dma = bd->getParentOfType<DMAOp>();
         int channel =
-            dma ? dma.getChannelIndex() : channels.lookup(bd->getBlock());
+            dma ? dma.getChannelIndex() : channels.lookup(bd->getBlock()).first;
+        DMAChannelDir dir = dma ? dma.getChannelDir()
+                                : channels.lookup(bd->getBlock()).second;
         if (auto tag = bd.getBdTag())
           receiversOfTag[*tag].push_back(assignments.size());
         assignments.push_back(
-            {bd, memOp.getTileID().col, memOp.getTileID().row, channel});
+            {bd, memOp.getTileID().col, memOp.getTileID().row, channel, dir});
       });
     }
 
@@ -262,7 +331,7 @@ struct AIEAssignBufferDescriptorIDsPass
           if (!tiles.insert(tile).second ||
               id >= targetModel.getNumBDs(a.col, a.row) ||
               !targetModel.isBdChannelAccessible(a.col, a.row, id, a.channel) ||
-              (!a.bd.getBdId() && gens.at(tile).bdIdAlreadyAssigned(id)))
+              (!a.bd.getBdId() && gens.at(tile).bdIdAlreadyAssigned(a.row, a.channel, a.dir, id)))
             return false;
         }
         return true;
@@ -282,7 +351,7 @@ struct AIEAssignBufferDescriptorIDsPass
       for (size_t i : indices) {
         auto &a = assignments[i];
         if (!a.bd.getBdId()) {
-          gens.at({a.col, a.row}).assignBdId(id);
+          gens.at({a.col, a.row}).assignBdId(a.row, a.channel, a.dir, id);
           a.bd.setBdId(id);
         }
       }
@@ -297,7 +366,7 @@ struct AIEAssignBufferDescriptorIDsPass
           return signalPassFailure();
         }
       } else {
-        auto nextId = gen.nextBdId(a.channel);
+        auto nextId = gen.nextBdId(a.row, a.channel, a.dir);
         if (!nextId) {
           a.bd.emitOpError()
               << "Allocator exhausted available BD IDs (maximum "
@@ -428,6 +497,8 @@ struct AIEAssignBufferDescriptorIDsPass
     return failure(walked.wasInterrupted());
   }
 };
+
+} // namespace
 
 std::unique_ptr<OperationPass<DeviceOp>>
 AIE::createAIEAssignBufferDescriptorIDsPass() {

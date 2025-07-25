@@ -1403,7 +1403,11 @@ public:
   uint32_t getNumBDs(int col, int row) const override {
     // aie4b (medusa) has 32 in single-app mode, with split connectivity.
     // TODO: aie4z in native mode has 16 private per channel.
-    return isShimNOCTile(col, row) ? 32 : 16;
+    if (isShimNOCTile(col, row))
+      return 32;
+    if (isMemTile(col, row))
+      return 16 * 10 * 8;
+    return 16;
   }
 
   bool isBdChannelAccessible(int col, int row, uint32_t bd_id,

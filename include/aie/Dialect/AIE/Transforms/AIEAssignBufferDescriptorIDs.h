@@ -19,19 +19,21 @@ struct BdIdGenerator {
   const int col;
   const int row;
   const AIETargetModel &targetModel;
-  std::set<uint32_t> alreadyAssigned;
+  std::set<uint32_t> alreadyAssigned[32];
 
   BdIdGenerator(int col, int row, const AIETargetModel &targetModel);
 
-  // The lowest free id `channelIndex` reaches that is a multiple of
-  // `alignment`.
-  std::optional<uint32_t> nextBdId(int channelIndex, uint32_t alignment = 1);
+  std::optional<uint32_t> nextBdId(uint32_t row, uint32_t channelIndex,
+                                   DMAChannelDir dir, uint32_t alignment = 1);
 
-  void assignBdId(uint32_t bdId);
+  void assignBdId(uint32_t row, uint32_t channelIndex, DMAChannelDir dir,
+                  uint32_t bdId);
 
-  bool bdIdAlreadyAssigned(uint32_t bdId);
+  bool bdIdAlreadyAssigned(uint32_t row, uint32_t channelIndex,
+                           DMAChannelDir dir, uint32_t bdId);
 
-  void freeBdId(uint32_t bdId);
+  void freeBdId(uint32_t row, uint32_t channelIndex, DMAChannelDir dir,
+                uint32_t bdId);
 };
 
 #endif

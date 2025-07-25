@@ -1847,7 +1847,15 @@ uint64_t AIE4TargetModel::getDmaBdAddress(int col, int row, uint32_t bd_id,
   if (isShimNOCTile(col, row)) {
     uint32_t numBds = 16;
     if (direction == AIE::DMAChannelDir::MM2S) {
-      offset = 0x00018C40;
+      if (getTargetArch() == AIEArch::AIE4z) {
+        offset = 0x00018C40;
+      } else {
+        if (channel < 2)
+          offset = 0x00018000;
+        else
+          offset = 0x00058000;
+        channel = 0;
+      }
     } else {
       if (channel == 0) {
         offset = 0x00018000;
@@ -2228,14 +2236,14 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
         case 1:
         case 3:
           return dstChan == 1;
+        case 5:
+        case 7:
+          return dstChan == 2;
         case 6:
         case 8:
-          return dstChan == 2;
-        case 7:
-        case 9:
           return dstChan == 3;
         case 4:
-        case 10:
+        case 9:
           return true;
         default:
           return false;
@@ -2245,7 +2253,7 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
       if (dstBundle == WireBundle::North) {
         if (srcChan == 4)
           return dstChan == 0;
-        if (srcChan == 10)
+        if (srcChan == 9)
           return dstChan == 4;
         return true;
       }
