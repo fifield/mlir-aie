@@ -5,7 +5,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "test_library.h"
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -15,9 +14,9 @@
 #include <sys/mman.h>
 #include <thread>
 #include <unistd.h>
-#include <xaiengine.h>
 
-#include "aie_inc.cpp"
+#include "memory_allocator.h"
+#include "test_utils.h"
 
 void populate_expected(int *buf) {
   const int stepsizes[3] = {8, 1, 1};
@@ -36,12 +35,6 @@ void populate_expected(int *buf) {
   }
 }
 
-void read_into(aie_libxaie_ctx_t *_xaie, int *buf) {
-  for (int i = 0; i < 128; i++) {
-    buf[i] = mlir_aie_read_buffer_buf34(_xaie, i);
-  }
-}
-
 void print_buf(int *buf) {
   for (int i = 0; i < 128; i++) {
     printf("%3d ", buf[i]);
@@ -56,24 +49,27 @@ int main(int argc, char *argv[]) {
   int seen[128];
   int expected[128];
 
-  // Boilerplate setup code
-  aie_libxaie_ctx_t *_xaie = mlir_aie_init_libxaie();
-  mlir_aie_init_device(_xaie);
-  mlir_aie_configure_cores(_xaie);
-  mlir_aie_configure_switchboxes(_xaie);
-  mlir_aie_configure_dmas(_xaie);
-  mlir_aie_initialize_locks(_xaie);
-  mlir_aie_start_cores(_xaie);
+  std::string txn_path = "transaction.bin";
+  std::vector<uint32_t> data = test_utils::load_instr_binary(txn_path);
+  test_utils::write_transaction_binary(reinterpret_cast<uint8_t *>(data.data()),
+                                       data.size() * sizeof(uint32_t));
 
-  // After this lock is acquired, the kernels have completed and buf34
-  // is populated.
-  assert(XAIE_OK == mlir_aie_acquire_lock34_recv(_xaie, -1, 5000));
+  uint64_t tile_col = 3;
+  uint64_t tile_row = 4;
 
-  // Read buf34 into seen.
-  read_into(_xaie, seen);
-
-  // Tear down.
-  mlir_aie_deinit_libxaie(_xaie);
+  while (true) {
+    uint64_t tile_lock_1 = ((tile_col << 25) | (tile_row << 20)) + 0x0001F010;
+    uint32_t lock_value = mlir_aie_sim_read32(tile_lock_1);
+    printf("Lock value: %u\n", lock_value);
+    for (int i = 0; i < 128; i++) {
+      seen[i] = mlir_aie_sim_read32(
+          (tile_col << 25) | (tile_row << 20) + 1024 + i * sizeof(uint32_t));
+      // printf("Data value: %d %u\n", i, seen[i]);
+    }
+    if (lock_value >= 1)
+      break;
+    sleep(1);
+  }
 
   // Compare results to expected results.
   populate_expected(expected);
@@ -87,12 +83,14 @@ int main(int argc, char *argv[]) {
   if (0 == errors) {
     print_buf(seen);
     printf("PASS!\n");
+    return 0;
   } else {
     printf("Expected:\n");
     print_buf(expected);
     printf("But got:\n");
     print_buf(seen);
     printf("FAIL.\n");
+    return 1;
   }
 
   return errors;

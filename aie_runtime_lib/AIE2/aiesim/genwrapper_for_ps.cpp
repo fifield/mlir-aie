@@ -6,7 +6,15 @@
 //===----------------------------------------------------------------------===//
 #include <adf/wrapper/wrapper.h>
 #include <xtlm.h>
+
 #define BUSWIDTH 128
+
+extern "C" {
+void setWrite32Ptr(void (*func)(uint64_t, unsigned int));
+void setRead32Ptr(unsigned int (*func)(uint64_t)) ;
+void setWriteGMPtr(void (*func)(uint64_t, const void*, uint64_t));
+void setReadGMPtr(void (*func)(uint64_t,  void*, uint64_t));
+}
 
 extern int main(int argc, char *argv[]);
 
@@ -275,29 +283,27 @@ void PSIP_ps_i3::response_process() {
   }
 }
 extern "C" {
-void ess_Write32(uint64 Addr, uint Data) {
+void aiesim_Write32(uint64_t Addr, uint32_t Data) {
   (PSIP_ps_i3::getInstance())->write32(Addr, Data);
 }
-uint32 ess_Read32(uint64 Addr) {
+uint32_t aiesim_Read32(uint64_t Addr) {
   return ((PSIP_ps_i3::getInstance())->read32(Addr));
 }
-void ess_Write128(uint64_t Addr, uint32_t *Data) {
-  (PSIP_ps_i3::getInstance())->write128(Addr, Data);
-}
-void ess_Read128(uint64_t Addr, uint32_t *Data) {
-  (PSIP_ps_i3::getInstance())->read128(Addr, Data);
-}
-void ess_WriteGM(uint64 addr, const void *data, uint64_t size) {
+void aiesim_WriteGM(uint64_t addr, const void *data, uint64_t size) {
   (PSIP_ps_i3::getInstance())->writeGM(addr, data, size);
 }
-void ess_ReadGM(uint64 addr, void *data, uint64_t size) {
+void aiesim_ReadGM(uint64_t addr, void *data, uint64_t size) {
   (PSIP_ps_i3::getInstance())->readGM(addr, data, size);
 }
 IPBlock *create_ip(sc_module_name name) {
+  setWrite32Ptr(aiesim_Write32);
+  setRead32Ptr(aiesim_Read32);
+  setWriteGMPtr(aiesim_WriteGM);
+  setReadGMPtr(aiesim_ReadGM);
   return (PSIP_ps_i3::createInstance(name));
 }
 void destroy_ip(IPBlock *ip) {
   std::cout << "IP-INFO: deleting ip PSIP_ps_i3 " << std::endl;
   delete ip;
 }
-}
+} // extern "C"

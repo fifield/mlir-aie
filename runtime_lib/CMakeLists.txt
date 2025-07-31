@@ -14,13 +14,36 @@ include(ExternalProject)
 project("runtime-libs")
 
 include("xaiengine/aiert.cmake")
-# Apply vendored aie-rt patches before anything in this file globs its
-# sources (the xaiengine_<target> ExternalProject below re-applies them
-# too, but that happens later, at build time, in its own nested configure —
-# too late for xaienginecdo_static's file(GLOB ...) further down).
-apply_aie_rt_vendor_patches(
-    ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/aie-rt
-    ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/patches/aie-rt)
+set(XAIE_SOURCE_DIR "../third_party/aie-rt/driver/src")
+set(BOOTGEN_SOURCE_DIR ${PROJECT_SOURCE_DIR}/../third_party/bootgen)
+
+add_aiert_headers(xaienginecdo_static
+        ${XAIE_SOURCE_DIR}
+        ${AIE_BINARY_DIR}/include/xaienginecdo_static
+        ${CMAKE_INSTALL_PREFIX}/include/xaienginecdo_static
+)
+add_aiert_library(xaienginecdo_static ${XAIE_SOURCE_DIR} STATIC)
+
+target_link_libraries(xaienginecdo_static PRIVATE cdo_driver_mlir_aie)
+target_compile_definitions(xaienginecdo_static PRIVATE __AIECDO__ __AIEDEBUG__)
+
+add_aiert_headers(xaienginecdo
+        ${XAIE_SOURCE_DIR}
+        ${AIE_BINARY_DIR}/include/xaienginecdo
+        ${CMAKE_INSTALL_PREFIX}/include/xaienginecdo
+)
+add_aiert_library(xaienginecdo ${XAIE_SOURCE_DIR})
+
+target_link_libraries(xaienginecdo PRIVATE cdo_driver_mlir_aie)
+target_compile_definitions(xaienginecdo PRIVATE __AIECDO__ __AIEDEBUG__ __AIESIM__)
+
+# just to make cmake happy since AIETargets will need to re-export
+# make sure not abs path...
+# https://github.com/Kitware/CMake/blob/16b1f0c3e99023316b12fdabd1980a18b738d942/Source/cmExportInstallFileGenerator.cxx#L224
+install(TARGETS xaienginecdo_static DESTINATION lib EXPORT xaienginecdo_static)
+install(EXPORT xaienginecdo_static DESTINATION lib/cmake/aie)
+install(TARGETS xaienginecdo DESTINATION lib EXPORT xaienginecdo)
+install(EXPORT xaienginecdo DESTINATION lib/cmake/aie)
 
 set(AIE_RUNTIME_TEST_TARGET_VAL ${AIR_RUNTIME_TEST_TARGET})
 if(NOT x86_64_TOOLCHAIN_FILE)
@@ -117,6 +140,7 @@ foreach(target ${AIE_RUNTIME_TARGETS})
     message(STATUS "setting up test_lib")
     ExternalProject_Add(test_lib_${target}
       PREFIX ${CMAKE_CURRENT_BINARY_DIR}/test_libTmp/${target}
+      DEPENDS xaienginecdo xaienginecdo-headers xaienginecdo-xaiengine.h
       SOURCE_DIR ${PROJECT_SOURCE_DIR}/test_lib
       BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/${target}/test_lib/lib
       CMAKE_CACHE_ARGS
@@ -145,30 +169,6 @@ foreach(target ${AIE_RUNTIME_TARGETS})
   endif()
 endforeach()
 
-set(XAIE_SOURCE_DIR "../third_party/aie-rt/driver/src")
-set(BOOTGEN_SOURCE_DIR ${PROJECT_SOURCE_DIR}/../third_party/bootgen)
-
-add_aiert_headers(xaienginecdo_static
-        ${XAIE_SOURCE_DIR}
-        ${AIE_BINARY_DIR}/include/xaienginecdo_static
-        ${CMAKE_INSTALL_PREFIX}/include/xaienginecdo_static
-)
-add_aiert_library(xaienginecdo_static ${XAIE_SOURCE_DIR} STATIC)
-
-target_link_libraries(xaienginecdo_static PRIVATE cdo_driver_mlir_aie)
-if(WIN32)
-  # The Windows bundled aie-rt path excludes xaie_sim.c 
-  # Avoid pulling in SimBackend via __AIEDEBUG__
-  target_compile_definitions(xaienginecdo_static PRIVATE -D__AIECDO__)
-else()
-  target_compile_definitions(xaienginecdo_static PRIVATE -D__AIECDO__ -D__AIEDEBUG__)
-endif()
-
-# just to make cmake happy since AIETargets will need to re-export
-# make sure not abs path...
-# https://github.com/Kitware/CMake/blob/16b1f0c3e99023316b12fdabd1980a18b738d942/Source/cmExportInstallFileGenerator.cxx#L224
-install(TARGETS xaienginecdo_static DESTINATION lib EXPORT xaienginecdo_static)
-install(EXPORT xaienginecdo_static DESTINATION lib/cmake/aie)
 target_include_directories(xaienginecdo_static SYSTEM PRIVATE ${BOOTGEN_SOURCE_DIR}/cdo-driver)
 
 include("${AIE_SOURCE_DIR}/cmake/install_headers.cmake")
@@ -182,6 +182,6 @@ install_headers(${AIEAPI_SOURCE_DIR}
 include("aiebu/aiebu.cmake")
 add_aiebu(
   ${PROJECT_SOURCE_DIR}/../third_party/cert/tools/aiebu
-  ${AIE_BINARY_DIR}
+  ${AIE_BINARY_DIR}/aiebu
   ${CMAKE_INSTALL_PREFIX}
 )

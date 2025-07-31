@@ -76,7 +76,7 @@ function(add_aiert_headers TARGET SRCPATH BUILDPATH INSTALLPATH)
 endfunction()
 
 function(add_aiert_library TARGET XAIE_SOURCE)
-message("Building aie-rt library for ${TARGET} from ${SRCPATH}")
+message("Building aie-rt library for ${TARGET} from ${XAIE_SOURCE}")
 cmake_parse_arguments(ARG "STATIC" "" "" ${ARGN})
   if(ARG_STATIC)
     set(LIBTYPE STATIC)

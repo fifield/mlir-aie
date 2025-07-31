@@ -14,6 +14,8 @@ function(add_runtime_pic_flag target_name)
   endif()
 endfunction()
 
+set(LibXAIE_INC_DIR ${PROJECT_BINARY_DIR}/../../../../include/xaienginecdo)
+
 find_package(XRT QUIET)
 
 set(BUILD_TEST_LIBRARY ON)

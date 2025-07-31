@@ -32,6 +32,14 @@ config.environment["PYTHONPATH"] = "{}:{}:{}".format(
     os.path.join(config.aie_obj_root, "aiebu", "aiebu", "lib", "python3"),
 )
 
+llvm_config.with_environment(
+    "LD_LIBRARY_PATH",
+    "{}:{}".format(
+        config.environment["LD_LIBRARY_PATH"],
+        os.path.join(config.aie_obj_root, "lib"),
+    ),
+)
+
 # suffixes: A list of file extensions to treat as test files.
 config.suffixes = [".mlir", ".py", ".test"]
 
