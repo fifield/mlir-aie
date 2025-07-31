@@ -15,7 +15,7 @@ import sys
 
 from aie.iron import ObjectFifo, Program, Runtime, Worker
 from aie.iron.placers import SequentialPlacer
-from aie.iron.device import NPU1Col1, NPU2Col1, NPU3, NPU3Z, XCVC1902
+from aie.iron.device import NPU3Z
 from aie.iron.controlflow import range_
 
 import argparse

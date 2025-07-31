@@ -83,7 +83,7 @@ jobs:
           export PYTHONPATH=$ME_ROOT/python:$ME_ROOT/applications:$PYTHONPATH
 
           cmake .. -G Ninja \
-            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_BUILD_TYPE=Release \
             -DPython3_EXECUTABLE=$(which python) \
             -DCMAKE_MODULE_PATH=$PWD/../cmake/modulesXilinx \
             -DLLVM_EXTERNAL_LIT=$(which lit) \

@@ -47,7 +47,7 @@ def my_eltwise_mul(dev, in1_size, in2_size, out_size, dtype=np.int32):
         B_ty = np.ndarray[(tile_size,), np.dtype[in2_dtype]]
         C_ty = np.ndarray[(tile_size,), np.dtype[out_dtype]]
 
-        # Type used in the memory tile which aggregates across the 2 cores
+        # Type used in the memory tile which aggregates across the n_cores
         A_memTile_ty = np.ndarray[(tile_size * n_cores,), np.dtype[in1_dtype]]
         B_memTile_ty = np.ndarray[(tile_size * n_cores,), np.dtype[in2_dtype]]
         C_memTile_ty = np.ndarray[(tile_size * n_cores,), np.dtype[out_dtype]]
@@ -153,7 +153,7 @@ parser = argparse.ArgumentParser(description="Vector-Vector Multiplication Progr
 parser.add_argument("-o", "--output", type=str, required=True, help="Output filename")
 args = parser.parse_args()
 
-dev = AIEDevice.npu3
+dev = AIEDevice.npu3z
 
 in1_size = 8192
 in2_size = 8192
