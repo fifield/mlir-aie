@@ -141,11 +141,13 @@
     "ExternalMemory": {
       "num_ddr_ports": 2,
       "ddr_queue_size": 2000,
-      "num_outstanding_reqs": 512,
-      "wr_queue_size": 2000,
-      "rd_queue_size": 2000,
+      "num_rd_outstanding_reqs": 256,
+      "num_wr_outstanding_reqs": 192,
       "network_rd_latency": 0,
       "network_wr_latency": 0,
+      "rd_bw": 154,
+      "wr_bw": 154,
+      "total_bw": 154,
       "mem_size": "0x400000"
     },
     "MathEngine": {
@@ -9255,7 +9257,8 @@
               "0xe8010": {"reset_value": "0x0", "type": "key_idx", "privileged": true, "application_id": "A"},
               "0xe8014": {"reset_value": "0x0", "type": "key_idx", "privileged": true, "application_id": "B"},
               "0xe8050": {"reset_value": "0x0", "type": "me_aximm_config", "privileged": true},
-              "0xe8060": {"reset_value": "0x0", "type": "axi_mm_outstanding_transactions", "privileged": true}
+              "0xe8060": {"reset_value": "0x0", "type": "axi_mm_outstanding_transactions", "privileged": true},
+              "0xe0180": {"reset_value": "0x1", "type": "compression_enable", "privileged": true}
             }
           },
           "DMA": {
