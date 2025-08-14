@@ -292,6 +292,8 @@ void Pathfinder::initialize(int maxCol, int maxRow,
   predEdge.clear();
 
   std::map<WireBundle, int> maxChannels;
+  bool isAIE4 = isa<AIE4TargetModel>(targetModel);
+
   auto intraconnect = [&](int col, int row) {
     TileID coords = {col, row};
     SwitchboxConnect &sb =
@@ -302,7 +304,7 @@ void Pathfinder::initialize(int maxCol, int maxRow,
       // get all ports into current switchbox
       int channels =
           targetModel.getNumSourceSwitchboxConnections(col, row, bundle);
-      if (channels == 0 && targetModel.isShimNOCorPLTile(col, row)) {
+      if (!isAIE4 && channels == 0 && targetModel.isShimNOCorPLTile(col, row)) {
         // wordaround for shimMux
         channels = targetModel.getNumSourceShimMuxConnections(col, row, bundle);
       }
@@ -311,7 +313,7 @@ void Pathfinder::initialize(int maxCol, int maxRow,
       }
       // get all ports out of current switchbox
       channels = targetModel.getNumDestSwitchboxConnections(col, row, bundle);
-      if (channels == 0 && targetModel.isShimNOCorPLTile(col, row)) {
+      if (!isAIE4 && channels == 0 && targetModel.isShimNOCorPLTile(col, row)) {
         // wordaround for shimMux
         channels = targetModel.getNumDestShimMuxConnections(col, row, bundle);
       }
@@ -323,7 +325,7 @@ void Pathfinder::initialize(int maxCol, int maxRow,
     sb.resize();
     // A shim's mux reaches its DMA, NOC and PLIO ports from any port.
     auto isMuxed = [&](Port p) {
-      return targetModel.isShimNOCorPLTile(col, row) &&
+      return !isAIE4 && targetModel.isShimNOCorPLTile(col, row) &&
              llvm::is_contained(
                  {WireBundle::DMA, WireBundle::NOC, WireBundle::PLIO},
                  p.bundle);
@@ -361,21 +363,33 @@ void Pathfinder::initialize(int maxCol, int maxRow,
         // from south to north
         interconnect(col, row, col, row - 1, WireBundle::South,
                      WireBundle::North);
+        // if (isAIE4)
+        //   interconnect(col, row, col, row - 1, WireBundle::South32,
+        //                WireBundle::North32);
       }
       if (row < maxRow) {
         // from north to south
         interconnect(col, row, col, row + 1, WireBundle::North,
                      WireBundle::South);
+        // if (isAIE4)
+        //   interconnect(col, row, col, row + 1, WireBundle::North32,
+        //                WireBundle::South32);
       }
       if (col > 0) {
         // from east to west
         interconnect(col, row, col - 1, row, WireBundle::West,
                      WireBundle::East);
+        if (isAIE4 && row == 0)
+          interconnect(col, row, col - 1, row, WireBundle::West32,
+                       WireBundle::East32);
       }
       if (col < maxCol) {
         // from west to east
         interconnect(col, row, col + 1, row, WireBundle::East,
                      WireBundle::West);
+        if (isAIE4 && row == 0)
+          interconnect(col, row, col + 1, row, WireBundle::East32,
+                       WireBundle::West32);
       }
     }
   }
@@ -776,7 +790,18 @@ void Pathfinder::buildRoutingGraph() {
         {{src.coords.col, src.coords.row + 1},
          {WireBundle::South, src.port.channel}},
         {{src.coords.col + 1, src.coords.row},
-         {WireBundle::West, src.port.channel}}};
+         {WireBundle::West, src.port.channel}},
+        // AIE4 32-bit stream switch routing (e.g. for TCT tokens). Only the
+        // edges actually created in initialize() (East32/West32 on row 0)
+        // resolve here; the graph.find() guard below drops the rest.
+        {{src.coords.col, src.coords.row - 1},
+         {WireBundle::North32, src.port.channel}},
+        {{src.coords.col - 1, src.coords.row},
+         {WireBundle::East32, src.port.channel}},
+        {{src.coords.col, src.coords.row + 1},
+         {WireBundle::South32, src.port.channel}},
+        {{src.coords.col + 1, src.coords.row},
+         {WireBundle::West32, src.port.channel}}};
     for (const auto &[neighborCoords, neighborPort] : neighbors) {
       auto nIt = graph.find({src.coords, neighborCoords});
       if (nIt != graph.end() &&

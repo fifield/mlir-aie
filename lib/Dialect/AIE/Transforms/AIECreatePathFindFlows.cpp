@@ -288,6 +288,18 @@ static std::optional<std::pair<TileID, Port>> linkedInput(TileID tile,
   case WireBundle::South:
     return std::pair{TileID{tile.col, tile.row - 1},
                      Port{WireBundle::North, out.channel}};
+  case WireBundle::East32:
+    return std::pair{TileID{tile.col + 1, tile.row},
+                     Port{WireBundle::West32, out.channel}};
+  case WireBundle::West32:
+    return std::pair{TileID{tile.col - 1, tile.row},
+                     Port{WireBundle::East32, out.channel}};
+  case WireBundle::North32:
+    return std::pair{TileID{tile.col, tile.row + 1},
+                     Port{WireBundle::South32, out.channel}};
+  case WireBundle::South32:
+    return std::pair{TileID{tile.col, tile.row - 1},
+                     Port{WireBundle::North32, out.channel}};
   default:
     return std::nullopt;
   }

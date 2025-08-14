@@ -1983,7 +1983,6 @@ AIE4TargetModel::getNumDestSwitchboxConnections(int col, int row,
       return 2;
     case WireBundle::West32:
     case WireBundle::East32:
-      return 1;
     default:
       return 0;
     }
@@ -2016,13 +2015,18 @@ AIE4TargetModel::getNumDestSwitchboxConnections(int col, int row,
       return 2;
     // 32 bit ports
     case WireBundle::North32:
-    case WireBundle::PLIO32:
     case WireBundle::Switch512:
     case WireBundle::Controller32:
       return 2;
     case WireBundle::West32:
-    case WireBundle::East32:
+     if (col == 0)
+        return 0;
       return 1;
+    case WireBundle::East32:
+      if (col == columns() - 1)
+        return 0;
+      return 1;
+    case WireBundle::PLIO32:
     default:
       return 0;
     }
@@ -2093,7 +2097,6 @@ AIE4TargetModel::getNumSourceSwitchboxConnections(int col, int row,
       return 2;
     case WireBundle::West32:
     case WireBundle::East32:
-      return 1;
     default:
       return 0;
     }
@@ -2125,11 +2128,15 @@ AIE4TargetModel::getNumSourceSwitchboxConnections(int col, int row,
     case WireBundle::Trace32:
     case WireBundle::North32:
     case WireBundle::Switch512:
-    case WireBundle::PLIO32:
     case WireBundle::Controller32:
       return 2;
     case WireBundle::West32:
+      if (col == 0)
+        return 0;
+      return 1;
     case WireBundle::East32:
+      if (col == columns() - 1)
+          return 0;
       return 1;
     default:
       return 0;
@@ -2167,10 +2174,10 @@ AIE4TargetModel::getNumSourceSwitchboxConnections(int col, int row,
   case WireBundle::North32:
     return 2;
   case WireBundle::Control32:
-  case WireBundle::West32:
-  case WireBundle::East32:
   case WireBundle::Switch512:
     return 1;
+  case WireBundle::West32:
+  case WireBundle::East32:
   default:
     return 0;
   }

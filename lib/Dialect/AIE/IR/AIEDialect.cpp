@@ -5947,6 +5947,14 @@ WireBundle xilinx::AIE::getConnectingBundle(WireBundle dir) {
     return WireBundle::West;
   case WireBundle::West:
     return WireBundle::East;
+  case WireBundle::North32:
+    return WireBundle::South32;
+  case WireBundle::South32:
+    return WireBundle::North32;
+  case WireBundle::East32:
+    return WireBundle::West32;
+  case WireBundle::West32:
+    return WireBundle::East32;
   default:
     return dir;
   }
