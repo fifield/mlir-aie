@@ -1022,6 +1022,8 @@ struct AIEDMATasksToNPUPass
     // failed() above guards the deref; see note in rewriteSingleBDDynamic.
     BdTemplateFields f = *fieldsOr; // NOLINT
 
+    int dir =
+        static_cast<std::underlying_type_t<AIE::DMAChannelDir>>(channelDir);
     NpuWriteBdOp::create(
         builder, bd_op.getLoc(), tile.getCol(), tile.getRow(), channel, dir,
         bd_id, len_addr_granularity, offset,

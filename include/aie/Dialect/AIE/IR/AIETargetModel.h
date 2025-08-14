@@ -1437,6 +1437,10 @@ public:
     return isMemTile(col, row) ? 24 : 8;
   }
 
+  uint32_t getMaxChannelNumForAdjacentMemTile(int col, int row) const override {
+    return 10;
+  }
+
   uint32_t getNumDestSwitchboxConnections(int col, int row,
                                           WireBundle bundle) const override;
   uint32_t getNumSourceSwitchboxConnections(int col, int row,
