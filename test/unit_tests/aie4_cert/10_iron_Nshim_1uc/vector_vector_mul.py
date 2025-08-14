@@ -9,7 +9,6 @@
 # RUN: echo FAIL | FileCheck %s
 # CHECK: PASS
 
-import attr
 from ml_dtypes import bfloat16
 import numpy as np
 import argparse
