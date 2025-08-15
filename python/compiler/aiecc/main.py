@@ -815,9 +815,9 @@ class FlowRunner:
 
     async def process_ctrlpkt(self, module_str, device_name):
         run_passes(
-            "builtin.module(aie.device(convert-aie-to-control-packets{elf-dir="
+            "builtin.module(aie.device(convert-aie-to-transaction{elf-dir="
             + self.tmpdirname
-            + "}))",
+            + "},aie-txn-to-ctrl-packet,aie-legalize-ctrl-packet))",
             module_str,
             self.prepend_tmp("ctrlpkt.mlir"),
             self.opts.verbose,
