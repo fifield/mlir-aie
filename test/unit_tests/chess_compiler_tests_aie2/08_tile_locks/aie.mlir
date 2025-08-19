@@ -13,7 +13,6 @@
 // CHECK: AIE2 ISS
 // CHECK: Core [7, 3] AIE2 locks are: 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
 // CHECK: PASS!
-// XFAIL: *
 
 module @test_chess_08_tile_locks {
   aie.device(xcve2802) {
