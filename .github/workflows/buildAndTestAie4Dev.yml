@@ -59,11 +59,12 @@ jobs:
 
           pip install -r python/requirements.txt
           pip install -r python/requirements_ml.txt
+          pip install -r python/requirements_dev.txt
           HOST_MLIR_PYTHON_PACKAGE_PREFIX=aie pip install -r python/requirements_extras.txt
           pip install -r third_party/cert/requirements.txt
 
           # for mesimulator
-          pip install bitstring toml
+          pip install bitstring toml cffi
 
           VERSION=$(utils/clone-llvm.sh --get-wheel-version)
           pip -q download mlir==$VERSION \
