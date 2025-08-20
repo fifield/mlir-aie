@@ -295,16 +295,27 @@ extract_ctrl_sections(const std::string &elf_path) {
 }
 
 std::vector<uint8_t>
-cert_utils::load_ctrl_pages_from_elf(const std::string &elf_path) {
+cert_utils::load_ctrl_pages_from_elf(const std::string &elf_path, uint32_t id) {
   std::vector<uint8_t> ctrl_pages;
   auto sections = extract_ctrl_sections(elf_path);
+  // there are at most sections.size() / 2 pairs for a given id
   for (unsigned i = 0; i < sections.size() / 2; i++) {
-    const auto &text_section = sections[".ctrltext.0." + std::to_string(i)];
-    const auto &data_section = sections[".ctrldata.0." + std::to_string(i)];
-    ctrl_pages.insert(ctrl_pages.end(), text_section.begin(),
-                      text_section.end());
-    ctrl_pages.insert(ctrl_pages.end(), data_section.begin(),
-                      data_section.end());
+    std::string text_section_name =
+        ".ctrltext." + std::to_string(id) + "." + std::to_string(i);
+    std::string data_section_name =
+        ".ctrldata." + std::to_string(id) + "." + std::to_string(i);
+
+    if (sections.count(text_section_name) &&
+        sections.count(data_section_name)) {
+      std::cout << "Loading sections: " << text_section_name << ", "
+                << data_section_name << std::endl;
+      const auto &text_section = sections[text_section_name];
+      const auto &data_section = sections[data_section_name];
+      ctrl_pages.insert(ctrl_pages.end(), text_section.begin(),
+                        text_section.end());
+      ctrl_pages.insert(ctrl_pages.end(), data_section.begin(),
+                        data_section.end());
+    }
   }
   return ctrl_pages;
 }

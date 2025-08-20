@@ -47,7 +47,8 @@ ext_mem_model_t enqueue_control_code(aie_libxaie_ctx_t *xaie, void *queue,
                                      std::vector<uint8_t> &control_code,
                                      std::vector<ext_mem_model_t> args = {});
 
-std::vector<uint8_t> load_ctrl_pages_from_elf(const std::string &elf_path);
+std::vector<uint8_t> load_ctrl_pages_from_elf(const std::string &elf_path,
+                                              uint32_t id = 0);
 
 } // namespace cert_utils
 
