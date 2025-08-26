@@ -359,7 +359,6 @@ struct NpuSyncToCertWaitTCTS : OpConversionPattern<AIEX::NpuSyncOp> {
           "cannot lower to cert.wait_tcts with non-constant sync parameters");
     uint32_t row = *rowOpt;
     uint32_t col = *colOpt;
-
     // These are the shift amounts from the tct packet format in the
     // architecture spec. The firmware expects the row and column packed and
     // shifted down to zero.

@@ -1280,6 +1280,8 @@ static PathEndPoint sourceOf(FlowOp flow) {
 // switchbox by (see shimMuxChannelFrom).
 static void lowerShimDMAPorts(DeviceOp device, OpBuilder &builder,
                               DynamicTileAnalysis &analyzer) {
+  if (isa<AIE4TargetModel>(device.getTargetModel()))
+    return;
   for (auto switchbox : device.getOps<SwitchboxOp>()) {
     TileOp tileOp = switchbox.getTileOp();
     if (!tileOp.isShimNOCTile())
