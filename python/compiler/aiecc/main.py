@@ -37,7 +37,7 @@ from aie.passmanager import PassManager
 
 
 def _create_input_with_addresses_pipeline(
-    scheme, dynamic_objFifos, ctrl_pkt_overlay, aie_target
+    scheme, dynamic_objFifos, packet_sw_objFifos, ctrl_pkt_overlay, aie_target
 ):
     pipeline = Pipeline()
 
@@ -59,7 +59,9 @@ def _create_input_with_addresses_pipeline(
             .add_pass("aie-assign-lock-ids")
             .add_pass("aie-register-objectFifos")
             .add_pass(
-                "aie-objectFifo-stateful-transform", dynamic_objFifos=dynamic_objFifos
+                "aie-objectFifo-stateful-transform",
+                dynamic_objFifos=dynamic_objFifos,
+                packet_sw_objFifos=packet_sw_objFifos,
             )
             .add_pass("aie-assign-bd-ids")
             .add_pass("aie-lower-cascade-flows")
@@ -1408,8 +1410,9 @@ class FlowRunner:
             aie_target, aie_peano_target = aie_targets[0], aie_peano_targets[0]
 
             pass_pipeline = INPUT_WITH_ADDRESSES_PIPELINE(
-                opts.alloc_scheme, 
-                opts.dynamic_objFifos, 
+                opts.alloc_scheme,
+                opts.dynamic_objFifos,
+                opts.packet_sw_objFifos,
                 opts.ctrl_pkt_overlay,
                 aie_target
             ).materialize(module=True)
