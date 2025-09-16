@@ -14,6 +14,8 @@ extern "C" {
 
 void ess_WriteGM(uint64_t addr, const void *data, uint64_t size);
 void ess_ReadGM(uint64_t addr, void *data, uint64_t size);
+uint32_t ess_Read32(uint64_t addr);
+void ess_Write32(uint64_t addr, uint32_t data);
 }
 
 #define XAIE_BASE_ADDR 0x20000000000

@@ -14,7 +14,7 @@
 // RUN: %PYTHON aiecc.py -v --aiesim --xchesscc --xbridge --no-compile-host --aie-generate-txn --txn-name=transaction.bin %s %test_utils_flags %S/test.cpp
 // RUN: aie.mlir.prj/aiesim.sh | FileCheck %s
 
-// CHECK: AIE4{{.*}}ISS
+// CHECK: AIE4{{.*}}sim
 // CHECK: test start.
 // CHECK: PASS!
 

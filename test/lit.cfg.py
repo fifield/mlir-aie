@@ -36,7 +36,7 @@ llvm_config.with_environment(
     "LD_LIBRARY_PATH",
     "{}:{}".format(
         config.environment["LD_LIBRARY_PATH"],
-        os.path.join(config.aie_obj_root, "lib"),
+        os.path.join(config.aie_obj_root, "runtime_lib", "x86_64", "xaiengine", "lib"),
     ),
 )
 

@@ -12,7 +12,7 @@
 // RUN: aie.mlir.prj/aiesim.sh | FileCheck --check-prefix=AIESIM %s
 // RUN: aie.mlir.prj/mesim.sh | FileCheck --check-prefix=MESIM %s
 //
-// AIESIM: AIE4{{.*}}ISS
+// AIESIM: AIE4{{.*}}sim
 // AIESIM: Hello, world.
 // MESIM: device model: {{.*}}aie4
 // MESIM: Hello, world.

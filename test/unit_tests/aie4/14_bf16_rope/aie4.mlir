@@ -9,7 +9,7 @@
 // RUN: aiecc.py --alloc-scheme=basic-sequential --xchesscc --xbridge --no-compile-host --aie-generate-txn --txn-name=transaction.bin --aiesim %s %test_utils_flags %S/test.cpp
 // RUN: aie4.mlir.prj/aiesim.sh | FileCheck --check-prefix=AIESIM %s
 //
-// AIESIM: AIE4{{.*}}ISS
+// AIESIM: AIE4{{.*}}sim
 // AIESIM: PASS!
 //
 

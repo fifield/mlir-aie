@@ -14,7 +14,7 @@ function(add_runtime_pic_flag target_name)
   endif()
 endfunction()
 
-set(LibXAIE_INC_DIR ${PROJECT_BINARY_DIR}/../../../../include/xaienginecdo)
+set(LibXAIE_INC_DIR ${PROJECT_BINARY_DIR}/../../../../include/xaienginecdo_static)
 
 find_package(XRT QUIET)
 
@@ -157,3 +157,12 @@ if (NOT WIN32)
       ARCHIVE DESTINATION ${CMAKE_INSTALL_PREFIX}/runtime_lib/${AIE_RUNTIME_TARGET}/test_lib/lib
   )
 endif()
+
+# simulation memory allocator library
+add_library(memory_allocator_mesim STATIC memory_allocator_mesim.cpp)
+target_compile_options(memory_allocator_mesim PRIVATE -fPIC)
+target_include_directories(memory_allocator_mesim PRIVATE ${LibXAIE_INC_DIR})
+
+install(TARGETS memory_allocator_mesim
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_PREFIX}/runtime_lib/${AIE_RUNTIME_TARGET}/test_lib/lib
+)
