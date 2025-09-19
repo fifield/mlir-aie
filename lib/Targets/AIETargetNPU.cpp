@@ -154,6 +154,7 @@ void appendLoadPdi(std::vector<uint32_t> &instructions, NpuLoadPdiOp op) {
 void appendAddressPatch(std::vector<uint32_t> &instructions,
                         NpuAddressPatchOp op) {
 
+  llvm::errs() << "instructions.size() = 0x" << llvm::format_hex(instructions.size()*4, 0) << "\n";
   auto words = reserveAndGetTail(instructions, 12);
 
   // XAIE_IO_CUSTOM_OP_DDR_PATCH

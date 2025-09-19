@@ -36,29 +36,30 @@ int main(int argc, const char *argv[]) {
   unsigned int device_index = 0;
   auto device = xrt::device(device_index);
 
-  // Load the xclbin
-  // Skeleton xclbin containing only the control packet network
-  auto xclbin = xrt::xclbin(std::string("aie.xclbin"));
+  // // Load the xclbin
+  // // Skeleton xclbin containing only the control packet network
+  // auto xclbin = xrt::xclbin(std::string("aie.xclbin"));
 
-  // Get the kernel from the xclbin
-  auto xkernels = xclbin.get_kernels();
-  auto xkernel = *std::find_if(xkernels.begin(), xkernels.end(),
-                               [](xrt::xclbin::kernel &k) {
-                                 auto name = k.get_name();
-                                 return name.rfind("MLIR_AIE", 0) == 0;
-                               });
-  auto kernelName = xkernel.get_name();
+  // // Get the kernel from the xclbin
+  // auto xkernels = xclbin.get_kernels();
+  // auto xkernel = *std::find_if(xkernels.begin(), xkernels.end(),
+  //                              [](xrt::xclbin::kernel &k) {
+  //                                auto name = k.get_name();
+  //                                return name.rfind("MLIR_AIE", 0) == 0;
+  //                              });
+  // auto kernelName = xkernel.get_name();
 
-  device.register_xclbin(xclbin);
+  // device.register_xclbin(xclbin);
 
   xrt::elf elf0("aie.elf");
-  xrt::module mod0{elf0};
-
+  xrt::hw_context context = xrt::hw_context(device, elf0);
+  // xrt::module mod0{elf0};
   // get a hardware context
-  xrt::hw_context context(device, xclbin.get_uuid());
+  // xrt::hw_context context(device, xclbin.get_uuid());
 
   // get a kernel handle
-  auto kernel0 = xrt::ext::kernel(context, mod0, kernelName);
+  std::string kernelName = "ctrl_packet_reconfig_elf:0";
+  auto kernel0 = xrt::ext::kernel(context, kernelName);
 
   xrt::bo bo_in = xrt::ext::bo(device, DATA_SIZE * sizeof(DATATYPE));
   xrt::bo bo_out = xrt::ext::bo(device, DATA_SIZE * sizeof(DATATYPE));
@@ -72,9 +73,7 @@ int main(int argc, const char *argv[]) {
   // Synchronizing BOs
   bo_in.sync(XCL_BO_SYNC_BO_TO_DEVICE);
 
-  unsigned int opcode = 3;
-
-  kernel0(opcode, 0, 0, bo_in, bo_out).wait2();
+  kernel0(bo_in, bo_out).wait2();
 
   bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
 
