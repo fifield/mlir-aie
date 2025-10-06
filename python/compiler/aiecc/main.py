@@ -140,6 +140,57 @@ async def write_file_async(file_content: str, file_path: str):
         await f.write(file_content)
 
 
+def emit_design_config_json(
+    kernel_name="MLIR_AIE",
+    instance_id="0",
+    txn_ctrl_code_file=None,
+    pdi_file=None,
+    ctrl_packet_file=None,
+    patch_info_file=None,
+    buffer_args=None,
+):
+    arguments = []
+    offset = 0x00
+
+    if buffer_args is None:
+        buffer_args = []
+
+    for buf in buffer_args:
+        arg = {
+            "name": buf,
+            "type": "char *",
+            "offset": str(hex(offset)),
+        }
+        arguments.append(arg)
+        offset += 0x8
+
+    instance_entry = {"id": instance_id}
+    if txn_ctrl_code_file is not None:
+        instance_entry["TXN_ctrl_code_file"] = txn_ctrl_code_file
+
+    if ctrl_packet_file is not None:
+        instance_entry["ctrl_packet_file"] = ctrl_packet_file
+
+    if patch_info_file is not None:
+        instance_entry["patch_info_file"] = patch_info_file
+
+    result = {
+        "xrt-kernels": [
+            {
+                "name": kernel_name,
+                "arguments": arguments,
+                "instance": [instance_entry],
+            }
+        ]
+    }
+
+    if pdi_file is not None:
+        pdi_entry = {"id": 0, "PDI_file": pdi_file}
+        result["xrt-kernels"][0]["PDIs"] = [pdi_entry]
+
+    return result
+
+
 def emit_design_kernel_json(
     kernel_name="MLIR_AIE",
     kernel_id="0x901",
@@ -827,6 +878,7 @@ class FlowRunner:
             output_file,
         ]
 
+        # TODO: replace this
         if ctrl_packet_file:
             ctrl_packet_size = os.path.getsize(ctrl_packet_file)
             exteral_buffers_json = {
@@ -878,7 +930,13 @@ class FlowRunner:
 
         # aie-opt --aie-ctrl-packet-to-dma -aie-dma-to-npu
         ctrl_seq_str = run_passes(
-            "builtin.module(aie.device(aie-ctrl-packet-to-dma,aie-dma-to-npu))",
+            "builtin.module(aie.device(aie-ctrl-packet-to-dma))",
+            ctrlpkt_mlir_str,
+            self.prepend_tmp("ctrlpkt_dma.mlir"),
+            self.opts.verbose,
+        )
+        ctrl_seq_str = run_passes(
+            "builtin.module(aie.device(aie-dma-to-npu))",
             ctrlpkt_mlir_str,
             file_ctrlpkt_dma_seq_mlir,
             self.opts.verbose,
@@ -901,6 +959,39 @@ class FlowRunner:
             )
             if seqs:
                 ctrl_idx = len(seqs[0].regions[0].blocks[0].arguments.types)
+
+        # create external_buffers.json for aiebu-asm
+        ctrl_packet_size = os.path.getsize(file_ctrlpkt_bin)
+        exteral_buffers_json = {
+            "external_buffers": {
+                "buffer_ctrl": {
+                    "xrt_id": ctrl_idx,
+                    "logical_id": -1,
+                    "size_in_bytes": ctrl_packet_size,
+                    "ctrl_pkt_buffer": 1,
+                    "name": "runtime_control_packet",
+                },
+            }
+        }
+        with open(self.prepend_tmp("external_buffers.json"), "w") as f:
+            json.dump(exteral_buffers_json, f, indent=2)
+
+        # create design_config.json for aiebu-asm
+        config_json = emit_design_config_json(
+            kernel_name=opts.kernel_name,
+            instance_id=opts.instance_name,
+            txn_ctrl_code_file=opts.insts_name.format(device_name, "seq"),
+            pdi_file="../project1/base_design.pdi",
+            ctrl_packet_file=file_ctrlpkt_bin,
+            patch_info_file=self.prepend_tmp("external_buffers.json"),
+            buffer_args=[f"bo{i}" for i in range(ctrl_idx)],
+        )
+        config_json_path = self.prepend_tmp(f"{device_name}_config.json")
+        print(config_json)
+        with open(config_json_path, "w") as f:
+            json.dump(config_json, f, indent=2)
+
+        # run aiebu-asm to generate elf file
         await self.aiebu_asm(
             opts.insts_name.format(device_name, "seq"),
             opts.elf_name.format(device_name),
