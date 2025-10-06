@@ -257,6 +257,11 @@ typically be outlined into the LLVM dialect, eventually resulting in a binary fi
 for each core.  The name of this file can be be specified using the `elf_file`
 attribute.
 
+If the `elf_file` attribute is present, no MLIR besides a terminator may be
+present in the core; in that case, the binary file linked dictates what 
+will run in the core. The path specified should is relative to the MLIR
+file.
+
 This op has an optional `stackSize` attribute, to control the amount of memory (in bytes)
 reserved for the stack.  The default value is 1024.  The stack (and other data allocations)
 are always stored in the local core memory, to avoid conflicts with static data allocations
@@ -335,7 +340,7 @@ _Define an AIE design targetting a complete device_
 Syntax:
 
 ```
-operation ::= `aie.device` `(` $device `)` regions attr-dict
+operation ::= `aie.device` `(` $device `)` ($sym_name^)? regions attr-dict
 ```
 
 This operation describes a design that executes on a particular AIEngine device.
@@ -362,13 +367,14 @@ aie.device(xcvc1902) {
 
 Traits: `HasParent<mlir::ModuleOp>`, `IsolatedFromAbove`, `SingleBlockImplicitTerminator<EndOp>`, `SingleBlock`, `SymbolTable`
 
-Interfaces: `AIETarget`
+Interfaces: `AIETarget`, `Symbol`
 
 #### Attributes:
 
 <table>
 <tr><th>Attribute</th><th>MLIR Type</th><th>Description</th></tr>
 <tr><td><code>device</code></td><td>xilinx::AIE::AIEDeviceAttr</td><td>AIE Device</td></tr>
+<tr><td><code>sym_name</code></td><td>::mlir::StringAttr</td><td>string attribute</td></tr>
 </table>
 
 
@@ -777,8 +783,6 @@ An op to read from a cascading stream from a neighboring core.
 The result type of this operation must have a size that matches the cascade size,
 which is architecture-dependent. e.g. AIE1: i384 or vector<8xi48>  AIE2: i512 or vector<16xi32>
 
-Traits: `HasParent<CoreOp>`
-
 #### Results:
 
 | Result | Description |
@@ -839,11 +843,7 @@ Case when LockID is not assigned:
   Before AIEAssignLockIDs: `%tile33 = aie.tile(3)`
   After AIEAssignLockIDs: `%tile33 = aie.tile(3, $assigned_value)`
 
-Traits: `AlwaysSpeculatableImplTrait`
-
-Interfaces: `ConditionallySpeculatable`, `InferTypeOpInterface`, `NoMemoryEffect (MemoryEffectOpInterface)`, `OpAsmOpInterface`, `TileElement`
-
-Effects: `MemoryEffects::Effect{}`
+Interfaces: `InferTypeOpInterface`, `OpAsmOpInterface`, `TileElement`
 
 #### Attributes:
 
@@ -1176,7 +1176,6 @@ Interfaces: `Symbol`
 <tr><td><code>via_DMA</code></td><td>::mlir::BoolAttr</td><td>bool attribute</td></tr>
 <tr><td><code>plio</code></td><td>::mlir::BoolAttr</td><td>bool attribute</td></tr>
 <tr><td><code>disable_synchronization</code></td><td>::mlir::BoolAttr</td><td>bool attribute</td></tr>
-<tr><td><code>via_shared_mem</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
 <tr><td><code>repeat_count</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute whose minimum value is 1</td></tr>
 <tr><td><code>initValues</code></td><td>::mlir::ArrayAttr</td><td>array of ElementsAttr</td></tr>
 <tr><td><code>padDimensions</code></td><td>::xilinx::AIE::BDPadLayoutArrayAttr</td><td></td></tr>
@@ -1237,6 +1236,43 @@ port and returns a subview of the acquired objects.
 
 
 
+### `aie.objectfifo.allocate` (::xilinx::AIE::ObjectFifoAllocateOp)
+
+_Sets a tile's memory module as the target for an objectfifo's memory allocation_
+
+Syntax:
+
+```
+operation ::= `aie.objectfifo.allocate` $objFifo_name `(` $delegateTile `)` attr-dict
+```
+
+Specify a tile's memory module to be used as the allocation target for this objectfifo.
+Only works if all the objectfifo's tiles, producer and consumers, have shared memory access to
+the specified tile's memory module.
+
+In the following example the objects of @of4 will be allocated on %tile14:
+```
+  aie.objectfifo @of4 (%tile13, {%tile14}, 2 : i32) : !aie.objectfifo<memref<256xi32>>
+  aie.objectfifo.allocate @of4 (%tile14)
+```
+
+Traits: `HasParent<DeviceOp>`
+
+#### Attributes:
+
+<table>
+<tr><th>Attribute</th><th>MLIR Type</th><th>Description</th></tr>
+<tr><td><code>objFifo_name</code></td><td>::mlir::FlatSymbolRefAttr</td><td>flat symbol reference attribute</td></tr>
+</table>
+
+#### Operands:
+
+| Operand | Description |
+| :-----: | ----------- |
+| `delegateTile` | index |
+
+
+
 ### `aie.objectfifo.link` (::xilinx::AIE::ObjectFifoLinkOp)
 
 _Links two objectFifos through an intermediary tile's DMA_
@@ -1247,7 +1283,7 @@ Syntax:
 operation ::= `aie.objectfifo.link` $fifoIns `->` $fifoOuts `(` $src_offsets $dst_offsets `)` attr-dict
 ```
 
-The `aie.objectFifo.link` operation marks two or more `objectFifos` as linked. This implies that the `objectFifos` form
+The `aie.objectfifo.link` operation marks two or more `objectFifos` as linked. This implies that the `objectFifos` form
 one dataflow movement which is split accross multiple `objectFifos`. Specifically, during the `objectFifo` lowering there will
 be less memory elements generated at the link point (i.e., the shared tile of all `objectFifos` in the link) as the `objectFifos` can share.
 
@@ -1640,8 +1676,6 @@ An op to write to a cascading stream from a neighboring core.
 The argument type of this operation must have a size that matches the cascade size,
 which is architecture-dependent. e.g. AIE1: i384 or vector<8xi48>  AIE2: i512 or vector<16xi32>
 
-Traits: `HasParent<CoreOp>`
-
 #### Operands:
 
 | Operand | Description |
@@ -1786,7 +1820,7 @@ _Runtime allocation information for a single shim DMA_
 Syntax:
 
 ```
-operation ::= `aie.shim_dma_allocation` $sym_name `(` $channel_dir `,` $channel_index `,` $col `)` attr-dict
+operation ::= `aie.shim_dma_allocation` $sym_name `(` $channel_dir `,` $channel_index `,` $col (`,` $packet^)? `)` attr-dict
 ```
 
 This op exists for cases where shim_dma configuration is performed outside of MLIR-AIE
@@ -1819,6 +1853,9 @@ Traits: `HasParent<DeviceOp>`
 <tr><td><code>channel_index</code></td><td>::mlir::IntegerAttr</td><td>64-bit signless integer attribute</td></tr>
 <tr><td><code>col</code></td><td>::mlir::IntegerAttr</td><td>64-bit signless integer attribute</td></tr>
 <tr><td><code>plio</code></td><td>::mlir::BoolAttr</td><td>bool attribute</td></tr>
+<tr><td><code>packet</code></td><td>::xilinx::AIE::PacketInfoAttr</td><td>
+    Tuple encoding the type and header of a packet;
+  </td></tr>
 </table>
 
 

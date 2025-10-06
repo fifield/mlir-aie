@@ -118,6 +118,33 @@ Traits: `SingleBlockImplicitTerminator<AIE::EndOp>`, `SingleBlock`
 
 
 
+### `aiex.configure` (::xilinx::AIEX::ConfigureOp)
+
+_Set up a configuration (program memories, stream switches, etc.) on the NPU device._
+
+Syntax:
+
+```
+operation ::= `aiex.configure` $symbol regions attr-dict
+```
+
+Traits: `HasParent<RuntimeSequenceOp>`, `NoTerminator`
+
+#### Attributes:
+
+<table>
+<tr><th>Attribute</th><th>MLIR Type</th><th>Description</th></tr>
+<tr><td><code>symbol</code></td><td>::mlir::FlatSymbolRefAttr</td><td>flat symbol reference attribute</td></tr>
+</table>
+
+#### Results:
+
+| Result | Description |
+| :----: | ----------- |
+| `result` | index |
+
+
+
 ### `aiex.connection` (::xilinx::AIEX::ConnectionOp)
 
 _A logical circuit-switched connection between cores_
@@ -220,7 +247,7 @@ _Concrete Instantiation of a Buffer Descriptor Chain as a Task on a Channel and 
 Syntax:
 
 ```
-operation ::= `aiex.dma_configure_task` `(` $tile `,` $direction `,` $channel `)` regions attr-dict
+operation ::= `aiex.dma_configure_task` `(` $tile `,` $direction `,` $channel (`,` $packet^)? `)` regions attr-dict
 ```
 
 Encapsulates the DMA configuration of one task, that is the (chain of) buffer descriptors to be executed on a given channel and direction on a tile.
@@ -241,6 +268,9 @@ Interfaces: `OpAsmOpInterface`, `TileElement`
 <tr><td><code>channel</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
 <tr><td><code>issue_token</code></td><td>::mlir::BoolAttr</td><td>bool attribute</td></tr>
 <tr><td><code>repeat_count</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
+<tr><td><code>packet</code></td><td>::xilinx::AIE::PacketInfoAttr</td><td>
+    Tuple encoding the type and header of a packet;
+  </td></tr>
 </table>
 
 #### Operands:
@@ -858,6 +888,31 @@ has executed all of its tasks.
 
 
 
+### `aiex.npu.load_pdi` (::xilinx::AIEX::NpuLoadPdiOp)
+
+_Load pdi operator_
+
+Syntax:
+
+```
+operation ::= `aiex.npu.load_pdi` attr-dict
+```
+
+Load a PDI (Programmable Device Image) to configure the NPU.
+The PDI is identified by `id`. `address` and `size` are typically written at
+runtime by the driver or host program.
+
+#### Attributes:
+
+<table>
+<tr><th>Attribute</th><th>MLIR Type</th><th>Description</th></tr>
+<tr><td><code>id</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
+<tr><td><code>size</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
+<tr><td><code>address</code></td><td>::mlir::IntegerAttr</td><td>64-bit unsigned integer attribute</td></tr>
+</table>
+
+
+
 ### `aiex.npu.maskwrite32` (::xilinx::AIEX::NpuMaskWrite32Op)
 
 _Write a masked 32-bit value to the AIE array_
@@ -886,6 +941,32 @@ If 'buffer' is not present and 'column' and 'row' are not present then
 <tr><td><code>buffer</code></td><td>::mlir::FlatSymbolRefAttr</td><td>flat symbol reference attribute</td></tr>
 <tr><td><code>column</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
 <tr><td><code>row</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
+</table>
+
+
+
+### `aiex.npu.preempt` (::xilinx::AIEX::NpuPreemptOp)
+
+_Preempt transaction operation_
+
+Syntax:
+
+```
+operation ::= `aiex.npu.preempt` attr-dict
+```
+
+Yield to higher priority task(s). Indicates to the transaction processor that the instruction stream can be interrupted at this point.
+Levels: 
+0: Noop.
+1: Mem tile.
+2: AIE tile.
+3: AIE registers.
+
+#### Attributes:
+
+<table>
+<tr><th>Attribute</th><th>MLIR Type</th><th>Description</th></tr>
+<tr><td><code>level</code></td><td>::mlir::IntegerAttr</td><td>8-bit unsigned integer attribute</td></tr>
 </table>
 
 
@@ -1116,6 +1197,35 @@ A route operation that routes one herd to another.
 
 
 
+### `aiex.run` (::xilinx::AIEX::RunOp)
+
+_Execute a runtime sequence_
+
+Syntax:
+
+```
+operation ::= `aiex.run` $runtime_sequence_symbol `(` $args `)` `:` `(` type($args) `)` attr-dict
+```
+
+Executes an `aiex.runtime_sequence` with the given name and arguments by inlining its instructions at the call site.
+
+Traits: `HasParent<ConfigureOp>`
+
+#### Attributes:
+
+<table>
+<tr><th>Attribute</th><th>MLIR Type</th><th>Description</th></tr>
+<tr><td><code>runtime_sequence_symbol</code></td><td>::mlir::FlatSymbolRefAttr</td><td>flat symbol reference attribute</td></tr>
+</table>
+
+#### Operands:
+
+| Operand | Description |
+| :-----: | ----------- |
+| `args` | variadic of any type |
+
+
+
 ### `aiex.runtime_sequence` (::xilinx::AIEX::RuntimeSequenceOp)
 
 _Program the configuration co-processor of the AI Engine array_
@@ -1127,6 +1237,8 @@ Typically, these instructions include configuring the data transfers between hos
 The input arguments are arguments passed in from the host at kernel invocation time. This may include buffers on the host.
 
 Traits: `HasParent<AIE::DeviceOp>`, `NoTerminator`
+
+Interfaces: `Symbol`
 
 #### Attributes:
 

@@ -145,7 +145,8 @@ the original loop.
 #### Options
 
 ```
--dynamic-objFifos : Flag to enable dynamic object fifo lowering in cores instead of loop unrolling.
+-dynamic-objFifos   : Flag to enable dynamic object fifo lowering in cores instead of loop unrolling.
+-packet-sw-objFifos : Flag to enable aie.packetflow lowering from objectfifos.
 ```
 
 ### `-aie-register-objectFifos`
@@ -172,6 +173,7 @@ Optionally, tileCol and tileRow can specify a single core to export
 #### Options
 
 ```
+-device  : Device to generate code for
 -tilecol : X coordinate of tile to generate code for
 -tilerow : Y coordinate of tile to generate code for
 ```

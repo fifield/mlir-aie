@@ -6,10 +6,11 @@ var searchData=
   ['accesses_3',['accesses',['../classtaplib_1_1tap_1_1TensorAccessPattern.html#a38f2fc7f6ffdba12aea30f5e3a06657e',1,'taplib.tap.TensorAccessPattern.accesses()'],['../classtaplib_1_1tas_1_1TensorAccessSequence.html#a319dc364453945660e815b364050edb6',1,'taplib.tas.TensorAccessSequence.accesses()']]],
   ['acquire_4',['acquire',['../classiron_1_1dataflow_1_1objectfifo_1_1ObjectFifoHandle.html#af2df42bef2b7aafdf6cc31acee9ef865',1,'iron::dataflow::objectfifo::ObjectFifoHandle']]],
   ['all_5fof_5fendpoints_5',['all_of_endpoints',['../classiron_1_1dataflow_1_1objectfifo_1_1ObjectFifoHandle.html#a9b8e261cf23b5949ce41d446c4dca3ac',1,'iron::dataflow::objectfifo::ObjectFifoHandle']]],
-  ['animate_6',['animate',['../classtaplib_1_1tas_1_1TensorAccessSequence.html#a73ebbeada918f71dc9c8ba88461059fa',1,'taplib::tas::TensorAccessSequence']]],
+  ['animate_6',['animate',['../classtaplib_1_1tas_1_1TensorAccessSequence.html#ac37dd395dca38ec04823b8c7310a0e37',1,'taplib::tas::TensorAccessSequence']]],
   ['animate_5ffrom_5faccesses_7',['animate_from_accesses',['../namespacetaplib_1_1visualization2d.html#affeb22effce76577f9435c2cab032a03',1,'taplib::visualization2d']]],
   ['arange_8',['arange',['../classiron_1_1tensor_1_1Tensor.html#a4e199b33ae831b645e85792b13ea206b',1,'iron::tensor::Tensor']]],
-  ['arr_5ftype_9',['arr_type',['../classiron_1_1runtime_1_1data_1_1RuntimeData.html#a2ee9c4ee18ed6ce13ddc946ed5d3d357',1,'iron::runtime::data::RuntimeData']]],
-  ['asarray_10',['asarray',['../namespaceiron_1_1experimental_1_1array.html#aede5167fbdb66f0c2c97547f778b6efc',1,'iron::experimental::array']]],
-  ['asnumpy_11',['asnumpy',['../classiron_1_1experimental_1_1array_1_1array.html#acd48c986e81bd772280538edec51b794',1,'iron::experimental::array::array']]]
+  ['arg_5ftypes_9',['arg_types',['../classiron_1_1kernel_1_1ExternalFunction.html#a4f5fc776cd2b7e3f6719d40cfaeedc6e',1,'iron::kernel::ExternalFunction']]],
+  ['arr_5ftype_10',['arr_type',['../classiron_1_1runtime_1_1data_1_1RuntimeData.html#a2ee9c4ee18ed6ce13ddc946ed5d3d357',1,'iron::runtime::data::RuntimeData']]],
+  ['asarray_11',['asarray',['../namespaceiron_1_1experimental_1_1array.html#aede5167fbdb66f0c2c97547f778b6efc',1,'iron::experimental::array']]],
+  ['asnumpy_12',['asnumpy',['../classiron_1_1experimental_1_1array_1_1array.html#acd48c986e81bd772280538edec51b794',1,'iron::experimental::array::array']]]
 ];
