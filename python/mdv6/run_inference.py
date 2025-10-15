@@ -13,6 +13,7 @@ from PIL import Image
 import numpy as np
 
 from model import MDV6MITYOLOv9c
+from model_bf16 import MDV6MITYOLOv9cBF16
 from weight_mapper import load_and_transform_weights
 from visualize import decode_predictions, draw_boxes
 
@@ -31,23 +32,45 @@ def load_image(image_path, size=640):
     return img_tensor
 
 
-def run_our_model(image_path, weights_path, conf_threshold=0.2, iou_threshold=0.5, output_dir=None):
+def run_our_model(image_path, weights_path, conf_threshold=0.2, iou_threshold=0.5, output_dir=None, use_bf16=False):
     """Run our MDV6 implementation."""
     print("="*80)
-    print("RUNNING OUR MODEL")
+    print(f"RUNNING OUR MODEL ({'BFloat16' if use_bf16 else 'Float32'})")
     print("="*80)
     
     # Load model
-    model = MDV6MITYOLOv9c(num_classes=3)
+    if use_bf16:
+        model = MDV6MITYOLOv9cBF16(num_classes=3)
+        print("Using BFloat16 quantized model")
+    else:
+        model = MDV6MITYOLOv9c(num_classes=3)
+        print("Using Float32 model")
+    
     model.eval()
     
     # Load weights
-    if weights_path.exists():
-        transformed_dict = load_and_transform_weights(weights_path)
-        model.load_state_dict(transformed_dict, strict=False)
-        print("✓ Loaded pretrained weights")
+    if use_bf16:
+        # Try to load quantized weights first
+        bf16_weights = weights_path.parent / (weights_path.stem + "_bf16.pth")
+        if bf16_weights.exists():
+            print(f"✓ Loading quantized weights from {bf16_weights.name}")
+            model.load_quantized_weights(bf16_weights)
+        elif weights_path.exists():
+            print(f"⚠ Quantized weights not found, converting from FP32...")
+            transformed_dict = load_and_transform_weights(weights_path)
+            model.load_state_dict(transformed_dict, strict=False)
+            model.to_bfloat16()
+            print("✓ Loaded and quantized pretrained weights")
+        else:
+            print("⚠ Using random initialization (no weights found)")
+            model.to_bfloat16()
     else:
-        print("⚠ Using random initialization (no weights found)")
+        if weights_path.exists():
+            transformed_dict = load_and_transform_weights(weights_path)
+            model.load_state_dict(transformed_dict, strict=False)
+            print("✓ Loaded pretrained weights")
+        else:
+            print("⚠ Using random initialization (no weights found)")
     
     # Load image
     img_tensor = load_image(image_path)
@@ -155,6 +178,8 @@ def main():
                        help='Confidence threshold for detections')
     parser.add_argument('--iou-threshold', type=float, default=0.5,
                        help='IOU threshold for NMS')
+    parser.add_argument('--use-bf16', action='store_true',
+                       help='Use BFloat16 quantized model (50%% memory reduction)')
     
     args = parser.parse_args()
     
@@ -185,7 +210,7 @@ def main():
     
     if not args.official_only:
         our_results = run_our_model(image_path, weights_path, 
-                                    args.conf_threshold, args.iou_threshold, output_dir)
+                                    args.conf_threshold, args.iou_threshold, output_dir, args.use_bf16)
     
     if not args.ours_only:
         official_results = run_official_model(image_path, weights_path,
