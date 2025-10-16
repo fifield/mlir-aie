@@ -51,6 +51,7 @@ def conv_layer_bf16_tiled(
     tile_h: int = 32,
     tile_w: int = 32,
     out_chan_block: int = 8,
+    n_patches: int = 2,
 ):
     """
     Tiled Conv layer for large images.
@@ -67,6 +68,7 @@ def conv_layer_bf16_tiled(
         tile_h: Spatial tile height
         tile_w: Spatial tile width
         out_chan_block: Output channel block size
+        n_patches: Number of patches to process per kernel invocation
     """
     
     if kernel_size != 3:
@@ -91,12 +93,12 @@ def conv_layer_bf16_tiled(
     output_tile_size = tile_h * tile_w * out_chan_block
     
     # Type definitions (bfloat16 as uint16)
-    # Input buffer holds 2 patches - ObjectFifo will chunk them
+    # Input buffer holds n_patches - ObjectFifo will chunk them
     patch_ty = np.ndarray[(patch_size,), np.dtype[np.uint16]]
-    input_buffer_ty = np.ndarray[(2 * patch_size,), np.dtype[np.uint16]]
+    input_buffer_ty = np.ndarray[(n_patches * patch_size,), np.dtype[np.uint16]]
     weight_block_ty = np.ndarray[(weight_block_size,), np.dtype[np.uint16]]
     output_tile_ty = np.ndarray[(output_tile_size,), np.dtype[np.uint16]]
-    output_buffer_ty = np.ndarray[(2 * output_tile_size,), np.dtype[np.uint16]]
+    output_buffer_ty = np.ndarray[(n_patches * output_tile_size,), np.dtype[np.uint16]]
     
     # Full image types for host interface
     input_ty = np.ndarray[(input_height * input_width * input_channels,), np.dtype[np.uint16]]
@@ -134,13 +136,13 @@ def conv_layer_bf16_tiled(
     # Output tile from core to L2 to L3
     of_output_tile = ObjectFifo(output_tile_ty, depth=fifo_depth, name="output_tile")
     
-    # Core task: process 2 spatial tiles with one output channel block
+    # Core task: process n_patches spatial tiles with one output channel block
     def core_fn(of_in_patch, of_wts, of_out_tile, kernel):
-        # Acquire weights once for both patches
+        # Acquire weights once for all patches
         elem_wts = of_wts.acquire(1)
         
-        # Process 2 patches in sequence with same weights
-        for _ in range_(2):
+        # Process n_patches in sequence with same weights
+        for _ in range_(n_patches):
             # Acquire input and output buffers
             elem_patch = of_in_patch.acquire(1)
             elem_out = of_out_tile.acquire(1)
@@ -177,17 +179,17 @@ def conv_layer_bf16_tiled(
     )
     
     # Runtime sequence
-    # Host sends 2 patches at a time in a single buffer
+    # Host sends n_patches at a time in a single buffer
     # ObjectFifo chunks it into individual patches for the core
-    # Host receives 2 output tiles in a single buffer
+    # Host receives n_patches output tiles in a single buffer
     rt = Runtime()
     with rt.sequence(input_buffer_ty, weight_block_ty, output_buffer_ty) as (I_patches, W_block, O_tiles):
         rt.start(worker)
         
-        # Process 2 tiles at a time (host orchestrates the tiling loop)
-        # Host sends buffer with 2 patches concatenated
-        # ObjectFifo will chunk into 2 separate patches for the core loop
-        # Host receives buffer with 2 output tiles concatenated
+        # Process n_patches tiles at a time (host orchestrates the tiling loop)
+        # Host sends buffer with n_patches concatenated
+        # ObjectFifo will chunk into n_patches separate patches for the core loop
+        # Host receives buffer with n_patches output tiles concatenated
         rt.fill(of_input_patch.prod(), I_patches)
         rt.fill(of_weights.prod(), W_block)
         rt.drain(of_output_tile.cons(), O_tiles, wait=True)
@@ -215,11 +217,12 @@ if __name__ == "__main__":
         tile_h = int(sys.argv[6]) if len(sys.argv) > 6 else 32
         tile_w = int(sys.argv[7]) if len(sys.argv) > 7 else 32
         out_chan_block = int(sys.argv[8]) if len(sys.argv) > 8 else 8
+        n_patches = int(sys.argv[9]) if len(sys.argv) > 9 else 2
         
     except (IndexError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
-        print("Usage: python aie2_tiled.py npu2 [H] [W] [C_in] [C_out] [tile_h] [tile_w] [out_chan_block]", file=sys.stderr)
-        print("Example: python aie2_tiled.py npu2 640 640 3 32 32 32 8", file=sys.stderr)
+        print("Usage: python aie2_tiled.py npu2 [H] [W] [C_in] [C_out] [tile_h] [tile_w] [out_chan_block] [n_patches]", file=sys.stderr)
+        print("Example: python aie2_tiled.py npu2 640 640 3 32 32 32 8 2", file=sys.stderr)
         sys.exit(1)
     
     print(f"Generating tiled convolution:", file=sys.stderr)
@@ -227,6 +230,7 @@ if __name__ == "__main__":
     print(f"  Output: {input_height}×{input_width}×{output_channels}", file=sys.stderr)
     print(f"  Tile size: {tile_h}×{tile_w}", file=sys.stderr)
     print(f"  Output channel block: {out_chan_block}", file=sys.stderr)
+    print(f"  Patches per invocation: {n_patches}", file=sys.stderr)
     
     tiles_h = (input_height + tile_h - 1) // tile_h
     tiles_w = (input_width + tile_w - 1) // tile_w
@@ -247,6 +251,7 @@ if __name__ == "__main__":
         tile_h=tile_h,
         tile_w=tile_w,
         out_chan_block=out_chan_block,
+        n_patches=n_patches,
     )
     
     print(module)
