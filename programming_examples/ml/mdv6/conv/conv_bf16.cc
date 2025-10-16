@@ -170,6 +170,123 @@ void conv3x3_bn_silu_bf16(bfloat16 *input, bfloat16 *weights,
   event1();
 }
 
+//*****************************************************************************
+// Conv3x3 Tiled for Conv0 - bfloat16
+// Processes a spatial tile (tile_h x tile_w) with output channel blocking
+// Input: (tile_h+2*padding, tile_w+2*padding, input_channels) - includes halo
+// Weights: (output_channels_block, input_channels, 3, 3)
+// Output: (tile_h, tile_w, output_channels_block)
+//*****************************************************************************
+void conv3x3_tile_blocked_bf16(bfloat16 *input_patch, bfloat16 *weights,
+                               bfloat16 *output_tile,
+                               const int32_t tile_height, const int32_t tile_width,
+                               const int32_t input_channels,
+                               const int32_t output_channels_block,
+                               const int32_t stride, const int32_t padding) {
+  event0();
+
+  const int patch_height = tile_height + 2 * padding;
+  const int patch_width = tile_width + 2 * padding;
+
+  // For each output channel in the block
+  for (int oc = 0; oc < output_channels_block; oc++) {
+    // For each output position in tile
+    for (int oh = 0; oh < tile_height; oh++) {
+      for (int ow = 0; ow < tile_width; ow++) {
+        float sum = 0.0f;
+        
+        // Convolve with 3x3 kernel
+        for (int ic = 0; ic < input_channels; ic++) {
+          for (int kh = 0; kh < 3; kh++) {
+            for (int kw = 0; kw < 3; kw++) {
+              // Patch already includes padding border, so add padding offset
+              int ih = oh * stride + kh;
+              int iw = ow * stride + kw;
+              
+              int input_idx = (ih * patch_width + iw) * input_channels + ic;
+              int weight_idx = ((oc * input_channels + ic) * 3 + kh) * 3 + kw;
+              
+              float in_val = (float)input_patch[input_idx];
+              float w_val = (float)weights[weight_idx];
+              sum += in_val * w_val;
+            }
+          }
+        }
+        
+        int output_idx = (oh * tile_width + ow) * output_channels_block + oc;
+        output_tile[output_idx] = (bfloat16)sum;
+      }
+    }
+  }
+
+  event1();
+}
+
+//*****************************************************************************
+// Conv3x3 Partial Accumulation for Conv1 - float32 accumulation
+// Processes one input channel block and accumulates to float32 buffer
+// Input: (tile_h+2, tile_w+2, input_channels_block)
+// Weights: (output_channels_block, input_channels_block, 3, 3)
+// Accum: (tile_h, tile_w, output_channels_block) - float32, updated in place
+//*****************************************************************************
+void conv3x3_partial_accum_bf16(bfloat16 *input_patch, bfloat16 *weights,
+                                float *accum_out,
+                                const int32_t tile_height, const int32_t tile_width,
+                                const int32_t input_channels_block,
+                                const int32_t output_channels_block,
+                                const int32_t stride, const int32_t padding) {
+  event0();
+
+  const int patch_height = tile_height + 2 * padding;
+  const int patch_width = tile_width + 2 * padding;
+
+  // For each output channel in the block
+  for (int oc = 0; oc < output_channels_block; oc++) {
+    // For each output position in tile
+    for (int oh = 0; oh < tile_height; oh++) {
+      for (int ow = 0; ow < tile_width; ow++) {
+        float sum = 0.0f;
+        
+        // Accumulate over this input channel block
+        for (int ic = 0; ic < input_channels_block; ic++) {
+          for (int kh = 0; kh < 3; kh++) {
+            for (int kw = 0; kw < 3; kw++) {
+              int ih = oh * stride + kh;
+              int iw = ow * stride + kw;
+              
+              int input_idx = (ih * patch_width + iw) * input_channels_block + ic;
+              int weight_idx = ((oc * input_channels_block + ic) * 3 + kh) * 3 + kw;
+              
+              float in_val = (float)input_patch[input_idx];
+              float w_val = (float)weights[weight_idx];
+              sum += in_val * w_val;
+            }
+          }
+        }
+        
+        // Accumulate to existing buffer (allows multiple input channel blocks)
+        int output_idx = (oh * tile_width + ow) * output_channels_block + oc;
+        accum_out[output_idx] += sum;
+      }
+    }
+  }
+
+  event1();
+}
+
+//*****************************************************************************
+// Convert float32 accumulation buffer to bfloat16 output
+//*****************************************************************************
+void accum_to_bf16(float *accum, bfloat16 *output, const int32_t size) {
+  event0();
+  
+  for (int i = 0; i < size; i++) {
+    output[i] = (bfloat16)accum[i];
+  }
+  
+  event1();
+}
+
 extern "C" {
 
 void conv3x3_bf16(bfloat16 *input, bfloat16 *weights, bfloat16 *output,
@@ -196,6 +313,31 @@ void conv3x3_fused_bf16(bfloat16 *input, bfloat16 *weights,
   conv3x3_bn_silu_bf16(input, weights, bn_weight, bn_bias, output,
                        input_height, input_width, input_channels, output_channels,
                        stride, padding);
+}
+
+void conv3x3_tiled_bf16(bfloat16 *input_patch, bfloat16 *weights,
+                        bfloat16 *output_tile,
+                        int32_t tile_height, int32_t tile_width,
+                        int32_t input_channels, int32_t output_channels_block,
+                        int32_t stride, int32_t padding) {
+  conv3x3_tile_blocked_bf16(input_patch, weights, output_tile,
+                            tile_height, tile_width, input_channels,
+                            output_channels_block, stride, padding);
+}
+
+void conv3x3_partial_bf16(bfloat16 *input_patch, bfloat16 *weights,
+                          float *accum_out,
+                          int32_t tile_height, int32_t tile_width,
+                          int32_t input_channels_block,
+                          int32_t output_channels_block,
+                          int32_t stride, int32_t padding) {
+  conv3x3_partial_accum_bf16(input_patch, weights, accum_out,
+                             tile_height, tile_width, input_channels_block,
+                             output_channels_block, stride, padding);
+}
+
+void convert_accum_bf16(float *accum, bfloat16 *output, int32_t size) {
+  accum_to_bf16(accum, output, size);
 }
 
 } // extern "C"
