@@ -91,9 +91,12 @@ def conv_layer_bf16_tiled(
     output_tile_size = tile_h * tile_w * out_chan_block
     
     # Type definitions (bfloat16 as uint16)
+    # Input buffer holds 2 patches - ObjectFifo will chunk them
     patch_ty = np.ndarray[(patch_size,), np.dtype[np.uint16]]
+    input_buffer_ty = np.ndarray[(2 * patch_size,), np.dtype[np.uint16]]
     weight_block_ty = np.ndarray[(weight_block_size,), np.dtype[np.uint16]]
     output_tile_ty = np.ndarray[(output_tile_size,), np.dtype[np.uint16]]
+    output_buffer_ty = np.ndarray[(2 * output_tile_size,), np.dtype[np.uint16]]
     
     # Full image types for host interface
     input_ty = np.ndarray[(input_height * input_width * input_channels,), np.dtype[np.uint16]]
@@ -131,30 +134,36 @@ def conv_layer_bf16_tiled(
     # Output tile from core to L2 to L3
     of_output_tile = ObjectFifo(output_tile_ty, depth=fifo_depth, name="output_tile")
     
-    # Core task: process one spatial tile with one output channel block
+    # Core task: process 2 spatial tiles with one output channel block
     def core_fn(of_in_patch, of_wts, of_out_tile, kernel):
-        # Acquire buffers
-        elem_patch = of_in_patch.acquire(1)
+        # Acquire weights once for both patches
         elem_wts = of_wts.acquire(1)
-        elem_out = of_out_tile.acquire(1)
         
-        # Call tiled convolution kernel
-        kernel(
-            elem_patch,
-            elem_wts,
-            elem_out,
-            tile_h,
-            tile_w,
-            input_channels,
-            out_chan_block,
-            stride,
-            padding,
-        )
+        # Process 2 patches in sequence with same weights
+        for _ in range_(2):
+            # Acquire input and output buffers
+            elem_patch = of_in_patch.acquire(1)
+            elem_out = of_out_tile.acquire(1)
+            
+            # Call tiled convolution kernel
+            kernel(
+                elem_patch,
+                elem_wts,
+                elem_out,
+                tile_h,
+                tile_w,
+                input_channels,
+                out_chan_block,
+                stride,
+                padding,
+            )
+            
+            # Release input and output buffers
+            of_in_patch.release(1)
+            of_out_tile.release(1)
         
-        # Release buffers
-        of_in_patch.release(1)
+        # Release weights after processing both patches
         of_wts.release(1)
-        of_out_tile.release(1)
     
     # Create worker
     worker = Worker(
@@ -168,19 +177,20 @@ def conv_layer_bf16_tiled(
     )
     
     # Runtime sequence
-    # Note: For now this is a simple sequential version
-    # The host will need to extract patches and assemble outputs
-    # A more advanced version would use multiple cores in parallel
+    # Host sends 2 patches at a time in a single buffer
+    # ObjectFifo chunks it into individual patches for the core
+    # Host receives 2 output tiles in a single buffer
     rt = Runtime()
-    with rt.sequence(patch_ty, weight_block_ty, output_tile_ty) as (I_patch, W_block, O_tile):
+    with rt.sequence(input_buffer_ty, weight_block_ty, output_buffer_ty) as (I_patches, W_block, O_tiles):
         rt.start(worker)
         
-        # Process one tile at a time (host orchestrates the tiling loop)
-        # This will be called multiple times by the host for each spatial tile
-        # and each output channel block
-        rt.fill(of_input_patch.prod(), I_patch)
+        # Process 2 tiles at a time (host orchestrates the tiling loop)
+        # Host sends buffer with 2 patches concatenated
+        # ObjectFifo will chunk into 2 separate patches for the core loop
+        # Host receives buffer with 2 output tiles concatenated
+        rt.fill(of_input_patch.prod(), I_patches)
         rt.fill(of_weights.prod(), W_block)
-        rt.drain(of_output_tile.cons(), O_tile, wait=True)
+        rt.drain(of_output_tile.cons(), O_tiles, wait=True)
     
     # Generate program
     return Program(dev, rt).resolve_program(SequentialPlacer())

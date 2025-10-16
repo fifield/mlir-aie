@@ -2,7 +2,7 @@
 
 import torch
 import torch.nn as nn
-from model import MDV6MITYOLOv9c
+from .model import MDV6MITYOLOv9c
 
 
 class MDV6MITYOLOv9cBF16(MDV6MITYOLOv9c):
