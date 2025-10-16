@@ -106,6 +106,7 @@ def test_conv_tiled(
     tile_h=32,
     tile_w=32,
     out_chan_block=8,
+    n_patches=2,
     use_aie=False,
     xclbin_path=None,
     insts_path=None,
@@ -121,6 +122,7 @@ def test_conv_tiled(
         tile_h: Spatial tile height
         tile_w: Spatial tile width
         out_chan_block: Output channel block size
+        n_patches: Number of patches to process per kernel invocation
         use_aie: Whether to run on AIE hardware
         xclbin_path: Path to xclbin file
         insts_path: Path to instructions file
@@ -132,6 +134,7 @@ def test_conv_tiled(
     print(f"  Output: {input_height}×{input_width}×{output_channels}")
     print(f"  Tile size: {tile_h}×{tile_w}")
     print(f"  Output channel block: {out_chan_block}")
+    print(f"  Patches per invocation: {n_patches}")
     print(f"{'='*80}\n")
     
     kernel_size = 3
@@ -196,18 +199,18 @@ def test_conv_tiled(
         print(f"  Input patch: {patch_size} elems ({patch_size * 2} bytes)")
         print(f"  Weight block: {weight_block_size} elems ({weight_block_size * 2} bytes)")
         print(f"  Output tile: {output_tile_size} elems ({output_tile_size * 2} bytes)")
-        print(f"  Input buffer (2 patches): {2 * patch_size} elems ({2 * patch_size * 2} bytes)")
+        print(f"  Input buffer ({n_patches} patches): {n_patches * patch_size} elems ({n_patches * patch_size * 2} bytes)")
         
-        # Setup AIE with 2-patch input buffer
+        # Setup AIE with n_patches input buffer
         print(f"\nSetting up AIE...")
         app = setup_aie(
             xclbin_path,
             insts_path,
-            (2 * patch_size,),  # Input buffer holds 2 patches
+            (n_patches * patch_size,),  # Input buffer holds n_patches
             np.uint16,
             (weight_block_size,),
             np.uint16,
-            (2 * output_tile_size,),  # Output buffer holds 2 tiles
+            (n_patches * output_tile_size,),  # Output buffer holds n_patches tiles
             np.uint16,
             kernel_name="MLIR_AIE"
         )
@@ -265,40 +268,37 @@ def test_conv_tiled(
             
             print(f"\nProcessing output channels {out_ch_start}-{out_ch_end-1}...")
             
-            # Execute all tiles for this output channel block (2 patches at a time)
+            # Execute all tiles for this output channel block (n_patches at a time)
             output_tiles = []
             
-            # Process 2 patches at a time
-            for batch_start in range(0, num_patches, 2):
-                batch_end = min(batch_start + 2, num_patches)
+            # Process n_patches at a time
+            for batch_start in range(0, num_patches, n_patches):
+                batch_end = min(batch_start + n_patches, num_patches)
                 batch_size = batch_end - batch_start
                 
-                # Extract 2-patch buffer from concatenated buffer using offset
+                # Extract n_patches buffer from concatenated buffer using offset
                 offset = batch_start * patch_size
-                if batch_size == 2:
-                    # Full batch of 2 patches
-                    two_patch_buffer = input_patches_buffer[offset:offset + 2 * patch_size]
+                if batch_size == n_patches:
+                    # Full batch of n_patches
+                    batch_buffer = input_patches_buffer[offset:offset + n_patches * patch_size]
                 else:
-                    # Last batch with only 1 patch - duplicate it to fill 2-patch buffer
-                    one_patch = input_patches_buffer[offset:offset + patch_size]
-                    two_patch_buffer = np.concatenate([one_patch, one_patch])
+                    # Last batch with fewer patches - pad by duplicating last patch
+                    partial_buffer = input_patches_buffer[offset:offset + batch_size * patch_size]
+                    last_patch = input_patches_buffer[offset + (batch_size - 1) * patch_size:offset + batch_size * patch_size]
+                    padding_patches = [last_patch] * (n_patches - batch_size)
+                    batch_buffer = np.concatenate([partial_buffer] + padding_patches)
                 
-                # Execute on AIE with 2-patch buffer
+                # Execute on AIE with n_patches buffer
                 start = time.time_ns()
-                output_buffer = execute(app, two_patch_buffer, weight_block_uint16)
+                output_buffer = execute(app, batch_buffer, weight_block_uint16)
                 stop = time.time_ns()
                 exec_time = (stop - start) / 1000  # microseconds
                 total_execution_time += exec_time
                 
-                # Extract output tiles from the returned buffer
-                # The AIE returns 2 output tiles concatenated in the output buffer
-                output_tile_0 = output_buffer[:output_tile_size].copy()
-                output_tile_1 = output_buffer[output_tile_size:2*output_tile_size].copy()
-                
-                # Append the valid tiles (only first tile if batch_size==1)
-                output_tiles.append(output_tile_0)
-                if batch_size == 2:
-                    output_tiles.append(output_tile_1)
+                # Split output buffer into individual tiles
+                for i in range(batch_size):
+                    tile_offset = i * output_tile_size
+                    output_tiles.append(output_buffer[tile_offset:tile_offset + output_tile_size])
                 
                 tiles_processed += batch_size
                 if tiles_processed % 100 == 0:
@@ -310,7 +310,7 @@ def test_conv_tiled(
                            out_end_h, out_end_w, actual_tile_h, actual_tile_w) in enumerate(patch_coords):
                 
                 # Convert output back to bf16
-                output_tile_bf16 = uint16_to_bf16(output_tiles[patch_idx])
+                output_tile_bf16 = uint16_to_bf16(output_tiles[patch_idx][:output_tile_size])
                 output_tile_hwc = output_tile_bf16.reshape(tile_h, tile_w, out_chan_block)
                 
                 # Place tile in output (handling edge tiles)
@@ -362,6 +362,7 @@ def main():
     parser.add_argument("--tile-h", "-th", type=int, default=32, help="Tile height")
     parser.add_argument("--tile-w", "-tw", type=int, default=32, help="Tile width")
     parser.add_argument("--out-chan-block", "-ob", type=int, default=8, help="Output channel block size")
+    parser.add_argument("--n-patches", "-np", type=int, default=2, help="Number of patches per invocation")
     parser.add_argument("--xclbin", "-x", type=str, help="Path to xclbin file")
     parser.add_argument("--insts", "-i", type=str, help="Path to instructions file")
     
@@ -377,6 +378,7 @@ def main():
         tile_h=args.tile_h,
         tile_w=args.tile_w,
         out_chan_block=args.out_chan_block,
+        n_patches=args.n_patches,
         use_aie=use_aie,
         xclbin_path=args.xclbin,
         insts_path=args.insts,
