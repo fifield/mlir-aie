@@ -196,23 +196,54 @@ def test_conv_tiled(
         print(f"  Input patch: {patch_size} elems ({patch_size * 2} bytes)")
         print(f"  Weight block: {weight_block_size} elems ({weight_block_size * 2} bytes)")
         print(f"  Output tile: {output_tile_size} elems ({output_tile_size * 2} bytes)")
+        print(f"  Input buffer (2 patches): {2 * patch_size} elems ({2 * patch_size * 2} bytes)")
         
-        # Setup AIE
+        # Setup AIE with 2-patch input buffer
         print(f"\nSetting up AIE...")
         app = setup_aie(
             xclbin_path,
             insts_path,
-            (patch_size,),
+            (2 * patch_size,),  # Input buffer holds 2 patches
             np.uint16,
             (weight_block_size,),
             np.uint16,
-            (output_tile_size,),
+            (2 * output_tile_size,),  # Output buffer holds 2 tiles
             np.uint16,
             kernel_name="MLIR_AIE"
         )
         
         total_execution_time = 0
         tiles_processed = 0
+        
+        # Pre-extract all input patches and concatenate into one big buffer
+        print(f"Pre-extracting {tiles_h * tiles_w} input patches...")
+        input_patches_list = []
+        patch_coords = []  # Store (tile_row, tile_col, out_start_h, out_start_w, actual_h, actual_w)
+        
+        for tile_row in range(tiles_h):
+            for tile_col in range(tiles_w):
+                # Extract input patch
+                patch = extract_patch_with_halo(
+                    input_hwc, tile_row, tile_col, tile_h, tile_w, padding
+                )
+                patch_uint16 = bf16_to_uint16(patch.flatten())
+                input_patches_list.append(patch_uint16)
+                
+                # Pre-calculate output placement coordinates
+                out_start_h = tile_row * tile_h
+                out_start_w = tile_col * tile_w
+                out_end_h = min(out_start_h + tile_h, input_height)
+                out_end_w = min(out_start_w + tile_w, input_width)
+                actual_tile_h = out_end_h - out_start_h
+                actual_tile_w = out_end_w - out_start_w
+                
+                patch_coords.append((tile_row, tile_col, out_start_h, out_start_w, 
+                                   out_end_h, out_end_w, actual_tile_h, actual_tile_w))
+        
+        # Concatenate all patches into one big buffer
+        input_patches_buffer = np.concatenate(input_patches_list)
+        num_patches = len(input_patches_list)
+        print(f"Extracted {num_patches} patches, concatenated into buffer of {len(input_patches_buffer)} elements\n")
         
         # Process each output channel block
         for out_blk_idx in range(num_out_blocks):
@@ -234,44 +265,60 @@ def test_conv_tiled(
             
             print(f"\nProcessing output channels {out_ch_start}-{out_ch_end-1}...")
             
-            # Process each spatial tile
-            for tile_row in range(tiles_h):
-                for tile_col in range(tiles_w):
-                    # Extract input patch
-                    patch = extract_patch_with_halo(
-                        input_hwc, tile_row, tile_col, tile_h, tile_w, padding
-                    )
-                    patch_uint16 = bf16_to_uint16(patch.flatten())
-                    
-                    # Execute on AIE
-                    start = time.time_ns()
-                    output_buffer = execute(app, patch_uint16, weight_block_uint16)
-                    stop = time.time_ns()
-                    exec_time = (stop - start) / 1000  # microseconds
-                    total_execution_time += exec_time
-                    
-                    # Convert output back to bf16
-                    output_tile_bf16 = uint16_to_bf16(output_buffer[:output_tile_size])
-                    output_tile_hwc = output_tile_bf16.reshape(tile_h, tile_w, out_chan_block)
-                    
-                    # Place tile in output (handling edge tiles)
-                    out_start_h = tile_row * tile_h
-                    out_start_w = tile_col * tile_w
-                    out_end_h = min(out_start_h + tile_h, input_height)
-                    out_end_w = min(out_start_w + tile_w, input_width)
-                    
-                    actual_tile_h = out_end_h - out_start_h
-                    actual_tile_w = out_end_w - out_start_w
-                    
-                    output_hwc[
-                        out_start_h:out_end_h,
-                        out_start_w:out_end_w,
-                        out_ch_start:out_ch_end
-                    ] = output_tile_hwc[:actual_tile_h, :actual_tile_w, :actual_out_ch_block]
-                    
-                    tiles_processed += 1
-                    if tiles_processed % 10 == 0:
-                        print(f"  Processed {tiles_processed}/{total_tiles} tiles...", end='\r')
+            # Execute all tiles for this output channel block (2 patches at a time)
+            output_tiles = []
+            
+            # Process 2 patches at a time
+            for batch_start in range(0, num_patches, 2):
+                batch_end = min(batch_start + 2, num_patches)
+                batch_size = batch_end - batch_start
+                
+                # Extract 2-patch buffer from concatenated buffer using offset
+                offset = batch_start * patch_size
+                if batch_size == 2:
+                    # Full batch of 2 patches
+                    two_patch_buffer = input_patches_buffer[offset:offset + 2 * patch_size]
+                else:
+                    # Last batch with only 1 patch - duplicate it to fill 2-patch buffer
+                    one_patch = input_patches_buffer[offset:offset + patch_size]
+                    two_patch_buffer = np.concatenate([one_patch, one_patch])
+                
+                # Execute on AIE with 2-patch buffer
+                start = time.time_ns()
+                output_buffer = execute(app, two_patch_buffer, weight_block_uint16)
+                stop = time.time_ns()
+                exec_time = (stop - start) / 1000  # microseconds
+                total_execution_time += exec_time
+                
+                # Extract output tiles from the returned buffer
+                # The AIE returns 2 output tiles concatenated in the output buffer
+                output_tile_0 = output_buffer[:output_tile_size].copy()
+                output_tile_1 = output_buffer[output_tile_size:2*output_tile_size].copy()
+                
+                # Append the valid tiles (only first tile if batch_size==1)
+                output_tiles.append(output_tile_0)
+                if batch_size == 2:
+                    output_tiles.append(output_tile_1)
+                
+                tiles_processed += batch_size
+                if tiles_processed % 100 == 0:
+                    print(f"  Processed {tiles_processed}/{total_tiles} tiles...", end='\r')
+            
+            # Batch process all outputs for this channel block
+            print(f"\n  Assembling outputs for channels {out_ch_start}-{out_ch_end-1}...")
+            for patch_idx, (tile_row, tile_col, out_start_h, out_start_w, 
+                           out_end_h, out_end_w, actual_tile_h, actual_tile_w) in enumerate(patch_coords):
+                
+                # Convert output back to bf16
+                output_tile_bf16 = uint16_to_bf16(output_tiles[patch_idx])
+                output_tile_hwc = output_tile_bf16.reshape(tile_h, tile_w, out_chan_block)
+                
+                # Place tile in output (handling edge tiles)
+                output_hwc[
+                    out_start_h:out_end_h,
+                    out_start_w:out_end_w,
+                    out_ch_start:out_ch_end
+                ] = output_tile_hwc[:actual_tile_h, :actual_tile_w, :actual_out_ch_block]
         
         print(f"\n\nTotal execution time: {total_execution_time:.2f} μs ({total_execution_time/1000:.3f} ms)")
         print(f"Average time per tile: {total_execution_time/total_tiles:.2f} μs")
