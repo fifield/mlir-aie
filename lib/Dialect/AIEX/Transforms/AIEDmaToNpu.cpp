@@ -341,7 +341,7 @@ public:
     if (!dev)
       return failure();
 
-    auto infoOp = AIE::ShimDMAAllocationOp::getForSymbol(
+    AIE::ShimDMAAllocationOp infoOp = AIE::ShimDMAAllocationOp::getForSymbol(
         dev, op.getMetadata().getRootReference());
     if (!infoOp) {
       return op->emitOpError("couldn't find shim_dma_allocation op.");
@@ -549,7 +549,7 @@ public:
     }
 
     // write the buffer descriptor to the array
-    auto channel = IntegerAttr::get(i32ty, infoOp->getChannelIndex());
+    auto channel = IntegerAttr::get(i32ty, infoOp.getChannelIndex());
     auto dir = IntegerAttr::get(
         i32ty,
         static_cast<std::underlying_type_t<AIE::DMAChannelDir>>(channelDir));
@@ -567,7 +567,7 @@ public:
     // (plus any offset-state update).
     int arg_idx = -1;
     if (failed(emitBufferAddressPatch(op, adaptor, rewriter, tileCol, tileRow,
-                                      infoOp->getChannelIndex(), channelDir,
+                                      infoOp.getChannelIndex(), channelDir,
                                       arg_idx)))
       return failure();
 

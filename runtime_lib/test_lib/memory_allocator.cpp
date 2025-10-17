@@ -31,7 +31,7 @@ uint32_t mlir_aie_sim_read32(uint64_t addr) {
 // static variable for tracking current DDR physical addr during AIESIM
 static uint64_t nextAlignedAddr = 0x80000000;
 
-uint32_t *mlir_aie_mem_alloc(aie_libxaie_ctx_t *_xaie, ext_mem_model_t &handle,
+uint32_t *mlir_aie_mem_alloc(aie_libxaie_ctx_t *ctx, ext_mem_model_t &handle,
                              int size) {
   uint64_t size_bytes = size * sizeof(int);
   handle.virtualAddr = std::malloc(size_bytes);
