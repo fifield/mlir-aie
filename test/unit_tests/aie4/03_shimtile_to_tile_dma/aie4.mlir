@@ -21,11 +21,8 @@ module @test_dma_to_txn {
     %tile_0_2 = aie.tile(0, 2)
     %buf02_0 = aie.buffer(%tile_0_2) {address = 2048 : i32, mem_bank = 0 : i32, sym_name = "buf02_0"} : memref<256xi32>
     %buf02_1 = aie.buffer(%tile_0_2) {address = 4096 : i32, mem_bank = 0 : i32, sym_name = "buf02_1"} : memref<256xi32>
-    %lock_0_2 = aie.lock(%tile_0_2, 0) { init = 2 : i32 }
+    %lock_0_2 = aie.lock(%tile_0_2, 0) { init = 1 : i32 }
     %lock_0_2_0 = aie.lock(%tile_0_2, 1)
-    %core_0_2 = aie.core(%tile_0_2) {
-      aie.end
-    }
 
     %tile_0_1 = aie.tile(0, 1)
     %mem_0_1 = aie.memtile_dma(%tile_0_1) {
@@ -50,7 +47,7 @@ module @test_dma_to_txn {
 
     %tile_0_0 = aie.tile(0, 0)
     %buf00_0 = aie.external_buffer {address = 0x80000000 : i64, sym_name = "buf00_0"} : memref<256 x i32>
-    %lock_0_0 = aie.lock(%tile_0_0, 0) { init = 2 : i32 }
+    %lock_0_0 = aie.lock(%tile_0_0, 0) { init = 1 : i32 }
     %lock_0_0_0 = aie.lock(%tile_0_0, 1)
     %mem_0_0 = aie.shim_dma(%tile_0_0) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb2)

@@ -23,9 +23,6 @@ module @test_dma_to_txn {
     %buf02_1 = aie.buffer(%tile_0_2) {address = 4096 : i32, mem_bank = 0 : i32, sym_name = "buf02_1"} : memref<256xi32>
     %lock_0_2 = aie.lock(%tile_0_2, 0) { init = 1 : i32 }
     %lock_0_2_0 = aie.lock(%tile_0_2, 1)
-    %core_0_2 = aie.core(%tile_0_2) {
-      aie.end
-    }
 
     %mem_0_2 = aie.mem(%tile_0_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)

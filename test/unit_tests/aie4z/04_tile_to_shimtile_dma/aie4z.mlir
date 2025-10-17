@@ -7,8 +7,7 @@
 //
 // REQUIRES: mesimulator
 //
-// RUN: aiecc.py --alloc-scheme=basic-sequential --xchesscc --xbridge --no-compile-host --aie-generate-txn --aiesim %s %test_utils_flags %S/test.cpp
-// RUN: aie-translate -aie-npu-to-binary -o transaction.bin aie4z.mlir.prj/txn.mlir
+// RUN: aiecc.py --alloc-scheme=basic-sequential --xchesscc --xbridge --aie-generate-txn --txn-name transaction.bin --aiesim %s %test_utils_flags %S/test.cpp
 // RUN: aie4z.mlir.prj/mesim.sh | FileCheck --check-prefix=MESIM %s
 //
 // MESIM: device model: {{.*}}aie4z
@@ -21,9 +20,6 @@ module @test_dma_to_txn {
     %buf02_1 = aie.buffer(%tile_0_2) {address = 4096 : i32, mem_bank = 0 : i32, sym_name = "buf02_1"} : memref<256xi32>
     %lock_0_2 = aie.lock(%tile_0_2, 0) { init = 1 : i32 }
     %lock_0_2_0 = aie.lock(%tile_0_2, 1)
-    %core_0_2 = aie.core(%tile_0_2) {
-      aie.end
-    }
 
     %mem_0_2 = aie.mem(%tile_0_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)

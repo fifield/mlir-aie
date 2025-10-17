@@ -11,8 +11,7 @@
 // REQUIRES: mesimulator
 //
 // RUN: xchesscc_wrapper aie4 -c %S/kernel.cc
-// RUN: aiecc.py --alloc-scheme=basic-sequential --xchesscc --xbridge --no-compile-host --aie-generate-txn --aiesim %s %test_utils_flags %S/test.cpp
-// RUN: aie-translate -aie-npu-to-binary -o transaction.bin aie4z.mlir.prj/txn.mlir
+// RUN: aiecc.py --alloc-scheme=basic-sequential --xchesscc --xbridge --aie-generate-txn --txn-name transaction.bin --aiesim %s %test_utils_flags %S/test.cpp
 // RUN: aie4z.mlir.prj/mesim.sh | tee %t.log | FileCheck --check-prefix=MESIM %s
 //
 // MESIM: device model: {{.*}}aie4z

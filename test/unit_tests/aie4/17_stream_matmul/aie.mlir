@@ -8,10 +8,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-// REQUIRES: valid_xchess_license, aietools_aie4, !hsa
+// REQUIRES: valid_xchess_license, aietools_aie4
 
 // RUN: xchesscc_wrapper aie4 -c %S/kernel.cc
-// RUN: %PYTHON aiecc.py --alloc-scheme=basic-sequential --xchesscc --xbridge --no-compile-host --aie-generate-txn --txn-name=transaction.bin --aiesim %s %test_utils_flags %S/test.cpp
+// RUN: %PYTHON aiecc.py --xchesscc --xbridge --aie-generate-txn --txn-name transaction.bin --aiesim %s %test_utils_flags %S/test.cpp
 // RUN: aie.mlir.prj/aiesim.sh | FileCheck %s
 
 // CHECK: PASS
