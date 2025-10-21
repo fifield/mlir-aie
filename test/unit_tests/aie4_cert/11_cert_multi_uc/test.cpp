@@ -44,7 +44,7 @@ int main(int argc, char *argv[]) {
     do {
       fw_state = cert_utils::get_fw_state(c, 0);
       std::cout << "fw_state: " << fw_state << "\n";
-    } while (fw_state != 0);
+    } while (fw_state != 0xffe);
 
     queue[c] = cert_utils::setup_queue(&xaie, c, queue_h[c], 64);
   }

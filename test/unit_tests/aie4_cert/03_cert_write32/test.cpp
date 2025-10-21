@@ -43,7 +43,7 @@ int main(int argc, char *argv[]) {
   do {
     fw_state = cert_utils::get_fw_state(column, 0);
     std::cout << "fw_state: " << fw_state << "\n";
-  } while (fw_state != 0);
+  } while (fw_state != 0xffe);
 
   // dummy allocation so that subsequent allocations are not paddr=zero
   ext_mem_model_t dummy_h;
