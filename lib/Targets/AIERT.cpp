@@ -300,7 +300,7 @@ xilinx::AIE::AIERTControl::AIERTControl(const AIE::AIETargetModel &tm)
     llvm::report_fatal_error("aie-rt configuration is not supported for the "
                              "AIE2PS architecture");
   case AIEArch::AIE4:
-    devGen = XAIE_DEV_GEN_AIE4_MEDUSA;
+    devGen = XAIE_DEV_GEN_AIE4;
     break;
   case AIEArch::AIE4z:
     devGen = XAIE_DEV_GEN_AIE4Z;

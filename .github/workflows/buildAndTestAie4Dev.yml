@@ -49,9 +49,14 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Install and Pull Git LFS
+        run: |
+          git lfs install --local
+          git lfs pull
+          git submodule foreach git lfs pull
+
       - name: Run commands
         run: |
-
           pip cache purge
 
           python3.10 -m venv aie-venv
