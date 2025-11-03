@@ -32,13 +32,6 @@ config.environment["PYTHONPATH"] = "{}:{}:{}".format(
     os.path.join(config.aie_obj_root, "aiebu", "aiebu", "lib", "python3"),
 )
 
-llvm_config.with_environment(
-    "LD_LIBRARY_PATH",
-    "{}:{}".format(
-        config.environment["LD_LIBRARY_PATH"],
-        os.path.join(config.aie_obj_root, "runtime_lib", "x86_64", "xaiengine", "lib"),
-    ),
-)
 
 # suffixes: A list of file extensions to treat as test files.
 config.suffixes = [".mlir", ".py", ".test"]
@@ -105,6 +98,7 @@ config.substitutions.append(("%extraAieCcFlags%", config.extraAieCcFlags))
 config.substitutions.append(
     ("%aie_runtime_lib%", os.path.join(config.aie_obj_root, "aie_runtime_lib"))
 )
+config.substitutions.append(("%aie_obj_root", config.aie_obj_root))
 config.substitutions.append(("%aietools", config.vitis_aietools_dir))
 # Show only failures
 # --maxfail=1 is scoped to lit: the kernel-check sweep runs the same wrapper and
