@@ -88,6 +88,49 @@ streaming interconnects which overlay on top of the design.
 -route-shim-to-tile-ctrl : Flag to generate routing between shim dma DMA and tile CTRL ports, for configuration.
 ```
 
+### `-aie-hoist-vector-transfer-pointers`
+
+_Hoist vector transfer pointer computations out of scf.for loops in aie.core regions_
+
+This pass optimizes vector transfer operations inside scf.for loops by hoisting
+pointer computations. It operates on aie.core regions within aie.device operations.
+When vector transfer operations have indices that depend on the loop induction variable,
+the pass:
+
+1. Flattens multi-dimensional memrefs to 1D
+2. Computes a base pointer before the loop
+3. Adds the pointer as a loop iter_arg
+4. Updates the pointer by a constant stride each iteration
+5. Replaces the transfer operations to use the iter_arg pointer
+
+This eliminates redundant index computation and affine.apply operations within
+the loop body, replacing them with simple pointer arithmetic.
+
+This pass must run before scf-to-cf conversion and before cores are outlined
+to functions, since it operates on scf.for loops within aie.core regions.
+
+### `-aie-llvm-loop-opt`
+
+_Optimize LLVM dialect loops for AIE (index-to-pointer transformation)_
+
+Performs loop strength reduction on LLVM dialect code by converting
+index-carried loops to pointer-carried loops. This optimization identifies
+loop-carried integer indices that are only used for getelementptr operations
+and transforms them to carry pointers instead, eliminating redundant address
+computations in each iteration.
+
+Pattern detected:
+- Loop header carries i64 index
+- Index used in: ptr = getelementptr base[index]
+- Index incremented: new_index = add index, stride
+- New index passed to next iteration
+
+Transformed to:
+- Loop header carries !llvm.ptr pointer
+- Pointer used directly for loads
+- Pointer incremented: new_ptr = getelementptr ptr[stride]
+- New pointer passed to next iteration
+
 ### `-aie-localize-locks`
 
 _Convert global locks to a core-relative index_
@@ -184,6 +227,34 @@ _Optimize vector instructions for AIE_
 
 After super-vectorization, some additional optimizations are important
 for improving QOR and enabling lowering to LLVM.
+
+### `-aie-vector-to-pointer-loops`
+
+_Transform vector load/store loops to use ptr dialect for explicit pointer arithmetic_
+
+This pass transforms scf.for loops containing vector.load/store operations
+with loop-carried index arguments to use ptr dialect operations.
+
+The transformation makes pointer increment patterns explicit to help the
+LLVM backend generate efficient post-increment addressing modes (GEP fusion).
+
+Example transformation:
+  Before:
+    scf.for iter_args(%idx = %0) {
+      %v = vector.load %memref[%idx]
+      %next = arith.addi %idx, %stride
+      scf.yield %next
+    }
+
+  After:
+    %ptr = ptr.to_ptr %memref
+    %init_ptr = ptr.ptr_add %ptr, %0
+    scf.for iter_args(%p = %init_ptr) {
+      %m = ptr.from_ptr %p
+      %v = vector.load %m[%c0]
+      %next_p = ptr.ptr_add %p, %stride
+      scf.yield %next_p
+    }
 
 ### `-aie-vector-transfer-lowering`
 
