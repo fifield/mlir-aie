@@ -146,12 +146,13 @@ void test_trace_event_attr() {
   MLIRContext context;
   context.loadDialect<AIEDialect>();
 
-  // Create a TraceEventAttr using StringRef
+  // Create a TraceEventAttr using StringAttr
   llvm::StringRef eventNameRef = "DMA_S2MM_0_START_TASK";
-  auto eventAttr = TraceEventAttr::get(&context, eventNameRef);
+  auto strAttr = StringAttr::get(&context, eventNameRef);
+  auto eventAttr = TraceEventAttr::get(&context, strAttr);
 
   // Get the name
-  std::string name = eventAttr.getName().str();
+  std::string name = eventAttr.getEventName();
 
   std::cout << "  ✓ TraceEventAttr name: '" << name << "'\n";
 
