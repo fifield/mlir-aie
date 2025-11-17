@@ -12,12 +12,17 @@
 #define MLIR_AIE_DEVICEMODEL_H
 
 #include "aie/Dialect/AIE/IR/AIEEnums.h"
+#include "aie/Dialect/AIE/IR/AIERegisterDatabase.h"
 
 #include "llvm/ADT/DenseSet.h"
 
 #include <iostream>
+#include <memory>
 
 namespace xilinx::AIE {
+
+// Forward declarations  
+class TileOp;
 
 using TileID = struct TileID {
   // friend definition (will define the function as a non-member function in the
@@ -96,6 +101,19 @@ private:
   const TargetModelKind kind;
 
   uint32_t ModelProperties = 0;
+
+  // Register database (loaded lazily on first access)
+  mutable std::unique_ptr<RegisterDatabase> regDB;
+  mutable bool regDBLoadAttempted = false;
+
+protected:
+  /// Subclasses override to provide architecture-specific database loading.
+  /// Returns nullptr if register database is not available for this architecture.
+  virtual std::unique_ptr<RegisterDatabase> loadRegisterDatabase() const;
+
+  /// Get the register database, loading it lazily on first access.
+  /// Throws fatal error if database is required but unavailable.
+  const RegisterDatabase *getRegisterDatabase() const;
 
 public:
   TargetModelKind getKind() const { return kind; }
@@ -348,6 +366,43 @@ public:
 
   // Returns true if the target model supports the given block format.
   virtual bool isSupportedBlockFormat(std::string const &format) const;
+
+  /// Register Database API - provides access to register and event information
+  /// for trace configuration and low-level register access.
+
+  /// Lookup register information by name and tile.
+  /// @param name Register name (e.g., "Trace_Control0")
+  /// @param tile Tile operation to determine module context
+  /// @param isMem True for memory module registers, false for core/shim
+  /// @return Pointer to register info, or nullptr if not found
+  /// @throws fatal_error if database required but unavailable
+  const RegisterInfo *lookupRegister(llvm::StringRef name, TileOp tile,
+                                     bool isMem = false) const;
+
+  /// Lookup event number by name and tile.
+  /// @param name Event name (e.g., "INSTR_EVENT_0", "DMA_S2MM_0_START_TASK")
+  /// @param tile Tile operation to determine module context
+  /// @param isMem True for memory module events, false for core/shim
+  /// @return Event number if found, nullopt otherwise
+  /// @throws fatal_error if database required but unavailable
+  std::optional<uint32_t> lookupEvent(llvm::StringRef name, TileOp tile,
+                                      bool isMem = false) const;
+
+  /// Encode a field value with proper bit shifting.
+  /// @param field Bit field information
+  /// @param value Value to encode
+  /// @return Value shifted to correct bit position
+  /// @throws fatal_error if database required but unavailable
+  uint32_t encodeFieldValue(const BitFieldInfo &field, uint32_t value) const;
+
+  /// Resolve stream switch port specification to port index.
+  /// @param value Port specification string (e.g., "NORTH:1", "DMA:0")
+  /// @param tile Tile operation for context
+  /// @param master True for master port, false for slave
+  /// @return Port index for stream switch register, or nullopt if invalid
+  /// @throws fatal_error if database required but unavailable
+  std::optional<uint32_t> resolvePortValue(llvm::StringRef value, TileOp tile,
+                                           bool master) const;
 };
 
 class AIE1TargetModel : public AIETargetModel {
@@ -446,6 +501,9 @@ public:
 };
 
 class AIE2TargetModel : public AIETargetModel {
+protected:
+  std::unique_ptr<RegisterDatabase> loadRegisterDatabase() const override;
+
 public:
   AIE2TargetModel(TargetModelKind k) : AIETargetModel(k) {
     // Device properties initialization

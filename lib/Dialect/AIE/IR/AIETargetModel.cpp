@@ -10,6 +10,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "aie/Dialect/AIE/IR/AIETargetModel.h"
+#include "aie/Dialect/AIE/IR/AIEDialect.h"
+#include "aie/Dialect/AIE/IR/AIERegisterDatabase.h"
+#include "llvm/Support/ErrorHandling.h"
 #include <cstdint>
 #include <utility>
 
@@ -18,6 +21,52 @@ using namespace llvm;
 namespace xilinx {
 namespace AIE {
 AIETargetModel::~AIETargetModel() = default;
+
+// Base class implementations for register database
+
+std::unique_ptr<RegisterDatabase> AIETargetModel::loadRegisterDatabase() const {
+  // Default: no register database available
+  return nullptr;
+}
+
+const RegisterDatabase *AIETargetModel::getRegisterDatabase() const {
+  if (!regDBLoadAttempted) {
+    regDB = loadRegisterDatabase();
+    regDBLoadAttempted = true;
+  }
+
+  if (!regDB) {
+    llvm::report_fatal_error(
+        llvm::StringRef(
+            "Register database required but not available for architecture: ") +
+        stringifyEnum(getTargetArch()));
+  }
+
+  return regDB.get();
+}
+
+const RegisterInfo *AIETargetModel::lookupRegister(llvm::StringRef name,
+                                                   TileOp tile,
+                                                   bool isMem) const {
+  return getRegisterDatabase()->lookupRegister(name, tile, isMem);
+}
+
+std::optional<uint32_t> AIETargetModel::lookupEvent(llvm::StringRef name,
+                                                    TileOp tile,
+                                                    bool isMem) const {
+  return getRegisterDatabase()->lookupEvent(name, tile, isMem);
+}
+
+uint32_t AIETargetModel::encodeFieldValue(const BitFieldInfo &field,
+                                          uint32_t value) const {
+  return getRegisterDatabase()->encodeFieldValue(field, value);
+}
+
+std::optional<uint32_t> AIETargetModel::resolvePortValue(llvm::StringRef value,
+                                                         TileOp tile,
+                                                         bool master) const {
+  return getRegisterDatabase()->resolvePortValue(value, tile, master);
+}
 
 ///
 /// AIE1 TargetModel
@@ -398,6 +447,11 @@ bool AIE1TargetModel::isValidStreamSwitchPort(int col, int row,
 ///
 /// AIE2 TargetModel
 ///
+
+std::unique_ptr<RegisterDatabase>
+AIE2TargetModel::loadRegisterDatabase() const {
+  return RegisterDatabase::loadAIE2();
+}
 
 AIEArch AIE2TargetModel::getTargetArch() const { return AIEArch::AIE2; }
 
