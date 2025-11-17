@@ -21,7 +21,7 @@
 
 namespace xilinx::AIE {
 
-// Forward declarations  
+// Forward declarations
 class TileOp;
 
 using TileID = struct TileID {
@@ -108,7 +108,8 @@ private:
 
 protected:
   /// Subclasses override to provide architecture-specific database loading.
-  /// Returns nullptr if register database is not available for this architecture.
+  /// Returns nullptr if register database is not available for this
+  /// architecture.
   virtual std::unique_ptr<RegisterDatabase> loadRegisterDatabase() const;
 
   /// Get the register database, loading it lazily on first access.
@@ -268,8 +269,8 @@ public:
   /// @return Port index for Stream_Switch_Event_Port_Selection register, or
   /// nullopt if invalid
   virtual std::optional<uint32_t>
-  getStreamSwitchPortIndex(int col, int row, WireBundle bundle, int channel,
-                           bool master) const = 0;
+  getStreamSwitchPortIndex(int col, int row, WireBundle bundle,
+                           uint32_t channel, bool master) const = 0;
 
   /// Check if a stream switch port is valid for the given tile
   /// @param col Tile column
@@ -279,7 +280,7 @@ public:
   /// @param master Master/slave direction
   /// @return True if the port configuration is valid
   virtual bool isValidStreamSwitchPort(int col, int row, WireBundle bundle,
-                                       int channel, bool master) const = 0;
+                                       uint32_t channel, bool master) const = 0;
 
   /// Return the number of buffer descriptors supported by the DMA in the given
   /// tile.
@@ -483,10 +484,10 @@ public:
 
   std::optional<uint32_t> getStreamSwitchPortIndex(int col, int row,
                                                    WireBundle bundle,
-                                                   int channel,
+                                                   uint32_t channel,
                                                    bool master) const override;
   bool isValidStreamSwitchPort(int col, int row, WireBundle bundle,
-                               int channel, bool master) const override;
+                               uint32_t channel, bool master) const override;
 
   uint32_t getColumnShift() const override { return 23; }
   uint32_t getRowShift() const override { return 18; }
@@ -599,10 +600,10 @@ public:
 
   std::optional<uint32_t> getStreamSwitchPortIndex(int col, int row,
                                                    WireBundle bundle,
-                                                   int channel,
+                                                   uint32_t channel,
                                                    bool master) const override;
   bool isValidStreamSwitchPort(int col, int row, WireBundle bundle,
-                               int channel, bool master) const override;
+                               uint32_t channel, bool master) const override;
 
   uint32_t getColumnShift() const override { return 25; }
   uint32_t getRowShift() const override { return 20; }
