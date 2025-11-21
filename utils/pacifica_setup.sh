@@ -13,6 +13,9 @@
 #
 ##===----------------------------------------------------------------------===##
 
+# Exit on error
+set -e
+
 FORCE_INSTALL=0
 if [ "$1" == "--force-install" ]; then
   FORCE_INSTALL=1
@@ -33,14 +36,26 @@ fi
 if [[ $FORCE_INSTALL -eq 1 || ( "$#" -lt 1 && -z "$(pip show mlir_aie | grep ^Location:)" ) ]]; then
   
   # install mlir-aie wheel
-  python3 -m pip install -I mlir_aie -f /group/xrlabs/jefff/pacifica-sim/latest-wheels
+  echo "Installing mlir_aie wheel..."
+  if ! python3 -m pip install -I mlir_aie -f /group/xrlabs/jefff/pacifica-sim/latest-wheels; then
+    echo "ERROR: Failed to install mlir_aie wheel" >&2
+    exit 1
+  fi
   export MLIR_AIE_INSTALL_DIR="$(pip show mlir_aie | grep ^Location: | awk '{print $2}')/mlir_aie"
 
   # install extras
-  HOST_MLIR_PYTHON_PACKAGE_PREFIX=aie python3 -m pip install git+https://github.com/makslevental/mlir-python-extras@f08db06 -f https://github.com/llvm/eudsl/releases/expanded_assets/latest
+  echo "Installing mlir-python-extras..."
+  if ! HOST_MLIR_PYTHON_PACKAGE_PREFIX=aie python3 -m pip install git+https://github.com/erwei-xilinx/mlir-python-extras@a801853ac0eef50a0f2779cfbbd7dabc931806ee -f https://github.com/llvm/eudsl/releases/expanded_assets/latest; then
+    echo "ERROR: Failed to install mlir-python-extras" >&2
+    exit 1
+  fi
   
   # these are needed for mesimulator
-  python3 -m pip install toml bitstring
+  echo "Installing mesimulator dependencies (toml, bitstring)..."
+  if ! python3 -m pip install toml bitstring cffi; then
+    echo "ERROR: Failed to install mesimulator dependencies" >&2
+    exit 1
+  fi
 fi
 
 # Write environment variables to pacifica_env.sh
@@ -68,7 +83,7 @@ export PYTHONPATH=\$PYTHONPATH:\$ME_ROOT/python:\$ME_ROOT/applications
 
 # setup environment for vitis
 export VITIS=/proj/primebuilds/HEAD_PRIME_daily_latest/installs/lin64/HEAD/Vitis
-export PATH=\${VITIS}/aietools/bin:\${VITIS}/bin:\$PATH
+export PATH=\$PATH:\${VITIS}/aietools/bin:\${VITIS}/bin
 export XILINXD_LICENSE_FILE=/proj/xbuilds/licenses/:2100@aiengine4-eng
 export LM_LICENSE_FILE=1757@xsjlicsrvip:2100@aiengine-eng
 
