@@ -2496,20 +2496,6 @@ RuntimeSequenceOp::getForSymbolInDeviceOrError(DeviceOp deviceOp,
   return runtimeSequenceOp;
 }
 
-//===----------------------------------------------------------------------===//
-// TraceEventAttr
-//===----------------------------------------------------------------------===//
-
-// Custom parser for TraceEventAttr value (uses shared helper)
-static ParseResult parseTraceEventValue(AsmParser &parser, Attribute &value) {
-  return xilinx::AIE::parseTraceEvent(parser, value);
-}
-
-// Custom printer for TraceEventAttr value (uses shared helper)
-static void printTraceEventValue(AsmPrinter &printer, Attribute value) {
-  xilinx::AIE::printTraceEventEnum(printer, value);
-}
-
 // Include implementations for custom attributes
 #define GET_ATTRDEF_CLASSES
 #include "aie/Dialect/AIE/IR/AIEAttrs.cpp.inc"

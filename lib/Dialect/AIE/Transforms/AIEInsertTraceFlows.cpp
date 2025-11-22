@@ -37,9 +37,9 @@ struct TraceInfo {
 
 struct ShimInfo {
   TileOp shimTile;
-  int channel;      // S2MM channel
-  int bdId;         // Buffer descriptor ID
-  int argIdx;       // Runtime sequence argument index
+  int channel;                         // S2MM channel
+  int bdId;                            // Buffer descriptor ID
+  int argIdx;                          // Runtime sequence argument index
   std::vector<TraceInfo> traceSources; // All traces routed to this shim
 };
 
@@ -93,12 +93,6 @@ struct AIEInsertTraceFlowsPass
       int traceChannel = 0;
       if (packetType == TracePacketType::Mem) {
         traceChannel = 1; // Mem trace uses port 1
-      } else if (packetType == TracePacketType::Core) {
-        traceChannel = 0; // Core trace uses port 0
-      } else if (packetType == TracePacketType::MemTile) {
-        traceChannel = 0; // MemTile trace uses port 0
-      } else if (packetType == TracePacketType::ShimTile) {
-        traceChannel = 0; // ShimTile trace uses port 0
       }
 
       TraceInfo info;
@@ -113,7 +107,7 @@ struct AIEInsertTraceFlowsPass
 
     // Phase 2b: Select shim tiles (minimize usage)
     std::map<int, ShimInfo> shimInfos; // col -> ShimInfo
-    
+
     if (minimizeShims && preferSameColumn) {
       // Strategy: Group all traces by column, use one shim per column
       std::map<int, std::vector<TraceInfo>> tracesByCol;
@@ -184,19 +178,22 @@ struct AIEInsertTraceFlowsPass
 
       // Create packet flow
       auto packetFlowOp = builder.create<PacketFlowOp>(
-          device.getLoc(), builder.getI8IntegerAttr(info.packetId), nullptr, nullptr);
-      
+          device.getLoc(), builder.getI8IntegerAttr(info.packetId), nullptr,
+          nullptr);
+
       Block *flowBody = new Block();
       packetFlowOp.getPorts().push_back(flowBody);
       OpBuilder flowBuilder = OpBuilder::atBlockEnd(flowBody);
 
       // Add source
-      flowBuilder.create<PacketSourceOp>(
-          device.getLoc(), Value(info.tile.getResult()), info.tracePort, info.traceChannel);
+      flowBuilder.create<PacketSourceOp>(device.getLoc(),
+                                         Value(info.tile.getResult()),
+                                         info.tracePort, info.traceChannel);
 
       // Add destination
-      flowBuilder.create<PacketDestOp>(
-          device.getLoc(), Value(shimInfo.shimTile.getResult()), WireBundle::DMA, shimInfo.channel);
+      flowBuilder.create<PacketDestOp>(device.getLoc(),
+                                       Value(shimInfo.shimTile.getResult()),
+                                       WireBundle::DMA, shimInfo.channel);
 
       // Add terminator
       flowBuilder.create<EndOp>(device.getLoc());
@@ -236,7 +233,7 @@ struct AIEInsertTraceFlowsPass
     for (auto &info : traceInfos) {
       int col = info.tile.getCol();
       int row = info.tile.getRow();
-      
+
       if (processedTiles.find({col, row}) != processedTiles.end())
         continue;
       processedTiles.insert({col, row});
@@ -249,8 +246,8 @@ struct AIEInsertTraceFlowsPass
       uint32_t timerCtrlValue = 31232; // Event 122 (BROADCAST_15) << 8
 
       builder.create<xilinx::AIEX::NpuWrite32Op>(
-          runtimeSeq.getLoc(), timerCtrlAddr, timerCtrlValue,
-          nullptr, builder.getI32IntegerAttr(col), builder.getI32IntegerAttr(row));
+          runtimeSeq.getLoc(), timerCtrlAddr, timerCtrlValue, nullptr,
+          builder.getI32IntegerAttr(col), builder.getI32IntegerAttr(row));
     }
 
     // 4c-4f. Insert per-shim configurations
@@ -260,101 +257,134 @@ struct AIEInsertTraceFlowsPass
       // 4c. Write buffer descriptor
       builder.create<xilinx::AIEX::NpuWriteBdOp>(
           runtimeSeq.getLoc(),
-          shimCol,                      // column
-          shimInfo.bdId,               // bd_id
-          traceBufferSize,             // buffer_length
-          0,                           // buffer_offset
-          1,                           // enable_packet
-          0,                           // out_of_order_id
-          0,                           // packet_id (not used for reception)
-          0,                           // packet_type (not used for reception)
-          0, 0, 0, 0, 0, 0,           // d0_size, d0_stride, d1_size, d1_stride, d2_size, d2_stride
-          0, 0, 0,                    // iteration_current, iteration_size, iteration_stride
-          0,                           // next_bd
-          0,                           // row
-          0,                           // use_next_bd
-          1,                           // valid_bd
-          0, 0, 0, 0, 0,              // lock_rel_val, lock_rel_id, lock_acq_enable, lock_acq_val, lock_acq_id
-          0, 0, 0, 0, 0, 0,           // d0_zero_before, d1_zero_before, d2_zero_before, d0_zero_after, d1_zero_after, d2_zero_after
-          traceBurstLength             // burst_length
+          shimCol,         // column
+          shimInfo.bdId,   // bd_id
+          traceBufferSize, // buffer_length
+          0,               // buffer_offset
+          1,               // enable_packet
+          0,               // out_of_order_id
+          0,               // packet_id (not used for reception)
+          0,               // packet_type (not used for reception)
+          0, 0, 0, 0, 0,
+          0,       // d0_size, d0_stride, d1_size, d1_stride, d2_size, d2_stride
+          0, 0, 0, // iteration_current, iteration_size, iteration_stride
+          0,       // next_bd
+          0,       // row
+          0,       // use_next_bd
+          1,       // valid_bd
+          0, 0, 0, 0, 0,    // lock_rel_val, lock_rel_id, lock_acq_enable,
+                            // lock_acq_val, lock_acq_id
+          0, 0, 0, 0, 0, 0, // d0_zero_before, d1_zero_before, d2_zero_before,
+                            // d0_zero_after, d1_zero_after, d2_zero_after
+          traceBurstLength  // burst_length
       );
 
       // 4d. Address patch
-      uint32_t bdAddress = computeBDAddress(shimCol, shimInfo.bdId, targetModel);
+      uint32_t bdAddress = computeBDAddress(shimCol, shimInfo.bdId,
+                                            shimInfo.shimTile, targetModel);
       builder.create<xilinx::AIEX::NpuAddressPatchOp>(
           runtimeSeq.getLoc(), bdAddress, shimInfo.argIdx, 0);
 
       // 4e. DMA channel configuration
-      uint32_t ctrlAddr = computeCtrlAddress(DMAChannelDir::S2MM, shimInfo.channel);
+      uint32_t ctrlAddr =
+          computeCtrlAddress(DMAChannelDir::S2MM, shimInfo.channel,
+                             shimInfo.shimTile, targetModel);
       builder.create<xilinx::AIEX::NpuMaskWrite32Op>(
-          runtimeSeq.getLoc(), ctrlAddr, 3840, 7936,  // value, mask
-          nullptr, builder.getI32IntegerAttr(shimCol), builder.getI32IntegerAttr(0));
+          runtimeSeq.getLoc(), ctrlAddr, 3840, 7936, // value, mask
+          nullptr, builder.getI32IntegerAttr(shimCol),
+          builder.getI32IntegerAttr(0));
 
       // Push BD to task queue
-      uint32_t taskQueueAddr = computeTaskQueueAddress(DMAChannelDir::S2MM, shimInfo.channel);
+      uint32_t taskQueueAddr =
+          computeTaskQueueAddress(DMAChannelDir::S2MM, shimInfo.channel,
+                                  shimInfo.shimTile, targetModel);
       uint32_t bdIdWithToken = (1U << 31) | shimInfo.bdId; // enable_token = 1
       builder.create<xilinx::AIEX::NpuWrite32Op>(
-          runtimeSeq.getLoc(), taskQueueAddr, bdIdWithToken,
-          nullptr, builder.getI32IntegerAttr(shimCol), builder.getI32IntegerAttr(0));
+          runtimeSeq.getLoc(), taskQueueAddr, bdIdWithToken, nullptr,
+          builder.getI32IntegerAttr(shimCol), builder.getI32IntegerAttr(0));
 
       // 4f. Shim timer and broadcast control
       // Shim timer control (USER_EVENT_1 = 127 << 8 = 32512)
+      uint32_t shimTimerCtrlAddr =
+          computeTimerCtrlAddress(shimInfo.shimTile, targetModel, false);
       builder.create<xilinx::AIEX::NpuWrite32Op>(
-          runtimeSeq.getLoc(), 212992, 32512,
-          nullptr, builder.getI32IntegerAttr(shimCol), builder.getI32IntegerAttr(0));
+          runtimeSeq.getLoc(), shimTimerCtrlAddr, 32512, nullptr,
+          builder.getI32IntegerAttr(shimCol), builder.getI32IntegerAttr(0));
+
+      // Trigger broadcast (Event_Broadcast15_A)
+      const RegisterInfo *broadcast15Reg =
+          targetModel.lookupRegister("Event_Broadcast15_A", shimInfo.shimTile);
+      if (!broadcast15Reg)
+        llvm::report_fatal_error(
+            "Failed to lookup Event_Broadcast15_A register");
+      builder.create<xilinx::AIEX::NpuWrite32Op>(
+          runtimeSeq.getLoc(), broadcast15Reg->offset, 127, nullptr,
+          builder.getI32IntegerAttr(shimCol), builder.getI32IntegerAttr(0));
 
       // Generate USER_EVENT_1
+      const RegisterInfo *eventGenReg =
+          targetModel.lookupRegister("Event_Generate", shimInfo.shimTile);
+      if (!eventGenReg)
+        llvm::report_fatal_error("Failed to lookup Event_Generate register");
       builder.create<xilinx::AIEX::NpuWrite32Op>(
-          runtimeSeq.getLoc(), 213068, 127,
-          nullptr, builder.getI32IntegerAttr(shimCol), builder.getI32IntegerAttr(0));
-
-      // Trigger broadcast
-      builder.create<xilinx::AIEX::NpuWrite32Op>(
-          runtimeSeq.getLoc(), 213000, 127,
-          nullptr, builder.getI32IntegerAttr(shimCol), builder.getI32IntegerAttr(0));
+          runtimeSeq.getLoc(), eventGenReg->offset, 127, nullptr,
+          builder.getI32IntegerAttr(shimCol), builder.getI32IntegerAttr(0));
     }
   }
 
 private:
   // Compute buffer descriptor base address
-  uint32_t computeBDAddress(int col, int bdId, const AIETargetModel &tm) {
-    const uint32_t BD_BASE = 0x1D004;
+  uint32_t computeBDAddress(int col, int bdId, TileOp shimTile,
+                            const AIETargetModel &tm) {
+    // Use register database to lookup BD0 address, then add stride * bdId
+    const RegisterInfo *bdReg = tm.lookupRegister("DMA_BD0_0", shimTile);
+    if (!bdReg)
+      llvm::report_fatal_error("Failed to lookup DMA_BD0_0 register");
     const uint32_t BD_STRIDE = 0x20;
-    return (col << tm.getColumnShift()) | (BD_BASE + bdId * BD_STRIDE);
+    return (col << tm.getColumnShift()) | (bdReg->offset + bdId * BD_STRIDE);
   }
 
   // Compute DMA task queue address
-  uint32_t computeTaskQueueAddress(DMAChannelDir dir, int channel) {
+  uint32_t computeTaskQueueAddress(DMAChannelDir dir, int channel,
+                                   TileOp shimTile, const AIETargetModel &tm) {
+    std::string regName;
     if (dir == DMAChannelDir::S2MM) {
-      return (channel == 0) ? 0x1D204 : 0x1D20C;
+      regName =
+          (channel == 0) ? "DMA_S2MM_0_Task_Queue" : "DMA_S2MM_1_Task_Queue";
     } else { // MM2S
-      return (channel == 0) ? 0x1D214 : 0x1D21C;
+      regName =
+          (channel == 0) ? "DMA_MM2S_0_Task_Queue" : "DMA_MM2S_1_Task_Queue";
     }
+    const RegisterInfo *reg = tm.lookupRegister(regName, shimTile);
+    if (!reg)
+      llvm::report_fatal_error(llvm::Twine("Failed to lookup ") + regName);
+    return reg->offset;
   }
 
   // Compute DMA control register address
-  uint32_t computeCtrlAddress(DMAChannelDir dir, int channel) {
+  uint32_t computeCtrlAddress(DMAChannelDir dir, int channel, TileOp shimTile,
+                              const AIETargetModel &tm) {
+    std::string regName;
     if (dir == DMAChannelDir::S2MM) {
-      return (channel == 0) ? 0x1D200 : 0x1D208;
+      regName = (channel == 0) ? "DMA_S2MM_0_Ctrl" : "DMA_S2MM_1_Ctrl";
     } else { // MM2S
-      return (channel == 0) ? 0x1D210 : 0x1D218;
+      regName = (channel == 0) ? "DMA_MM2S_0_Ctrl" : "DMA_MM2S_1_Ctrl";
     }
+    const RegisterInfo *reg = tm.lookupRegister(regName, shimTile);
+    if (!reg)
+      llvm::report_fatal_error(llvm::Twine("Failed to lookup ") + regName);
+    return reg->offset;
   }
 
   // Compute timer control address based on tile type
   uint32_t computeTimerCtrlAddress(TileOp tile, const AIETargetModel &tm,
                                    bool isMemTrace) {
-    int col = tile.getCol();
-    int row = tile.getRow();
-    
-    if (tm.isShimNOCTile(col, row) || tm.isShimPLTile(col, row)) {
-      return 0x34000; // 212992
-    } else if (tm.isMemTile(col, row)) {
-      return 0x94000;
-    } else if (tm.isCoreTile(col, row)) {
-      return isMemTrace ? 0x14000 : 0x34000;
-    }
-    return 0x34000; // default
+    // Use register database to lookup Timer_Control for the appropriate module
+    const RegisterInfo *reg =
+        tm.lookupRegister("Timer_Control", tile, isMemTrace);
+    if (!reg)
+      llvm::report_fatal_error("Failed to lookup Timer_Control register");
+    return reg->offset;
   }
 };
 

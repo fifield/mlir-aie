@@ -1889,6 +1889,8 @@ def run(mlir_module, args=None):
     os.environ["AIETOOLS"] = opts.aietools_path
 
     aie_path = aie.compiler.aiecc.configure.install_path()
+    if "MLIR_AIE_INSTALL_DIR" not in os.environ:
+        os.environ["MLIR_AIE_INSTALL_DIR"] = aie_path
     peano_path = os.path.join(opts.peano_install_dir, "bin")
     os.environ["PATH"] = os.pathsep.join([aie_path, os.environ["PATH"]])
     os.environ["PATH"] = os.pathsep.join([peano_path, os.environ["PATH"]])

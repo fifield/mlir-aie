@@ -89,8 +89,8 @@ public:
 
   /// Resolve "PORT:CHANNEL" value to stream switch port index
   /// @param value String in format "PORT:CHANNEL" (e.g., "NORTH:1", "DMA:0")
-  /// @param tile Tile operation (for context)
-  /// @param master True for master port, false for slave
+  /// @param tile Tile operation
+  /// @param master True for master port, false for slave port
   /// @return Port index, or nullopt if invalid/unsupported
   std::optional<uint32_t> resolvePortValue(llvm::StringRef value, TileOp tile,
                                            bool master) const;
