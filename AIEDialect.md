@@ -1160,6 +1160,16 @@ all even indices from the stream, followed by all odd indices:
                       ) : !aie.objectfifo<memref<256xi32>>
 ```
 
+The behavior of the objectFifo is further controlled by optional parameters.
+The `repeat_count` parameter specifies the number of times each individual 
+object is repeated during transfer. When `repeat_count == 1`, each object 
+is transferred once.
+
+The `iter_count` parameter specifies the number of iterations of 
+the buffer descriptor chain generated at the lower level. The total number 
+of objects transferred is calculated as `iter_count * elemNumber * repeat_count`.
+When `repeat_count == 1`, this simplifies to `iter_count * elemNumber`.
+
 Traits: `HasParent<DeviceOp>`
 
 Interfaces: `Symbol`
@@ -1179,6 +1189,7 @@ Interfaces: `Symbol`
 <tr><td><code>repeat_count</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute whose minimum value is 1</td></tr>
 <tr><td><code>initValues</code></td><td>::mlir::ArrayAttr</td><td>array of ElementsAttr</td></tr>
 <tr><td><code>padDimensions</code></td><td>::xilinx::AIE::BDPadLayoutArrayAttr</td><td></td></tr>
+<tr><td><code>iter_count</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute</td></tr>
 </table>
 
 #### Operands:
@@ -1761,6 +1772,29 @@ Traits: `HasParent<PacketRulesOp>`
 | Operand | Description |
 | :-----: | ----------- |
 | `amsel` | index |
+
+
+
+### `aie.runtime_sequence` (::xilinx::AIE::RuntimeSequenceOp)
+
+_Program the configuration co-processor of the AI Engine array_
+
+Instructions in this operation allow for runtime (re-)configuration of the AI Engine array, such as configuring data movement buffer descriptors.
+These instructions will execute on the configuration co-processor of the AI Engine array.
+
+Typically, these instructions include configuring the data transfers between host and AIE array on the shims.
+The input arguments are arguments passed in from the host at kernel invocation time. This may include buffers on the host.
+
+Traits: `HasParent<DeviceOp>`, `NoTerminator`
+
+Interfaces: `Symbol`
+
+#### Attributes:
+
+<table>
+<tr><th>Attribute</th><th>MLIR Type</th><th>Description</th></tr>
+<tr><td><code>sym_name</code></td><td>::mlir::StringAttr</td><td>string attribute</td></tr>
+</table>
 
 
 
