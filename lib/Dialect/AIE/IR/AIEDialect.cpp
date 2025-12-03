@@ -2748,7 +2748,7 @@ LogicalResult ConfigureCascadeOp::verify() {
   if (tile.isMemTile())
     return emitOpError("memTile row has no cascade stream interface");
 
-  if (isa<AIE2TargetModel>(t)) {
+  if (isa<AIE2TargetModel>(t) || isa<AIE4TargetModel>(t)) {
     if (inputDir == CascadeDir::South || inputDir == CascadeDir::East) {
       return emitOpError("input direction of cascade must be North or West on ")
              << stringifyAIEArch(t.getTargetArch());
