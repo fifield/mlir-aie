@@ -893,7 +893,7 @@ xilinx::AIE::AIERTControl::configureSwitches(DeviceOp &targetOp,
   }
 
   // Cascade configuration
-  if (isa<AIE2TargetModel>(targetModel)) {
+  if (isa<AIE2TargetModel>(targetModel) || isa<AIE4TargetModel>(targetModel)) {
     for (auto configOp : targetOp.getOps<ConfigureCascadeOp>()) {
       TxnLocBracket bracket(*this, configOp.getLoc());
       TileOp tile = cast<TileOp>(configOp.getTile().getDefiningOp());
