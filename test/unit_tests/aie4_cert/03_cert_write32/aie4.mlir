@@ -8,8 +8,8 @@
 //
 // RUN: mkdir -p project0
 // RUN: cp %aie_obj_root/third_party/cert/main/cert_medusa.elf project0/cert_medusa.elf
-// RUN: aiecc.py --tmpdir=project0 --alloc-scheme=basic-sequential --xchesscc --xbridge --aie-generate-txn --txn-name=transaction.bin --aiesim %s %test_utils_flags %S/test.cpp
-// RUN: aiecc.py --tmpdir=project1 --alloc-scheme=basic-sequential --xchesscc --xbridge --aie-generate-elf --elf-name=aie4.elf %S/cert.mlir
+// RUN: aiecc.py --tmpdir=project0 --alloc-scheme=basic-sequential --xchesscc --xbridge --no-compile --aie-generate-txn --txn-name=transaction.bin --aiesim %s %test_utils_flags %S/test.cpp
+// RUN: aiecc.py --tmpdir=project1 --alloc-scheme=basic-sequential --xchesscc --xbridge --no-compile --aie-generate-elf --elf-name=aie4.elf %S/cert.mlir
 // RUN: project0/mesim.sh | FileCheck %s
 //
 // CHECK: PASS!
@@ -69,6 +69,7 @@ module {
     }
 
     aie.flow(%tile_1_1, DMA : 0, %tile_1_2, DMA : 0)
+    aie.flow(%tile_1_0, Control32 : 1, %tile_1_0, Controller32 : 0)
   }
 
 }
