@@ -180,7 +180,7 @@ void registerAIETranslations() {
   static llvm::cl::opt<std::string> sequenceName(
       "aie-sequence-name", llvm::cl::init(""),
       llvm::cl::desc(
-          "Specify the name of the aiex.runtime_sequence to translate"));
+          "Specify the name of the aie.runtime_sequence to translate"));
   static llvm::cl::opt<std::string> npuEmitLocmap(
       "aie-npu-emit-locmap", llvm::cl::init(""),
       llvm::cl::value_desc("filename"),

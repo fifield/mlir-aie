@@ -18,7 +18,7 @@
 //
 // TODO: verify the data being written then add it to the checks
 //
-// CHECK-LABEL: aiex.runtime_sequence @configure()
+// CHECK-LABEL: aie.runtime_sequence @configure()
 // CHECK: aiex.npu.blockwrite(%{{.*}}) {address = 6995968 : ui32} : memref<6xi32>
 // CHECK: aiex.npu.blockwrite(%{{.*}}) {address = 6996000 : ui32} : memref<6xi32>
 // CHECK: aiex.npu.write32 {address = 6999556 : ui32, value = 0 : ui32}
