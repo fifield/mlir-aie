@@ -45,6 +45,7 @@ declare_mlir_python_sources(AIEPythonSources.Utils
     utils/parse_eventIR.py
     utils/get_trace_summary.py
     utils/trace_utils.py
+    utils/regdb.py
 )
 
 declare_mlir_python_sources(AIEPythonSources.Helpers
@@ -359,6 +360,7 @@ target_include_directories(AIEPythonModules.extension._aie.dso PUBLIC ${VITIS_AI
 
 # Copy the runtime libs into the _mlir_libs directory for convenience.
 set(_runtime_deps
+  mlir_apfloat_wrappers
   mlir_async_runtime
   mlir_c_runner_utils
   mlir_float16_utils
