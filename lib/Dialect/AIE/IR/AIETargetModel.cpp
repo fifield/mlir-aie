@@ -1333,7 +1333,7 @@ std::optional<uint32_t> AIE2TargetModel::getStreamSwitchPortIndex(
         return std::nullopt;
       }
     }
-    // !master
+    // Slave ports
   } else {
 
     if (isCoreTile(col, row)) {
