@@ -317,9 +317,11 @@ class EnhancedAIEDocsParser:
                     }
 
                     for sub_module_name, filename in filename_or_list:
-                        sub_module_data = self.parse_module_file(sub_module_name, filename)
+                        sub_module_data = self.parse_module_file(
+                            sub_module_name, filename
+                        )
                         shim_registers.extend(sub_module_data.get("registers", []))
-                        
+
                         # Merge base address info if available
                         sub_base_info = sub_module_data.get("base_address_info", {})
                         if sub_base_info.get("base_address_formula"):
@@ -331,7 +333,7 @@ class EnhancedAIEDocsParser:
                                 shim_base_info["base_address_formula"] += (
                                     " / " + sub_base_info["base_address_formula"]
                                 )
-                        
+
                         # Merge notes
                         if sub_base_info.get("notes"):
                             shim_base_info["notes"].extend(sub_base_info["notes"])
@@ -341,7 +343,9 @@ class EnhancedAIEDocsParser:
                         "registers": shim_registers,
                     }
                     database["modules"]["shim"] = module_data
-                    print(f"  Combined shim module: {len(shim_registers)} total registers")
+                    print(
+                        f"  Combined shim module: {len(shim_registers)} total registers"
+                    )
                 else:
                     # Single module files
                     module_data = self.parse_module_file(module_name, filename_or_list)
