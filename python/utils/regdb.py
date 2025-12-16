@@ -421,14 +421,14 @@ class MLIRModuleAnnotator:
             try:
                 offset_int = int(offset, 16)
                 offset = f"0x{offset_int:05X}"
-            except:
+            except (ValueError, TypeError):
                 pass
         else:
             # Already has 0x prefix, reformat to 5 digits
             try:
                 offset_int = int(offset, 16)
                 offset = f"0x{offset_int:05X}"
-            except:
+            except (ValueError, TypeError):
                 pass
 
         # Build comment string
