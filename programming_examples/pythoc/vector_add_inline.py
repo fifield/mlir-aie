@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # vector_add_inline.py -*- Python -*-
 #
 # This file is licensed under the Apache License v2.0 with LLVM Exceptions.
@@ -6,29 +7,43 @@
 #
 # (c) Copyright 2025 Advanced Micro Devices, Inc.
 
-"""
-IRON + PythoC Phase 2 Example: Inline Kernel Definition
+"""Single-file end-to-end example: PythoC inline kernel with IRON.
 
-This example demonstrates single-source development with PythoC kernels
-defined inline using the @aie_kernel decorator. The kernel is compiled
-automatically when creating the PythocKernel instance.
+This script demonstrates:
+1. Defining a PythoC kernel inline using @aie_kernel decorator
+2. Building a placed-IRON program entirely in Python
+3. Emitting MLIR to disk
+4. Compiling the design with aiecc
+5. Running and verifying the design with pyxrt
+
+It showcases Phase 2 of PythoC IRON integration: single-source development
+where the kernel is defined inline and compiled automatically.
 """
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
 
 import numpy as np
-import sys
 
-from aie.iron import Program, Worker, ObjectFifo, Runtime
-from aie.iron.device import NPU1Col1
+from aie.iron import ObjectFifo, Program, Runtime, Worker
+from aie.iron.compile import compile_mlir_module
+from aie.iron.controlflow import range_
+from aie.iron.device import NPU1Col1, NPU2Col1
 from aie.iron.placers import SequentialPlacer
 from aie.iron.pythoc import aie_kernel, PythocKernel
+import aie.utils.xrt as xrt_utils
 
-# Import PythoC types and operations for kernel definition
+# Import PythoC types and operations for inline kernel definition
 from pythoc import ptr, i32
 from pythoc.aie.operations import load_v, store_v, vector_add
 from pythoc.aie.vector import aie_vector
 
+DEFAULT_BUILD_DIR = Path(__file__).resolve().parent / "vector_add_inline_build"
 
-# Define kernel inline with @aie_kernel decorator
+
+# Define PythoC kernel inline using @aie_kernel decorator
 @aie_kernel
 def add_kernel(a: ptr[i32, True], b: ptr[i32, True], 
                c: ptr[i32, True], N: i32):
@@ -70,80 +85,193 @@ def add_kernel(a: ptr[i32, True], b: ptr[i32, True],
         i = i + 1
 
 
-def main():
-    """Build and run IRON program with inline PythoC kernel."""
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="End-to-end PythoC inline kernel example with IRON",
+    )
+    parser.add_argument(
+        "--device",
+        choices=("npu", "npu1", "npu2"),
+        default="npu2",
+        help="Target device: npu/npu1 (AIE-ML) or npu2 (Strix)",
+    )
+    parser.add_argument(
+        "--work-dir",
+        type=Path,
+        default=DEFAULT_BUILD_DIR,
+        help="Directory for generated MLIR, objects, and xclbin artifacts",
+    )
+    parser.add_argument(
+        "--tensor-size",
+        type=int,
+        default=4096,
+        help="Total vector length processed (must be divisible by 4 and 16)",
+    )
+    parser.add_argument(
+        "--skip-run",
+        action="store_true",
+        help="Generate MLIR + xclbin but skip the pyxrt execution step",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Emit verbose compiler logging",
+    )
+    return parser.parse_args()
+
+
+def pick_device(name: str):
+    normalized = name.lower()
+    if normalized == "npu2":
+        return NPU2Col1(), "aie2p"
+    return NPU1Col1(), "aie2"
+
+
+def build_mlir_module(device, tensor_size: int):
+    """Build IRON program with inline PythoC kernel."""
+    tiles_per_factor = 4
+    if tensor_size % tiles_per_factor:
+        raise ValueError("tensor_size must be divisible by 4 for this example")
+    if tensor_size % 16:
+        raise ValueError("tensor_size must be divisible by 16 for vectorization")
     
-    # Configuration
-    N = 256  # Must be multiple of 16 for vectorization
-    tile_size = N
-    
-    # Define tile type for ObjectFifos
+    tile_size = tensor_size // tiles_per_factor
+
+    tensor_ty = np.ndarray[(tensor_size,), np.dtype[np.int32]]
     tile_ty = np.ndarray[(tile_size,), np.dtype[np.int32]]
-    
+
     # Create PythocKernel from decorated function
     # The kernel is compiled automatically during initialization
     kernel = PythocKernel(
         add_kernel,  # Pass decorated function directly
         [tile_ty, tile_ty, tile_ty, np.int32]  # Type signature
     )
-    
+
     # Define ObjectFifos for data movement
     of_a = ObjectFifo(tile_ty, name="in_a")
     of_b = ObjectFifo(tile_ty, name="in_b")
     of_c = ObjectFifo(tile_ty, name="out")
-    
+
     # Define core function that uses the kernel
     def core_fn(of_a, of_b, of_c, kernel):
         """AIE core function: acquire buffers, call kernel, release."""
-        elem_a = of_a.acquire(1)
-        elem_b = of_b.acquire(1)
-        elem_c = of_c.acquire(1)
-        
-        # Call PythoC kernel
-        kernel(elem_a, elem_b, elem_c, tile_size)
-        
-        of_a.release(1)
-        of_b.release(1)
-        of_c.release(1)
-    
+        for _ in range_(tiles_per_factor):
+            elem_a = of_a.acquire(1)
+            elem_b = of_b.acquire(1)
+            elem_c = of_c.acquire(1)
+            
+            # Call PythoC kernel
+            kernel(elem_a, elem_b, elem_c, tile_size)
+            
+            of_a.release(1)
+            of_b.release(1)
+            of_c.release(1)
+
     # Create worker with kernel
     worker = Worker(
         core_fn,
         [of_a.cons(), of_b.cons(), of_c.prod(), kernel]
     )
-    
-    # Build IRON program
-    with Program(NPU1Col1(), SequentialPlacer()):
-        runtime = Runtime()
-        
-        # Connect ObjectFifos to runtime
-        runtime.buffer(of_a).connect(worker)
-        runtime.buffer(of_b).connect(worker)
-        worker.connect(runtime.buffer(of_c))
-    
+
+    # Build IRON program with runtime sequence
+    runtime = Runtime()
+    with runtime.sequence(tensor_ty, tensor_ty, tensor_ty) as (a_in, b_in, c_out):
+        runtime.start(worker)
+        runtime.fill(of_a.prod(), a_in)
+        runtime.fill(of_b.prod(), b_in)
+        runtime.drain(of_c.cons(), c_out, wait=True)
+
+    program = Program(device, runtime)
+    module = program.resolve_program(SequentialPlacer())
+    assert module.operation.verify(), "Generated MLIR failed verification"
+    return module
+
+
+def save_module(module, mlir_path: Path):
+    """Save MLIR module to file."""
+    with open(mlir_path, "w", encoding="utf-8") as handle:
+        print(module, file=handle)
+
+
+def compile_design(module, insts_path: Path, xclbin_path: Path, work_dir: Path, verbose: bool):
+    """Compile MLIR module to xclbin using aiecc."""
+    compile_mlir_module(
+        mlir_module=module,
+        insts_path=str(insts_path),
+        xclbin_path=str(xclbin_path),
+        work_dir=str(work_dir),
+        verbose=verbose,
+    )
+
+
+def run_with_xrt(xclbin_path: Path, insts_path: Path, tensor_size: int, verbose: bool):
+    """Execute design on NPU using XRT and verify results."""
+    app = xrt_utils.setup_aie(
+        xclbin_path=str(xclbin_path),
+        insts_path=str(insts_path),
+        in_0_shape=(tensor_size,),
+        in_0_dtype=np.int32,
+        in_1_shape=(tensor_size,),
+        in_1_dtype=np.int32,
+        out_buf_shape=(tensor_size,),
+        out_buf_dtype=np.int32,
+        kernel_name="MLIR_AIE",
+        verbosity=1 if verbose else 0,
+    )
+
     # Prepare test data
-    a_data = np.arange(N, dtype=np.int32)
-    b_data = np.arange(N, dtype=np.int32) * 2
-    c_data = np.zeros(N, dtype=np.int32)
-    
-    # Execute on NPU
-    print(f"Running inline PythoC kernel: {add_kernel.__name__}")
-    print(f"Processing {N} elements...")
-    
-    runtime(a_data, b_data, c_data)
-    
+    a_data = np.arange(1, tensor_size + 1, dtype=np.int32)
+    b_data = np.arange(1, tensor_size + 1, dtype=np.int32) * 2
+
+    try:
+        output_vec = xrt_utils.execute(app, a_data, b_data)
+    finally:
+        del app
+
     # Verify results
     expected = a_data + b_data
-    if np.allclose(c_data, expected):
-        print("✓ Test PASSED")
-        print(f"  Sample: {a_data[:4]} + {b_data[:4]} = {c_data[:4]}")
-        return 0
-    else:
-        print("✗ Test FAILED")
-        print(f"  Expected: {expected[:8]}")
-        print(f"  Got:      {c_data[:8]}")
-        return 1
+    np.testing.assert_array_equal(output_vec, expected)
+    return output_vec
+
+
+def main():
+    args = parse_args()
+    work_dir = args.work_dir.resolve()
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    device, target_arch = pick_device(args.device)
+
+    print(f"[1/4] Building IRON program with inline PythoC kernel ({target_arch})")
+    print(f"      Kernel: {add_kernel.__name__} (defined inline with @aie_kernel)")
+    module = build_mlir_module(device, args.tensor_size)
+    mlir_path = work_dir / "kernel.mlir"
+    save_module(module, mlir_path)
+    print(f"      -> {mlir_path}")
+
+    print("[2/4] PythoC kernel compiled automatically to LLVM IR")
+    print(f"      (Compilation happens during PythocKernel initialization)")
+
+    print("[3/4] Invoking aiecc to produce xclbin + instructions")
+    insts_path = work_dir / "insts.bin"
+    xclbin_path = work_dir / "final.xclbin"
+    compile_design(module, insts_path, xclbin_path, work_dir, args.verbose)
+    print(f"      -> {xclbin_path}\n      -> {insts_path}")
+
+    if args.skip_run:
+        print("[4/4] Skipping pyxrt execution (--skip-run)")
+        return
+
+    print("[4/4] Running with pyxrt and validating results")
+    output_vec = run_with_xrt(
+        xclbin_path=xclbin_path,
+        insts_path=insts_path,
+        tensor_size=args.tensor_size,
+        verbose=args.verbose,
+    )
+    preview = np.asarray(output_vec[:8])
+    print(f"      PASS. First elements: {preview}")
+    print(f"\n✓ Single-source PythoC kernel example completed successfully!")
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
