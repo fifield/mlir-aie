@@ -13,12 +13,14 @@ PythoC is a Python-to-LLVM compiler that generates AIE-compatible object files.
 """
 
 from .compiler import compile_pythoc_kernel, compile_pythoc_source
+from .decorators import aie_kernel
 from .kernel import PythocKernel
 from .types import pythoc_to_numpy_type, infer_kernel_signature
 
 __all__ = [
     'compile_pythoc_kernel',
     'compile_pythoc_source',
+    'aie_kernel',
     'PythocKernel',
     'pythoc_to_numpy_type',
     'infer_kernel_signature',

@@ -93,8 +93,40 @@ class PythocKernel(Kernel):
             self._is_llvm_ir = True
             
         else:
-            # Phase 2: Inline decorated function (not yet implemented)
-            raise NotImplementedError(
-                "Inline PythoC kernels with @aie_kernel decorator "
-                "will be supported in Phase 2"
+            # Phase 2: Inline decorated function
+            if not hasattr(kernel_fn_or_name, '__aie_kernel__'):
+                raise TypeError(
+                    "kernel_fn_or_name must be either a string (function name) "
+                    "or a function decorated with @aie_kernel"
+                )
+            
+            # Import compile_pythoc_source here to avoid circular imports
+            from .compiler import compile_pythoc_source
+            
+            # Compile the inline function to LLVM IR
+            ll_file = compile_pythoc_source(
+                source_code=kernel_fn_or_name.__aie_source__,
+                function_name=kernel_fn_or_name.__aie_name__,
+                target_arch=target_arch,
+                output_dir=None,
+                optimization_level=2,
+                verbose=False
             )
+            
+            # Validate types parameter
+            if not isinstance(llvm_ir_path_or_types, list):
+                raise TypeError(
+                    "For inline kernels, llvm_ir_path_or_types must be a list of types"
+                )
+            
+            # Call parent Kernel constructor with compiled LLVM IR
+            super().__init__(
+                name=kernel_fn_or_name.__aie_name__,
+                bin_name=str(ll_file),
+                arg_types=llvm_ir_path_or_types
+            )
+            
+            self._target_arch = target_arch
+            self._is_pythoc = True
+            self._is_llvm_ir = True
+            self._is_inline = True
