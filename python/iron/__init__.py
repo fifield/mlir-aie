@@ -18,3 +18,6 @@ from aie.utils import (
     set_tensor_class,
     get_current_device,
 )
+
+# PythoC integration
+from .pythoc import PythocKernel, compile_pythoc_kernel
