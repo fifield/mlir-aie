@@ -148,3 +148,6 @@ __all__ = [
     "kernels",
     "algorithms",
 ]
+
+# PythoC integration
+from .pythoc import PythocKernel, compile_pythoc_kernel
