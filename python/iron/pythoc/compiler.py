@@ -239,6 +239,7 @@ def compile_pythoc_source(
                 'event0': event0, 'event1': event1,
                 'bitcast_i32_to_f32': bitcast_i32_to_f32,
                 'fast_exp2_i32_to_f32': fast_exp2_i32_to_f32,
+                'range': range,  # Add Python's built-in range for standard loop syntax
             })
         except ImportError as e:
             raise RuntimeError(f"Failed to import PythoC types: {e}")
