@@ -762,22 +762,6 @@ Effects: `MemoryEffects::Effect{}`
 
 
 
-### `xllvm.intr.aie2.vbroadcastfloat.I512` (::xilinx::xllvm::VectorBroadcastfloatI512IntrOp)
-
-#### Operands:
-
-| Operand | Description |
-| :-----: | ----------- |
-| `src` | 32-bit float |
-
-#### Results:
-
-| Result | Description |
-| :----: | ----------- |
-| `res` | LLVM dialect-compatible type |
-
-
-
 ### `xllvm.intr.aie2.vextract.elem16.I512` (::xilinx::xllvm::VectorExtractElem16I512IntrOp)
 
 #### Operands:
@@ -1556,6 +1540,28 @@ Effects: `MemoryEffects::Effect{}`
 | `src` | vector of 32-bit signless integer values of length 64 |
 | `shift` | 32-bit signless integer |
 | `sign` | 32-bit signless integer |
+
+#### Results:
+
+| Result | Description |
+| :----: | ----------- |
+| `res` | LLVM dialect-compatible type |
+
+
+
+### `xllvm.intr.aie2p.invsqrt` (::xilinx::xllvm::InvsqrtAIE2pIntrOp)
+
+Traits: `AlwaysSpeculatableImplTrait`
+
+Interfaces: `ConditionallySpeculatable`, `NoMemoryEffect (MemoryEffectOpInterface)`
+
+Effects: `MemoryEffects::Effect{}`
+
+#### Operands:
+
+| Operand | Description |
+| :-----: | ----------- |
+| `src` | 32-bit float |
 
 #### Results:
 
