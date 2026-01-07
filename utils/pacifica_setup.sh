@@ -45,7 +45,7 @@ if [[ $FORCE_INSTALL -eq 1 || ( "$#" -lt 1 && -z "$(pip show mlir_aie | grep ^Lo
 
   # install extras
   echo "Installing mlir-python-extras..."
-  if ! HOST_MLIR_PYTHON_PACKAGE_PREFIX=aie python3 -m pip install git+https://github.com/erwei-xilinx/mlir-python-extras@a801853ac0eef50a0f2779cfbbd7dabc931806ee -f https://github.com/llvm/eudsl/releases/expanded_assets/latest; then
+  if ! EUDSL_PYTHON_EXTRAS_HOST_PACKAGE_PREFIX=aie python3 -m pip install -r python/requirements_extras.txt; then
     echo "ERROR: Failed to install mlir-python-extras" >&2
     exit 1
   fi
