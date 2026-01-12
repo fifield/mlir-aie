@@ -65,8 +65,7 @@ def main():
     
     print(f"✓ PythocKernel created: {mul_kernel._name}")
     print(f"✓ Kernel bin_name: {mul_kernel.bin_name}")
-    print(f"✓ Is PythoC kernel: {mul_kernel._is_pythoc}")
-    print(f"✓ Is LLVM IR: {mul_kernel._is_llvm_ir}\n")
+    print(f"✓ Target arch: {target_arch}\n")
     
     # Step 3: Generate MLIR design using the kernel
     print("Step 3: Generating MLIR design...")
