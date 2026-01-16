@@ -82,7 +82,7 @@ if [[ $(hostname) == xco* ]]; then
 else
   export LD_LIBRARY_PATH=/wrk/hmca/shared/ext/systemc-2.3.3_gcc10_std20/lib64:$LD_LIBRARY_PATH
 fi
-export LD_LIBRARY_PATH=\$CERVINO_ROOT/Boost_1_89_0/boost_1_89_0/rdi/lib:\$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=\$CERVINO_ROOT/ext/Boost_1_89_0/boost_1_89_0/rdi/lib:\$LD_LIBRARY_PATH
 export PYTHONPATH=\$PYTHONPATH:\$ME_ROOT/python:\$ME_ROOT/applications
 
 # setup environment for vitis
