@@ -84,8 +84,8 @@ jobs:
 
           export PATH=$PATH:${VITIS}/aietools/bin:${VITIS}/bin:${VITIS}/gnu/microblaze/lin/bin
 
-          export LD_LIBRARY_PATH=$CERVINO_ROOT/ext/systemc/systemc-2.3.3/lib-linux64:$LD_LIBRARY_PATH
-          export LD_LIBRARY_PATH=$CERVINO_ROOT/ext/Boost_1_72_0/boost_1_72_0/rdi/lib/gcc8.3.0/lnx64.o:$LD_LIBRARY_PATH
+          export LD_LIBRARY_PATH=/proj/rdi/staff/jefff/aie4/wrk/hmca/shared/ext/systemc-2.3.3_gcc10_std20/lib64:$LD_LIBRARY_PATH
+          export LD_LIBRARY_PATH=$CERVINO_ROOT/ext/Boost_1_89_0/boost_1_89_0/rdi/lib:$LD_LIBRARY_PATH
           export PYTHONPATH=$ME_ROOT/python:$ME_ROOT/applications:$PYTHONPATH
 
           cmake .. -G Ninja \

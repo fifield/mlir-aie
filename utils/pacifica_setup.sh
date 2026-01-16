@@ -77,8 +77,12 @@ fi
 export CERVINO_ROOT=\$PACIFICA_SIM_ROOT/cervino
 export ME_ROOT=\$PACIFICA_SIM_ROOT/cervino/aie4
 export me_DIR=\$ME_ROOT/core_model/sipp/lib
-export LD_LIBRARY_PATH=\$CERVINO_ROOT/ext/systemc/systemc-2.3.3/lib-linux64:\$LD_LIBRARY_PATH
-export LD_LIBRARY_PATH=\$CERVINO_ROOT/ext/Boost_1_72_0/boost_1_72_0/rdi/lib/gcc8.3.0/lnx64.o:\$LD_LIBRARY_PATH
+if [[ $(hostname) == xco* ]]; then
+  export LD_LIBRARY_PATH=/proj/rdi/staff/jefff/aie4/wrk/hmca/shared/ext/systemc-2.3.3_gcc10_std20/lib64:$LD_LIBRARY_PATH
+else
+  export LD_LIBRARY_PATH=/wrk/hmca/shared/ext/systemc-2.3.3_gcc10_std20/lib64:$LD_LIBRARY_PATH
+fi
+export LD_LIBRARY_PATH=\$CERVINO_ROOT/Boost_1_89_0/boost_1_89_0/rdi/lib:\$LD_LIBRARY_PATH
 export PYTHONPATH=\$PYTHONPATH:\$ME_ROOT/python:\$ME_ROOT/applications
 
 # setup environment for vitis
