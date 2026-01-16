@@ -257,10 +257,11 @@ struct UsesAreAccessible {
         element = getParentTileElement(user);
       }
       if (!element) {
-        // This should probably be caught elsewhere as well.
-        return op->emitOpError("is accessed outside of a tile")
-                   .attachNote(user->getLoc())
-               << "user";
+        // // This should probably be caught elsewhere as well.
+        // return op->emitOpError("is accessed outside of a tile")
+        //            .attachNote(user->getLoc())
+        //        << "user";
+        continue;
       }
       auto tileID = element.getTileID();
       if (!targetModel.isLegalMemAffinity(tileID.col, tileID.row, thisID.col,
