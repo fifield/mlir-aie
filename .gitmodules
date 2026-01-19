@@ -7,7 +7,7 @@
 	url = https://github.com/Xilinx/XilinxBoardStore.git
 [submodule "cmake/modulesXilinx"]
 	path = cmake/modulesXilinx
-	url = https://github.com/Xilinx/cmakeModules.git
+	url = https://github.com/fifield/cmakeModules.git
 [submodule "runtime_lib/xaiengine/aie-rt"]
 	path = third_party/aie-rt
 	url = https://gitenterprise.xilinx.com/jefff/aie-rt.git
