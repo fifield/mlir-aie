@@ -22,6 +22,8 @@ if [ "$1" == "--force-install" ]; then
   shift
 fi
 
+# get this file's location
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
 # install dir
 if [ "$#" -ge 1 ]; then
@@ -45,7 +47,7 @@ if [[ $FORCE_INSTALL -eq 1 || ( "$#" -lt 1 && -z "$(pip show mlir_aie | grep ^Lo
 
   # install extras
   echo "Installing mlir-python-extras..."
-  if ! EUDSL_PYTHON_EXTRAS_HOST_PACKAGE_PREFIX=aie python3 -m pip install -r python/requirements_extras.txt; then
+  if ! EUDSL_PYTHON_EXTRAS_HOST_PACKAGE_PREFIX=aie python3 -m pip install -r ${SCRIPT_DIR}/../python/requirements_extras.txt; then
     echo "ERROR: Failed to install mlir-python-extras" >&2
     exit 1
   fi
