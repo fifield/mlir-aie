@@ -279,7 +279,7 @@ uint64_t AIE1TargetModel::getDmaBdAddress(int col, int row, uint32_t bd_id,
     llvm_unreachable(
         "AIE1TargetModel::getDmaBdAddress called for non-DMA tile");
   }
-  return ((col & 0xff) << getColumnShift()) | ((row & 0xff) << getRowShift()) |
+  return ((col & 0xff) << getColumnShift()) | ((row & 0x1f) << getRowShift()) |
          offset;
 }
 
@@ -306,7 +306,7 @@ AIE1TargetModel::getDmaControlAddress(int col, int row, int channel,
   if (direction == AIE::DMAChannelDir::MM2S)
     offset += 010;
 
-  return ((col & 0xff) << getColumnShift()) | ((row & 0xff) << getRowShift()) |
+  return ((col & 0xff) << getColumnShift()) | ((row & 0x1f) << getRowShift()) |
          offset;
 }
 
@@ -844,7 +844,7 @@ uint64_t AIE2TargetModel::getDmaBdAddress(int col, int row, uint32_t bd_id,
         "AIE2TargetModel::getDmaBdAddress called for non-DMA tile");
   }
   // NOLINTEND(bugprone-branch-clone)
-  return ((col & 0xff) << getColumnShift()) | ((row & 0xff) << getRowShift()) |
+  return ((col & 0xff) << getColumnShift()) | ((row & 0x1f) << getRowShift()) |
          offset;
 }
 
@@ -986,7 +986,7 @@ AIE2TargetModel::getDmaControlAddress(int col, int row, int channel,
         "AIE2TargetModel::getDmaControlAddress called for non-DMA tile");
   }
 
-  return ((col & 0xff) << getColumnShift()) | ((row & 0xff) << getRowShift()) |
+  return ((col & 0xff) << getColumnShift()) | ((row & 0x1f) << getRowShift()) |
          offset;
 }
 
@@ -1872,17 +1872,40 @@ uint64_t AIE4TargetModel::getDmaBdAddress(int col, int row, uint32_t bd_id,
     }
     offset += (channel * numBds * 0x30) + (bd_id * 0x30);
 
-    // } else if (isMemTile(col, row)) {
-    // } else if (isCoreTile(col, row)) { col+= 2
+  } else if (isMemTile(col, row)) {
+    // AIE4 MemTile DMA BD address
+    // Base address for S2MM channel 0
+    offset = 0x00008000;
+    // Each BD is 11 words (0x2C bytes), 16 BDs per channel
+    if (direction == AIE::DMAChannelDir::MM2S) {
+      offset = 0x00008C00; // MM2S base
+    }
+    offset += ((channel % 4) * 4 * 0x30) + (bd_id * 0x30);
+    if (channel >= 4)
+      offset += 0x40000;
+
+  } else if (isCoreTile(col, row)) {
+    // AIE4 Core Tile DMA BD address
+    // Base address for DMA BDs
+    offset = 0x000AC000;
+    // Each BD is 6 words (0x18 bytes) at 0x20 alignment, 16 BDs total
+    offset += bd_id * 0x20;
+
   } else {
     llvm_unreachable("unimplemented");
   }
-  return ((col & 0xff) << getColumnShift()) | ((row & 0xff) << getRowShift()) |
+  if (isCoreTile(col, row))
+    row = row + (5 * getNumMemTileRows()) - 1; // account for memtile rows
+  return ((col & 0xff) << getColumnShift()) | ((row & 0x1f) << getRowShift()) |
          offset;
 }
 
 uint32_t AIE4TargetModel::getDmaBdAddressOffset(int col, int row) const {
-  assert(row == 0 && "unimplemented");
+  if (isCoreTile(col, row))
+    return 0x0; // 2
+  if (isMemTile(col, row))
+    return 0x0;
+  // shim tile
   return 0x4;
 }
 
@@ -1899,11 +1922,27 @@ AIE4TargetModel::getDmaControlAddress(int col, int row, int channel,
                       0x000185E0, 0x000185E8, 0x000185F0, 0x000185F8};
       offset = o[channel];
     }
+  } else if (isMemTile(col, row)) {
+    if (direction == AIE::DMAChannelDir::S2MM) {
+      offset = 0x00009E00 + (channel * 0x8);
+    } else {
+      offset = 0x00009E60 + (channel * 0x8);
+    }
+    if (channel >= 4)
+      offset += 0x40000;
+  } else if (isCoreTile(col, row)) {
+    if (direction == AIE::DMAChannelDir::S2MM) {
+      offset = 0x000ACE00 + (channel * 0x8);
+    } else {
+      offset = 0x000ACE10 + (channel * 0x8);
+    }
   } else {
     llvm_unreachable(
         "AIE4TargetModel::getDmaControlAddress unimplemented tile type");
   }
-  return ((col & 0xff) << getColumnShift()) | ((row & 0xff) << getRowShift()) |
+  if (isCoreTile(col, row))
+    row = row + (5 * getNumMemTileRows()) - 1; // account for memtile rows
+  return ((col & 0xff) << getColumnShift()) | ((row & 0x1f) << getRowShift()) |
          offset;
 }
 

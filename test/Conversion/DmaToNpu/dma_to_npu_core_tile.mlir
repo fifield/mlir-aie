@@ -24,6 +24,8 @@ module {
         packet_type = 5 : i32,
         column = 0 : i32,
         row = 2 : i32,
+        channel = 0 : i32,
+        direction = 0 : i32,
         d0_stride = 564 : i32,
         d0_size = 62 : i32,
         d0_zero_after = 0 : i32,

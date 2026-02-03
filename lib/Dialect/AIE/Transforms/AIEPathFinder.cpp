@@ -338,14 +338,17 @@ void Pathfinder::initialize(int maxCol, int maxRow,
             isMuxed(pIn) || isMuxed(pOut);
   };
 
+  // Create an inter-tile edge with all bundle pairs at once.
   auto interconnect = [&](int col, int row, int targetCol, int targetRow,
-                          WireBundle srcBundle, WireBundle dstBundle) {
+                          ArrayRef<std::pair<WireBundle, WireBundle>> bundlePairs) {
     TileID src = {col, row}, dst = {targetCol, targetRow};
     SwitchboxConnect &sb =
-        graph.try_emplace({src, dst}, src, dst).first->second;
-    for (int channel = 0; channel < maxChannels[srcBundle]; channel++) {
-      sb.srcPorts.push_back(Port{srcBundle, channel});
-      sb.dstPorts.push_back(Port{dstBundle, channel});
+        graph.try_emplace(std::make_pair(src, dst), src, dst).first->second;
+    for (auto [srcBundle, dstBundle] : bundlePairs) {
+      for (int channel = 0; channel < maxChannels[srcBundle]; channel++) {
+        sb.srcPorts.push_back(Port{srcBundle, channel});
+        sb.dstPorts.push_back(Port{dstBundle, channel});
+      }
     }
     sb.resize();
     for (size_t i = 0; i < sb.srcPorts.size(); i++)
@@ -361,35 +364,35 @@ void Pathfinder::initialize(int maxCol, int maxRow,
       // connections between switchboxes
       if (row > 0) {
         // from south to north
-        interconnect(col, row, col, row - 1, WireBundle::South,
-                     WireBundle::North);
-        // if (isAIE4)
-        //   interconnect(col, row, col, row - 1, WireBundle::South32,
-        //                WireBundle::North32);
+        SmallVector<std::pair<WireBundle, WireBundle>> southToNorth = {
+            {WireBundle::South, WireBundle::North}};
+        if (isAIE4)
+          southToNorth.push_back({WireBundle::South32, WireBundle::North32});
+        interconnect(col, row, col, row - 1, southToNorth);
       }
       if (row < maxRow) {
         // from north to south
-        interconnect(col, row, col, row + 1, WireBundle::North,
-                     WireBundle::South);
-        // if (isAIE4)
-        //   interconnect(col, row, col, row + 1, WireBundle::North32,
-        //                WireBundle::South32);
+        SmallVector<std::pair<WireBundle, WireBundle>> northToSouth = {
+            {WireBundle::North, WireBundle::South}};
+        if (isAIE4)
+          northToSouth.push_back({WireBundle::North32, WireBundle::South32});
+        interconnect(col, row, col, row + 1, northToSouth);
       }
       if (col > 0) {
         // from east to west
-        interconnect(col, row, col - 1, row, WireBundle::West,
-                     WireBundle::East);
+        SmallVector<std::pair<WireBundle, WireBundle>> westToEast = {
+            {WireBundle::West, WireBundle::East}};
         if (isAIE4 && row == 0)
-          interconnect(col, row, col - 1, row, WireBundle::West32,
-                       WireBundle::East32);
+          westToEast.push_back({WireBundle::West32, WireBundle::East32});
+        interconnect(col, row, col - 1, row, westToEast);
       }
       if (col < maxCol) {
         // from west to east
-        interconnect(col, row, col + 1, row, WireBundle::East,
-                     WireBundle::West);
+        SmallVector<std::pair<WireBundle, WireBundle>> eastToWest = {
+            {WireBundle::East, WireBundle::West}};
         if (isAIE4 && row == 0)
-          interconnect(col, row, col + 1, row, WireBundle::East32,
-                       WireBundle::West32);
+          eastToWest.push_back({WireBundle::East32, WireBundle::West32});
+        interconnect(col, row, col + 1, row, eastToWest);
       }
     }
   }
@@ -792,8 +795,9 @@ void Pathfinder::buildRoutingGraph() {
         {{src.coords.col + 1, src.coords.row},
          {WireBundle::West, src.port.channel}},
         // AIE4 32-bit stream switch routing (e.g. for TCT tokens). Only the
-        // edges actually created in initialize() (East32/West32 on row 0)
-        // resolve here; the graph.find() guard below drops the rest.
+        // edges actually created in initialize() (North32/South32 on all AIE4
+        // rows, East32/West32 on row 0) resolve here; the graph.find() guard
+        // below drops the rest.
         {{src.coords.col, src.coords.row - 1},
          {WireBundle::North32, src.port.channel}},
         {{src.coords.col - 1, src.coords.row},

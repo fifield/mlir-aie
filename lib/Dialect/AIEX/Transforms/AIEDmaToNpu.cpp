@@ -813,10 +813,130 @@ public:
         tm.getDmaBdAddress(col, row, bd_id, op.getChannel(), dir);
 
     std::vector<uint32_t> words;
-    if (isa<AIE::AIE4TargetModel>(tm)) {
+    if (isa<AIE::AIE4TargetModel>(tm) && tm.isMemTile(col, row)) {
+      // AIE4 MemTile DMA - 11 words
+      words.assign(11, 0);
+      // DMA_S2MM_0_BD0_0
+      // Base_Address [23:0]
+      words[0] = op.getBufferOffset() & 0xffffff;
+
+      // DMA_S2MM_0_BD0_1
+      // Lock_Acq_Value [31:25], Buffer_Length [22:0]
+      words[1] = (op.getLockAcqVal() & 0x7f) << 25;
+      words[1] |= op.getBufferLength() & 0x7fffff;
+
+      // DMA_S2MM_0_BD0_2
+      // Lock_Acq_ID [29:20], Lock_Rel_Value [17:11], Lock_Rel_ID [10:1],
+      // Lock_Acq_Enable [0]
+      unsigned int acq_id = op.getLockAcqId();
+      unsigned int rel_id = op.getLockRelId();
+      if (auto base = tm.getLockLocalBaseIndex(col, row, col, row)) {
+        acq_id += *base;
+        rel_id += *base;
+      }
+      words[2] = (acq_id & 0x3ff) << 20;
+      words[2] |= (op.getLockRelVal() & 0x7f) << 11;
+      words[2] |= (rel_id & 0x3ff) << 1;
+      words[2] |= op.getLockAcqEnable() & 0x1;
+
+      // DMA_S2MM_0_BD0_3
+      // D1_Stepsize [22:0]
+      words[3] = op.getD1Stride() & 0x7fffff;
+
+      // DMA_S2MM_0_BD0_4
+      // D2_Stepsize [22:0]
+      words[4] = op.getD2Stride() & 0x7fffff;
+
+      // DMA_S2MM_0_BD0_5
+      // D3_Stepsize [22:0]
+      words[5] = 0; // D3_Stepsize not currently used
+
+      // DMA_S2MM_0_BD0_6
+      // TLAST_Suppress [31], Iteration_Stepsize [22:0]
+      words[6] = 0; // TLAST_Suppress unused in S2MM
+      words[6] |= op.getIterationStride() & 0x7fffff;
+
+      // DMA_S2MM_0_BD0_7
+      // Iteration_Current [29:22], Enable_Packet [21], Packet_ID [20:16],
+      // D0_Pad_After [15:8], D0_Pad_Before [7:0]
+      words[7] = (op.getIterationCurrent() & 0xff) << 22;
+      words[7] |= (op.getEnablePacket() & 0x1) << 21;
+      words[7] |= (op.getPacketId() & 0x1f) << 16;
+      words[7] |= (op.getD0ZeroAfter() & 0xff) << 8;
+      words[7] |= op.getD0ZeroBefore() & 0xff;
+
+      // DMA_S2MM_0_BD0_8
+      // D2_Pad_After [31:24], D2_Pad_Before [23:16], D1_Pad_After [15:8],
+      // D1_Pad_Before [7:0]
+      words[8] = (op.getD2ZeroAfter() & 0xff) << 24;
+      words[8] |= (op.getD2ZeroBefore() & 0xff) << 16;
+      words[8] |= (op.getD1ZeroAfter() & 0xff) << 8;
+      words[8] |= op.getD1ZeroBefore() & 0xff;
+
+      // DMA_S2MM_0_BD0_9
+      // D1_Wrap [30:19], D0_Wrap [16:5], Out_Of_Order_BD_ID [3:0]
+      words[9] = (op.getD1Size() & 0xfff) << 19;
+      words[9] |= (op.getD0Size() & 0xfff) << 5;
+      words[9] |= op.getOutOfOrderId() & 0xf;
+
+      // DMA_S2MM_0_BD0_10
+      // Next_BD [30:27], Use_Next_BD [26], D2_Wrap [25:14], Iteration_Wrap
+      // [7:0]
+      words[10] = (op.getNextBd() & 0xf) << 27;
+      words[10] |= (op.getUseNextBd() & 0x1) << 26;
+      words[10] |= (op.getD2Size() & 0xfff) << 14;
+      words[10] |= op.getIterationSize() & 0xff;
+    } else if (isa<AIE::AIE4TargetModel>(tm) && tm.isCoreTile(col, row)) {
+      if (op.getD0ZeroBefore() || op.getD1ZeroBefore() ||
+          op.getD2ZeroBefore() || op.getD0ZeroAfter() || op.getD1ZeroAfter() ||
+          op.getD2ZeroAfter())
+        return op->emitOpError("Zero padding is only available on MemTile");
+      // AIE4 Tile DMA - 6 words
+      words.assign(6, 0);
+      // DMA_BD0_0
+      // Base_Address [30:16], Buffer_Length [14:0]
+      words[0] = ((op.getBufferOffset() / 4) & 0x7fff) << 16;
+      words[0] |= op.getBufferLength() & 0x7fff;
+
+      // DMA_BD0_1
+      // Enable_Packet [30], Out_Of_Order_BD_ID [27:24], Packet_ID [23:19],
+      // Packet_Type [18:16]
+      words[1] = (op.getEnablePacket() & 0x1) << 30;
+      words[1] |= (op.getOutOfOrderId() & 0xf) << 24;
+      words[1] |= (op.getPacketId() & 0x1f) << 19;
+      words[1] |= (op.getPacketType() & 0x7) << 16;
+
+      // DMA_BD0_2
+      // D1_Stepsize [30:16]
+      words[2] = (op.getD1Stride() & 0x7fff) << 16;
+
+      // DMA_BD0_3
+      // Iteration_Current [31:26], D0_Wrap [25:17], D2_Stepsize [14:0]
+      words[3] = (op.getIterationCurrent() & 0x3f) << 26;
+      words[3] |= (op.getD0Size() & 0x1ff) << 17;
+      words[3] |= op.getD2Stride() & 0x7fff;
+
+      // DMA_BD0_4
+      // D1_Wrap [31:23], Iteration_Wrap [22:17], Iteration_Stepsize [14:0]
+      words[4] = (op.getD1Size() & 0x1ff) << 23;
+      words[4] |= (op.getIterationSize() & 0x3f) << 17;
+      words[4] |= op.getIterationStride() & 0x7fff;
+
+      // DMA_BD0_5
+      // TLAST_Suppress [31], Next_BD [30:27], Use_Next_BD [26],
+      // Lock_Rel_Value [24:18], Lock_Rel_ID [16:13], Lock_Acq_Enable [12],
+      // Lock_Acq_Value [11:5], Lock_Acq_ID [3:0]
+      words[5] = 0; // TLAST_Suppress
+      words[5] |= (op.getNextBd() & 0xf) << 27;
+      words[5] |= (op.getUseNextBd() & 0x1) << 26;
+      words[5] |= (op.getLockRelVal() & 0x7f) << 18;
+      words[5] |= (op.getLockRelId() & 0xf) << 13;
+      words[5] |= (op.getLockAcqEnable() & 0x1) << 12;
+      words[5] |= (op.getLockAcqVal() & 0x7f) << 5;
+      words[5] |= op.getLockAcqId() & 0xf;
+    } else if (isa<AIE::AIE4TargetModel>(tm)) {
       if (!tm.isShimNOCTile(col, row))
-        return op->emitOpError(
-            "AIE4 buffer descriptors are only supported on shim tiles");
+        return op->emitOpError("has no buffer descriptor layout on this tile");
       if (op.getD0ZeroBefore() || op.getD1ZeroBefore() ||
           op.getD2ZeroBefore() || op.getD0ZeroAfter() || op.getD1ZeroAfter() ||
           op.getD2ZeroAfter())

@@ -296,8 +296,9 @@ struct AIEDMATasksToNPUPass
     // A foldable SSA bd_id must name the same register as the block write.
     auto constBdId = bdId ? getConstantIntValue(bdId) : std::nullopt;
     uint32_t bd_id = constBdId ? *constBdId : bd_op.getBdId().value_or(0);
-    uint64_t register_addr = target_model.getDmaBdAddress(col, row, bd_id) +
-                             target_model.getDmaBdAddressOffset(col, row);
+    uint64_t register_addr =
+        target_model.getDmaBdAddress(col, row, bd_id, channel, channelDir) +
+        target_model.getDmaBdAddressOffset(col, row);
     // On the runtime-bd_id path the patched register (BD buffer-address word)
     // is itself runtime: getBdRegisterBase(bd_id) + getDmaBdAddressOffset.
     // Emitted as an SSA operand on the address patch; null keeps the static
@@ -388,11 +389,21 @@ struct AIEDMATasksToNPUPass
 
       // The BD's address field, from the target model's layout. Shim NOC BDs
       // address bytes; mem and core tile BDs address 32-bit words.
-      const AIE::DmaBdLayout *layout = target_model.getDmaBdLayout(col, row);
-      if (!layout)
+      // AIE4 has no modeled layout; its tile and memtile BDs carry the base
+      // address in word 0 (tile: Base_Address [30:16], memtile: [23:0]).
+      AIE::DmaBdField addrBits;
+      if (const AIE::DmaBdLayout *layout =
+              target_model.getDmaBdLayout(col, row))
+        addrBits = layout->bufferOffset;
+      else if (isa<AIE::AIE4TargetModel>(target_model) &&
+               target_model.isCoreTile(col, row))
+        addrBits = {/*word=*/0, /*shift=*/16, /*width=*/15};
+      else if (isa<AIE::AIE4TargetModel>(target_model) &&
+               target_model.isMemTile(col, row))
+        addrBits = {/*word=*/0, /*shift=*/0, /*width=*/24};
+      else
         return bd_op->emitOpError(
             "has no buffer descriptor layout on this tile");
-      const AIE::DmaBdField &addrBits = layout->bufferOffset;
       uint64_t divisor = target_model.isShimNOCTile(col, row) ? 1 : 4;
       uint64_t maxByteAddr = (uint64_t(addrBits.mask()) + 1) * divisor - 1;
       if (buf_addr > maxByteAddr)
