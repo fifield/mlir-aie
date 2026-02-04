@@ -1089,15 +1089,6 @@ xilinx::AIE::AIERTControl::addInitConfig(DeviceOp &targetOp,
   if (failed(verifyDMAChannelsResolved(targetOp)))
     return failure();
 
-  // Unset isolation registers for aie4 simulation.
-  if (isa<AIE4TargetModel>(targetOp.getTargetModel())) {
-    for (TileOp tile : targetOp.getOps<TileOp>()) {
-      XAie_LocType tileLoc =
-          XAie_TileLoc(tile.getTileID().col, tile.getTileID().row);
-      TRY_XAIE_API_EMIT_ERROR(tile, _XAie_TileCtrlSetIsolation,
-                              &aiert->devInst, tileLoc, 0);
-    }
-  }
   if (isa<NPU3zTargetModel>(targetOp.getTargetModel())) {
     // set compatability mode
     uint32_t mode = 0x1; // Native
