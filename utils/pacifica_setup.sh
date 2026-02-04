@@ -45,13 +45,6 @@ if [[ $FORCE_INSTALL -eq 1 || ( "$#" -lt 1 && -z "$(pip show mlir_aie | grep ^Lo
   fi
   export MLIR_AIE_INSTALL_DIR="$(pip show mlir_aie | grep ^Location: | awk '{print $2}')/mlir_aie"
 
-  # install extras
-  echo "Installing mlir-python-extras..."
-  if ! EUDSL_PYTHON_EXTRAS_HOST_PACKAGE_PREFIX=aie python3 -m pip install -r ${SCRIPT_DIR}/../python/requirements_extras.txt; then
-    echo "ERROR: Failed to install mlir-python-extras" >&2
-    exit 1
-  fi
-  
   # these are needed for mesimulator
   echo "Installing mesimulator dependencies (toml, bitstring)..."
   if ! python3 -m pip install toml bitstring cffi; then
@@ -68,7 +61,7 @@ cat > pacifica_env.sh <<EOF
 export MLIR_AIE_DIR=${MLIR_AIE_INSTALL_DIR}
 export PATH=${MLIR_AIE_INSTALL_DIR}/bin:\$PATH 
 export PYTHONPATH=${MLIR_AIE_INSTALL_DIR}/python:\$PYTHONPATH
-export LD_LIBRARY_PATH=${MLIR_AIE_INSTALL_DIR}/lib:\$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=${MLIR_AIE_INSTALL_DIR}/lib:${MLIR_AIE_INSTALL_DIR}/lib/runtime_lib/x86_64/xaiengine/lib:\$LD_LIBRARY_PATH
 
 # setup environment for simulator
 if [[ $(hostname) == xco* ]]; then
@@ -80,9 +73,9 @@ export CERVINO_ROOT=\$PACIFICA_SIM_ROOT/cervino
 export ME_ROOT=\$PACIFICA_SIM_ROOT/cervino/aie4
 export me_DIR=\$ME_ROOT/core_model/sipp/lib
 if [[ $(hostname) == xco* ]]; then
-  export LD_LIBRARY_PATH=/proj/rdi/staff/jefff/aie4/wrk/hmca/shared/ext/systemc-2.3.3_gcc10_std20/lib64:$LD_LIBRARY_PATH
+  export LD_LIBRARY_PATH=/proj/rdi/staff/jefff/aie4/wrk/hmca/shared/ext/systemc-2.3.3_gcc10_std20/lib64:\$LD_LIBRARY_PATH
 else
-  export LD_LIBRARY_PATH=/wrk/hmca/shared/ext/systemc-2.3.3_gcc10_std20/lib64:$LD_LIBRARY_PATH
+  export LD_LIBRARY_PATH=/wrk/hmca/shared/ext/systemc-2.3.3_gcc10_std20/lib64:\$LD_LIBRARY_PATH
 fi
 export LD_LIBRARY_PATH=\$CERVINO_ROOT/ext/Boost_1_89_0/boost_1_89_0/rdi/lib:\$LD_LIBRARY_PATH
 export PYTHONPATH=\$PYTHONPATH:\$ME_ROOT/python:\$ME_ROOT/applications
