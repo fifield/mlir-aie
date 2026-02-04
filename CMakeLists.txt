@@ -495,46 +495,6 @@ if(NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
   endif()
 endif()
 
-# add third_party/cert as an ExternalProject
-find_program(MB_GCC "mb-gcc")
-if(NOT MB_GCC)
-	message(WARNING "Unable to find mb-gcc, not building CERT.")
-  # copy the checked-in cert binaries to build and install area
-  execute_process(
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-      ${CMAKE_BINARY_DIR}/third_party/cert/main
-    COMMAND ${CMAKE_COMMAND} -E copy
-      ${PROJECT_SOURCE_DIR}/test/unit_tests/aie4_cert/cert_medusa.elf
-      ${CMAKE_BINARY_DIR}/third_party/cert/main
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_INSTALL_PREFIX}/cert
-    COMMAND ${CMAKE_COMMAND} -E copy
-      ${PROJECT_SOURCE_DIR}/test/unit_tests/aie4_cert/cert_medusa.elf
-      ${CMAKE_INSTALL_PREFIX}/cert
-  )
-else()
-  message(STATUS "Found mb-gcc, building CERT: ${MB_GCC}")
-  execute_process(
-      COMMAND sed -i "s/master\\/markdown/master\\/src\\/markdown_graphviz_svg\\/markdown/" ${PROJECT_SOURCE_DIR}/third_party/cert/specification/CMakeLists.txt
-      COMMAND sed -i "s/$(MAKE)/make/" ${PROJECT_SOURCE_DIR}/third_party/cert/main/CMakeLists.txt
-  )
-  ExternalProject_Add(third_party_cert
-    PREFIX ${CMAKE_BINARY_DIR}/third_party/cert
-    SOURCE_DIR ${PROJECT_SOURCE_DIR}/third_party/cert
-    BINARY_DIR ${CMAKE_BINARY_DIR}/third_party/cert
-    UPDATE_DISCONNECTED 1
-    BUILD_ALWAYS true
-    STEP_TARGETS ublaze-elf
-    INSTALL_COMMAND
-      ${CMAKE_COMMAND} -E make_directory ${CMAKE_INSTALL_PREFIX}/cert &&
-      ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/third_party/cert/main/cert_medusa.elf ${CMAKE_INSTALL_PREFIX}/cert
-    USES_TERMINAL_CONFIGURE true
-    USES_TERMINAL_BUILD true
-    USES_TERMINAL_TEST true
-    USES_TERMINAL_INSTALL true
-    TEST_EXCLUDE_FROM_MAIN true
-  )
-endif()
-
 # Last because each of these has its own CMakeLists.txt which reloads/re-finds LLVM, thus resettings globals.
 # The test/example/tutorial subdirectories' check-* lit targets depend on AIEPythonModules, so they
 # require the Python bindings. Gate them behind an option that is forced OFF when the bindings are
