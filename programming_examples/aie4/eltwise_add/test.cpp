@@ -34,7 +34,7 @@ int main(int argc, const char *argv[]) {
   auto device = xrt::device(device_index);
   // The name format here is <kernel_name>:<instance_name> from the config.json
   std::string kernelName = "main:sequence";
-  xrt::elf ctx_elf{"aie.elf"};
+  xrt::elf ctx_elf{"eltwise_add_placed.elf"};
   xrt::hw_context context = xrt::hw_context(device, ctx_elf);
   auto kernel = xrt::ext::kernel(context, kernelName);
   xrt::bo bo_in0 = xrt::ext::bo{device, BUF_SIZE};
