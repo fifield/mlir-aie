@@ -194,7 +194,7 @@ if opts.device == "npu":
     dev = AIEDevice.npu1_1col
 elif opts.device == "npu2":
     dev = AIEDevice.npu2
-elif opts.device == "npu3z":
+elif opts.device == "npu3":
     dev = AIEDevice.npu3
 else:
     raise ValueError("[ERROR] Device name {} is unknown".format(sys.argv[1]))

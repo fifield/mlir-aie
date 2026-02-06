@@ -4,7 +4,7 @@ all: eltwise_add_placed.elf test.exe
 	clang -std=c++17 -lstdc++ -I/opt/xilinx/xrt/include -L/opt/xilinx/xrt/lib -luuid -lxrt_coreutil $< -o $@
 
 %.mlir: %.py
-	python $< -d npu3z -i1s 2048 -i2s 2048 -os 2048 > $@
+	python $< -d npu3 -i1s 2048 -i2s 2048 -os 2048 > $@
 
 %.elf: %.mlir 
 	aiecc.py -v --tmpdir=project --xchesscc --xbridge --no-compile-host \

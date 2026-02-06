@@ -23,10 +23,13 @@ constexpr size_t BUF_SIZE = DATA_COUNT * sizeof(DTYPE);
 
 int main(int argc, const char *argv[]) {
   // Set up input data
-  srand(1726250518);
-  std::vector<DTYPE> vec_in(DATA_COUNT);
-  for (int i = 0; i < vec_in.size(); i++) {
-    vec_in[i] = DTYPE(i);
+  std::vector<DTYPE> vec_in0(DATA_COUNT);
+  std::vector<DTYPE> vec_in1(DATA_COUNT);
+  std::vector<DTYPE> vec_out(DATA_COUNT);
+  for (int i = 0; i < vec_in0.size(); i++) {
+    vec_in0[i] = DTYPE(i);
+    vec_in1[i] = DTYPE(i + 0xbeef);
+    vec_out[i] = 0xdeadbeef;
   }
 
   // Set up XRT
@@ -44,35 +47,27 @@ int main(int argc, const char *argv[]) {
   // Set up kernel run
   char *buf_in0 = bo_in0.map<char *>();
   char *buf_in1 = bo_in1.map<char *>();
+  char *buf_out = bo_out.map<char *>();
 
-  memcpy(buf_in0, vec_in.data(), BUF_SIZE);
-  memcpy(buf_in1, vec_in.data(), BUF_SIZE);
+  memcpy(buf_in0, vec_in0.data(), BUF_SIZE);
+  memcpy(buf_in1, vec_in1.data(), BUF_SIZE);
+  memcpy(buf_out, vec_out.data(), BUF_SIZE);
 
   bo_in0.sync(XCL_BO_SYNC_BO_TO_DEVICE);
   bo_in1.sync(XCL_BO_SYNC_BO_TO_DEVICE);
 
-  //auto run = xrt::run(kernel);
-  //run.set_arg(0, bo_in0);
-  //run.set_arg(1, bo_in1);
-  //run.set_arg(2, bo_out);
-
   // Run
   auto t_start = std::chrono::high_resolution_clock::now();
-  //run.start();
-  //run.wait2();
   kernel(bo_in0, bo_in1, bo_out).wait2();
-
   auto t_stop = std::chrono::high_resolution_clock::now();
 
   bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
-  char *buf_out = bo_out.map<char *>();
 
   // Validate output
-  std::vector<DTYPE> vec_out(DATA_COUNT);
   std::vector<DTYPE> vec_ref(DATA_COUNT);
   memcpy(vec_out.data(), buf_out, BUF_SIZE);
   for (int i = 0; i < DATA_COUNT; i++) {
-    vec_ref[i] = vec_in[i] + vec_in[i];
+    vec_ref[i] = vec_in0[i] + vec_in1[i] + 42;
   }
   bool outputs_correct = (vec_out == vec_ref);
 
@@ -84,14 +79,15 @@ int main(int argc, const char *argv[]) {
             << std::setprecision(0) << std::setw(8) << time << " μs"
             << std::endl;
   if (outputs_correct) {
-    std::cout << "PASS!" << std::endl;
+    std::cout << "PASS! 🐬" << std::endl;
   } else {
     for (int i = 0; i < DATA_COUNT; i++) {
-      std::cout << "in: " << std::setw(12) << vec_in[i] << ", "
+      std::cout << "in0: " << std::setw(12) << vec_in0[i] << ", "
+                << "in1: " << std::setw(12) << vec_in1[i] << ", "
                 << "out: " << std::setw(12) << vec_out[i]
                 << ", ref: " << std::setw(12) << vec_ref[i] << std::endl;
     }
-    std::cout << "Fail." << std::endl;
+    std::cout << "fail." << std::endl;
   }
 
   return (outputs_correct ? 0 : 1);
