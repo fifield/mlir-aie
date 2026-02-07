@@ -18,12 +18,13 @@ from pathlib import Path
 import numpy as np
 
 from aie.iron import ObjectFifo, Program, Runtime, Worker
-from aie.iron.compile import compile_mlir_module
+import aie.iron as iron
+from aie.utils.compile import compile_mlir_module
 from aie.iron.controlflow import range_
 from aie.iron.device import NPU1Col1, NPU2Col1
 from aie.iron.placers import SequentialPlacer
 from aie.iron.pythoc import aie_kernel, PythocKernel
-import aie.utils.xrt as xrt_utils
+from aie.utils import DefaultNPURuntime, NPUKernel
 
 # Import PythoC types and operations for inline kernel definition
 from pythoc import ptr, i32
@@ -193,32 +194,32 @@ def compile_design(
 
 def run_with_xrt(xclbin_path: Path, insts_path: Path, tensor_size: int, verbose: bool):
     """Execute design on NPU using XRT and verify results."""
-    app = xrt_utils.setup_aie(
-        xclbin_path=str(xclbin_path),
-        insts_path=str(insts_path),
-        in_0_shape=(tensor_size,),
-        in_0_dtype=np.int32,
-        in_1_shape=(tensor_size,),
-        in_1_dtype=np.int32,
-        out_buf_shape=(tensor_size,),
-        out_buf_dtype=np.int32,
+    # Create NPU kernel handle
+    npu_kernel = NPUKernel(
+        str(xclbin_path),
+        str(insts_path),
         kernel_name="MLIR_AIE",
-        verbosity=1 if verbose else 0,
     )
+    kernel_handle = DefaultNPURuntime.load(npu_kernel)
 
-    # Prepare test data
+    # Prepare test data using iron.tensor
     a_data = np.arange(1, tensor_size + 1, dtype=np.int32)
     b_data = np.arange(1, tensor_size + 1, dtype=np.int32) * 2
+    in_a = iron.tensor(a_data, dtype=np.int32)
+    in_b = iron.tensor(b_data, dtype=np.int32)
+    out_c = iron.zeros(tensor_size, dtype=np.int32)
 
-    try:
-        output_vec = xrt_utils.execute(app, a_data, b_data)
-    finally:
-        del app
+    # Run on NPU
+    DefaultNPURuntime.run(kernel_handle, [in_a, in_b, out_c])
 
     # Verify results
+    output_vec = out_c.numpy()
     expected = a_data + b_data
     np.testing.assert_array_equal(output_vec, expected)
-    return output_vec
+
+    # Return a COPY of the data, since output_vec is a view into XRT buffer
+    # that will be freed when out_c goes out of scope
+    return np.array(output_vec)
 
 
 def main():
