@@ -319,6 +319,7 @@ class XRTHostRuntime(HostRuntime):
             "Krackan",
             "Gorgon Point",
         ],
+        "npu3": ["npu3", "Medusa"],
     }
     _tensor_class = XRTTensor
 
@@ -733,18 +734,18 @@ class XRTHostRuntime(HostRuntime):
         """Get the device associated with this runtime.
 
         Returns:
-            Device: The device object (NPU1 or NPU2).
+            Device: The device object (NPU1, NPU2, or NPU3).
 
         Raises:
             HostRuntimeError: If the device string is unknown.
         """
         from aie.iron.device import from_name
 
-        if self.npu_str in ("npu1", "npu2"):
+        if self.npu_str in ("npu1", "npu2", "npu3"):
             return from_name(self.npu_str, n_cols=None)
         else:
             raise HostRuntimeError(
-                f"Unknown device string: {self.npu_str}: expected npu1 or npu2"
+                f"Unknown device string: {self.npu_str}: expected npu1, npu2, or npu3"
             )
 
 
@@ -845,6 +846,7 @@ class CachedXRTRuntime(XRTHostRuntime):
     NPU_CONTEXT_CACHE_SIZE = {
         "npu1": 6,
         "npu2": 16,
+        "npu3": 32,
     }
 
     # Instruction streams are not a driver-limited resource, and one xclbin

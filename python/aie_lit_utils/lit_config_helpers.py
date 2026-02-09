@@ -104,6 +104,7 @@ class LitConfigHelper:
             "Krackan",
             "Gorgon Point",
         ],
+        "npu3": ["npu3"],
     }
 
     PATH_ENV_VARS = {"PATH", "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"}
@@ -285,10 +286,9 @@ class LitConfigHelper:
                 - found: True if XRT is detected and valid
                 - flags: Compiler/linker flags for XRT (includes -I, -L, and libraries)
                 - substitutions: Dictionary with "%xrt_flags", "%run_on_npu1%",
-                                 "%run_on_npu2%", and "%aie_cmake_device%"
-                                 ("npu2" when a Strix NPU is detected, else "npu";
-                                 what the run_cmake lits pass as -DAIE_DEVICE)
-                - features: List of features including "ryzen_ai", "ryzen_ai_npu1", or "ryzen_ai_npu2"
+                                 "%run_on_npu2%", "%run_on_npu3%", and
+                                 "%aie_cmake_device%" mappings
+                - features: List of features including "ryzen_ai", "ryzen_ai_npu1", "ryzen_ai_npu2", or "ryzen_ai_npu3"
                            based on detected NPU hardware and available Vitis components
         """
         if vitis_components is None:
@@ -297,14 +297,16 @@ class LitConfigHelper:
         expected_npu = os.environ.get("AIE_EXPECTED_NPU")
         if expected_npu and expected_npu not in LitConfigHelper.NPU_MODELS:
             llvm_config.lit_config.fatal(
-                "AIE_EXPECTED_NPU must be 'npu1' or 'npu2', " f"got {expected_npu!r}"
+                "AIE_EXPECTED_NPU must be 'npu1', 'npu2', or 'npu3', "
+                f"got {expected_npu!r}"
             )
 
         config = HardwareConfig()
         run_on_npu1 = "echo"
         run_on_npu2 = "echo"
+        run_on_npu3 = "echo"
         # Whichever generation is actually detected, so device-agnostic tests
-        # (single lit file, no npu1/npu2 duplication) can target it directly.
+        # (single lit file, no generation-specific duplication) can target it.
         # Consumed by %aie_cmake_device% below.
         detected_npu_device = ""
 
@@ -320,6 +322,7 @@ class LitConfigHelper:
 
             config.substitutions["%run_on_npu1%"] = run_on_npu1
             config.substitutions["%run_on_npu2%"] = run_on_npu2
+            config.substitutions["%run_on_npu3%"] = run_on_npu3
             config.substitutions["%aie_cmake_device%"] = "npu"
             return config
 
@@ -463,6 +466,17 @@ class LitConfigHelper:
                         logger.warning(
                             "NPU2 detected but no AIE2P backend is available"
                         )
+                elif model in LitConfigHelper.NPU_MODELS["npu3"]:
+                    if "AIE4" in vitis_components:
+                        run_on_npu3 = LitConfigHelper._run_on_npu_wrap(
+                            aie_src_root, "npu3"
+                        )
+                        config.features.extend(["ryzen_ai", "ryzen_ai_npu3"])
+                        config.substitutions["%run_on_npu3%"] = run_on_npu3
+                        detected_npu_device = "npu3"
+                        logger.info("Running tests on NPU3 with command line: %s", run_on_npu3)
+                    else:
+                        logger.warning("NPU3 detected but aietools for aie4 not available")
                 else:
                     logger.warning("xrt-smi reported unknown NPU model '%s'.", model)
                 break
@@ -482,10 +496,11 @@ class LitConfigHelper:
 
         config.substitutions["%run_on_npu1%"] = run_on_npu1
         config.substitutions["%run_on_npu2%"] = run_on_npu2
+        config.substitutions["%run_on_npu3%"] = run_on_npu3
         # add_aie_design/add_aie_run_test's -DAIE_DEVICE takes "npu" (not
         # "npu1") for the first-gen device -- map the detected generation.
         config.substitutions["%aie_cmake_device%"] = (
-            "npu2" if detected_npu_device == "npu2" else "npu"
+            detected_npu_device if detected_npu_device in {"npu2", "npu3"} else "npu"
         )
 
         return config
