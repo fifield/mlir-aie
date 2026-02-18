@@ -17,7 +17,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../../python")
 
 import torch
 from mdv6.layers import RepNCSPELAN
-from aie.utils.xrt import setup_aie, execute
 
 
 def bf16_to_uint16(tensor):
