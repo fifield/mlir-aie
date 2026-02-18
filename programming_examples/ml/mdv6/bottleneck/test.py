@@ -18,7 +18,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../../python")
 import torch
 import torch.nn as nn
 from mdv6.layers import Bottleneck
-from aie.utils.xrt import setup_aie, execute
 
 
 def bf16_to_uint16(bf16_tensor):
