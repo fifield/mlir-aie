@@ -15,7 +15,6 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../../python"))
 
 import torch
-from aie.utils.xrt import setup_aie, execute
 
 
 def bf16_to_uint16(bf16_tensor):
