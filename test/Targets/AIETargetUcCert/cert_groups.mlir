@@ -7,6 +7,7 @@
 
 // RUN: aie-translate --aie-cert-to-asm %s | FileCheck %s
 
+// CHECK: .partition
 // CHECK: .attach_to_group 0
 // CHECK: START_JOB 0
 // CHECK: .attach_to_group 1
