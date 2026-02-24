@@ -7,6 +7,11 @@
 #
 # (c) Copyright 2025 Advanced Micro Devices, Inc.
 
+# REQUIRES: ryzen_ai_npu2
+#
+# RUN: %python %s --device npu2 --tensor-size 4096 --work-dir ./vector_add_inline_build | FileCheck %s
+# CHECK: PASS!
+
 """Single-file end-to-end example: PythoC inline kernel with IRON.
 """
 

@@ -171,6 +171,10 @@ if LitConfigHelper.can_import_python_module(config, config.python_executable, "p
 LitConfigHelper.setup_aiecc_substitution(config)
 LitConfigHelper.setup_host_link_substitution(config)
 
+config.environment["PYTHONPATH"] = "{}:{}".format(
+    os.path.join(config.xrt_dir, "python"), config.environment["PYTHONPATH"]
+)
+
 tools = [
     "aie-opt",
     "aie-translate",

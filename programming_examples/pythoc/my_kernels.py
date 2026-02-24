@@ -6,6 +6,8 @@
 #
 # (c) Copyright 2025 Advanced Micro Devices, Inc.
 
+# RUN: python -m py_compile %s
+
 """Reusable PythoC AIE kernel library.
 
 A collection of element-wise vector kernels written in PythoC for AIE2/AIE2P.
