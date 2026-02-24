@@ -7,6 +7,11 @@
 #
 # (c) Copyright 2025 Advanced Micro Devices, Inc.
 
+# REQUIRES: ryzen_ai_npu2
+#
+# RUN: %python %s --device npu2 --tensor-size 4096 --work-dir ./vector_mul_pythoc_build | FileCheck %s
+# CHECK: PASS!
+
 """End-to-end example: External PythoC kernel with IRON.
 
 This example demonstrates how to:

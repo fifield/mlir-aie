@@ -71,18 +71,17 @@ def _get_llc_path() -> str:
         if llc_path.exists():
             return str(llc_path)
 
-    # Try default llvm-aie location in aie-venv
-    default_llvm_aie = Path(
-        "/scratch/jefff/acdc/aie-venv/lib/python3.12/site-packages/llvm-aie/bin/llc"
-    )
-    if default_llvm_aie.exists():
-        return str(default_llvm_aie)
+    llvm_aie_bin = os.environ.get("PEANO_INSTALL_DIR")
+    if llvm_aie_bin:
+        llc_path = Path(llvm_aie_bin) / "bin" / "llc"
+        if llc_path.exists():
+            return str(llc_path)
 
     raise RuntimeError(
         "llvm-aie llc not found. Please ensure:\n"
         "1. LLVM_AIE_BIN environment variable is set, or\n"
-        "2. llvm-aie is installed in aie-venv\n"
-        "Note: System llc does not support AIE2 target"
+        "2. PEANO_INSTALL_DIR environment variable is set\n"
+        "Note: System llc does not support AIE2/AIE2P target"
     )
 
 
