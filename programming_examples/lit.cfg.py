@@ -132,6 +132,10 @@ LitConfigHelper.apply_config_to_lit(
     },
 )
 
+config.environment["PYTHONPATH"] = "{}:{}".format(
+    os.path.join(config.xrt_dir, "python"), config.environment["PYTHONPATH"]
+)
+
 tools = [
     "aie-opt",
     "aie-translate",
