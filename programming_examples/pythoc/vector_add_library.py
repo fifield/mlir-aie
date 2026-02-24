@@ -7,6 +7,11 @@
 #
 # (c) Copyright 2025 Advanced Micro Devices, Inc.
 
+# REQUIRES: ryzen_ai_npu2
+#
+# RUN: %python %s --device npu2 --tensor-size 4096 --work-dir ./vector_add_library_build | FileCheck %s
+# CHECK: PASS!
+
 """End-to-end example: PythoC kernel imported from a library module.
 
 Demonstrates importing a pre-defined PythoC kernel from my_kernels.py
