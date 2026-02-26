@@ -106,28 +106,6 @@ std::unique_ptr<RegisterDatabase> RegisterDatabase::loadAIE4() {
   return db;
 }
 
-std::unique_ptr<RegisterDatabase> RegisterDatabase::loadAIE4Z() {
-  auto registerPath = findRegDBFile("aie_registers_aie4z.json");
-
-  if (!registerPath) {
-    llvm::errs() << "Failed to locate AIE4Z register database. "
-                 << "Set MLIR_AIE_INSTALL_DIR to the "
-                 << "MLIR-AIE installation path.\n";
-    return nullptr;
-  }
-
-  // Event database is optional for AIE4Z
-  auto eventPath = findRegDBFile("events_database.json");
-  std::string emptyPath;
-
-  auto db = std::unique_ptr<RegisterDatabase>(new RegisterDatabase());
-  if (!db->loadFromJSON(*registerPath, eventPath ? *eventPath : emptyPath,
-                        "aie4z"))
-    return nullptr;
-
-  return db;
-}
-
 bool RegisterDatabase::loadFromJSON(StringRef registerPath, StringRef eventPath,
                                     StringRef archKey) {
   // Load register database

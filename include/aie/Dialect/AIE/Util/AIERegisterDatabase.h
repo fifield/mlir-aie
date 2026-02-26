@@ -65,9 +65,6 @@ public:
   /// Load database for AIE4 architecture
   static std::unique_ptr<RegisterDatabase> loadAIE4();
 
-  /// Load database for AIE4Z architecture
-  static std::unique_ptr<RegisterDatabase> loadAIE4Z();
-
   /// Lookup register by name and module
   const RegisterInfo *lookupRegister(llvm::StringRef name,
                                      llvm::StringRef module) const;
