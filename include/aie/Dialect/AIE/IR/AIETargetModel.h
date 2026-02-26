@@ -1342,6 +1342,9 @@ public:
 
 class AIE4TargetModel : public AIETargetModel {
 
+protected:
+  std::unique_ptr<RegisterDatabase> loadRegisterDatabase() const override;
+
   static constexpr Properties properties =
       AIETargetModel::UsesSemaphoreLocks |
       AIETargetModel::UsesMultiDimensionalBDs;

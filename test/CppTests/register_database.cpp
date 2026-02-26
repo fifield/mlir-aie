@@ -312,6 +312,220 @@ void test_encode_field_value_overflow() {
                "field width\n";
 }
 
+// ======== AIE4 Tests ========
+
+void test_aie4_load_database() {
+  std::cout << "Test: Load AIE4 Register Database\n";
+
+  auto db = RegisterDatabase::loadAIE4();
+  if (!db) {
+    throw std::runtime_error("Failed to load AIE4 register database");
+  }
+
+  std::cout << "  ✓ Database loaded successfully\n";
+}
+
+void test_aie4_lookup_register() {
+  std::cout << "Test: AIE4 Lookup Registers\n";
+
+  auto db = RegisterDatabase::loadAIE4();
+  if (!db) {
+    throw std::runtime_error("Failed to load database");
+  }
+
+  // Trace0_Control0 in CORE_MODULE, offset 0xA00D0
+  auto traceCtrl =
+      db->lookupRegister("Trace0_Control0", "CORE_MODULE");
+  if (!traceCtrl) {
+    throw std::runtime_error(
+        "Failed to find Trace0_Control0 in CORE_MODULE");
+  }
+  std::cout << "  ✓ Trace0_Control0 found\n";
+  std::cout << "    - offset: 0x" << std::hex << traceCtrl->offset << std::dec
+            << "\n";
+
+  if (traceCtrl->offset != 0xA00D0) {
+    throw std::runtime_error("Trace0_Control0 offset mismatch");
+  }
+  std::cout << "  ✓ Trace0_Control0 offset is correct (0xA00D0)\n";
+}
+
+void test_aie4_bitfield_parsing() {
+  std::cout << "Test: AIE4 Bit Field Parsing\n";
+
+  auto db = RegisterDatabase::loadAIE4();
+  if (!db) {
+    throw std::runtime_error("Failed to load database");
+  }
+
+  auto traceCtrl =
+      db->lookupRegister("Trace0_Control0", "CORE_MODULE");
+  if (!traceCtrl) {
+    throw std::runtime_error("Failed to find Trace0_Control0");
+  }
+
+  if (traceCtrl->bit_fields.empty()) {
+    throw std::runtime_error("Trace0_Control0 has no bit fields");
+  }
+  std::cout << "  ✓ Trace0_Control0 has " << traceCtrl->bit_fields.size()
+            << " bit fields\n";
+
+  // Trace_Stop_Event: bit_range [24, 31]
+  const BitFieldInfo *stopEvent = traceCtrl->getField("Trace_Stop_Event");
+  if (!stopEvent) {
+    throw std::runtime_error("Failed to find Trace_Stop_Event field");
+  }
+  if (stopEvent->bit_start != 24 || stopEvent->bit_end != 31) {
+    std::cerr << "Expected [24:31], got [" << stopEvent->bit_start << ":"
+              << stopEvent->bit_end << "]\n";
+    throw std::runtime_error("Trace_Stop_Event bit range mismatch");
+  }
+  std::cout << "  ✓ Trace_Stop_Event at bits [" << stopEvent->bit_start << ":"
+            << stopEvent->bit_end << "], width=" << stopEvent->getWidth()
+            << "\n";
+
+  // Mode: bit_range [0, 1]
+  const BitFieldInfo *mode = traceCtrl->getField("Mode");
+  if (!mode) {
+    throw std::runtime_error("Failed to find Mode field");
+  }
+  if (mode->bit_start != 0 || mode->bit_end != 1) {
+    throw std::runtime_error("Mode bit range mismatch");
+  }
+  std::cout << "  ✓ Mode at bits [" << mode->bit_start << ":" << mode->bit_end
+            << "], width=" << mode->getWidth() << "\n";
+}
+
+void test_aie4_encode_field_value() {
+  std::cout << "Test: AIE4 Encode Field Values\n";
+
+  auto db = RegisterDatabase::loadAIE4();
+  if (!db) {
+    throw std::runtime_error("Failed to load database");
+  }
+
+  // Use Performance_Start_Stop_0_1 from MEMORY_TILE_MODULE
+  auto perfCtrl = db->lookupRegister("Performance_Start_Stop_0_1",
+                                     "MEMORY_TILE_MODULE");
+  if (!perfCtrl) {
+    throw std::runtime_error(
+        "Failed to find Performance_Start_Stop_0_1 in MEMORY_TILE_MODULE");
+  }
+
+  // Cnt0_Start_Event (bits 7:0) - value 0x25 should stay at bits 0-7
+  const BitFieldInfo *cnt0Start = perfCtrl->getField("Cnt0_Start_Event");
+  if (!cnt0Start) {
+    throw std::runtime_error("Failed to find Cnt0_Start_Event field");
+  }
+
+  uint32_t encoded0 = db->encodeFieldValue(*cnt0Start, 0x25).value();
+  if (encoded0 != 0x25) {
+    std::cerr << "Expected 0x25, got 0x" << std::hex << encoded0 << std::dec
+              << "\n";
+    throw std::runtime_error("Cnt0_Start_Event encoding failed");
+  }
+  std::cout << "  ✓ Cnt0_Start_Event(0x25) = 0x" << std::hex << encoded0
+            << std::dec << "\n";
+
+  // Cnt0_Stop_Event (bits 15:8) - value 0x21 -> 0x2100
+  const BitFieldInfo *cnt0Stop = perfCtrl->getField("Cnt0_Stop_Event");
+  if (!cnt0Stop) {
+    throw std::runtime_error("Failed to find Cnt0_Stop_Event field");
+  }
+
+  uint32_t encoded1 = db->encodeFieldValue(*cnt0Stop, 0x21).value();
+  if (encoded1 != 0x2100) {
+    std::cerr << "Expected 0x2100, got 0x" << std::hex << encoded1 << std::dec
+              << "\n";
+    throw std::runtime_error("Cnt0_Stop_Event encoding failed");
+  }
+  std::cout << "  ✓ Cnt0_Stop_Event(0x21) = 0x" << std::hex << encoded1
+            << std::dec << "\n";
+
+  // Cnt1_Start_Event (bits 23:16) - value 0x10 -> 0x100000
+  const BitFieldInfo *cnt1Start = perfCtrl->getField("Cnt1_Start_Event");
+  if (!cnt1Start) {
+    throw std::runtime_error("Failed to find Cnt1_Start_Event field");
+  }
+
+  uint32_t encoded2 = db->encodeFieldValue(*cnt1Start, 0x10).value();
+  if (encoded2 != 0x100000) {
+    std::cerr << "Expected 0x100000, got 0x" << std::hex << encoded2
+              << std::dec << "\n";
+    throw std::runtime_error("Cnt1_Start_Event encoding failed");
+  }
+  std::cout << "  ✓ Cnt1_Start_Event(0x10) = 0x" << std::hex << encoded2
+            << std::dec << "\n";
+}
+
+void test_aie4_cross_module() {
+  std::cout << "Test: AIE4 Cross-Module Register Lookup\n";
+
+  auto db = RegisterDatabase::loadAIE4();
+  if (!db) {
+    throw std::runtime_error("Failed to load database");
+  }
+
+  // Performance_Start_Stop_0_1 exists in both MEMORY_TILE_MODULE and PL_MODULE
+  // with different offsets
+  auto memTileReg = db->lookupRegister("Performance_Start_Stop_0_1",
+                                       "MEMORY_TILE_MODULE");
+  auto plReg =
+      db->lookupRegister("Performance_Start_Stop_0_1", "PL_MODULE");
+
+  if (!memTileReg) {
+    throw std::runtime_error(
+        "Failed to find Performance_Start_Stop_0_1 in MEMORY_TILE_MODULE");
+  }
+  if (!plReg) {
+    throw std::runtime_error(
+        "Failed to find Performance_Start_Stop_0_1 in PL_MODULE");
+  }
+
+  // MEMORY_TILE_MODULE offset=0x00000000, PL_MODULE offset=0x00004000
+  if (memTileReg->offset != 0x0) {
+    throw std::runtime_error("MEMORY_TILE_MODULE offset mismatch");
+  }
+  if (plReg->offset != 0x4000) {
+    throw std::runtime_error("PL_MODULE offset mismatch");
+  }
+  std::cout << "  ✓ MEMORY_TILE_MODULE offset=0x" << std::hex
+            << memTileReg->offset << ", PL_MODULE offset=0x" << plReg->offset
+            << std::dec << "\n";
+}
+
+void test_aie4_wrong_module() {
+  std::cout << "Test: AIE4 Lookup Register in Wrong Module\n";
+
+  auto db = RegisterDatabase::loadAIE4();
+  if (!db) {
+    throw std::runtime_error("Failed to load database");
+  }
+
+  // Trace0_Control0 exists in CORE_MODULE, not in MEMORY_MODULE
+  auto result = db->lookupRegister("Trace0_Control0", "MEMORY_MODULE");
+  if (result != nullptr) {
+    throw std::runtime_error(
+        "Expected nullptr when looking up core register in MEMORY_MODULE");
+  }
+  std::cout << "  ✓ Correctly returns nullptr when module is wrong\n";
+}
+
+void test_aie4_nonexistent_register() {
+  std::cout << "Test: AIE4 Lookup Non-existent Register\n";
+
+  auto db = RegisterDatabase::loadAIE4();
+  if (!db) {
+    throw std::runtime_error("Failed to load database");
+  }
+
+  auto result = db->lookupRegister("NONEXISTENT_REGISTER", "CORE_MODULE");
+  if (result != nullptr) {
+    throw std::runtime_error("Expected nullptr for non-existent register");
+  }
+  std::cout << "  ✓ Correctly returns nullptr for non-existent register\n";
+}
+
 int main() {
   try {
     std::cout << "==============================================\n";
@@ -329,6 +543,15 @@ int main() {
     test_encode_field_value();
     test_encode_single_bit_field();
     test_encode_field_value_overflow();
+
+    // AIE4 tests
+    test_aie4_load_database();
+    test_aie4_lookup_register();
+    test_aie4_bitfield_parsing();
+    test_aie4_encode_field_value();
+    test_aie4_cross_module();
+    test_aie4_wrong_module();
+    test_aie4_nonexistent_register();
 
     std::cout << "\n==============================================\n";
     std::cout << "All tests passed! ✓\n";

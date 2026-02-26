@@ -84,6 +84,27 @@ std::unique_ptr<RegisterDatabase> RegisterDatabase::loadAIE2() {
   return db;
 }
 
+std::unique_ptr<RegisterDatabase> RegisterDatabase::loadAIE4() {
+  auto registerPath = findRegDBFile("aie_registers_aie4.json");
+
+  if (!registerPath) {
+    llvm::errs() << "Failed to locate AIE4 register database. "
+                 << "Set MLIR_AIE_INSTALL_DIR to the "
+                 << "MLIR-AIE installation path.\n";
+    return nullptr;
+  }
+
+  // Event database is optional for AIE4
+  auto eventPath = findRegDBFile("events_database.json");
+  std::string emptyPath;
+
+  auto db = std::unique_ptr<RegisterDatabase>(new RegisterDatabase());
+  if (!db->loadFromJSON(*registerPath, eventPath ? *eventPath : emptyPath))
+    return nullptr;
+
+  return db;
+}
+
 bool RegisterDatabase::loadFromJSON(StringRef registerPath,
                                     StringRef eventPath) {
   // Load register database
@@ -193,11 +214,14 @@ bool RegisterDatabase::loadFromJSON(StringRef registerPath,
     }
   }
 
-  // Load event database
+  // Load event database (optional — may not exist for all architectures)
+  if (eventPath.empty())
+    return true;
+
   auto eventBuf = MemoryBuffer::getFile(eventPath);
   if (!eventBuf) {
-    llvm::errs() << "Failed to load event database: " << eventPath << "\n";
-    return false;
+    // Event database is optional; not an error if missing
+    return true;
   }
 
   auto eventJSON = json::parse(eventBuf.get()->getBuffer());
@@ -206,20 +230,23 @@ bool RegisterDatabase::loadFromJSON(StringRef registerPath,
     return false;
   }
 
-  // Parse event database for aie2
   auto *eventRoot = eventJSON->getAsObject();
   if (!eventRoot)
     return false;
 
-  auto *aie2 = eventRoot->getObject("aie2");
-  if (!aie2) {
-    llvm::errs() << "Failed to find 'aie2' architecture in event database\n";
-    return false;
+  // Try architecture-specific key (aie2, aie4, etc.)
+  json::Object *archObj = nullptr;
+  for (const char *arch : {"aie2", "aie4"}) {
+    archObj = eventRoot->getObject(arch);
+    if (archObj)
+      break;
   }
+  if (!archObj)
+    return true; // No matching architecture; not an error
 
-  auto *eventModules = aie2->getObject("modules");
+  auto *eventModules = archObj->getObject("modules");
   if (!eventModules)
-    return false;
+    return true;
 
   // Iterate through modules (core, memory, pl, mem_tile)
   for (const auto &modulePair : *eventModules) {
