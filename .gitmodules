@@ -25,3 +25,6 @@
 [submodule "third_party/cert"]
 	path = third_party/cert
 	url = https://gitenterprise.xilinx.com/TurinAI/cert.git
+[submodule "third_party/aiebu"]
+	path = third_party/aiebu
+	url = https://github.com/Xilinx/aiebu.git

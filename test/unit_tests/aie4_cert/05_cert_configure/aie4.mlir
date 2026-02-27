@@ -7,7 +7,7 @@
 //
 // REQUIRES: mesimulator
 //
-// RUN: aiecc.py --tmpdir=project --alloc-scheme=basic-sequential --xchesscc --xbridge --no-compile-host --aie-generate-elf --elf-name=aie4.elf --aiesim %s %test_utils_flags %S/test.cpp
+// RUN: aiecc.py --tmpdir=project --alloc-scheme=basic-sequential --xchesscc --xbridge --no-compile-host --generate-full-elf --full-elf-name=aie4.elf --aiesim %s %test_utils_flags %S/test.cpp
 // RUN: aie-opt --convert-aie-to-transaction='elf-dir=%aie_obj_root/third_party/cert/main' %S/base.mlir -o transaction.mlir
 // RUN: aie-translate -aie-npu-to-binary -o transaction.bin transaction.mlir
 // RUN: project/mesim.sh | FileCheck --check-prefix=MESIM %s
@@ -49,5 +49,11 @@ module {
     }
 
     aie.flow(%tile_0_0, DMA : 0, %tile_0_1, DMA : 0)
+
+    // workaround for aiecc limitation where aiebu-asm json is incorrect for
+    // "full elf" target without at least one user runtime_sequence
+    aie.runtime_sequence () {
+      aie.end
+    }
   }
 }

@@ -7,18 +7,16 @@
 function(add_aiebu SRCPATH BUILDPATH INSTALLPATH)
   # Add a custom target to build AIEBU
   add_custom_command(
-    OUTPUT ${SRCPATH}/build/Release/AIEBU-3.2-Linux.tar.gz
+    OUTPUT ${SRCPATH}/build/Release/AIEBU-1.0-Linux.tar.gz
     COMMAND ${CMAKE_COMMAND} -E echo "Building AIEBU in ${SRCPATH} ${BUILDPATH}"
-    COMMAND sed -i 's/master\\/markdown/master\\/src\\/markdown_graphviz_svg\\/markdown/g' ${SRCPATH}/src/python/CMakeLists.txt
     # comment out failing ctest and debug build
     COMMAND sed -i "43s/^ /# /" ${SRCPATH}/build/build.sh
     COMMAND sed -i "64s/^c/# c/" ${SRCPATH}/build/build.sh
     COMMAND sed -i "65s/^c/# c/" ${SRCPATH}/build/build.sh
-    COMMAND sed -i "7s/3.30/3.32/" ${SRCPATH}/src/cpp/aiebu/CMakeLists.txt
     COMMAND ${CMAKE_COMMAND} -E chdir ${SRCPATH}/build ./build.sh
     COMMAND ${CMAKE_COMMAND} -E make_directory ${BUILDPATH}
     COMMAND ${CMAKE_COMMAND} -E rm -rf ${BUILDPATH}/aiebu
-    COMMAND tar --strip-components=1 -xzf ${SRCPATH}/build/Release/AIEBU-3.2-Linux.tar.gz -C ${BUILDPATH}
+    COMMAND tar --strip-components=1 -xzf ${SRCPATH}/build/Release/AIEBU-1.0-Linux.tar.gz -C ${BUILDPATH}
     WORKING_DIRECTORY ${SRCPATH}
     DEPENDS ${SRCPATH}
     COMMENT "Building AIEBU"
@@ -27,10 +25,10 @@ function(add_aiebu SRCPATH BUILDPATH INSTALLPATH)
   # Add a custom target to install AIEBU
   add_custom_target(install_aiebu ALL
     COMMAND ${CMAKE_COMMAND} -E echo "Installing AIEBU to ${INSTALLPATH}"
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${INSTALLPATH}
     COMMAND ${CMAKE_COMMAND} -E rm -rf ${INSTALLPATH}/aiebu
-    COMMAND tar --strip-components=1 -xzf ${SRCPATH}/build/Release/AIEBU-3.2-Linux.tar.gz -C ${INSTALLPATH}
-    DEPENDS ${SRCPATH}/build/Release/AIEBU-3.2-Linux.tar.gz
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${INSTALLPATH}/aiebu
+    COMMAND tar --strip-components=1 -xzf ${SRCPATH}/build/Release/AIEBU-1.0-Linux.tar.gz -C ${INSTALLPATH}/aiebu
+    DEPENDS ${SRCPATH}/build/Release/AIEBU-1.0-Linux.tar.gz
     COMMENT "Installing AIEBU"
   )
 

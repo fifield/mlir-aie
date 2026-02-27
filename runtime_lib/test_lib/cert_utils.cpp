@@ -298,13 +298,28 @@ std::vector<uint8_t>
 cert_utils::load_ctrl_pages_from_elf(const std::string &elf_path, uint32_t id) {
   std::vector<uint8_t> ctrl_pages;
   auto sections = extract_ctrl_sections(elf_path);
+
   // there are at most sections.size() / 2 pairs for a given id
   for (unsigned i = 0; i < sections.size() / 2; i++) {
     std::string text_section_name =
-        ".ctrltext." + std::to_string(id) + "." + std::to_string(i);
+        ".ctrltext." + std::to_string(id) + "." + std::to_string(i) + ".0";
     std::string data_section_name =
-        ".ctrldata." + std::to_string(id) + "." + std::to_string(i);
+        ".ctrldata." + std::to_string(id) + "." + std::to_string(i) + ".0";
+    auto dump_first_64_bytes = [](const std::string &sec_name,
+                                  const std::vector<uint8_t> &sec) {
+      static const char *hex = "0123456789ABCDEF";
+      const size_t n = sec.size() < 64 ? sec.size() : 64;
 
+      std::cout << sec_name << " first " << n << " bytes:\n";
+      for (size_t j = 0; j < n; ++j) {
+        uint8_t b = sec[j];
+        std::cout << hex[(b >> 4) & 0xF] << hex[b & 0xF] << ' ';
+        if ((j + 1) % 16 == 0)
+          std::cout << '\n';
+      }
+      if (n % 16 != 0)
+        std::cout << '\n';
+    };
     if (sections.count(text_section_name) &&
         sections.count(data_section_name)) {
       std::cout << "Loading sections: " << text_section_name << ", "

@@ -11,7 +11,7 @@
 // RUN: mkdir -p project0/
 // RUN: cp %aie_obj_root/third_party/cert/main/cert_medusa.elf project0/cert_medusa.elf
 // RUN: aiecc.py --tmpdir=project0 --xchesscc --xbridge --aie-generate-txn --txn-name=transaction.bin %S/base.mlir
-// RUN: aiecc.py --tmpdir=project1 --xchesscc --xbridge --no-compile-host --aie-generate-elf --elf-name=aie4.elf --aiesim %s %test_utils_flags %S/test.cpp
+// RUN: aiecc.py --tmpdir=project1 --xchesscc --xbridge --no-compile-host --generate-full-elf --full-elf-name=aie4.elf --aiesim %s %test_utils_flags %S/test.cpp
 // RUN: project1/mesim.sh | FileCheck --check-prefix=MESIM %s
 //
 // MESIM: device model: {{.*}}aie4

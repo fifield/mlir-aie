@@ -181,7 +181,7 @@ install_headers(${AIEAPI_SOURCE_DIR}
 
 include("aiebu/aiebu.cmake")
 add_aiebu(
-  ${PROJECT_SOURCE_DIR}/../third_party/cert/tools/aiebu
-  ${AIE_BINARY_DIR}
+  ${PROJECT_SOURCE_DIR}/../third_party/aiebu
+  ${AIE_BINARY_DIR}/aiebu
   ${CMAKE_INSTALL_PREFIX}
 )
