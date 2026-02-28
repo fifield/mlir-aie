@@ -21,11 +21,15 @@ CLI Usage:
     # Annotate an MLIR file
     python -m aie.utils.regdb -a input.mlir -o output.mlir
     python -m aie.utils.regdb -a input.mlir --in-place
+
+    # Annotate a cert ASM file
+    python -m aie.utils.regdb -s input.asm -o output.asm
 """
 
 import argparse
 import json
 import logging
+import re
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -867,6 +871,111 @@ class MLIRModuleAnnotator:
         return count
 
 
+class CertAsmAnnotator:
+    """Annotates cert ASM files with register information.
+
+    Parses WRITE_32, MASK_WRITE_32, and UC_DMA_BD instructions and appends
+    semicolon comments with decoded register names and bit-field values.
+    """
+
+    # Regex patterns for ASM instructions
+    _RE_WRITE_32 = re.compile(
+        r"^(\s*WRITE_32\s+)(0x[0-9a-fA-F]+),\s*(0x[0-9a-fA-F]+)\s*$"
+    )
+    _RE_MASK_WRITE_32 = re.compile(
+        r"^(\s*MASK_WRITE_32\s+)(0x[0-9a-fA-F]+),\s*(0x[0-9a-fA-F]+),\s*(0x[0-9a-fA-F]+)\s*$"
+    )
+    _RE_UC_DMA_BD = re.compile(
+        r"^(\s*UC_DMA_BD\s+\d+,\s*)(0x[0-9a-fA-F]+),(.*)$"
+    )
+
+    def __init__(self, arch="aie4"):
+        self.decoder = AIEAddressDecoder(arch=arch)
+        self.annotator = MLIRModuleAnnotator(arch=arch)
+
+    def annotate_line(self, line: str) -> str:
+        """Parse one ASM line; return it with ; comment appended if applicable."""
+        # Strip trailing newline for matching, preserve it for output
+        stripped = line.rstrip("\n\r")
+
+        # Try WRITE_32
+        m = self._RE_WRITE_32.match(stripped)
+        if m:
+            addr = int(m.group(2), 16)
+            value = int(m.group(3), 16)
+            decoded = self.decoder.parse_address(addr)
+            comment = self.annotator.generate_comment(decoded, value=value)
+            return stripped + "  ; " + comment
+
+        # Try MASK_WRITE_32
+        m = self._RE_MASK_WRITE_32.match(stripped)
+        if m:
+            addr = int(m.group(2), 16)
+            mask = int(m.group(3), 16)
+            value = int(m.group(4), 16)
+            decoded = self.decoder.parse_address(addr)
+            comment = self.annotator.generate_comment(decoded, value=value, mask=mask)
+            return stripped + "  ; " + comment
+
+        # Try UC_DMA_BD
+        m = self._RE_UC_DMA_BD.match(stripped)
+        if m:
+            addr = int(m.group(2), 16)
+            decoded = self.decoder.parse_address(addr)
+            col = decoded.get("col", "?")
+            row = decoded.get("row", "?")
+            offset = decoded.get("offset", "0x0")
+            register = decoded.get("register", "unknown")
+            if isinstance(offset, int):
+                offset = f"0x{offset:05X}"
+            elif offset.startswith("0x"):
+                try:
+                    offset = f"0x{int(offset, 16):05X}"
+                except (ValueError, TypeError):
+                    pass
+            comment = f"Tile({col}, {row}), Offset {offset}, Name: {register}"
+            return stripped + "  ; " + comment
+
+        return stripped
+
+    def annotate_file(self, input_path: str, output_path: Optional[str] = None) -> int:
+        """Read ASM file line by line, annotate, write output.
+
+        Args:
+            input_path: Path to input ASM file
+            output_path: Path to output file (None = stdout)
+
+        Returns:
+            Number of lines annotated
+        """
+        with open(input_path, "r") as f:
+            lines = f.readlines()
+
+        annotated_count = 0
+        output_lines = []
+        for line in lines:
+            original = line.rstrip("\n\r")
+            annotated = self.annotate_line(line)
+            if annotated != original:
+                annotated_count += 1
+            output_lines.append(annotated)
+
+        output_str = "\n".join(output_lines) + "\n"
+
+        if output_path:
+            with open(output_path, "w") as f:
+                f.write(output_str)
+            print(
+                f"Annotated {annotated_count} lines. Output written to: {output_path}",
+                file=sys.stderr,
+            )
+        else:
+            sys.stdout.write(output_str)
+            print(f"\n// Annotated {annotated_count} lines", file=sys.stderr)
+
+        return annotated_count
+
+
 def parse_address_arg(addr_str: str) -> int:
     """Parse address from string (supports hex and decimal)."""
     addr_str = addr_str.strip()
@@ -904,6 +1013,9 @@ Examples:
 
   # Annotate MLIR file and write to stdout
   %(prog)s -a input.mlir
+
+  # Annotate cert ASM file
+  %(prog)s -s input.asm -o output.asm
         """,
     )
 
@@ -927,9 +1039,15 @@ Examples:
         help="Annotate MLIR file with register information",
     )
     parser.add_argument(
+        "-s",
+        "--asm",
+        metavar="ASM_FILE",
+        help="Annotate cert ASM file with register information",
+    )
+    parser.add_argument(
         "-o",
         "--output",
-        help="Output file for annotated MLIR (default: stdout)",
+        help="Output file for annotated MLIR/ASM (default: stdout)",
     )
     parser.add_argument(
         "--in-place",
@@ -952,6 +1070,28 @@ Examples:
 
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
+
+    # ASM annotation mode (default arch to aie4 since cert is AIE4-only)
+    if args.asm:
+        arch = args.arch if args.arch != "aie2" or "--arch" in sys.argv else "aie4"
+        if args.in_place:
+            output_path = args.asm
+        else:
+            output_path = args.output
+
+        try:
+            asm_annotator = CertAsmAnnotator(arch=arch)
+            asm_annotator.annotate_file(args.asm, output_path)
+        except FileNotFoundError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            import traceback
+
+            traceback.print_exc()
+            return 1
+        return 0
 
     # MLIR annotation mode
     if args.annotate:

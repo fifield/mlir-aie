@@ -18,7 +18,7 @@ Tests cover:
 import sys
 
 # Try to import from installed package, or use a workaround message
-from aie.utils.regdb import AIEAddressDecoder, MLIRModuleAnnotator
+from aie.utils.regdb import AIEAddressDecoder, MLIRModuleAnnotator, CertAsmAnnotator
 
 # =============================================================================
 # Test AIEAddressDecoder - Address Parsing
@@ -487,6 +487,59 @@ with Context() as ctx, Location.unknown():
     module_str = str(module)
     has_comment = 'comment = "Tile(0, 2)' in module_str
     print(f"  has_comment_attribute: {has_comment}")
+
+# =============================================================================
+# Test CertAsmAnnotator
+# =============================================================================
+
+print("\n" + "=" * 70)
+print("Testing CertAsmAnnotator")
+print("=" * 70)
+
+asm_annotator = CertAsmAnnotator(arch="aie4")
+
+# -----------------------------------------------------------------------------
+# Test 24: Annotate WRITE_32 line
+# Address 0x006a3000 is Core_Control at Tile(0, 2) on AIE4
+# -----------------------------------------------------------------------------
+# CHECK-LABEL: Test 24: Annotate WRITE_32
+# CHECK: has_comment: True
+# CHECK: has_register: True
+# CHECK: has_value: True
+print("\nTest 24: Annotate WRITE_32")
+asm_line = "  WRITE_32               0x006a3000, 0x00000001\n"
+result_line = asm_annotator.annotate_line(asm_line)
+print(f"  has_comment: {'; ' in result_line}")
+print(f"  has_register: {'Core_Control' in result_line}")
+print(f"  has_value: {'Value' in result_line}")
+
+# -----------------------------------------------------------------------------
+# Test 25: Annotate MASK_WRITE_32 line
+# Address 0x006a3000 is Core_Control at Tile(0, 2) on AIE4
+# -----------------------------------------------------------------------------
+# CHECK-LABEL: Test 25: Annotate MASK_WRITE_32
+# CHECK: has_comment: True
+# CHECK: has_register: True
+# CHECK: has_mask: True
+print("\nTest 25: Annotate MASK_WRITE_32")
+asm_line = "  MASK_WRITE_32          0x006a3000, 0x00000001, 0x00000000\n"
+result_line = asm_annotator.annotate_line(asm_line)
+print(f"  has_comment: {'; ' in result_line}")
+print(f"  has_register: {'Core_Control' in result_line}")
+print(f"  has_mask: {'Mask' in result_line}")
+
+# -----------------------------------------------------------------------------
+# Test 26: Annotate UC_DMA_BD line
+# Address 0x00108000 targets a memory tile register area
+# -----------------------------------------------------------------------------
+# CHECK-LABEL: Test 26: Annotate UC_DMA_BD
+# CHECK: has_comment: True
+# CHECK: has_tile: True
+print("\nTest 26: Annotate UC_DMA_BD")
+asm_line = "  UC_DMA_BD    0, 0x006ac000, @blockwrite_data_1, 6, 0, 0\n"
+result_line = asm_annotator.annotate_line(asm_line)
+print(f"  has_comment: {'; ' in result_line}")
+print(f"  has_tile: {'Tile(' in result_line}")
 
 # =============================================================================
 # Summary
