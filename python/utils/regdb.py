@@ -38,29 +38,61 @@ logger = logging.getLogger(__name__)
 class AIEAddressDecoder:
     """Decoder for AIE array addresses."""
 
-    # Memory region definitions: (name, base_offset, size_bytes)
+    # Memory region definitions per architecture: (name, base_offset, size_bytes)
     # These are regions where addresses within the range should show offset from base
     MEMORY_REGIONS = {
-        "core": [
-            ("Program_Memory", 0x20000, 0x4000),  # 16KB program memory
-            ("DataMemory", 0x0, 0x10000),  # 64KB data memory
-        ],
-        "memory": [
-            ("DataMemory", 0x0, 0x10000),  # 64KB data memory for memory module
-        ],
-        "memory_tile": [
-            ("DataMemory", 0x0, 0x80000),  # 512KB data memory for memtile
-        ],
+        "aie2": {
+            "core": [
+                ("Program_Memory", 0x20000, 0x4000),  # 16KB program memory
+                ("DataMemory", 0x0, 0x10000),  # 64KB data memory
+            ],
+            "memory": [
+                ("DataMemory", 0x0, 0x10000),  # 64KB data memory for memory module
+            ],
+            "memory_tile": [
+                ("DataMemory", 0x0, 0x80000),  # 512KB data memory for memtile
+            ],
+        },
+        "aie4": {
+            "core": [
+                ("Program_Memory", 0x80000, 0x8000),  # 32KB program memory
+                ("DataMemory", 0x0, 0x20000),  # 128KB data memory
+            ],
+            "memory": [
+                ("DataMemory", 0x0, 0x20000),  # 128KB data memory for memory module
+            ],
+            # Note: AIE4 memtile DataMemory starts at 0x100000 which exceeds the
+            # 20-bit tile offset (row_shift=20). It is omitted from memory regions
+            # since it cannot be represented in the standard addressing scheme.
+        },
     }
 
-    def __init__(self):
-        """Initialize decoder with register database."""
+    # Map architecture name to AIEDevice enum name
+    _ARCH_DEVICE = {
+        "aie2": "npu1",
+        "aie4": "npu3",
+    }
+
+    _KNOWN_ARCHES = {"aie2", "aie4"}
+
+    def __init__(self, arch="aie2"):
+        """Initialize decoder with register database
+
+        Args:
+            arch: Architecture name ("aie2" or "aie4")
+        """
+        if arch not in self._KNOWN_ARCHES:
+            raise ValueError(
+                f"Unknown architecture '{arch}', expected one of {sorted(self._KNOWN_ARCHES)}"
+            )
+        self.arch = arch
         self.database: dict = {}
         self.load_database()
 
     def load_database(self):
-        """Load the register database from JSON file."""
-        db_path = Path(root_path()) / "lib" / "regdb" / "aie_registers_aie2.json"
+        """Load the register database from JSON file"""
+
+        db_path = Path(root_path()) / "lib" / "regdb" / f"aie_registers_{self.arch}.json"
 
         try:
             with open(db_path, "r") as f:
@@ -75,33 +107,71 @@ class AIEAddressDecoder:
             logger.error("Invalid JSON in database file: %s", e)
             raise
 
+    def _addr_row_to_logical(self, addr_row: int, target_model) -> int:
+        """Convert an address-space row to a logical tile row.
+
+        On AIE4 memtiles occupy multiple rows of address space (5 per
+        memtile row).  Core tile addresses are shifted up accordingly:
+            encode: addr_row = row + 5*num_memtile_rows - 1
+            decode: row = addr_row - 5*num_memtile_rows + 1
+
+        Memtile address rows (1 .. 5*N) all map back to the first
+        memtile logical row (row 1).
+
+        On AIE2 there is no adjustment (1:1 mapping).
+        """
+        if self.arch != "aie4":
+            return addr_row
+
+        num_mt = target_model.get_num_mem_tile_rows()  # typically 1
+        mt_addr_span = 5 * num_mt  # address rows consumed by memtiles
+        first_core_addr_row = 1 + mt_addr_span  # = 6 when num_mt=1
+
+        if addr_row == 0:
+            return 0  # shim
+        elif addr_row < first_core_addr_row:
+            return 1  # memtile (all 5 address rows → logical row 1)
+        else:
+            return addr_row - mt_addr_span + 1
+
+    def _logical_row_to_addr(self, row: int, col: int, target_model) -> int:
+        """Convert a logical tile row to an address-space row.
+
+        Inverse of _addr_row_to_logical.
+        """
+        if self.arch != "aie4":
+            return row
+        if target_model.is_core_tile(col, row):
+            num_mt = target_model.get_num_mem_tile_rows()
+            return row + (5 * num_mt) - 1
+        return row
+
     def parse_address(self, address: int) -> Optional[Dict]:
         """Parse an AIE address and return decoded information.
 
         Args:
             address: Address to decode (hex or decimal)
 
-        Address format: ((col << column_shift) | (row << row_shift)) + offset
+        Address format: ((col << column_shift) | (addr_row << row_shift)) + offset
 
-        Where:
-        - col: column number
-        - row: row number
-          - row 0: shim tile (shim module)
-          - row 1: memtile (memory_tile module)
-          - row 2+: core tile (core, memory modules)
+        On AIE4 core tiles, addr_row != logical row because memtiles
+        consume 5 rows of address space each.
         """
         import aie.dialects.aie as aiedialect
 
-        # Get target model from npu1 device
-        device = getattr(aiedialect, "AIEDevice").npu1
+        # Get target model from device for this architecture
+        device = getattr(aiedialect.AIEDevice, self._ARCH_DEVICE[self.arch])
         target_model = aiedialect.get_target_model(device)
 
-        # Extract col, row, and offset using target model
+        # Extract col, address row, and offset
         col = (address >> target_model.get_column_shift()) & 0x7F
-        row = (address >> target_model.get_row_shift()) & 0x1F
+        addr_row = (address >> target_model.get_row_shift()) & 0x1F
         register_offset = address & 0xFFFFF  # bits 0-19 (offset within tile)
 
-        # Determine tile type and candidate modules
+        # Convert address row to logical row for tile-type queries
+        row = self._addr_row_to_logical(addr_row, target_model)
+
+        # Determine tile type and candidate modules using logical row
         if target_model.is_mem_tile(col, row):
             tile_type = "memory_tile"
             module_candidates = ["memory_tile"]
@@ -199,8 +269,9 @@ class AIEAddressDecoder:
         Returns:
             Dict with memory region info if found, None otherwise
         """
-        # Check for memory regions in this module
-        regions = self.MEMORY_REGIONS.get(module_name, [])
+        # Check for memory regions in this module for the current architecture
+        arch_regions = self.MEMORY_REGIONS.get(self.arch, {})
+        regions = arch_regions.get(module_name, [])
 
         for region_name, base_offset, size_bytes in regions:
             if base_offset <= offset < base_offset + size_bytes:
@@ -235,8 +306,8 @@ class AIEAddressDecoder:
         """
         import aie.dialects.aie as aiedialect
 
-        # Get target model from npu1 device
-        device = getattr(aiedialect, "AIEDevice").npu1
+        # Get target model from device for this architecture
+        device = getattr(aiedialect.AIEDevice, self._ARCH_DEVICE[self.arch])
         target_model = aiedialect.get_target_model(device)
 
         # Find the register
@@ -280,10 +351,13 @@ class AIEAddressDecoder:
         except (ValueError, AttributeError):
             return None
 
+        # Convert logical row to address row (AIE4 core tile adjustment)
+        addr_row = self._logical_row_to_addr(row, col, target_model)
+
         # Calculate address using target model
         address = (
             (col << target_model.get_column_shift())
-            | (row << target_model.get_row_shift())
+            | (addr_row << target_model.get_row_shift())
         ) + register_offset
 
         return address
@@ -371,9 +445,14 @@ class AIEAddressDecoder:
 class MLIRModuleAnnotator:
     """Annotates MLIR modules with register information using Python bindings."""
 
-    def __init__(self):
-        """Initialize with AIE decoder."""
-        self.decoder = AIEAddressDecoder()
+    def __init__(self, arch="aie2"):
+        """Initialize with AIE decoder
+
+        Args:
+            arch: Architecture name ("aie2" or "aie4")
+        """
+        self.arch = arch
+        self.decoder = AIEAddressDecoder(arch=arch)
 
     def decode_bit_field_value(self, value: int, bit_range: str) -> int:
         """Extract bits from value based on bit range.
@@ -603,10 +682,12 @@ class MLIRModuleAnnotator:
         # If we have row/col from operation attributes, we need to construct
         # a full address for the decoder (which expects col/row encoded in address)
         if row is not None and col is not None:
+            # Convert logical row to address row (AIE4 core tile adjustment)
+            addr_row = self.decoder._logical_row_to_addr(row, col, target_model)
             # Construct full address using target model
             full_address = (
                 (col << target_model.get_column_shift())
-                | (row << target_model.get_row_shift())
+                | (addr_row << target_model.get_row_shift())
             ) + (address & 0xFFFFF)
         else:
             # Address already contains col/row encoded
@@ -664,6 +745,17 @@ class MLIRModuleAnnotator:
             device = AIEDevice.npu1
         else:
             device = AIEDevice(int(devices[0].device))
+
+        # Detect architecture from the device and update decoder if needed
+        # Map device name (or prefix) to arch; npu1*/npu2* -> aie2, npu3* -> aie4
+        device_name = device.name
+        if device_name.startswith("npu3"):
+            detected_arch = "aie4"
+        else:
+            detected_arch = "aie2"
+        if detected_arch != self.arch:
+            self.arch = detected_arch
+            self.decoder = AIEAddressDecoder(arch=detected_arch)
 
         target_model = aiedialect.get_target_model(device)
 
@@ -851,6 +943,12 @@ Examples:
         action="store_true",
         help="Show bit field definitions when decoding addresses",
     )
+    parser.add_argument(
+        "--arch",
+        choices=["aie2", "aie4"],
+        default="aie2",
+        help="Target architecture (default: aie2)",
+    )
 
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
@@ -864,7 +962,7 @@ Examples:
             output_path = args.output
 
         try:
-            annotator = MLIRModuleAnnotator()
+            annotator = MLIRModuleAnnotator(arch=args.arch)
             annotator.annotate_file(args.annotate, output_path)
         except FileNotFoundError as e:
             logger.error("%s", e)
@@ -878,7 +976,7 @@ Examples:
         return 0
 
     # Initialize decoder for address operations
-    decoder = AIEAddressDecoder()
+    decoder = AIEAddressDecoder(arch=args.arch)
 
     # Reverse lookup mode
     if args.col is not None and args.row is not None and args.register:

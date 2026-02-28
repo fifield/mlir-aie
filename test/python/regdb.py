@@ -337,6 +337,158 @@ with Context() as ctx, Location.unknown():
     print(f"  has_comment_attribute: {has_comment}")
 
 # =============================================================================
+# Test AIE4 Architecture Support
+# =============================================================================
+
+print("\n" + "=" * 70)
+print("Testing AIE4 Architecture Support")
+print("=" * 70)
+
+# -----------------------------------------------------------------------------
+# Test 17: AIE4 Core tile register (Core_Control at offset 0xA3000)
+# AIE4 core tiles use adjusted address rows: addr_row = row + 4 (for 1 memtile row)
+# Tile(0, 2): ((0 << 25) | ((2+4) << 20)) + 0xA3000 = 0x600000 + 0xA3000 = 0x6A3000
+# -----------------------------------------------------------------------------
+# CHECK-LABEL: Test 17: AIE4 Core tile register
+# CHECK: col: 0
+# CHECK: row: 2
+# CHECK: tile_type: core_tile
+# CHECK: register: Core_Control
+print("\nTest 17: AIE4 Core tile register")
+decoder4 = AIEAddressDecoder(arch="aie4")
+result = decoder4.parse_address(0x6A3000)
+print(f"  col: {result['col']}")
+print(f"  row: {result['row']}")
+print(f"  tile_type: {result['tile_type']}")
+print(f"  register: {result['register']}")
+
+# -----------------------------------------------------------------------------
+# Test 18: AIE4 Program Memory region (base 0x80000, 32KB)
+# Address 0x80010 should be Program_Memory+0x10
+# Tile(0, 2): ((0 << 25) | (6 << 20)) + 0x80010 = 0x680010
+# -----------------------------------------------------------------------------
+# CHECK-LABEL: Test 18: AIE4 Program Memory region
+# CHECK: col: 0
+# CHECK: row: 2
+# CHECK: register: Program_Memory+0x10
+# CHECK: is_memory_region: True
+print("\nTest 18: AIE4 Program Memory region")
+result = decoder4.parse_address(0x680010)
+print(f"  col: {result['col']}")
+print(f"  row: {result['row']}")
+print(f"  register: {result['register']}")
+print(f"  is_memory_region: {result.get('is_memory_region', False)}")
+
+# -----------------------------------------------------------------------------
+# Test 19: AIE4 Core DataMemory region (base 0x0, 128KB)
+# Address 0x100 should be DataMemory+0x100
+# Tile(0, 2): ((0 << 25) | (6 << 20)) + 0x100 = 0x600100
+# -----------------------------------------------------------------------------
+# CHECK-LABEL: Test 19: AIE4 Core DataMemory region
+# CHECK: col: 0
+# CHECK: row: 2
+# CHECK: register: DataMemory+0x100
+# CHECK: is_memory_region: True
+print("\nTest 19: AIE4 Core DataMemory region")
+result = decoder4.parse_address(0x600100)
+print(f"  col: {result['col']}")
+print(f"  row: {result['row']}")
+print(f"  register: {result['register']}")
+print(f"  is_memory_region: {result.get('is_memory_region', False)}")
+
+# -----------------------------------------------------------------------------
+# Test 20: AIE4 encode/decode round-trip
+# encode_address(0,2,"Core_Control") should produce addr_row=6 -> 0x6A3000
+# -----------------------------------------------------------------------------
+# CHECK-LABEL: Test 20: AIE4 round-trip encode/decode
+# CHECK: encoded_address: 0x6a3000
+# CHECK: round_trip_success: True
+print("\nTest 20: AIE4 round-trip encode/decode")
+encoded4 = decoder4.encode_address(col=0, row=2, register_name="Core_Control")
+print(f"  encoded_address: {hex(encoded4) if encoded4 else 'None'}")
+decoded4 = decoder4.parse_address(encoded4)
+round_trip_ok = (
+    decoded4["register"] == "Core_Control"
+    and decoded4["col"] == 0
+    and decoded4["row"] == 2
+)
+print(f"  round_trip_success: {round_trip_ok}")
+
+# -----------------------------------------------------------------------------
+# Test 21: AIE4 memory region boundaries
+# Program_Memory: 0x80000 to 0x87FFF (32KB)
+# DataMemory: 0x0 to 0x1FFFF (128KB)
+# -----------------------------------------------------------------------------
+# CHECK-LABEL: Test 21: AIE4 memory region boundaries
+# CHECK: pm_at_start: True
+# CHECK: pm_at_end: True
+# CHECK: pm_past_end: False
+# CHECK: dm_at_end: True
+# CHECK: dm_past_end: False
+print("\nTest 21: AIE4 memory region boundaries")
+pm_at_start = decoder4.find_memory_region("core", 0x80000)
+pm_at_end = decoder4.find_memory_region("core", 0x87FFF)
+pm_past_end = decoder4.find_memory_region("core", 0x88000)
+dm_at_end = decoder4.find_memory_region("core", 0x1FFFF)
+dm_past_end = decoder4.find_memory_region("core", 0x20000)
+print(f"  pm_at_start: {pm_at_start is not None}")
+print(f"  pm_at_end: {pm_at_end is not None}")
+print(f"  pm_past_end: {pm_past_end is not None}")
+print(f"  dm_at_end: {dm_at_end is not None}")
+print(f"  dm_past_end: {dm_past_end is not None}")
+
+# -----------------------------------------------------------------------------
+# Test 22: AIE4 bit-fields have 'bits' string
+# Core_Control has Enable and Reset bit-fields
+# -----------------------------------------------------------------------------
+# CHECK-LABEL: Test 22: AIE4 bit-fields have bits string
+# CHECK: has_bit_fields: True
+# CHECK: has_bits_string: True
+print("\nTest 22: AIE4 bit-fields have bits string")
+result = decoder4.parse_address(0x6A3000)
+has_bf = "bit_fields" in result and len(result["bit_fields"]) > 0
+print(f"  has_bit_fields: {has_bf}")
+if has_bf:
+    has_bits = all("bits" in bf for bf in result["bit_fields"])
+    print(f"  has_bits_string: {has_bits}")
+else:
+    print(f"  has_bits_string: False")
+
+# -----------------------------------------------------------------------------
+# Test 23: AIE4 MLIR module annotation with npu3 device
+# -----------------------------------------------------------------------------
+# CHECK-LABEL: Test 23: AIE4 MLIR annotation
+# CHECK: annotated_count: {{[0-9]+}}
+# CHECK: has_comment_attribute: True
+print("\nTest 23: AIE4 MLIR annotation")
+
+mlir_source_aie4 = """
+module {
+    aie.device(npu3) {
+    %tile_0_2 = aie.tile(0, 2)
+    aie.runtime_sequence() {
+        aiex.npu.write32 {address = 0xA3000 : ui32, column = 0 : i32, row = 2 : i32, value = 1 : ui32}
+    }
+    }
+}
+"""
+
+annotator4 = MLIRModuleAnnotator(arch="aie4")
+
+with Context() as ctx, Location.unknown():
+    ctx.append_dialect_registry(get_dialect_registry())
+    ctx.load_all_available_dialects()
+
+    module = Module.parse(mlir_source_aie4)
+    count = annotator4.annotate_module(module)
+    print(f"  annotated_count: {count}")
+
+    # Verify annotations reference Core_Control
+    module_str = str(module)
+    has_comment = 'comment = "Tile(0, 2)' in module_str
+    print(f"  has_comment_attribute: {has_comment}")
+
+# =============================================================================
 # Summary
 # =============================================================================
 
