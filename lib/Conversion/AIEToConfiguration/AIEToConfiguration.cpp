@@ -961,13 +961,13 @@ convertAIEToConfiguration(AIE::DeviceOp device, StringRef clElfDir,
 
   // If we chose the first aiex.configure as insertion point, erase it
   // and inline its child operations.
-  if (!configureOps.empty()) {
-    // splice the body into the current insertion point
-    builder.getBlock()->getOperations().splice(
-        builder.getInsertionPoint(),
-        configureOps.front().getBody().front().getOperations());
-    configureOps.front().erase();
-  }
+  // if (!configureOps.empty()) {
+  //   // splice the body into the current insertion point
+  //   builder.getBlock()->getOperations().splice(
+  //       builder.getInsertionPoint(),
+  //       configureOps.front().getBody().front().getOperations());
+  //   configureOps.front().erase();
+  // }
 
   return success();
 }
