@@ -1,33 +1,11 @@
-//===- aie_no_trace.mlir ---------------------------------------*- MLIR -*-===//
-//
-// This file is licensed under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-// Copyright (C) 2024, Advanced Micro Devices, Inc.
-//
-//===----------------------------------------------------------------------===//
-//
-// This is the same design as aie_trace.mlir but WITHOUT trace configuration.
-// Compare this file with aie_trace.mlir to see what trace adds.
-//
-//===----------------------------------------------------------------------===//
-
 module {
   aie.device(npu1_1col) {
-    // External kernel function declaration
     func.func private @vector_scalar_mul_aie_scalar(memref<1024xi32>, memref<1024xi32>, memref<1xi32>, i32)
-    
-    // Tile declarations
     %shim_noc_tile_0_0 = aie.tile(0, 0)
     %tile_0_2 = aie.tile(0, 2)
-    
-    // ObjectFIFOs for data movement
     aie.objectfifo @in(%shim_noc_tile_0_0, {%tile_0_2}, 2 : i32) : !aie.objectfifo<memref<1024xi32>> 
     aie.objectfifo @infactor(%shim_noc_tile_0_0, {%tile_0_2}, 2 : i32) : !aie.objectfifo<memref<1xi32>> 
     aie.objectfifo @out(%tile_0_2, {%shim_noc_tile_0_0}, 2 : i32) : !aie.objectfifo<memref<1024xi32>> 
-    
-    // Core computation
     %core_0_2 = aie.core(%tile_0_2) {
       %c0 = arith.constant 0 : index
       %c9223372036854775807 = arith.constant 9223372036854775807 : index
@@ -52,27 +30,51 @@ module {
       }
       aie.end
     } {link_with = "scale.o"}
-    
-    // Runtime sequence - NO TRACE CONFIGURATION
-    aiex.runtime_sequence(%arg0: memref<4096xi32>, %arg1: memref<1xi32>, %arg2: memref<4096xi32>) {
-      
-      // Configure DMA tasks for input, factor, and output
+    aie.trace @core_trace(%tile_0_2) {
+      aie.trace.mode "Event-Time"
+      aie.trace.packet id = 1 type = core
+      aie.trace.event <"INSTR_EVENT_0">
+      aie.trace.event <"INSTR_EVENT_1">
+      aie.trace.event <"INSTR_VECTOR">
+      aie.trace.event <"MEMORY_STALL">
+      aie.trace.event <"PORT_IDLE_0">
+      aie.trace.event <"LOCK_STALL">
+      aie.trace.event <"PORT_RUNNING_1">
+      aie.trace.event <"PORT_RUNNING_0">
+      aie.trace.port<0> port = DMA channel = 0 direction = S2MM
+      aie.trace.port<1> port = DMA channel = 0 direction = MM2S
+      aie.trace.start broadcast=15
+      aie.trace.stop broadcast=14
+    }
+    aie.trace @shim_trace(%shim_noc_tile_0_0) {
+      aie.trace.packet id = 2 type = shimtile
+      aie.trace.event <"DMA_S2MM_0_START_TASK">
+      aie.trace.event <"DMA_S2MM_1_START_TASK">
+      aie.trace.event <"DMA_MM2S_0_START_TASK">
+      aie.trace.event <"DMA_S2MM_0_FINISHED_TASK">
+      aie.trace.event <"DMA_S2MM_1_FINISHED_TASK">
+      aie.trace.event <"DMA_MM2S_0_FINISHED_TASK">
+      aie.trace.event <"DMA_S2MM_0_STREAM_STARVATION">
+      aie.trace.event <"DMA_S2MM_1_STREAM_STARVATION">
+      aie.trace.start event=<"TRUE">
+      aie.trace.stop event=<"NONE">
+    }
+    aie.runtime_sequence(%arg0: memref<4096xi32>, %arg1: memref<1xi32>, %arg2: memref<4096xi32>, %arg3: memref<1048576xi8>) {
+      aie.trace.start_config @core_trace
+      aie.trace.start_config @shim_trace
+
       %0 = aiex.dma_configure_task_for @in {
         aie.dma_bd(%arg0 : memref<4096xi32>, 0, 4096, [<size = 1, stride = 0>, <size = 1, stride = 0>, <size = 1, stride = 0>, <size = 4096, stride = 1>]) {burst_length = 0 : i32}
         aie.end
       } {issue_token = true}
-      
       %1 = aiex.dma_configure_task_for @infactor {
         aie.dma_bd(%arg1 : memref<1xi32>, 0, 1, [<size = 1, stride = 0>, <size = 1, stride = 0>, <size = 1, stride = 0>, <size = 1, stride = 1>]) {burst_length = 0 : i32}
         aie.end
       } {issue_token = true}
-      
       %2 = aiex.dma_configure_task_for @out {
         aie.dma_bd(%arg2 : memref<4096xi32>, 0, 4096, [<size = 1, stride = 0>, <size = 1, stride = 0>, <size = 1, stride = 0>, <size = 4096, stride = 1>]) {burst_length = 0 : i32}
         aie.end
       } {issue_token = true}
-      
-      // Start and await data transfer tasks
       aiex.dma_start_task(%0)
       aiex.dma_start_task(%1)
       aiex.dma_start_task(%2)
@@ -82,3 +84,4 @@ module {
     }
   }
 }
+
