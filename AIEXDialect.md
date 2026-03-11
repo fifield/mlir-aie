@@ -1809,6 +1809,19 @@ _AIE Device_
 | npu2_6col | `14` | npu2_6col |
 | npu2_7col | `15` | npu2_7col |
 
+### AIETileType
+
+_Type of AIE Tile_
+
+#### Cases:
+
+| Symbol | Value | String |
+| :----: | :---: | ------ |
+| CoreTile | `0` | CoreTile |
+| MemTile | `1` | MemTile |
+| ShimNOCTile | `2` | ShimNOCTile |
+| ShimPLTile | `3` | ShimPLTile |
+
 ### CascadeDir
 
 _Directions for cascade_
@@ -1822,7 +1835,20 @@ _Directions for cascade_
 | North | `5` | North |
 | East | `6` | East |
 
-### CoreEvent
+### ComboLogic
+
+_Combo event logic function_
+
+#### Cases:
+
+| Symbol | Value | String |
+| :----: | :---: | ------ |
+| AND | `0` | AND |
+| AND_NOT | `1` | AND_NOT |
+| OR | `2` | OR |
+| OR_NOT | `3` | OR_NOT |
+
+### CoreEventAIE
 
 _Core module event enumeration for AIE_
 
@@ -2237,6 +2263,18 @@ _DMA Channel direction_
 | S2MM | `0` | S2MM |
 | MM2S | `1` | MM2S |
 
+### EdgeTrigger
+
+_Edge detection trigger mode_
+
+#### Cases:
+
+| Symbol | Value | String |
+| :----: | :---: | ------ |
+| RISING | `1` | RISING |
+| FALLING | `2` | FALLING |
+| BOTH | `3` | BOTH |
+
 ### LockAction
 
 _Lock acquire/release_
@@ -2260,7 +2298,7 @@ _Lock operation is blocking_
 | NonBlocking | `0` | NonBlocking |
 | Blocking | `1` | Blocking |
 
-### MemEvent
+### MemEventAIE
 
 _Memory module event enumeration for AIE_
 
@@ -2645,7 +2683,7 @@ _Memory module event enumeration for AIE2P_
 | USER_EVENT_2 | `126` | USER_EVENT_2 |
 | USER_EVENT_3 | `127` | USER_EVENT_3 |
 
-### MemTileEvent
+### MemTileEventAIE
 
 _Memory tile event enumeration for AIE_
 
@@ -3005,7 +3043,7 @@ _Ports of an object FIFO_
 | Produce | `0` | Produce |
 | Consume | `1` | Consume |
 
-### ShimTileEvent
+### ShimTileEventAIE
 
 _Shim tile event enumeration for AIE_
 
@@ -3415,6 +3453,31 @@ _Shim tile event enumeration for AIE2P_
 | BROADCAST_A_15 | `125` | BROADCAST_A_15 |
 | USER_EVENT_0 | `126` | USER_EVENT_0 |
 | USER_EVENT_1 | `127` | USER_EVENT_1 |
+
+### TraceMode
+
+_Trace capture mode_
+
+#### Cases:
+
+| Symbol | Value | String |
+| :----: | :---: | ------ |
+| EventTime | `0` | Event-Time |
+| EventPC | `1` | Event-PC |
+| Execution | `2` | Execution |
+
+### TracePacketType
+
+_Packet type identifier for parsing_
+
+#### Cases:
+
+| Symbol | Value | String |
+| :----: | :---: | ------ |
+| Core | `0` | core |
+| Mem | `1` | mem |
+| ShimTile | `2` | shimtile |
+| MemTile | `3` | memtile |
 
 ### WireBundle
 
