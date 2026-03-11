@@ -53,7 +53,8 @@ std::optional<uint32_t> BdIdGenerator::nextBdId(uint32_t row,
   uint32_t maxBdId = targetModel.getNumBDs(col, row) - 1;
   // Find the next free BD ID. This is not an efficient algorithm, but doesn't
   for (; (bdIdAlreadyAssigned(row, channelIndex, dir, bdId) ||
-          !targetModel.isBdChannelAccessible(col, row, bdId, channelIndex)) &&
+          !targetModel.isBdChannelAccessible(col, row, bdId, channelIndex,
+                                             dir)) &&
          bdId <= maxBdId;
        bdId += alignment)
     ;
@@ -330,7 +331,7 @@ struct AIEAssignBufferDescriptorIDsPass
           auto tile = std::make_pair(a.col, a.row);
           if (!tiles.insert(tile).second ||
               id >= targetModel.getNumBDs(a.col, a.row) ||
-              !targetModel.isBdChannelAccessible(a.col, a.row, id, a.channel) ||
+              !targetModel.isBdChannelAccessible(a.col, a.row, id, a.channel, a.dir) ||
               (!a.bd.getBdId() && gens.at(tile).bdIdAlreadyAssigned(a.row, a.channel, a.dir, id)))
             return false;
         }
@@ -359,7 +360,7 @@ struct AIEAssignBufferDescriptorIDsPass
     for (auto &a : assignments) {
       auto &gen = gens.at({a.col, a.row});
       if (auto id = a.bd.getBdId()) {
-        if (!targetModel.isBdChannelAccessible(a.col, a.row, *id, a.channel)) {
+        if (!targetModel.isBdChannelAccessible(a.col, a.row, *id, a.channel, a.dir)) {
           a.bd.emitOpError()
               << "assigned bd_id " << *id << " is not accessible from channel "
               << a.channel << " on this tile";
@@ -370,7 +371,7 @@ struct AIEAssignBufferDescriptorIDsPass
         if (!nextId) {
           a.bd.emitOpError()
               << "Allocator exhausted available BD IDs (maximum "
-              << targetModel.getNumBDsForChannel(a.col, a.row, a.channel)
+              << targetModel.getNumBDsForChannel(a.col, a.row, a.channel, a.dir)
               << " available for channel " << a.channel << ").";
           return signalPassFailure();
         }

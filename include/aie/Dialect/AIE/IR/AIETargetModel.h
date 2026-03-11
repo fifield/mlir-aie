@@ -507,10 +507,11 @@ public:
   /// Return the number of buffer descriptors accessible on channel `channel`
   /// for the tile at (`col`, `row`). For tiles with no per-channel BD
   /// partitioning this equals getNumBDs(col, row).
-  uint32_t getNumBDsForChannel(int col, int row, int channel) const {
+  uint32_t getNumBDsForChannel(int col, int row, int channel,
+                               DMAChannelDir dir) const {
     uint32_t count = 0;
     for (uint32_t bd = 0; bd < getNumBDs(col, row); ++bd)
-      if (isBdChannelAccessible(col, row, bd, channel))
+      if (isBdChannelAccessible(col, row, bd, channel, dir))
         ++count;
     return count;
   }
@@ -530,9 +531,9 @@ public:
   }
 
   /// Return true iff buffer descriptor `bd_id` on tile (`col`, `row`) can be
-  /// submitted on channel `channel`.
+  /// submitted on channel `channel` with direction `dir`.
   virtual bool isBdChannelAccessible(int col, int row, uint32_t bd_id,
-                                     int channel) const = 0;
+                                     int channel, DMAChannelDir dir) const = 0;
 
   /// Return the register layout of a buffer descriptor on the given tile
   /// type, or null if the target has none modeled for it.
@@ -791,9 +792,7 @@ public:
   uint32_t getMaxLockValue() const override { return 1; }
   std::optional<uint32_t> getLocalLockAddress(uint32_t lockId,
                                               TileID tile) const override;
-  uint32_t getNumBDs(AIETileType tileType) const override {
-    return 16; // AIE1 has no MemTiles, always 16
-  }
+  uint32_t getNumBDs(int col, int row) const override { return 16; }
   uint32_t getBDMaxDims(AIETileType tileType) const override {
     // AIE1 has no MemTiles; preserve the historical BD dimension limit.
     return 3;
@@ -818,8 +817,8 @@ public:
     // AIE1 core and shim tiles both have a 6-bit Iteration_Wrap field.
     return 6;
   }
-  bool isBdChannelAccessible(int col, int row, uint32_t bd_id,
-                             int channel) const override {
+  bool isBdChannelAccessible(int col, int row, uint32_t bd_id, int channel,
+                             DMAChannelDir dir) const override {
     return true;
   }
 
@@ -963,9 +962,9 @@ public:
     return getDmaBdLimits(tileType).iterationSize.width;
   }
 
-  bool isBdChannelAccessible(int col, int row, uint32_t bd_id,
-                             int channel) const override {
-    if (getTileType(col, row) != AIETileType::MemTile) {
+  bool isBdChannelAccessible(int col, int row, uint32_t bd_id, int channel,
+                             DMAChannelDir dir) const override {
+    if (!isMemTile(col, row)) {
       return true;
     } else {
       if ((channel & 1) == 0) { // even channel number
@@ -1401,24 +1400,41 @@ public:
                                                  int memRow) const override;
 
   uint32_t getNumBDs(int col, int row) const override {
-    // aie4b (medusa) has 32 in single-app mode, with split connectivity.
-    // TODO: aie4z in native mode has 16 private per channel.
-    if (isShimNOCTile(col, row))
+    if (isShimNOCTile(col, row)) {
+      if (getTargetArch() == AIEArch::AIE4z)
+        // AIE4z native mode: 16 private BDs per channel.
+        return 16;
+      // AIE4b (medusa) has 32 in single-app mode, with split connectivity.
       return 32;
+    }
     if (isMemTile(col, row))
       return 16 * 10 * 8;
     return 16;
   }
 
-  bool isBdChannelAccessible(int col, int row, uint32_t bd_id,
-                             int channel) const override {
+  bool isBdChannelAccessible(int col, int row, uint32_t bd_id, int channel,
+                             DMAChannelDir dir) const override {
     if (!isShimNOCTile(col, row)) {
       return true;
+    } else if (getTargetArch() == AIEArch::AIE4z) {
+      // AIE4z native mode: each channel has 16 private BDs (0-15),
+      // no shared BD restrictions.
+      return true;
     } else {
-      if (channel < 2) { // even channel number
-        return bd_id < 16;
+      // AIE4b mode:
+      //   BDs 0-15:  MM2S channels 0,1 and S2MM channel 0
+      //   BDs 16-31: MM2S channels 2,3 and S2MM channel 1
+      if (dir == DMAChannelDir::MM2S) {
+        if (channel < 2)
+          return bd_id < 16;
+        else
+          return bd_id >= 16;
       } else {
-        return bd_id >= 16;
+        // S2MM
+        if (channel < 1)
+          return bd_id < 16;
+        else
+          return bd_id >= 16;
       }
     }
   }
