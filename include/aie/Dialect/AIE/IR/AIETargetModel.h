@@ -236,8 +236,7 @@ public:
 
   /// Return true if the given tile is either a ShimNOC or ShimPL tile.
   bool isShimNOCorPLTile(int col, int row) const {
-    AIETileType t = getTileType(col, row);
-    return t == AIETileType::ShimNOCTile || t == AIETileType::ShimPLTile;
+    return isShimNOCTile(col, row) || isShimPLTile(col, row);
   }
 
   /// Return true if the given tile ID is valid.
@@ -508,7 +507,7 @@ public:
   /// for the tile at (`col`, `row`). For tiles with no per-channel BD
   /// partitioning this equals getNumBDs(col, row).
   uint32_t getNumBDsForChannel(int col, int row, int channel,
-                               DMAChannelDir dir) const {
+                               DMAChannelDir dir = DMAChannelDir::MM2S) const {
     uint32_t count = 0;
     for (uint32_t bd = 0; bd < getNumBDs(col, row); ++bd)
       if (isBdChannelAccessible(col, row, bd, channel, dir))
@@ -792,7 +791,7 @@ public:
   uint32_t getMaxLockValue() const override { return 1; }
   std::optional<uint32_t> getLocalLockAddress(uint32_t lockId,
                                               TileID tile) const override;
-  uint32_t getNumBDs(int col, int row) const override { return 16; }
+  uint32_t getNumBDs(AIETileType tileType) const override { return 16; }
   uint32_t getBDMaxDims(AIETileType tileType) const override {
     // AIE1 has no MemTiles; preserve the historical BD dimension limit.
     return 3;
@@ -926,7 +925,6 @@ public:
   uint32_t getComputeTileLoadStoreBusWidth() const override { return 256; }
   uint32_t getComputeTileMaxVectorAlignBits() const override { return 256; }
 
-  using AIETargetModel::getNumLocks;
   uint32_t getNumLocks(AIETileType tileType) const override {
     return tileType == AIETileType::MemTile ? 64 : 16;
   }
@@ -1001,7 +999,7 @@ public:
   uint32_t getMemTileSize() const override { return 0x00080000; }
 
   uint32_t getNumBanks(int col, int row) const override {
-    return getTileType(col, row) == AIETileType::MemTile ? 8 : 4;
+    return isMemTile(col, row) ? 8 : 4;
   }
 
   uint32_t getMaxChannelNumForAdjacentMemTile(int col, int row) const override {
@@ -1189,7 +1187,7 @@ public:
       return nocColumns.contains(col) ? AIETileType::ShimNOCTile
                                       : AIETileType::ShimPLTile;
     }
-    if (row == 1 || row == 2)
+    if (row > 0 && row <= static_cast<int>(getNumMemTileRows()))
       return AIETileType::MemTile;
     return AIETileType::CoreTile;
   }
@@ -1247,7 +1245,7 @@ public:
   AIETileType getTileType(int col, int row) const override {
     if (row == 0)
       return AIETileType::ShimNOCTile; // NPU1 has no ShimPL tiles
-    if (row == 1)
+    if (row > 0 && row <= static_cast<int>(getNumMemTileRows()))
       return AIETileType::MemTile;
     return AIETileType::CoreTile;
   }
@@ -1282,7 +1280,7 @@ public:
   AIETileType getTileType(int col, int row) const override {
     if (row == 0)
       return AIETileType::ShimNOCTile;
-    if (row == 1)
+    if (row > 0 && row <= static_cast<int>(getNumMemTileRows()))
       return AIETileType::MemTile;
     return AIETileType::CoreTile;
   }
@@ -1383,10 +1381,10 @@ public:
   uint32_t getLocalMemorySize() const override { return 0x00020000; }
   uint32_t getAccumulatorCascadeSize() const override { return 512; }
 
-  uint32_t getNumLocks(int col, int row) const override {
-    if (isMemTile(col, row))
+  uint32_t getNumLocks(AIETileType tileType) const override {
+    if (tileType == AIETileType::MemTile)
       return 64;
-    if (isShimNOCTile(col, row))
+    if (tileType == AIETileType::ShimNOCTile)
       return 32;
     return 16;
   }
@@ -1402,15 +1400,15 @@ public:
                                                  int memCol,
                                                  int memRow) const override;
 
-  uint32_t getNumBDs(int col, int row) const override {
-    if (isShimNOCTile(col, row)) {
+  uint32_t getNumBDs(AIETileType tileType) const override {
+    if (tileType == AIETileType::ShimNOCTile) {
       if (getTargetArch() == AIEArch::AIE4z)
         // AIE4z native mode: 16 private BDs per channel.
         return 16;
       // AIE4b (medusa) has 32 in single-app mode, with split connectivity.
       return 32;
     }
-    if (isMemTile(col, row))
+    if (tileType == AIETileType::MemTile)
       return 16 * 10 * 8;
     return 16;
   }
@@ -1496,20 +1494,20 @@ public:
     return 6; /* 1 Shim row, 1 memtile row, and 4 Core rows. */
   }
 
-  bool isCoreTile(int col, int row) const override { return row > 1; }
-  bool isMemTile(int col, int row) const override { return row == 1; }
-
-  bool isShimPLTile(int col, int row) const override {
-    return false; // No PL
+  AIETileType getTileType(int col, int row) const override {
+    if (row == 0)
+      return AIETileType::ShimNOCTile;
+    if (row > 0 && row <= static_cast<int>(getNumMemTileRows()))
+      return AIETileType::MemTile;
+    return AIETileType::CoreTile;
   }
-
-  bool isShimNOCorPLTile(int col, int row) const override {
-    return isShimNOCTile(col, row) || isShimPLTile(col, row);
-  }
-
-  bool isShimNOCTile(int col, int row) const override { return row == 0; }
 
   uint32_t getNumMemTileRows() const override { return 1; }
+
+  std::optional<uint32_t> getStreamSwitchPortIndex(int col, int row,
+                                                   WireBundle bundle,
+                                                   uint32_t channel,
+                                                   bool master) const override;
 
   static bool classof(const AIETargetModel *model) {
     return model->getKind() >= TK_AIE4_NPU3 && model->getKind() < TK_AIE4_Last;

@@ -1316,46 +1316,17 @@ LogicalResult xilinx::AIE::AIERTControl::resetPerfCounters(int col, int row) {
 LogicalResult xilinx::AIE::AIERTControl::addAieElfs(DeviceOp &targetOp,
                                                     const StringRef elfPath,
                                                     bool aieSim) {
-  for (auto tileOp : targetOp.getOps<TileOp>())
-    if (tileOp.isShimNOCorPLTile()) {
-      // Resets no needed with V2 kernel driver
-    } else {
-      int col = tileOp.colIndex();
-      int row = tileOp.rowIndex();
-      if (row == 0 && tileOp->hasAttr("elf_file")) {
-        std::string fileName =
-            tileOp->getAttrOfType<mlir::StringAttr>("elf_file").str();
-        fileName = elfPath.str() + std::string(1, ps) + fileName;
-        std::cout << fileName << "\n";
-        if (failed(addUcElf(col, fileName)))
-          return failure();
-        continue;
-      }
-      if (auto coreOp = tileOp.getCoreOp()) {
-        std::string fileName;
-        if (auto fileAttr = coreOp.getElfFile()) {
-          fileName = fileAttr->str();
-        } else {
-          // Skip cores without elf_file (e.g., lightweight reset
-          // devices that only need DMA/lock reconfiguration).
-          continue;
-        }
-        // Check if fileName is already an absolute path.
-        // If so, use it directly. Otherwise, concatenate with elfPath.
-        std::string fullPath;
-        if (std::filesystem::path(fileName).is_absolute()) {
-          fullPath = fileName;
-        } else {
-          auto ps = std::filesystem::path::preferred_separator;
-          fullPath =
-              (llvm::Twine(elfPath) + std::string(1, ps) + fileName).str();
-        }
-        if (failed(addAieElf(col, row, fullPath, aieSim)))
-          return failure();
-      }
-    }
-    CoreOp coreOp = tileOp.getCoreOp();
-    if (!coreOp)
+  for (auto tileOp : targetOp.getOps<TileOp>()) {
+    int col = tileOp.colIndex();
+    int row = tileOp.rowIndex();
+    if (row == 0 && tileOp->hasAttr("elf_file")) {
+      std::string fileName =
+          tileOp->getAttrOfType<mlir::StringAttr>("elf_file").str();
+      auto ps = std::filesystem::path::preferred_separator;
+      fileName = elfPath.str() + std::string(1, ps) + fileName;
+      std::cout << fileName << "\n";
+      if (failed(addUcElf(col, fileName)))
+        return failure();
       continue;
     }
     if (auto coreOp = tileOp.getCoreOp()) {
@@ -1363,10 +1334,9 @@ LogicalResult xilinx::AIE::AIERTControl::addAieElfs(DeviceOp &targetOp,
       if (auto fileAttr = coreOp.getElfFile()) {
         fileName = fileAttr->str();
       } else {
-        coreOp.emitOpError()
-            << "Expected lowered ELF file to be given as attribute "
-                "`elf_file` for this core. Compile cores first.";
-        return failure();
+        // Skip cores without elf_file (e.g., lightweight reset
+        // devices that only need DMA/lock reconfiguration).
+        continue;
       }
       // Check if fileName is already an absolute path.
       // If so, use it directly. Otherwise, concatenate with elfPath.
@@ -1378,11 +1348,8 @@ LogicalResult xilinx::AIE::AIERTControl::addAieElfs(DeviceOp &targetOp,
         fullPath =
             (llvm::Twine(elfPath) + std::string(1, ps) + fileName).str();
       }
-      if (failed(addCoreElf(col, row, fullPath, aieSim))) {
-        coreOp.emitOpError()
-            << "Failed to add core ELF file: " << fullPath;
+      if (failed(addCoreElf(col, row, fullPath, aieSim)))
         return failure();
-      }
     }
   }
   return success();

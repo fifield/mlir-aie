@@ -445,13 +445,5 @@ void registerAIETranslations() {
         return success();
       },
       registerDialects);
-
-  // Translate cert dialect operations to assembly
-  TranslateFromMLIRRegistration registrationCertToAsm(
-      "aie-cert-to-asm", "Translate cert operations to assembly",
-      [](ModuleOp module, raw_ostream &output) {
-        return AIETranslateToUcDma(module, output);
-      },
-      registerDialects);
 }
 } // namespace xilinx::AIE

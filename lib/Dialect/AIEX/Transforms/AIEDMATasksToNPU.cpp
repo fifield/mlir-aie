@@ -766,9 +766,9 @@ struct AIEDMATasksToNPUPass
                   bool outOfOrder = false) {
     AIE::DMABDOp bd_op = getBdForBlock(block);
     Value runtimeBdId = bd_op.getBdIdVal();
-    const auto &target_model = AIE::getTargetModel(bd_op);
+    const auto &tm = AIE::getTargetModel(bd_op);
     auto buffer_type = llvm::cast<BaseMemRefType>(bd_op.getBuffer().getType());
-    uint32_t addr_granularity = target_model.getAddressGenGranularity();
+    uint32_t addr_granularity = tm.getAddressGenGranularity();
 
     // Runtime (SSA) sizes/strides/len/offset take the dynamic BD-word encoder
     // path; a runtime bd_id (dynamic free-list pool) also forces it, since the
@@ -799,9 +799,9 @@ struct AIEDMATasksToNPUPass
         return bd_op->emitOpError("length_parameter requires a constant "
                                   "offset, bd_id, next_bd and lock value");
       int col = tile.getCol(), row = tile.getRow();
-      if (!target_model.isShimNOCTile(col, row) &&
-          !target_model.isMemTile(col, row) &&
-          !target_model.isCoreTile(col, row))
+      if (!tm.isShimNOCTile(col, row) &&
+          !tm.isMemTile(col, row) &&
+          !tm.isCoreTile(col, row))
         return bd_op->emitOpError(
             "runtime-valued BD size/stride/len/bd_id/next_bd/lock value is "
             "only supported on tiles with a DMA buffer descriptor layout (shim "
@@ -819,9 +819,9 @@ struct AIEDMATasksToNPUPass
           llvm::reverse(bd_op.getMixedSizes()));
       SmallVector<OpFoldResult, 4> stridesRev(
           llvm::reverse(bd_op.getMixedStrides()));
-      if (failed(verifyConstBdRealizability(
-              bd_op, sizesRev, stridesRev, elemWidth,
-              target_model.getAddressGenGranularity())))
+      if (failed(verifyConstBdRealizability(bd_op, sizesRev, stridesRev,
+                                            elemWidth,
+                                            tm.getAddressGenGranularity())))
         return failure();
       return rewriteSingleBDDynamic(builder, block, bd_op, tile, channel,
                                     channelDir, packet, runtimeBdId,
@@ -919,13 +919,18 @@ struct AIEDMATasksToNPUPass
       // wrap-size limit.  Canonicalization zeroes size-1 strides before this
       // pass runs, so isContiguousTransfer is sufficient.
       bool treatAsLinear =
-          isLinearModeTransfer(target_model, tile.getCol(), tile.getRow(),
-                               input_sizes, input_strides);
+          isLinearModeTransfer(tm, tile.getCol(), tile.getRow(), input_sizes,
+                               input_strides);
       if (!treatAsLinear && bd_op.getLengthStateTableIdxAttr())
         AIE::placeRuntimeLengthDimension(input_sizes, input_strides);
 
+      if (dims->size() > 2) {
+        d2size = (tm.isMemTile(tile.getCol(), tile.getRow()))
+                     ? (*dims)[2].getSize()
+                     : 0;
+      }
       if (padDims.has_value()) {
-        if (!target_model.isMemTile(tile.getCol(), tile.getRow()))
+        if (!tm.isMemTile(tile.getCol(), tile.getRow()))
           return bd_op->emitOpError()
                  << "Padding is only supported by memtile dma bds.";
         if (padDims->size() > dims->size())
@@ -946,7 +951,7 @@ struct AIEDMATasksToNPUPass
           return bd_op->emitOpError()
                  << "supports padding only for MM2S direction on MemTiles.";
       }
-      getHardwareStridesWraps(target_model, bd_op, buffer_type, input_sizes,
+      getHardwareStridesWraps(tm, bd_op, buffer_type, input_sizes,
                               input_strides, sizes, strides);
 
       if (failed(verifyStridesWraps(
@@ -974,9 +979,7 @@ struct AIEDMATasksToNPUPass
         // TODO: d2_size is a dead field; AIEDmaToNpu.cpp memtile word-packing
         // never writes it (see its `// TODO: D2Size`); the real D2 repeat
         // count is carried entirely by buffer_length, same as on shim tiles.
-        d2size = (target_model.isMemTile(tile.getCol(), tile.getRow()))
-                     ? sizes[2]
-                     : 0;
+        d2size = (tm.isMemTile(tile.getCol(), tile.getRow())) ? sizes[2] : 0;
       }
       if (input_sizes[3] > 1 && input_strides[3] == 0) {
         // We allow users to encode the repeat_count as a dimension 3 stride
@@ -1015,7 +1018,7 @@ struct AIEDMATasksToNPUPass
         return failure();
       }
     } else {
-      if (padDims && target_model.isMemTile(tile.getCol(), tile.getRow()) &&
+      if (padDims && tm.isMemTile(tile.getCol(), tile.getRow()) &&
           channelDir == AIE::DMAChannelDir::MM2S) {
         return bd_op->emitOpError()
                << "Padding requires n-d data layouts expressed as "
@@ -1027,7 +1030,7 @@ struct AIEDMATasksToNPUPass
       }
     }
     auto fieldsOr = gatherBdTemplateFields(builder, block, bd_op, tile,
-                                           target_model, packet, outOfOrder);
+                                           tm, packet, outOfOrder);
     if (failed(fieldsOr))
       return failure();
     // failed() above guards the deref; see note in rewriteSingleBDDynamic.
@@ -1060,7 +1063,7 @@ struct AIEDMATasksToNPUPass
         /*d2_zero_after=*/padAfter[2],
         /*burst_length=*/bd_op.getBurstLength(),
         /*axcache=*/
-        target_model.isShimNOCTile(tile.getCol(), tile.getRow())
+        tm.isShimNOCTile(tile.getCol(), tile.getRow())
             ? builder.getI32IntegerAttr(bd_op.getAxcacheOrDefault())
             : IntegerAttr());
     if (failed(
@@ -1073,7 +1076,7 @@ struct AIEDMATasksToNPUPass
     auto lengthUnit = bd_op.getLengthUnit();
     if (bd_op.getLengthStateTableIdxAttr() && lengthUnit)
       return emitUpdateBdLengthFromParameter(
-          builder, bd_op, buffer_type, *lengthUnit, target_model, tile.getCol(),
+          builder, bd_op, buffer_type, *lengthUnit, tm, tile.getCol(),
           tile.getRow(), bd_id);
     return success();
   }

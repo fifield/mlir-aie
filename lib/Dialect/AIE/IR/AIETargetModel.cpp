@@ -1312,14 +1312,15 @@ AIE2TargetModel::getLocalLockAddress(uint32_t lockId, TileID tile) const {
   uint32_t lockAddrOffset = 0x10;
 
   if (isCoreTile(tile.col, tile.row) &&
-      lockId < getNumLocks(tile.col, tile.row))
+      lockId < AIETargetModel::getNumLocks(tile.col, tile.row))
     return computeTileBaseAddress + lockAddrOffset * lockId;
 
-  if (isMemTile(tile.col, tile.row) && lockId < getNumLocks(tile.col, tile.row))
+  if (isMemTile(tile.col, tile.row) &&
+      lockId < AIETargetModel::getNumLocks(tile.col, tile.row))
     return memTileBaseAddress + lockAddrOffset * lockId;
 
   if (isShimNOCorPLTile(tile.col, tile.row) &&
-      lockId < getNumLocks(tile.col, tile.row))
+      lockId < AIETargetModel::getNumLocks(tile.col, tile.row))
     return shimTileBaseAddress + lockAddrOffset * lockId;
 
   return std::nullopt;
@@ -1958,11 +1959,11 @@ AIE4TargetModel::getLockLocalBaseIndex(int localCol, int localRow, int lockCol,
     if (isMemSouth(localCol, localRow, lockCol, lockRow))
       return 0;
     if (isMemWest(localCol, localRow, lockCol, lockRow))
-      return getNumLocks(localCol, localRow);
+      return AIETargetModel::getNumLocks(localCol, localRow);
     if (isMemNorth(localCol, localRow, lockCol, lockRow))
-      return getNumLocks(localCol, localRow) * 2;
+      return AIETargetModel::getNumLocks(localCol, localRow) * 2;
     if (isMemEast(localCol, localRow, lockCol, lockRow))
-      return getNumLocks(localCol, localRow) * 3;
+      return AIETargetModel::getNumLocks(localCol, localRow) * 3;
   }
 
   if (isMemTile(localCol, localRow)) {
@@ -1971,7 +1972,7 @@ AIE4TargetModel::getLockLocalBaseIndex(int localCol, int localRow, int lockCol,
     int colOffset = (lockCol - localCol) + 7;
     if (colOffset > 14 || colOffset < 0)
       return std::nullopt;
-    return colOffset * getNumLocks(localCol, localRow);
+    return colOffset * AIETargetModel::getNumLocks(localCol, localRow);
   }
 
   return std::nullopt;
@@ -2063,7 +2064,7 @@ AIE4TargetModel::getNumDestSwitchboxConnections(int col, int row,
     case WireBundle::Controller32:
       return 2;
     case WireBundle::West32:
-     if (col == 0)
+      if (col == 0)
         return 0;
       return 1;
     case WireBundle::East32:
@@ -2180,7 +2181,7 @@ AIE4TargetModel::getNumSourceSwitchboxConnections(int col, int row,
       return 1;
     case WireBundle::East32:
       if (col == columns() - 1)
-          return 0;
+        return 0;
       return 1;
     default:
       return 0;
@@ -2663,7 +2664,7 @@ std::optional<uint32_t>
 AIE4TargetModel::getLocalLockAddress(uint32_t lockId, TileID tile) const {
   uint32_t lockAddrOffset = 0x10;
 
-  if (lockId < getNumLocks(tile.col, tile.row))
+  if (lockId < AIETargetModel::getNumLocks(tile.col, tile.row))
     return std::nullopt;
 
   if (isCoreTile(tile.col, tile.row)) {
@@ -2685,6 +2686,12 @@ AIE4TargetModel::getLocalLockAddress(uint32_t lockId, TileID tile) const {
     return shimTileBaseAddress + lockAddrOffset * lockId;
   }
 
+  return std::nullopt;
+}
+
+std::optional<uint32_t> BaseNPU3TargetModel::getStreamSwitchPortIndex(
+    int col, int row, WireBundle bundle, uint32_t channel, bool master) const {
+  // TODO: Implement AIE4 stream switch port index mapping.
   return std::nullopt;
 }
 

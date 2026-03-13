@@ -1277,11 +1277,9 @@ struct AIENpuToCertPass
     if (failed(applyPartialConversion(currentDevice, target, std::move(p2))))
       return signalPassFailure();
 
-    // Run the greedy driver with no patterns, purely for its DCE: p2
-    // leaves each converted blockwrite's memref.get_global (and any constant
-    // feeding it) dead, since the new op references the global by symbol
-    // rather than by SSA value. CertJobOp's verifier rejects those ops
+    // Merge consecutive writes and clean up dead SSA producers left by p2.
     RewritePatternSet cleanup(&getContext());
+    cleanup.insert<MergeConsecutiveCertUcDmaWriteDesSyncOps>(&getContext());
     if (failed(applyPatternsGreedily(getOperation(), std::move(cleanup))))
       return signalPassFailure();
 
