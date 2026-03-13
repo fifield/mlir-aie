@@ -6,7 +6,7 @@
 //
 // REQUIRES: mesimulator
 //
-// RUN: aiecc.py -v --alloc-scheme=basic-sequential --xchesscc --xbridge --no-compile --no-compile-host --aiesim %s %test_utils_flags %S/test.cpp
+// RUN: aiecc -v --alloc-scheme=basic-sequential --xchesscc --xbridge --no-compile --no-compile-host --aiesim %s %test_utils_flags %S/test.cpp
 // RUN: aie-opt --convert-aie-to-transaction='elf-dir=%aie_obj_root/third_party/cert/main' %s -o transaction.mlir 
 // RUN: aie-translate -aie-npu-to-binary -o transaction.bin transaction.mlir
 // RUN: aie4.mlir.prj/mesim.sh | FileCheck %s

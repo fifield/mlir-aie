@@ -9,8 +9,8 @@
 //
 // RUN: mkdir -p project0/
 // RUN: cp %aie_obj_root/third_party/cert/main/cert_medusa.elf project0/cert_medusa.elf
-// RUN: aiecc.py --tmpdir=project0 --xchesscc --xbridge --aie-generate-txn --txn-name=transaction.bin %s
-// RUN: aiecc.py --tmpdir=project1 --xchesscc --xbridge --no-compile-host --generate-full-elf --full-elf-name=aie4.elf --aiesim %S/aie4.mlir %test_utils_flags %S/test.cpp
+// RUN: aiecc --tmpdir=project0 --xchesscc --xbridge --aie-generate-txn --txn-name=transaction.bin %s
+// RUN: aiecc --tmpdir=project1 --xchesscc --xbridge --no-compile-host --generate-full-elf --full-elf-name=aie4.elf --aiesim %S/aie4.mlir %test_utils_flags %S/test.cpp
 // RUN: project1/mesim.sh | FileCheck --check-prefix=MESIM %s
 //
 // MESIM: device model: {{.*}}aie4
