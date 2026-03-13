@@ -1403,8 +1403,9 @@ public:
   uint32_t getNumBDs(AIETileType tileType) const override {
     if (tileType == AIETileType::ShimNOCTile) {
       if (getTargetArch() == AIEArch::AIE4z)
-        // AIE4z native mode: 16 private BDs per channel.
-        return 16;
+        // AIE4z native mode: 16 private BDs per channel, 12 channels
+        // (8 MM2S + 4 S2MM).
+        return 16 * 12;
       // AIE4b (medusa) has 32 in single-app mode, with split connectivity.
       return 32;
     }
@@ -1418,9 +1419,8 @@ public:
     if (!isShimNOCTile(col, row)) {
       return true;
     } else if (getTargetArch() == AIEArch::AIE4z) {
-      // AIE4z native mode: each channel has 16 private BDs (0-15),
-      // no shared BD restrictions.
-      return true;
+      // AIE4z native mode: each channel has 16 private BDs (0-15).
+      return bd_id < 16;
     } else {
       // AIE4b mode:
       //   BDs 0-15:  MM2S channels 0,1 and S2MM channel 0
