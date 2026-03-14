@@ -78,8 +78,7 @@ from aie.dialects.aiex import (
     shim_dma_single_bd_task,
 )
 from aie.extras.context import mlir_mod_ctx
-from aie.iron.pythoc import aie_kernel
-from aie.iron.pythoc.compiler import compile_pythoc_source
+from aie.iron.pythoc import aie_kernel, PythocKernel
 from aie.utils.compile import compile_mlir_module
 from aie.utils import DefaultNPURuntime, NPUKernel
 from aie.utils.regdb import AIEAddressDecoder
@@ -236,7 +235,7 @@ def dynamic_dma_add_one(
 # ── Design construction ──────────────────────────────────────────────────────
 
 
-def build_mlir_module(dev, obj_file):
+def build_mlir_module(dev, kernel):
     """Build MLIR module using lower-level dialect API with raw flows."""
     tensor_ty = np.ndarray[(N,), np.dtype[np.int32]]
 
@@ -246,7 +245,7 @@ def build_mlir_module(dev, obj_file):
         def device_body():
             # Declare external kernel function
             kernel_fn = external_func(
-                "dynamic_dma_add_one",
+                kernel._name,
                 inputs=[tensor_ty, tensor_ty, np.int32, np.int32, np.int32],
             )
 
@@ -279,7 +278,7 @@ def build_mlir_module(dev, obj_file):
             # Core: call the PythoC kernel
             # in_addr_words = 0 (byte addr 0 / 4)
             # out_addr_words = N (byte addr N*4 / 4)
-            @core(t02, str(obj_file))
+            @core(t02, kernel.bin_name)
             def core_body():
                 kernel_fn(in_buf, out_buf, 0, N, N)
 
@@ -380,18 +379,19 @@ def main():
     dev, target_arch = pick_device(args.device)
 
     try:
+        tensor_ty = np.ndarray[(N,), np.dtype[np.int32]]
+
         print(f"[1/4] Compiling PythoC kernel ({target_arch})")
-        obj_file = compile_pythoc_source(
-            source_code=dynamic_dma_add_one.__aie_source__,
-            function_name="dynamic_dma_add_one",
+        kernel = PythocKernel(
+            dynamic_dma_add_one,
+            [tensor_ty, tensor_ty, np.int32, np.int32, np.int32],
             target_arch=target_arch,
-            verbose=args.verbose,
             extra_globals=_REGDB_GLOBALS,
         )
-        print(f"      -> {obj_file}")
+        print(f"      -> {kernel.bin_name}")
 
         print("[2/4] Building MLIR module with raw flows + dynamic DMA")
-        module = build_mlir_module(dev, obj_file)
+        module = build_mlir_module(dev, kernel)
         mlir_path = work_dir / "design.mlir"
         with open(mlir_path, "w") as f:
             print(module, file=f)

@@ -47,6 +47,7 @@ class PythocKernel(Kernel):
         llvm_ir_path_or_types: str | list,
         types: Optional[list[type[np.ndarray] | np.dtype]] = None,
         target_arch: str = "aie2p",
+        extra_globals: Optional[dict] = None,
     ):
         """Initialize PythocKernel.
 
@@ -94,6 +95,7 @@ class PythocKernel(Kernel):
                 output_dir=None,
                 optimization_level=2,
                 verbose=False,
+                extra_globals=extra_globals,
             )
 
             # Validate types parameter
