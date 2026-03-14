@@ -135,6 +135,7 @@ def compile_pythoc_source(
     output_dir: Optional[str] = None,
     optimization_level: int = 2,
     verbose: bool = False,
+    extra_globals: Optional[dict] = None,
 ) -> Path:
     """Compile PythoC source code to an AIE object file.
 
@@ -249,6 +250,7 @@ def compile_pythoc_source(
             from pythoc.aie.loop_hints import prepare_for_pipelining, loop_range
             from pythoc.aie.profiling import event0, event1
             from pythoc.aie.utils import bitcast_i32_to_f32, fast_exp2_i32_to_f32
+            from pythoc.aie.operations import read_tm, write_tm
 
             # Populate user_globals with all imported names
             user_globals.update(
@@ -301,11 +303,17 @@ def compile_pythoc_source(
                     "event1": event1,
                     "bitcast_i32_to_f32": bitcast_i32_to_f32,
                     "fast_exp2_i32_to_f32": fast_exp2_i32_to_f32,
+                    "read_tm": read_tm,
+                    "write_tm": write_tm,
                     "range": range,  # Add Python's built-in range for standard loop syntax
                 }
             )
         except ImportError as e:
             raise RuntimeError(f"Failed to import PythoC types: {e}")
+
+        # Merge caller-provided globals (e.g. regdb constants)
+        if extra_globals:
+            user_globals.update(extra_globals)
 
         # Create compiler instance with user globals
         compiler = LLVMCompiler(user_globals=user_globals)
