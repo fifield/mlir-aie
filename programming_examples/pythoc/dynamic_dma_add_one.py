@@ -31,14 +31,12 @@ Flow:
 The compute tile's DMA is NOT statically configured by MLIR — only the
 stream routing and shim DMA are set up at compile time.
 
-AIE2P Compute Tile DMA Register Map (from xaie2pgbl_params.h):
-  BD base:            0x1D000 (stride 0x20 per BD, 6 words each)
-  S2MM_0_START_QUEUE: 0x1DE04  (bits [3:0]=BD_ID, [23:16]=repeat_count)
-  MM2S_0_START_QUEUE: 0x1DE14
-  S2MM_0_STATUS:      0x1DF00  (bit [19]=Channel_Running)
-  MM2S_0_STATUS:      0x1DF10
-  Lock N value:       0x1F000 + N*0x10
-  Proc bus enable:    0x32038  (bit 0)
+AIE2P Compute Tile DMA Register Map (looked up from regdb):
+  BD base:            DMA_BD0_0 (stride 0x20 per BD, 6 words each)
+  S2MM_0_START_QUEUE: DMA_S2MM_0_Start_Queue (bits [3:0]=BD_ID, [23:16]=repeat_count)
+  MM2S_0_START_QUEUE: DMA_MM2S_0_Start_Queue
+  Lock N value:       Lock{N}_value
+  Proc bus enable:    Core_Processor_Bus (bit 0)
 
 BD word layout (compute tile):
   Word 0 [27:14]=BASE_ADDRESS (word addr), [13:0]=BUFFER_LENGTH (words)
@@ -84,6 +82,7 @@ from aie.iron.pythoc import aie_kernel
 from aie.iron.pythoc.compiler import compile_pythoc_source
 from aie.utils.compile import compile_mlir_module
 from aie.utils import DefaultNPURuntime, NPUKernel
+from aie.utils.regdb import AIEAddressDecoder
 import aie.iron as iron
 
 # Import PythoC types and operations for inline kernel definition
@@ -94,6 +93,56 @@ DEFAULT_BUILD_DIR = Path(__file__).resolve().parent / "dynamic_dma_add_one_build
 
 # Number of int32 elements to process
 N = 256
+
+# ── Register addresses from register database ────────────────────────────────
+
+_decoder = AIEAddressDecoder()
+_reg = _decoder.get_register_offset
+
+# DMA buffer descriptor registers (memory module)
+DMA_BD0_0 = _reg("DMA_BD0_0", "memory")
+DMA_BD0_1 = _reg("DMA_BD0_1", "memory")
+DMA_BD0_2 = _reg("DMA_BD0_2", "memory")
+DMA_BD0_3 = _reg("DMA_BD0_3", "memory")
+DMA_BD0_4 = _reg("DMA_BD0_4", "memory")
+DMA_BD0_5 = _reg("DMA_BD0_5", "memory")
+DMA_BD1_0 = _reg("DMA_BD1_0", "memory")
+DMA_BD1_1 = _reg("DMA_BD1_1", "memory")
+DMA_BD1_2 = _reg("DMA_BD1_2", "memory")
+DMA_BD1_3 = _reg("DMA_BD1_3", "memory")
+DMA_BD1_4 = _reg("DMA_BD1_4", "memory")
+DMA_BD1_5 = _reg("DMA_BD1_5", "memory")
+
+# DMA channel start queue registers (memory module)
+DMA_S2MM_0_START_QUEUE = _reg("DMA_S2MM_0_Start_Queue", "memory")
+DMA_MM2S_0_START_QUEUE = _reg("DMA_MM2S_0_Start_Queue", "memory")
+
+# Lock value registers (memory module)
+LOCK0_VALUE = _reg("Lock0_value", "memory")
+LOCK1_VALUE = _reg("Lock1_value", "memory")
+
+# Core processor bus enable register (core module)
+CORE_PROCESSOR_BUS = _reg("Core_Processor_Bus", "core")
+
+# Collect all register constants for PythoC kernel compilation
+_REGDB_GLOBALS = {
+    "DMA_BD0_0": DMA_BD0_0,
+    "DMA_BD0_1": DMA_BD0_1,
+    "DMA_BD0_2": DMA_BD0_2,
+    "DMA_BD0_3": DMA_BD0_3,
+    "DMA_BD0_4": DMA_BD0_4,
+    "DMA_BD0_5": DMA_BD0_5,
+    "DMA_BD1_0": DMA_BD1_0,
+    "DMA_BD1_1": DMA_BD1_1,
+    "DMA_BD1_2": DMA_BD1_2,
+    "DMA_BD1_3": DMA_BD1_3,
+    "DMA_BD1_4": DMA_BD1_4,
+    "DMA_BD1_5": DMA_BD1_5,
+    "DMA_S2MM_0_START_QUEUE": DMA_S2MM_0_START_QUEUE,
+    "DMA_MM2S_0_START_QUEUE": DMA_MM2S_0_START_QUEUE,
+    "LOCK0_VALUE": LOCK0_VALUE,
+    "LOCK1_VALUE": LOCK1_VALUE,
+}
 
 
 # ── PythoC kernel ────────────────────────────────────────────────────────────
@@ -125,29 +174,29 @@ def dynamic_dma_add_one(
 
     # BD0 word 0: [27:14] BASE_ADDRESS, [13:0] BUFFER_LENGTH
     bd0_w0: i32 = (in_addr_words << 14) | num_words
-    write_tm(bd0_w0, 0x1D000)
+    write_tm(bd0_w0, DMA_BD0_0)
 
     # BD0 words 1-4: defaults (no packet, contiguous 1D, no iteration)
-    write_tm(0, 0x1D004)
-    write_tm(0, 0x1D008)
-    write_tm(0, 0x1D00C)
-    write_tm(0, 0x1D010)
+    write_tm(0, DMA_BD0_1)
+    write_tm(0, DMA_BD0_2)
+    write_tm(0, DMA_BD0_3)
+    write_tm(0, DMA_BD0_4)
 
     # BD0 word 5: VALID_BD=1, LOCK_REL_VALUE=+1, LOCK_REL_ID=0
     #   bit 25 = VALID_BD
     #   bits [24:18] = LOCK_REL_VALUE = 1
     #   bits [17:13] = LOCK_REL_ID = 0
     #   -> 0x02000000 | 0x00040000 = 0x02040000
-    write_tm(0x02040000, 0x1D014)
+    write_tm(0x02040000, DMA_BD0_5)
 
     # Start S2MM channel 0: Start_BD_ID=0 (bits [3:0]), Repeat_Count=0
-    write_tm(0, 0x1DE04)
+    write_tm(0, DMA_S2MM_0_START_QUEUE)
 
-    # Wait for S2MM completion: poll lock 0 value register (0x1F000)
+    # Wait for S2MM completion: poll lock 0 value register
     # Lock 0 starts at 0; BD0 adds +1 when transfer finishes
     done: i32 = 0
     while done == 0:
-        done = read_tm(0x1F000)
+        done = read_tm(LOCK0_VALUE)
 
     # ── Process data: add 1 to each element ───────────────────────────────
 
@@ -158,30 +207,30 @@ def dynamic_dma_add_one(
 
     # ── Program BD1 for MM2S channel 0 (send to stream) ───────────────────
 
-    # BD1 starts at 0x1D020 (BD stride = 0x20)
+    # BD1 word 0: [27:14] BASE_ADDRESS, [13:0] BUFFER_LENGTH
     bd1_w0: i32 = (out_addr_words << 14) | num_words
-    write_tm(bd1_w0, 0x1D020)
+    write_tm(bd1_w0, DMA_BD1_0)
 
     # BD1 words 1-4: defaults
-    write_tm(0, 0x1D024)
-    write_tm(0, 0x1D028)
-    write_tm(0, 0x1D02C)
-    write_tm(0, 0x1D030)
+    write_tm(0, DMA_BD1_1)
+    write_tm(0, DMA_BD1_2)
+    write_tm(0, DMA_BD1_3)
+    write_tm(0, DMA_BD1_4)
 
     # BD1 word 5: VALID_BD=1, LOCK_REL_VALUE=+1, LOCK_REL_ID=1
     #   bit 25 = VALID_BD
     #   bits [24:18] = LOCK_REL_VALUE = 1
     #   bits [17:13] = LOCK_REL_ID = 1
     #   -> 0x02000000 | 0x00040000 | 0x00002000 = 0x02042000
-    write_tm(0x02042000, 0x1D034)
+    write_tm(0x02042000, DMA_BD1_5)
 
     # Start MM2S channel 0: Start_BD_ID=1 (bits [3:0])
-    write_tm(1, 0x1DE14)
+    write_tm(1, DMA_MM2S_0_START_QUEUE)
 
-    # Wait for MM2S completion: poll lock 1 value register (0x1F010)
+    # Wait for MM2S completion: poll lock 1 value register
     done = 0
     while done == 0:
-        done = read_tm(0x1F010)
+        done = read_tm(LOCK1_VALUE)
 
 
 # ── Design construction ──────────────────────────────────────────────────────
@@ -239,7 +288,7 @@ def build_mlir_module(dev, obj_file):
             def sequence(A, C):
                 # Enable processor bus on compute tile (0,2)
                 npu_maskwrite32(
-                    address=0x32038,
+                    address=CORE_PROCESSOR_BUS,
                     value=0x1,
                     mask=0x1,
                     column=0,
@@ -337,6 +386,7 @@ def main():
             function_name="dynamic_dma_add_one",
             target_arch=target_arch,
             verbose=args.verbose,
+            extra_globals=_REGDB_GLOBALS,
         )
         print(f"      -> {obj_file}")
 
