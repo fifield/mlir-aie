@@ -39,6 +39,12 @@ ARCH_CONFIGS = {
         "prefix": "XAIE4_EVENTS_",
         "python_name": "aie4",  # Python module name
     },
+    "xaie_events_aie4.h": {
+        "name": "aie4",
+        "display_name": "AIE4",
+        "prefix": "XAIE4_EVENTS_",
+        "python_name": "aie4",  # Python module name
+    },
 }
 
 

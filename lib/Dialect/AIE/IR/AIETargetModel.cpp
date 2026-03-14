@@ -1784,6 +1784,11 @@ AIE4TargetModel::loadRegisterDatabase() const {
   return RegisterDatabase::loadAIE4();
 }
 
+std::unique_ptr<RegisterDatabase>
+NPU3zTargetModel::loadRegisterDatabase() const {
+  return RegisterDatabase::loadAIE4Z();
+}
+
 AIEArch AIE4TargetModel::getTargetArch() const { return AIEArch::AIE4; }
 
 // Return the tile ID of the memory to the west of the given tile, if it exists.
