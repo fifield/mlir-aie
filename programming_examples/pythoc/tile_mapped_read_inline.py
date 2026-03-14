@@ -128,6 +128,9 @@ def build_mlir_module(dev):
             memref_16xi32 = np.ndarray[(16,), np.dtype[np.int32]]
             memref_64xi32 = np.ndarray[(64,), np.dtype[np.int32]]
 
+            # Emit the external_func declaration for the kernel.
+            # (IRON's Worker/Program calls this automatically, but the
+            #  low-level @device/@core path requires an explicit call.)
             kernel.resolve()
 
             # Tile declarations
