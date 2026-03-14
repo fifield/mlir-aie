@@ -223,6 +223,40 @@ class AIEAddressDecoder:
 
         return None
 
+    def get_register_offset(
+        self,
+        register_name: str,
+        module_name: Optional[str] = None,
+    ) -> int:
+        """Look up a register's tile-local offset by name.
+
+        Args:
+            register_name: Name of the register (e.g. "DMA_BD0_0")
+            module_name: Module to search in (e.g. "core", "memory").
+                         If None, searches all modules.
+
+        Returns:
+            Integer offset within the tile.
+
+        Raises:
+            KeyError: If the register is not found.
+        """
+        modules_to_search = (
+            [module_name] if module_name else list(self.database["modules"].keys())
+        )
+        for mod in modules_to_search:
+            module_data = self.database["modules"].get(mod, {})
+            for register in module_data.get("registers", []):
+                if register.get("name") == register_name:
+                    offset_str = register["offset"]
+                    if offset_str.startswith("0x"):
+                        return int(offset_str, 16)
+                    return int(offset_str)
+        raise KeyError(
+            f"Register '{register_name}' not found"
+            + (f" in module '{module_name}'" if module_name else "")
+        )
+
     def encode_address(
         self,
         col: int,
