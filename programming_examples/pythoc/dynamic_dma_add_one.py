@@ -63,7 +63,6 @@ from aie.dialects.aie import (
     core,
     device,
     DMAChannelDir,
-    external_func,
     flow,
     lock,
     tile,
@@ -243,11 +242,7 @@ def build_mlir_module(dev, kernel):
 
         @device(dev)
         def device_body():
-            # Declare external kernel function
-            kernel_fn = external_func(
-                kernel._name,
-                inputs=[tensor_ty, tensor_ty, np.int32, np.int32, np.int32],
-            )
+            kernel.resolve()
 
             # Tile declarations
             t00 = tile(0, 0)  # Shim tile
@@ -280,7 +275,7 @@ def build_mlir_module(dev, kernel):
             # out_addr_words = N (byte addr N*4 / 4)
             @core(t02, kernel.bin_name)
             def core_body():
-                kernel_fn(in_buf, out_buf, 0, N, N)
+                kernel(in_buf, out_buf, 0, N, N)
 
             # Runtime sequence (host-side DMA programming)
             @runtime_sequence(tensor_ty, tensor_ty)
