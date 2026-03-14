@@ -38,19 +38,22 @@ endif()
 # -----------------------------------------------------------------------------
 # In WSL, CMake runs on Windows via `powershell.exe cmake`. Therefore, we must
 # prefer deterministic repo-root detection. Fall back to Python only if needed.
+# If MLIR_AIE_DIR is already set (e.g. passed via -DMLIR_AIE_DIR=...), use it.
 
-get_filename_component(_mlir_aie_repo_root "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
-if(EXISTS "${_mlir_aie_repo_root}/runtime_lib/test_lib/xrt_test_wrapper.h")
-  set(MLIR_AIE_DIR "${_mlir_aie_repo_root}")
-else()
-  find_package(Python3 COMPONENTS Interpreter QUIET)
-  if(Python3_Interpreter_FOUND)
-    execute_process(
-      COMMAND "${Python3_EXECUTABLE}" -c "from aie.utils.config import root_path; print(root_path())"
-      OUTPUT_VARIABLE MLIR_AIE_DIR
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-      ERROR_QUIET
-    )
+if(NOT MLIR_AIE_DIR)
+  get_filename_component(_mlir_aie_repo_root "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
+  if(EXISTS "${_mlir_aie_repo_root}/runtime_lib/test_lib/xrt_test_wrapper.h")
+    set(MLIR_AIE_DIR "${_mlir_aie_repo_root}")
+  else()
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+      execute_process(
+        COMMAND "${Python3_EXECUTABLE}" -c "from aie.utils.config import root_path; print(root_path())"
+        OUTPUT_VARIABLE MLIR_AIE_DIR
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+      )
+    endif()
   endif()
 endif()
 

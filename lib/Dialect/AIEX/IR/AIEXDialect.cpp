@@ -1200,8 +1200,7 @@ getAbsoluteAddress(T *op, uint32_t addressOffset,
     uint32_t row = buffer.getTileOp().getRow();
     address = static_cast<uint32_t>(*bufferAddress) +
               addressOffset * sizeof(uint32_t);
-    address = ((col & 0xff) << tm.getColumnShift()) |
-              ((row & 0xff) << tm.getRowShift()) | (address & 0xfffff);
+    address = tm.getTileAddress(col, row) | (address & 0xfffff);
   } else { // otherwise, the given address is absolute
     address = addressOffset;
     std::optional<uint32_t> col = op->getColumn();
@@ -1209,8 +1208,7 @@ getAbsoluteAddress(T *op, uint32_t addressOffset,
     if (col && row) {
       // If col and row are set, only the lower 20 bits of the address are
       // used, and col and row dictate the upper bits (ignored)
-      address = ((*col & 0xff) << tm.getColumnShift()) |
-                ((*row & 0xff) << tm.getRowShift()) | (address & 0xfffff);
+      address = tm.getTileAddress(*col, *row) | (address & 0xfffff);
     }
   }
 

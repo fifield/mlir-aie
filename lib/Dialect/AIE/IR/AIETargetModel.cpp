@@ -26,6 +26,11 @@ std::string getModuleForTile(const AIETargetModel &model, TileID tile,
     return "shim";
   if (model.isMemTile(tile.col, tile.row))
     return "memory_tile";
+  // In AIE4, core tiles have no separate memory module; Trace1 registers
+  // are in the "core" module of the register database.
+  AIEArch arch = model.getTargetArch();
+  if (isMem && (arch == AIEArch::AIE4 || arch == AIEArch::AIE4z))
+    return "core";
   return isMem ? std::string("memory") : std::string("core");
 }
 
@@ -37,6 +42,11 @@ std::string getModuleForTileEvents(const AIETargetModel &model, TileID tile,
   if (model.isMemTile(tile.col, tile.row))
     return "mem_tile"; // Events database uses "mem_tile" instead of
                        // "memory_tile"
+  // In AIE4, core tiles have no separate memory module; both trace units
+  // (Trace0 and Trace1) use core module events.
+  AIEArch arch = model.getTargetArch();
+  if (isMem && (arch == AIEArch::AIE4 || arch == AIEArch::AIE4z))
+    return "core";
   return isMem ? std::string("memory") : std::string("core");
 }
 
@@ -1772,6 +1782,11 @@ AIE4TargetModel::loadRegisterDatabase() const {
   return RegisterDatabase::loadAIE4();
 }
 
+std::unique_ptr<RegisterDatabase>
+NPU3zTargetModel::loadRegisterDatabase() const {
+  return RegisterDatabase::loadAIE4Z();
+}
+
 AIEArch AIE4TargetModel::getTargetArch() const { return AIEArch::AIE4; }
 
 // Return the tile ID of the memory to the west of the given tile, if it exists.
@@ -2496,6 +2511,9 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
       if (dstBundle == WireBundle::TileControl)
         return srcChan == dstChan;
     }
+    // Switch512 subordinate (32-bit bridge to 512-bit switch)
+    if (srcBundle == WireBundle::Switch512)
+      return dstBundle == WireBundle::Switch32;
     return false;
   }
 
@@ -2567,12 +2585,16 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
                          {WireBundle::TileControl, WireBundle::Switch32}))
         return true;
       return false;
-    // Switch32 subordinate
+    // Switch512 subordinate (port on 32-bit switch to main switch)
+    case (WireBundle::Switch512):
+      return dstBundle == WireBundle::Switch32;
+    // Switch32 subordinate (port on main switch; can route back to 32-bit switch)
     case (WireBundle::Switch32):
       return (isBundleInList(
           dstBundle, {WireBundle::Core, WireBundle::DMA, WireBundle::South,
                       WireBundle::East, WireBundle::West, WireBundle::North,
-                      WireBundle::NorthControl, WireBundle::TileControl}));
+                      WireBundle::NorthControl, WireBundle::TileControl,
+                      WireBundle::Switch512}));
     }
   }
   return false;

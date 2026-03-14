@@ -590,6 +590,16 @@ public:
   }
 
   virtual uint32_t getNumMemTileRows() const = 0;
+
+  /// Return the upper address bits (col and row fields) for the given tile.
+  /// The default encoding is (col << colShift) | (row << rowShift).
+  /// Architectures with non-trivial address layouts (e.g. AIE4, where each
+  /// memtile row expands to 5 address rows) override this.
+  virtual uint32_t getTileAddress(int col, int row) const {
+    return ((col & 0xff) << getColumnShift()) |
+           ((row & 0xff) << getRowShift());
+  }
+
   /// Return the size (in bytes) of a MemTile.
   virtual uint32_t getMemTileSize() const = 0;
   /// Return the number of memory banks of a given tile.
@@ -1351,6 +1361,17 @@ public:
   AIE4TargetModel(TargetModelKind k, Properties p = None)
       : AIETargetModel(k, p | properties) {}
 
+  /// AIE4 core tiles use a non-trivial address encoding: each memtile row
+  /// expands to 5 rows in the address space, so core tile (col, row) encodes
+  /// as (col << 25) | ((row + 5*numMemTileRows - 1) << 20).
+  uint32_t getTileAddress(int col, int row) const override {
+    uint32_t addrRow = static_cast<uint32_t>(row);
+    if (isCoreTile(col, row))
+      addrRow += 5 * getNumMemTileRows() - 1;
+    return ((col & 0xff) << getColumnShift()) |
+           ((addrRow & 0xff) << getRowShift());
+  }
+
   AIEArch getTargetArch() const override;
 
   uint32_t getAddressGenGranularity() const override { return 32; }
@@ -1539,6 +1560,9 @@ public:
     return model->getKind() == TK_AIE4_NPU3Z;
   }
   AIEArch getTargetArch() const override { return AIEArch::AIE4z; }
+
+protected:
+  std::unique_ptr<RegisterDatabase> loadRegisterDatabase() const override;
 };
 
 } // namespace xilinx::AIE

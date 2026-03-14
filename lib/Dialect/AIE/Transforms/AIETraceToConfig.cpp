@@ -25,6 +25,52 @@ using namespace xilinx::AIE;
 
 namespace {
 
+/// Returns true if the target is an AIE4 architecture (AIE4 or AIE4z).
+static bool isAIE4(const AIETargetModel &tm) {
+  auto arch = tm.getTargetArch();
+  return arch == AIEArch::AIE4 || arch == AIEArch::AIE4z;
+}
+
+/// Returns the trace register name prefix for the given tile and packet type.
+/// For AIE4:
+///   - Core tile, isMem=false  -> "Trace0_"  (trace unit 0)
+///   - Core tile, isMem=true   -> "Trace1_"  (trace unit 1, captures DMA events)
+///   - Shim / MemTile          -> "Trace_A_"
+/// For AIE1/AIE2/AIE2P:
+///   - All tile types          -> "Trace_"
+static std::string getTraceRegPrefix(const AIETargetModel &tm, TileID tileID,
+                                     bool isMem) {
+  if (isAIE4(tm)) {
+    if (tm.isShimNOCorPLTile(tileID.col, tileID.row) ||
+        tm.isMemTile(tileID.col, tileID.row))
+      return "Trace_A_";
+    return isMem ? "Trace1_" : "Trace0_";
+  }
+  return "Trace_";
+}
+
+/// Returns the port selection register name for the given slot and tile type.
+/// For AIE4 shim tiles, the registers have an "_A_" infix.
+static std::string getPortSelRegName(const AIETargetModel &tm, TileID tileID,
+                                     uint32_t slot) {
+  bool isShim = tm.isShimNOCorPLTile(tileID.col, tileID.row);
+  if (isAIE4(tm) && isShim)
+    return slot < 4 ? "Stream_Switch_Event_Port_Selection_A_0"
+                    : "Stream_Switch_Event_Port_Selection_A_1";
+  return slot < 4 ? "Stream_Switch_Event_Port_Selection_0"
+                  : "Stream_Switch_Event_Port_Selection_1";
+}
+
+/// Returns the Master/Slave field name for port selection registers.
+/// AIE4 renames "Master_Slave" to "Manager_Subordinate".
+static std::string getMasterSlaveFieldName(const AIETargetModel &tm,
+                                           uint32_t slot) {
+  const char *suffix =
+      isAIE4(tm) ? "_Manager_Subordinate" : "_Master_Slave";
+  return "Port_" + std::to_string(slot) + suffix;
+}
+
+
 struct AIETraceToConfigPass
     : xilinx::AIE::impl::AIETraceToConfigBase<AIETraceToConfigPass> {
   void runOnOperation() override {
@@ -64,6 +110,9 @@ struct AIETraceToConfigPass
       OpBuilder configBuilder = OpBuilder::atBlockEnd(configBody);
 
       bool isMem = (packetType == TracePacketType::Mem);
+
+      // Compute architecture-specific register name prefix once for this trace.
+      std::string tracePrefix = getTraceRegPrefix(targetModel, tileID, isMem);
 
       // Process combo/edge events FIRST (before other trace config)
       // This ensures COMBO_EVENT_*/EDGE_DETECTION_EVENT_* are configured
@@ -255,7 +304,7 @@ struct AIETraceToConfigPass
           }
 
           TraceRegOp::create(configBuilder, trace.getLoc(),
-                             builder.getStringAttr("Trace_Control0"),
+                             builder.getStringAttr(tracePrefix + "Control0"),
                              builder.getStringAttr("Trace_Start_Event"),
                              builder.getI32IntegerAttr(startEvent),
                              /*mask=*/nullptr,
@@ -300,7 +349,7 @@ struct AIETraceToConfigPass
           }
 
           TraceRegOp::create(configBuilder, trace.getLoc(),
-                             builder.getStringAttr("Trace_Control0"),
+                             builder.getStringAttr(tracePrefix + "Control0"),
                              builder.getStringAttr("Trace_Stop_Event"),
                              builder.getI32IntegerAttr(stopEvent),
                              /*mask=*/nullptr,
@@ -313,7 +362,7 @@ struct AIETraceToConfigPass
         bool isCore = (packetType == TracePacketType::Core);
         if (auto modeOp = dyn_cast<TraceModeOp>(op); modeOp && isCore) {
           TraceRegOp::create(configBuilder, trace.getLoc(),
-                             builder.getStringAttr("Trace_Control0"),
+                             builder.getStringAttr(tracePrefix + "Control0"),
                              builder.getStringAttr("Mode"),
                              builder.getI32IntegerAttr(
                                  static_cast<uint32_t>(modeOp.getMode())),
@@ -331,12 +380,12 @@ struct AIETraceToConfigPass
                  "-aie-insert-trace-flows");
           TraceRegOp::create(
               configBuilder, trace.getLoc(),
-              builder.getStringAttr("Trace_Control1"),
+              builder.getStringAttr(tracePrefix + "Control1"),
               builder.getStringAttr("ID"), builder.getI32IntegerAttr(*packetId),
               /*mask=*/nullptr, builder.getStringAttr("packet ID"));
 
           TraceRegOp::create(configBuilder, trace.getLoc(),
-                             builder.getStringAttr("Trace_Control1"),
+                             builder.getStringAttr(tracePrefix + "Control1"),
                              builder.getStringAttr("Packet_Type"),
                              builder.getI32IntegerAttr(
                                  static_cast<uint32_t>(packetOp.getType())),
@@ -345,20 +394,19 @@ struct AIETraceToConfigPass
         }
       }
 
-      // 2. Emit port configurations (Stream_Switch_Event_Port_Selection_0/1)
+      // 2. Emit port configurations
       for (auto &op : trace.getBody().getOps()) {
         if (auto portOp = dyn_cast<TracePortOp>(op)) {
           uint32_t slot = portOp.getSlot();
 
-          // Determine which register based on slot
-          StringRef registerName = (slot < 4)
-                                       ? "Stream_Switch_Event_Port_Selection_0"
-                                       : "Stream_Switch_Event_Port_Selection_1";
+          // Determine which register based on slot and architecture/tile type.
+          std::string registerName =
+              getPortSelRegName(targetModel, tileID, slot);
 
           // Generate field names
           std::string idFieldName = "Port_" + std::to_string(slot) + "_ID";
           std::string masterSlaveFieldName =
-              "Port_" + std::to_string(slot) + "_Master_Slave";
+              getMasterSlaveFieldName(targetModel, slot);
 
           // Generate port value string "PORT:CHANNEL"
           std::string portValue = stringifyWireBundle(portOp.getPort()).str() +
@@ -415,7 +463,8 @@ struct AIETraceToConfigPass
         }
 
         // Determine which register and field
-        StringRef registerName = (i < 4) ? "Trace_Event0" : "Trace_Event1";
+        std::string registerName =
+            tracePrefix + ((i < 4) ? "Event0" : "Event1");
         std::string fieldName = "Trace_Event" + std::to_string(i);
 
         // Emit register write with event number as integer

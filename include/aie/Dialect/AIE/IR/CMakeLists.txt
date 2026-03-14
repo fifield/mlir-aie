@@ -51,12 +51,14 @@ set(EVENTS_HEADER_FILES
   "${AIE_RT_EVENTS_DIR}/xaie_events_aie.h"
   "${AIE_RT_EVENTS_DIR}/xaie_events_aieml.h"
   "${AIE_RT_EVENTS_DIR}/xaie_events_aie2p.h"
+  "${AIE_RT_EVENTS_DIR}/xaie_events_aie4.h"
 )
 
 set(GENERATED_EVENTS_TD_FILES
   "${CMAKE_BINARY_DIR}/include/AIEEventsAIE.td.inc"
   "${CMAKE_BINARY_DIR}/include/AIEEventsAIE2.td.inc"
   "${CMAKE_BINARY_DIR}/include/AIEEventsAIE2P.td.inc"
+  "${CMAKE_BINARY_DIR}/include/AIEEventsAIE4.td.inc"
 )
 
 set(GENERATED_EVENTS_JSON "${CMAKE_BINARY_DIR}/lib/regdb/events_database.json")

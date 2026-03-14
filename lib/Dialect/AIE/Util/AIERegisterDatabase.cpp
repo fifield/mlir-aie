@@ -77,7 +77,7 @@ std::unique_ptr<RegisterDatabase> RegisterDatabase::loadAIE2() {
   }
 
   auto db = std::unique_ptr<RegisterDatabase>(new RegisterDatabase());
-  if (!db->loadFromJSON(*registerPath, *eventPath))
+  if (!db->loadFromJSON(*registerPath, *eventPath, "aie2"))
     return nullptr;
   db->buildOffsetIndex();
 
@@ -99,14 +99,38 @@ std::unique_ptr<RegisterDatabase> RegisterDatabase::loadAIE4() {
   std::string emptyPath;
 
   auto db = std::unique_ptr<RegisterDatabase>(new RegisterDatabase());
-  if (!db->loadFromJSON(*registerPath, eventPath ? *eventPath : emptyPath))
+  if (!db->loadFromJSON(*registerPath, eventPath ? *eventPath : emptyPath,
+                        "aie4"))
+    return nullptr;
+
+  return db;
+}
+
+std::unique_ptr<RegisterDatabase> RegisterDatabase::loadAIE4Z() {
+  auto registerPath = findRegDBFile("aie_registers_aie4z.json");
+
+  if (!registerPath) {
+    llvm::errs() << "Failed to locate AIE4Z register database. "
+                 << "Set MLIR_AIE_INSTALL_DIR to the "
+                 << "MLIR-AIE installation path.\n";
+    return nullptr;
+  }
+
+  // Event database is optional for AIE4Z
+  auto eventPath = findRegDBFile("events_database.json");
+  std::string emptyPath;
+
+  auto db = std::unique_ptr<RegisterDatabase>(new RegisterDatabase());
+  if (!db->loadFromJSON(*registerPath, eventPath ? *eventPath : emptyPath,
+                        "aie4z"))
     return nullptr;
 
   return db;
 }
 
 bool RegisterDatabase::loadFromJSON(StringRef registerPath,
-                                    StringRef eventPath) {
+                                    StringRef eventPath,
+                                    StringRef archKey) {
   // Load register database
   auto registerBuf = MemoryBuffer::getFile(registerPath);
   if (!registerBuf) {
@@ -235,11 +259,16 @@ bool RegisterDatabase::loadFromJSON(StringRef registerPath,
     return false;
 
   // Try architecture-specific key (aie2, aie4, etc.)
+  // If archKey is specified, use it directly; otherwise try aie2 then aie4.
   json::Object *archObj = nullptr;
-  for (const char *arch : {"aie2", "aie4"}) {
-    archObj = eventRoot->getObject(arch);
-    if (archObj)
-      break;
+  if (!archKey.empty()) {
+    archObj = eventRoot->getObject(archKey);
+  } else {
+    for (const char *arch : {"aie2", "aie4"}) {
+      archObj = eventRoot->getObject(arch);
+      if (archObj)
+        break;
+    }
   }
   if (!archObj)
     return true; // No matching architecture; not an error
