@@ -112,16 +112,12 @@ def read_processor_bus(data: ptr[i32, True], addr: i32, size: i32, stride: i32):
 def build_mlir_module(dev):
     """Build the MLIR module using lower-level Python API + PythoC kernel."""
 
-    # Compile the PythoC kernel to an object file
-    from aie.iron.pythoc.compiler import compile_pythoc_source
-
     target_arch = "aie2p" if dev == AIEDevice.npu2 else "aie2"
 
-    obj_file = compile_pythoc_source(
-        source_code=read_processor_bus.__aie_source__,
-        function_name="read_processor_bus",
+    kernel = PythocKernel(
+        read_processor_bus,
+        [np.ndarray[(8,), np.dtype[np.int32]], np.int32, np.int32, np.int32],
         target_arch=target_arch,
-        verbose=False,
     )
 
     with mlir_mod_ctx() as ctx:
@@ -135,7 +131,7 @@ def build_mlir_module(dev):
 
             # Declare the external kernel function
             read_fn = external_func(
-                "read_processor_bus",
+                kernel._name,
                 inputs=[memref_8xi32, np.int32, np.int32, np.int32],
             )
 
@@ -164,7 +160,7 @@ def build_mlir_module(dev):
                 )
 
             # Core program: read lock values via processor bus and write to output
-            @core(t02, str(obj_file))
+            @core(t02, kernel.bin_name)
             def core_body():
                 for _ in range_(8):
                     of_in1.acquire(ObjectFifoPort.Consume, 1)
