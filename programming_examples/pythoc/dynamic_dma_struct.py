@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# dynamic_dma_add_one.py -*- Python -*-
+# dynamic_dma_struct.py -*- Python -*-
 #
 # This file is licensed under the Apache License v2.0 with LLVM Exceptions.
 # See https://llvm.org/LICENSE.txt for license information.
@@ -9,44 +9,20 @@
 
 # REQUIRES: ryzen_ai_npu2
 #
-# RUN: %python %s --device npu2 --work-dir ./dynamic_dma_add_one_build | FileCheck %s
+# RUN: %python %s --device npu2 --work-dir ./dynamic_dma_struct_build | FileCheck %s
 # CHECK: PASS!
 
-"""Dynamic DMA programming test: core programs its own DMA via write_tm.
+"""Dynamic DMA programming with struct-based helper functions.
 
-The PythoC kernel dynamically programs the compute tile's DMA buffer
-descriptors and starts DMA channels using write_tm (processor bus writes).
-This demonstrates that the core can control its own DMA at runtime rather
-than relying on static MLIR-generated DMA configuration.
+Same functionality as dynamic_dma_add_one.py, but demonstrates PythoC struct
+support by passing DMA channel configuration (BD base address, start queue
+address, lock address) as a struct to a helper function that programs a BD
+and starts a DMA transfer.
 
-Flow:
-  1. Host sends N int32 values to the compute tile via shim DMA.
-  2. The kernel programs BD0 for S2MM ch0 (receive), starts the channel,
-     and waits for the transfer to complete via lock-based signaling.
-  3. The kernel processes data: out[i] = in[i] + 1.
-  4. The kernel programs BD1 for MM2S ch0 (send), starts the channel,
-     and waits for completion.
-  5. Host receives the processed data and verifies correctness.
-
-The compute tile's DMA is NOT statically configured by MLIR — only the
-stream routing and shim DMA are set up at compile time.
-
-AIE2P Compute Tile DMA Register Map (looked up from regdb):
-  BD base:            DMA_BD0_0 (stride 0x20 per BD, 6 words each)
-  S2MM_0_START_QUEUE: DMA_S2MM_0_Start_Queue (bits [3:0]=BD_ID, [23:16]=repeat_count)
-  MM2S_0_START_QUEUE: DMA_MM2S_0_Start_Queue
-  Lock N value:       Lock{N}_value
-  Proc bus enable:    Core_Processor_Bus (bit 0)
-
-BD word layout (compute tile):
-  Word 0 [27:14]=BASE_ADDRESS (word addr), [13:0]=BUFFER_LENGTH (words)
-  Word 1 [31]=COMPRESSION, [30]=PACKET, ...
-  Word 2 [25:13]=D1_STEPSIZE, [12:0]=D0_STEPSIZE (stored as value-1)
-  Word 3 [28:21]=D1_WRAP, [20:13]=D0_WRAP, [12:0]=D2_STEPSIZE
-  Word 4 [24:19]=ITER_CUR, [18:13]=ITER_WRAP, [12:0]=ITER_STEP
-  Word 5 [31]=TLAST_SUP, [30:27]=NEXT_BD, [26]=USE_NEXT_BD, [25]=VALID_BD,
-         [24:18]=LOCK_REL_VALUE, [17:13]=LOCK_REL_ID, [12]=LOCK_ACQ_EN,
-         [11:5]=LOCK_ACQ_VALUE, [3:0]=LOCK_ACQ_ID
+This tests:
+  - PythoC struct types in @aie_kernel cross-compilation
+  - Helper function calls from the main kernel
+  - Multi-function compilation in compile_pythoc_source
 """
 
 from __future__ import annotations
@@ -84,10 +60,10 @@ from aie.utils.regdb import AIEAddressDecoder
 import aie.iron as iron
 
 # Import PythoC types and operations for inline kernel definition
-from pythoc import ptr, i32
+from pythoc import ptr, i32, struct
 from pythoc.aie.operations import read_tm, write_tm
 
-DEFAULT_BUILD_DIR = Path(__file__).resolve().parent / "dynamic_dma_add_one_build"
+DEFAULT_BUILD_DIR = Path(__file__).resolve().parent / "dynamic_dma_struct_build"
 
 # Number of int32 elements to process
 N = 256
@@ -97,45 +73,23 @@ N = 256
 _decoder = AIEAddressDecoder()
 _reg = _decoder.get_register_offset
 
-# DMA buffer descriptor registers (memory module)
-DMA_BD0_0 = _reg("DMA_BD0_0", "memory")
-DMA_BD0_1 = _reg("DMA_BD0_1", "memory")
-DMA_BD0_2 = _reg("DMA_BD0_2", "memory")
-DMA_BD0_3 = _reg("DMA_BD0_3", "memory")
-DMA_BD0_4 = _reg("DMA_BD0_4", "memory")
-DMA_BD0_5 = _reg("DMA_BD0_5", "memory")
-DMA_BD1_0 = _reg("DMA_BD1_0", "memory")
-DMA_BD1_1 = _reg("DMA_BD1_1", "memory")
-DMA_BD1_2 = _reg("DMA_BD1_2", "memory")
-DMA_BD1_3 = _reg("DMA_BD1_3", "memory")
-DMA_BD1_4 = _reg("DMA_BD1_4", "memory")
-DMA_BD1_5 = _reg("DMA_BD1_5", "memory")
+# DMA buffer descriptor base address (BD0 start; stride 0x20 between BDs)
+DMA_BD_BASE = _reg("DMA_BD0_0", "memory")      # 0x1d000
 
-# DMA channel start queue registers (memory module)
+# DMA channel start queue registers
 DMA_S2MM_0_START_QUEUE = _reg("DMA_S2MM_0_Start_Queue", "memory")
 DMA_MM2S_0_START_QUEUE = _reg("DMA_MM2S_0_Start_Queue", "memory")
 
-# Lock value registers (memory module)
+# Lock value registers
 LOCK0_VALUE = _reg("Lock0_value", "memory")
 LOCK1_VALUE = _reg("Lock1_value", "memory")
 
-# Core processor bus enable register (core module)
+# Core processor bus enable register
 CORE_PROCESSOR_BUS = _reg("Core_Processor_Bus", "core")
 
-# Collect all register constants for PythoC kernel compilation
+# Constants passed to the PythoC kernel via extra_globals
 _REGDB_GLOBALS = {
-    "DMA_BD0_0": DMA_BD0_0,
-    "DMA_BD0_1": DMA_BD0_1,
-    "DMA_BD0_2": DMA_BD0_2,
-    "DMA_BD0_3": DMA_BD0_3,
-    "DMA_BD0_4": DMA_BD0_4,
-    "DMA_BD0_5": DMA_BD0_5,
-    "DMA_BD1_0": DMA_BD1_0,
-    "DMA_BD1_1": DMA_BD1_1,
-    "DMA_BD1_2": DMA_BD1_2,
-    "DMA_BD1_3": DMA_BD1_3,
-    "DMA_BD1_4": DMA_BD1_4,
-    "DMA_BD1_5": DMA_BD1_5,
+    "DMA_BD_BASE": DMA_BD_BASE,
     "DMA_S2MM_0_START_QUEUE": DMA_S2MM_0_START_QUEUE,
     "DMA_MM2S_0_START_QUEUE": DMA_MM2S_0_START_QUEUE,
     "LOCK0_VALUE": LOCK0_VALUE,
@@ -143,92 +97,96 @@ _REGDB_GLOBALS = {
 }
 
 
-# ── PythoC kernel ────────────────────────────────────────────────────────────
+# ── PythoC kernel and helpers ─────────────────────────────────────────────────
+#
+# Helper functions are decorated with @aie_kernel just like the main kernel.
+# PythocKernel's helpers= parameter compiles them all into the same LLVM
+# module so the main kernel can call them.
 
 
 @aie_kernel
-def dynamic_dma_add_one(
+def program_bd_and_start(
+    ch: struct[bd_base: i32, start_queue: i32, lock_addr: i32],
+    bd_id: i32,
+    base_addr_words: i32,
+    num_words: i32,
+    lock_rel_id: i32,
+):
+    """Program a DMA buffer descriptor and start the channel.
+
+    Args:
+        ch: DMA channel config (BD base address, start queue addr, lock addr)
+        bd_id: Buffer descriptor ID (used in start queue)
+        base_addr_words: Buffer base address in 32-bit word units
+        num_words: Number of 32-bit words to transfer
+        lock_rel_id: Lock ID to release on completion
+    """
+    bd: i32 = ch.bd_base + (bd_id * 32)  # 0x20 stride between BDs
+
+    # BD word 0: [27:14] BASE_ADDRESS, [13:0] BUFFER_LENGTH
+    write_tm((base_addr_words << 14) | num_words, bd)
+
+    # BD words 1-4: defaults (contiguous 1D, no packet, no iteration)
+    write_tm(0, bd + 4)
+    write_tm(0, bd + 8)
+    write_tm(0, bd + 12)
+    write_tm(0, bd + 16)
+
+    # BD word 5: VALID_BD=1, LOCK_REL_VALUE=+1, LOCK_REL_ID
+    valid_bd: i32 = 1 << 25
+    lock_rel_val: i32 = 1 << 18   # +1
+    lock_id_bits: i32 = lock_rel_id << 13
+    write_tm(valid_bd | lock_rel_val | lock_id_bits, bd + 20)
+
+    # Start the channel: bits [3:0] = BD_ID
+    write_tm(bd_id, ch.start_queue)
+
+
+@aie_kernel
+def wait_for_lock(
+    ch: struct[bd_base: i32, start_queue: i32, lock_addr: i32],
+):
+    """Poll until the lock associated with a DMA channel is released."""
+    done: i32 = 0
+    while done == 0:
+        done = read_tm(ch.lock_addr)
+
+
+@aie_kernel
+def dynamic_dma_struct(
     in_buf: ptr[i32, True],
     out_buf: ptr[i32, True],
     in_addr_words: i32,
     out_addr_words: i32,
     num_words: i32,
 ):
-    """Dynamically program tile DMA to receive/send data, with add-one processing.
+    """Dynamically program tile DMA using struct-based helpers.
 
-    The kernel programs DMA buffer descriptors and starts DMA channels using
-    write_tm (processor bus writes). Lock-based signaling is used to detect
-    DMA completion.
-
-    Args:
-        in_buf:  Pointer to input buffer in tile local memory
-        out_buf: Pointer to output buffer in tile local memory
-        in_addr_words:  Input buffer base address in 32-bit word units
-        out_addr_words: Output buffer base address in 32-bit word units
-        num_words:      Number of 32-bit words to transfer/process
+    Uses a DMAChannel struct to pass BD base, start queue, and lock
+    addresses to helper functions, reducing repetition.
     """
+    # Build channel config structs (both share the same BD base;
+    # bd_id selects which BD within that base: BD0=0, BD1=1, etc.)
+    s2mm: struct[bd_base: i32, start_queue: i32, lock_addr: i32] = (
+        DMA_BD_BASE, DMA_S2MM_0_START_QUEUE, LOCK0_VALUE
+    )
+    mm2s: struct[bd_base: i32, start_queue: i32, lock_addr: i32] = (
+        DMA_BD_BASE, DMA_MM2S_0_START_QUEUE, LOCK1_VALUE
+    )
 
-    # ── Program BD0 for S2MM channel 0 (receive from stream) ──────────────
+    # Receive data from stream via S2MM channel
+    program_bd_and_start(s2mm, 0, in_addr_words, num_words, 0)
+    wait_for_lock(s2mm)
 
-    # BD0 word 0: [27:14] BASE_ADDRESS, [13:0] BUFFER_LENGTH
-    bd0_w0: i32 = (in_addr_words << 14) | num_words
-    write_tm(bd0_w0, DMA_BD0_0)
-
-    # BD0 words 1-4: defaults (no packet, contiguous 1D, no iteration)
-    write_tm(0, DMA_BD0_1)
-    write_tm(0, DMA_BD0_2)
-    write_tm(0, DMA_BD0_3)
-    write_tm(0, DMA_BD0_4)
-
-    # BD0 word 5: VALID_BD=1, LOCK_REL_VALUE=+1, LOCK_REL_ID=0
-    #   bit 25 = VALID_BD
-    #   bits [24:18] = LOCK_REL_VALUE = 1
-    #   bits [17:13] = LOCK_REL_ID = 0
-    #   -> 0x02000000 | 0x00040000 = 0x02040000
-    write_tm(0x02040000, DMA_BD0_5)
-
-    # Start S2MM channel 0: Start_BD_ID=0 (bits [3:0]), Repeat_Count=0
-    write_tm(0, DMA_S2MM_0_START_QUEUE)
-
-    # Wait for S2MM completion: poll lock 0 value register
-    # Lock 0 starts at 0; BD0 adds +1 when transfer finishes
-    done: i32 = 0
-    while done == 0:
-        done = read_tm(LOCK0_VALUE)
-
-    # ── Process data: add 1 to each element ───────────────────────────────
-
+    # Process data: add 1 to each element
     i: i32 = 0
     while i < num_words:
         out_buf[i] = in_buf[i] + 1
         i = i + 1
 
-    # ── Program BD1 for MM2S channel 0 (send to stream) ───────────────────
-
-    # BD1 word 0: [27:14] BASE_ADDRESS, [13:0] BUFFER_LENGTH
-    bd1_w0: i32 = (out_addr_words << 14) | num_words
-    write_tm(bd1_w0, DMA_BD1_0)
-
-    # BD1 words 1-4: defaults
-    write_tm(0, DMA_BD1_1)
-    write_tm(0, DMA_BD1_2)
-    write_tm(0, DMA_BD1_3)
-    write_tm(0, DMA_BD1_4)
-
-    # BD1 word 5: VALID_BD=1, LOCK_REL_VALUE=+1, LOCK_REL_ID=1
-    #   bit 25 = VALID_BD
-    #   bits [24:18] = LOCK_REL_VALUE = 1
-    #   bits [17:13] = LOCK_REL_ID = 1
-    #   -> 0x02000000 | 0x00040000 | 0x00002000 = 0x02042000
-    write_tm(0x02042000, DMA_BD1_5)
-
-    # Start MM2S channel 0: Start_BD_ID=1 (bits [3:0])
-    write_tm(1, DMA_MM2S_0_START_QUEUE)
-
-    # Wait for MM2S completion: poll lock 1 value register
-    done = 0
-    while done == 0:
-        done = read_tm(LOCK1_VALUE)
+    # Send data to stream via MM2S channel
+    program_bd_and_start(mm2s, 1, out_addr_words, num_words, 1)
+    wait_for_lock(mm2s)
 
 
 # ── Design construction ──────────────────────────────────────────────────────
@@ -242,48 +200,33 @@ def build_mlir_module(dev, kernel):
 
         @device(dev)
         def device_body():
-            # Emit the external_func declaration for the kernel.
-            # (IRON's Worker/Program calls this automatically, but the
-            #  low-level @device/@core path requires an explicit call.)
             kernel.resolve()
 
-            # Tile declarations
-            t00 = tile(0, 0)  # Shim tile
-            t02 = tile(0, 2)  # Compute tile
+            t00 = tile(0, 0)
+            t02 = tile(0, 2)
 
-            # Local memory buffers on compute tile at known addresses
-            # in_buf:  N words at byte address 0
-            # out_buf: N words at byte address N*4
             in_buf = buffer(t02, datatype=tensor_ty, name="in_buf", address=0)
             out_buf = buffer(
                 t02, datatype=tensor_ty, name="out_buf", address=N * 4
             )
 
-            # Locks for DMA completion signaling (DMA BDs release these)
             lock(t02, lock_id=0, init=0, sym_name="s2mm_done")
             lock(t02, lock_id=1, init=0, sym_name="mm2s_done")
 
-            # Circuit-switched stream routing
-            flow(t00, WireBundle.DMA, 0, t02, WireBundle.DMA, 0)  # input
-            flow(t02, WireBundle.DMA, 0, t00, WireBundle.DMA, 0)  # output
+            flow(t00, WireBundle.DMA, 0, t02, WireBundle.DMA, 0)
+            flow(t02, WireBundle.DMA, 0, t00, WireBundle.DMA, 0)
 
-            # Shim DMA channel allocation (maps names to shim DMA channels)
             from aie.dialects.aie import shim_dma_allocation
 
             shim_dma_allocation("in_alloc", t00, DMAChannelDir.MM2S, 0)
             shim_dma_allocation("out_alloc", t00, DMAChannelDir.S2MM, 0)
 
-            # Core: call the PythoC kernel
-            # in_addr_words = 0 (byte addr 0 / 4)
-            # out_addr_words = N (byte addr N*4 / 4)
             @core(t02, kernel.bin_name)
             def core_body():
                 kernel(in_buf, out_buf, 0, N, N)
 
-            # Runtime sequence (host-side DMA programming)
             @runtime_sequence(tensor_ty, tensor_ty)
             def sequence(A, C):
-                # Enable processor bus on compute tile (0,2)
                 npu_maskwrite32(
                     address=CORE_PROCESSOR_BUS,
                     value=0x1,
@@ -292,7 +235,6 @@ def build_mlir_module(dev, kernel):
                     row=2,
                 )
 
-                # Program shim DMA to send input and receive output
                 in_task = shim_dma_single_bd_task(
                     "in_alloc", A, sizes=[1, 1, 1, N]
                 )
@@ -314,7 +256,7 @@ def build_mlir_module(dev, kernel):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Dynamic DMA programming via PythoC write_tm",
+        description="Dynamic DMA with struct-based helpers",
     )
     parser.add_argument(
         "--device",
@@ -358,7 +300,6 @@ def run_with_xrt(xclbin_path, insts_path, verbose):
     )
     kernel_handle = DefaultNPURuntime.load(npu_kernel)
 
-    # Input data: 1, 2, 3, ..., N
     in_data = np.arange(1, N + 1, dtype=np.int32)
     in_buf = iron.tensor(in_data, dtype=np.int32)
     out_buf = iron.zeros(N, dtype=np.int32)
@@ -379,12 +320,14 @@ def main():
     try:
         tensor_ty = np.ndarray[(N,), np.dtype[np.int32]]
 
-        print(f"[1/4] Compiling PythoC kernel ({target_arch})")
+        print(f"[1/4] Compiling PythoC kernel ({target_arch}) with struct helpers")
+
         kernel = PythocKernel(
-            dynamic_dma_add_one,
+            dynamic_dma_struct,
             [tensor_ty, tensor_ty, np.int32, np.int32, np.int32],
             target_arch=target_arch,
             extra_globals=_REGDB_GLOBALS,
+            helpers=[program_bd_and_start, wait_for_lock],
         )
         print(f"      -> {kernel.bin_name}")
 
@@ -404,7 +347,6 @@ def main():
         print("[4/4] Running with pyxrt and validating results")
         output = run_with_xrt(xclbin_path, insts_path, args.verbose)
 
-        # Verify: output should be input + 1
         expected = np.arange(2, N + 2, dtype=np.int32)
         errors = 0
         for i in range(N):
