@@ -85,6 +85,54 @@ def _get_llc_path() -> str:
     )
 
 
+def _make_helper_wrapper(name, func_info, user_globals):
+    """Create a minimal callable wrapper for a compiled helper function.
+
+    The wrapper is added to user_globals so PythoC's visit_Name can find
+    the helper and _get_callable can locate handle_call on it.
+    """
+    from pythoc import void as pc_void
+
+    # Ensure void functions have a return type hint (PythoC requires it)
+    ret_hint = func_info.return_type_hint or pc_void
+
+    def handle_call(visitor, args, node):
+        from llvmlite import ir as llvm_ir
+
+        # The helper is already compiled in the same LLVM module.
+        # Look it up (or declare it if compiling a fresh module).
+        try:
+            ir_func = visitor.module.get_global(name)
+        except KeyError:
+            param_llvm_types = []
+            module_ctx = visitor.module.context
+            for p in func_info.param_names:
+                pt = func_info.param_type_hints[p]
+                param_llvm_types.append(pt.get_llvm_type(module_ctx))
+            ret_ty = (
+                ret_hint.get_llvm_type(module_ctx)
+                if hasattr(ret_hint, 'get_llvm_type')
+                else llvm_ir.VoidType()
+            )
+            ft = llvm_ir.FunctionType(ret_ty, param_llvm_types)
+            ir_func = llvm_ir.Function(visitor.module, ft, name)
+
+        module_ctx = visitor.module.context
+        param_llvm_types = [
+            func_info.param_type_hints[p].get_llvm_type(module_ctx)
+            for p in func_info.param_names
+        ]
+        return visitor._perform_call(
+            node, ir_func, param_llvm_types,
+            ret_hint, evaluated_args=args,
+        )
+
+    wrapper = lambda *a, **kw: None  # noqa: E731 – placeholder
+    wrapper.handle_call = handle_call
+    wrapper._is_compiled = True
+    user_globals[name] = wrapper
+
+
 def compile_pythoc_kernel(
     kernel_path: str,
     function_name: str,
@@ -182,14 +230,23 @@ def compile_pythoc_source(
         # Parse source code
         tree = ast.parse(source_code)
 
-        # Find the target function and remove @compile decorator
+        # Find the target function and any helper functions defined before it.
+        # Only functions appearing before the target are treated as helpers
+        # (these are typically prepended by PythocKernel's helpers= parameter).
+        # Functions after the target are ignored — they may be unrelated
+        # functions in the same file (e.g., when compiling from a kernel file
+        # with multiple independent functions).
         func_node = None
+        helper_nodes = []
         for node in tree.body:
-            if isinstance(node, ast.FunctionDef) and node.name == function_name:
-                func_node = node
-                # Remove @compile decorator to avoid execution issues
-                func_node.decorator_list = []
-                break
+            if isinstance(node, ast.FunctionDef):
+                # Remove decorators to avoid execution issues
+                node.decorator_list = []
+                if node.name == function_name:
+                    func_node = node
+                    break
+                else:
+                    helper_nodes.append(node)
 
         if func_node is None:
             raise ValueError(f"Function '{function_name}' not found in source code")
@@ -218,6 +275,7 @@ def compile_pythoc_source(
                 bf16,
                 void,
                 bool as pbool,
+                struct,
             )
             from pythoc.aie import (
                 aie_vector,
@@ -305,6 +363,7 @@ def compile_pythoc_source(
                     "fast_exp2_i32_to_f32": fast_exp2_i32_to_f32,
                     "read_tm": read_tm,
                     "write_tm": write_tm,
+                    "struct": struct,
                     "range": range,  # Add Python's built-in range for standard loop syntax
                 }
             )
@@ -318,14 +377,62 @@ def compile_pythoc_source(
         # Create compiler instance with user globals
         compiler = LLVMCompiler(user_globals=user_globals)
 
-        # Compile function to LLVM IR
+        # Compile helper functions first (if any) so they're available
+        # in the same LLVM module when the target function calls them.
+        # After compiling each helper, register it in PythoC's unified
+        # registry so the main function's call resolver can find it.
+        first = True
+        if helper_nodes:
+            from pythoc.registry import get_unified_registry, FunctionInfo
+            from pythoc.type_resolver import TypeResolver
+
+            registry = get_unified_registry()
+
+            for helper in helper_nodes:
+                if verbose:
+                    print(f"Compiling helper {helper.name} to LLVM IR...")
+                llvm_helper = compiler.compile_function_from_ast(
+                    helper,
+                    source_code=source_code,
+                    reset_module=first,
+                    user_globals=user_globals,
+                )
+                first = False
+
+                # Build param type hints from annotations so call resolution works
+                resolver = TypeResolver(compiler.module.context, user_globals=user_globals)
+                param_hints = {}
+                param_names = []
+                for arg in helper.args.args:
+                    param_names.append(arg.arg)
+                    if arg.annotation:
+                        param_hints[arg.arg] = resolver.parse_annotation(arg.annotation)
+                ret_hint = resolver.parse_annotation(helper.returns) if helper.returns else None
+
+                func_info = FunctionInfo(
+                    name=helper.name,
+                    source_file="<inline>",
+                    ast_node=helper,
+                    llvm_function=llvm_helper,
+                    return_type_hint=ret_hint,
+                    param_type_hints=param_hints,
+                    param_names=param_names,
+                    is_compiled=True,
+                )
+                registry.register_function(func_info)
+
+                # Create a callable wrapper so visit_Name can find the
+                # helper and _get_callable can locate handle_call on it.
+                _make_helper_wrapper(helper.name, func_info, user_globals)
+
+        # Compile target function to LLVM IR
         if verbose:
             print(f"Compiling {function_name} to LLVM IR...")
 
         llvm_func = compiler.compile_function_from_ast(
             func_node,
             source_code=source_code,
-            reset_module=True,
+            reset_module=first,
             user_globals=user_globals,
         )
 

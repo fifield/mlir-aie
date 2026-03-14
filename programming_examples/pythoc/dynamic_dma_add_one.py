@@ -242,6 +242,9 @@ def build_mlir_module(dev, kernel):
 
         @device(dev)
         def device_body():
+            # Emit the external_func declaration for the kernel.
+            # (IRON's Worker/Program calls this automatically, but the
+            #  low-level @device/@core path requires an explicit call.)
             kernel.resolve()
 
             # Tile declarations

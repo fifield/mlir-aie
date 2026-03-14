@@ -48,6 +48,7 @@ class PythocKernel(Kernel):
         types: Optional[list[type[np.ndarray] | np.dtype]] = None,
         target_arch: str = "aie2p",
         extra_globals: Optional[dict] = None,
+        helpers: Optional[list] = None,
     ):
         """Initialize PythocKernel.
 
@@ -56,6 +57,10 @@ class PythocKernel(Kernel):
             llvm_ir_path_or_types: Path to object file (.o) (Phase 1) or type list (Phase 2)
             types: Type signature (Phase 1 only, when llvm_ir_path is string)
             target_arch: Target architecture (aie2, aie2p)
+            extra_globals: Additional symbols (e.g. register constants) for compilation
+            helpers: List of @aie_kernel helper functions to compile alongside
+                     the main kernel.  Their source is prepended so the main
+                     kernel can call them.
 
         Raises:
             NotImplementedError: If trying to use Phase 2 features
@@ -86,10 +91,24 @@ class PythocKernel(Kernel):
             # Inline decorated function
             # Import compile_pythoc_source here to avoid circular imports
             from .compiler import compile_pythoc_source
+            import textwrap
+
+            # Build combined source: helpers first, then main kernel.
+            # compile_pythoc_source compiles all helper FunctionDefs
+            # before the target, so calls from main→helper resolve.
+            source_parts = []
+            for h in helpers or []:
+                if not hasattr(h, "__aie_source__"):
+                    raise TypeError(
+                        f"Helper {h!r} must be decorated with @aie_kernel"
+                    )
+                source_parts.append(textwrap.dedent(h.__aie_source__))
+            source_parts.append(textwrap.dedent(kernel_fn_or_name.__aie_source__))
+            combined_source = "\n".join(source_parts)
 
             # Compile the inline function to LLVM IR
             obj_file = compile_pythoc_source(
-                source_code=kernel_fn_or_name.__aie_source__,
+                source_code=combined_source,
                 function_name=kernel_fn_or_name.__aie_name__,
                 target_arch=target_arch,
                 output_dir=None,
