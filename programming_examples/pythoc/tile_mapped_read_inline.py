@@ -37,7 +37,6 @@ from aie.dialects.aie import (
     AIEDevice,
     core,
     device,
-    external_func,
     lock,
     object_fifo,
     object_fifo_link,
@@ -129,11 +128,7 @@ def build_mlir_module(dev):
             memref_16xi32 = np.ndarray[(16,), np.dtype[np.int32]]
             memref_64xi32 = np.ndarray[(64,), np.dtype[np.int32]]
 
-            # Declare the external kernel function
-            read_fn = external_func(
-                kernel._name,
-                inputs=[memref_8xi32, np.int32, np.int32, np.int32],
-            )
+            kernel.resolve()
 
             # Tile declarations
             t00 = tile(0, 0)
@@ -165,7 +160,7 @@ def build_mlir_module(dev):
                 for _ in range_(8):
                     of_in1.acquire(ObjectFifoPort.Consume, 1)
                     elem_out = of_out1.acquire(ObjectFifoPort.Produce, 1)
-                    read_fn(
+                    kernel(
                         elem_out, LOCK_REG_ADDR, NUM_LOCKS, LOCK_REG_STRIDE
                     )
                     of_in1.release(ObjectFifoPort.Consume, 1)
