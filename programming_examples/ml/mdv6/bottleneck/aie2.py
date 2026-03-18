@@ -10,7 +10,7 @@ import sys
 
 from aie.iron import (
     Kernel,
-    LocalBuffer,
+    Buffer,
     ObjectFifo,
     Program,
     Runtime,
@@ -96,15 +96,15 @@ def bottleneck_layer_bf16(
     of_weights_L3L2 = ObjectFifo(weight_ty, depth=1, name="weights_L3L2")
     of_output_L2L3 = ObjectFifo(output_ty, depth=1, name="output_L2L3")
 
+    # Local buffers for intermediate results (created at top level, placed by Worker)
+    input_copy_buffer = Buffer(input_copy_ty, name="input_copy")
+    temp1_buffer = Buffer(temp_ty, name="temp1_conv3x3")
+    temp2_buffer = Buffer(temp_ty, name="temp2_conv1x1")
+    temp3_buffer = Buffer(temp_ty, name="temp3_repconv")
+    temp4_buffer = Buffer(temp_ty, name="temp4_conv2")
+
     # Task for the core to perform
-    def core_fn(of_in, of_wts, of_out, kernel):
-        # Allocate local buffers for intermediate results
-        input_copy_buffer = LocalBuffer(input_copy_ty, name="input_copy")
-        temp1_buffer = LocalBuffer(temp_ty, name="temp1_conv3x3")
-        temp2_buffer = LocalBuffer(temp_ty, name="temp2_conv1x1")
-        temp3_buffer = LocalBuffer(temp_ty, name="temp3_repconv")
-        temp4_buffer = LocalBuffer(temp_ty, name="temp4_conv2")
-        
+    def core_fn(of_in, of_wts, of_out, kernel, input_copy_buffer, temp1_buffer, temp2_buffer, temp3_buffer, temp4_buffer):
         # Acquire input and output buffers
         elem_in = of_in.acquire(1)
         elem_wts = of_wts.acquire(1)
@@ -142,7 +142,13 @@ def bottleneck_layer_bf16(
             of_weights_L3L2.cons(),
             of_output_L2L3.prod(),
             bottleneck_kernel,
+            input_copy_buffer,
+            temp1_buffer,
+            temp2_buffer,
+            temp3_buffer,
+            temp4_buffer,
         ],
+        stack_size=4096,
     )
 
     # Runtime operations

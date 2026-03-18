@@ -10,7 +10,7 @@ import sys
 
 from aie.iron import (
     Kernel,
-    LocalBuffer,
+    Buffer,
     ObjectFifo,
     Program,
     Runtime,
@@ -81,12 +81,12 @@ def repconv_layer_bf16(
     of_weights_L3L2 = ObjectFifo(weight_ty, depth=1, name="weights_L3L2")
     of_output_L2L3 = ObjectFifo(output_ty, depth=1, name="output_L2L3")
 
+    # Local buffers for intermediate results (created at top level, placed by Worker)
+    temp1_buffer = Buffer(temp_ty, name="temp1_conv3x3")
+    temp2_buffer = Buffer(temp_ty, name="temp2_conv1x1")
+
     # Task for the core to perform
-    def core_fn(of_in, of_wts, of_out, kernel):
-        # Allocate local buffers for intermediate results
-        temp1_buffer = LocalBuffer(temp_ty, name="temp1_conv3x3")
-        temp2_buffer = LocalBuffer(temp_ty, name="temp2_conv1x1")
-        
+    def core_fn(of_in, of_wts, of_out, kernel, temp1, temp2):
         # Acquire input and output buffers
         elem_in = of_in.acquire(1)
         elem_wts = of_wts.acquire(1)
@@ -97,8 +97,8 @@ def repconv_layer_bf16(
             elem_in,
             elem_wts,
             elem_out,
-            temp1_buffer,
-            temp2_buffer,
+            temp1,
+            temp2,
             height,
             width,
             in_channels,
@@ -120,7 +120,10 @@ def repconv_layer_bf16(
             of_weights_L3L2.cons(),
             of_output_L2L3.prod(),
             repconv_kernel,
+            temp1_buffer,
+            temp2_buffer,
         ],
+        stack_size=4096,
     )
 
     # Runtime operations

@@ -10,7 +10,7 @@ import sys
 
 from aie.iron import (
     Kernel,
-    LocalBuffer,
+    Buffer,
     ObjectFifo,
     Program,
     Runtime,
@@ -111,21 +111,21 @@ def repncsp_layer_bf16(
     of_weights_L3L2 = ObjectFifo(weight_ty, depth=1, name="weights_L3L2")
     of_output_L2L3 = ObjectFifo(output_ty, depth=1, name="output_L2L3")
 
+    # Local buffers for intermediate results (created at top level, placed by Worker)
+    x1_conv1_buffer = Buffer(neck_ty, name="x1_conv1")
+    x1_bottleneck_buffer = Buffer(neck_ty, name="x1_bottleneck")
+    x2_conv2_buffer = Buffer(neck_ty, name="x2_conv2")
+    concat_buffer = Buffer(concat_ty, name="concat_buffer")
+
+    # Bottleneck internal buffers
+    bn_input_copy_buffer = Buffer(neck_ty, name="bn_input_copy")
+    bn_temp1_buffer = Buffer(neck_ty, name="bn_temp1")
+    bn_temp2_buffer = Buffer(neck_ty, name="bn_temp2")
+    bn_temp3_buffer = Buffer(neck_ty, name="bn_temp3")
+    bn_temp4_buffer = Buffer(neck_ty, name="bn_temp4")
+
     # Task for the core to perform
-    def core_fn(of_in, of_wts, of_out, kernel):
-        # Allocate local buffers for intermediate results
-        x1_conv1_buffer = LocalBuffer(neck_ty, name="x1_conv1")
-        x1_bottleneck_buffer = LocalBuffer(neck_ty, name="x1_bottleneck")
-        x2_conv2_buffer = LocalBuffer(neck_ty, name="x2_conv2")
-        concat_buffer = LocalBuffer(concat_ty, name="concat_buffer")
-        
-        # Bottleneck internal buffers
-        bn_input_copy_buffer = LocalBuffer(neck_ty, name="bn_input_copy")
-        bn_temp1_buffer = LocalBuffer(neck_ty, name="bn_temp1")
-        bn_temp2_buffer = LocalBuffer(neck_ty, name="bn_temp2")
-        bn_temp3_buffer = LocalBuffer(neck_ty, name="bn_temp3")
-        bn_temp4_buffer = LocalBuffer(neck_ty, name="bn_temp4")
-        
+    def core_fn(of_in, of_wts, of_out, kernel, x1_conv1_buffer, x1_bottleneck_buffer, x2_conv2_buffer, concat_buffer, bn_input_copy_buffer, bn_temp1_buffer, bn_temp2_buffer, bn_temp3_buffer, bn_temp4_buffer):
         # Acquire input and output buffers
         elem_in = of_in.acquire(1)
         elem_wts = of_wts.acquire(1)
@@ -165,7 +165,17 @@ def repncsp_layer_bf16(
             of_weights_L3L2.cons(),
             of_output_L2L3.prod(),
             repncsp_kernel,
+            x1_conv1_buffer,
+            x1_bottleneck_buffer,
+            x2_conv2_buffer,
+            concat_buffer,
+            bn_input_copy_buffer,
+            bn_temp1_buffer,
+            bn_temp2_buffer,
+            bn_temp3_buffer,
+            bn_temp4_buffer,
         ],
+        stack_size=4096,
     )
 
     # Runtime operations

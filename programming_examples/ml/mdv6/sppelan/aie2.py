@@ -11,7 +11,7 @@ import sys
 
 from aie.iron import (
     Kernel,
-    LocalBuffer,
+    Buffer,
     ObjectFifo,
     Program,
     Runtime,
@@ -113,15 +113,15 @@ def sppelan_bf16(
     of_in = ObjectFifo(input_ty, depth=1, name="input_L3L2")
     of_wts = ObjectFifo(weight_ty, depth=1, name="weights_L3L2")
     of_out = ObjectFifo(output_ty, depth=1, name="output_L2L3")
-    
-    def core_fn(of_in, of_wts, of_out, kernel):
-        # Allocate LocalBuffers for intermediate results
-        conv1_buf = LocalBuffer(conv1_ty, name="conv1_output")
-        pool1_buf = LocalBuffer(pool_ty, name="pool1_output")
-        pool2_buf = LocalBuffer(pool_ty, name="pool2_output")
-        pool3_buf = LocalBuffer(pool_ty, name="pool3_output")
-        concat_buf = LocalBuffer(concat_ty, name="concat_buffer")
-        
+
+    # Local buffers for intermediate results (created at top level, placed by Worker)
+    conv1_buf = Buffer(conv1_ty, name="conv1_output")
+    pool1_buf = Buffer(pool_ty, name="pool1_output")
+    pool2_buf = Buffer(pool_ty, name="pool2_output")
+    pool3_buf = Buffer(pool_ty, name="pool3_output")
+    concat_buf = Buffer(concat_ty, name="concat_buffer")
+
+    def core_fn(of_in, of_wts, of_out, kernel, conv1_buf, pool1_buf, pool2_buf, pool3_buf, concat_buf):
         # Acquire input and weight buffers
         elem_in = of_in.acquire(1)
         elem_wts = of_wts.acquire(1)
@@ -155,7 +155,18 @@ def sppelan_bf16(
     # Create worker
     worker = Worker(
         core_fn,
-        [of_in.cons(), of_wts.cons(), of_out.prod(), sppelan_kernel],
+        [
+            of_in.cons(),
+            of_wts.cons(),
+            of_out.prod(),
+            sppelan_kernel,
+            conv1_buf,
+            pool1_buf,
+            pool2_buf,
+            pool3_buf,
+            concat_buf,
+        ],
+        stack_size=4096,
     )
     
     # Create runtime sequence
