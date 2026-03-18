@@ -28,7 +28,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../../python")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from mdv6.layers import Conv
-from aie.utils.xrt import setup_aie, execute
+import aie.iron as iron
+from aie.utils import NPUKernel, DefaultNPURuntime
 
 
 def bf16_to_uint16(bf16_tensor):
@@ -38,63 +39,64 @@ def bf16_to_uint16(bf16_tensor):
 
 def uint16_to_bf16(uint16_array):
     """Convert uint16 array from AIE to bfloat16 tensor."""
-    return torch.from_numpy(uint16_array).view(torch.bfloat16)
+    return torch.from_numpy(uint16_array.copy()).view(torch.bfloat16)
 
 
-def extract_patch_with_halo(image, tile_row, tile_col, tile_h, tile_w, padding=1):
+def extract_patch_with_halo(image, tile_row, tile_col, tile_h, tile_w,
+                            padding=1, stride=1, kernel_size=3):
     """
-    Extract a spatial patch from the image with halo for convolution.
-    
+    Extract a spatial patch from the image for tiled convolution.
+
     Args:
         image: Input tensor (H, W, C)
-        tile_row: Row index of tile
-        tile_col: Column index of tile
-        tile_h: Tile height (output size)
-        tile_w: Tile width (output size)
+        tile_row: Row index of output tile
+        tile_col: Column index of output tile
+        tile_h: Output tile height
+        tile_w: Output tile width
         padding: Convolution padding
-        
+        stride: Convolution stride
+        kernel_size: Convolution kernel size
+
     Returns:
-        Patch tensor (tile_h + 2*padding, tile_w + 2*padding, C)
+        Patch tensor (patch_h, patch_w, C) where patch = (tile-1)*stride + kernel_size
     """
     H, W, C = image.shape
-    
-    # Calculate output region
-    out_start_h = tile_row * tile_h
-    out_start_w = tile_col * tile_w
-    out_end_h = min(out_start_h + tile_h, H)
-    out_end_w = min(out_start_w + tile_w, W)
-    
-    # Calculate input region (with halo)
-    in_start_h = out_start_h - padding
-    in_start_w = out_start_w - padding
-    in_end_h = out_end_h + padding
-    in_end_w = out_end_w + padding
-    
+
+    # Input region needed for this output tile
+    # Output pixel (oh, ow) reads input at (oh*stride - padding, ow*stride - padding)
+    # through (oh*stride - padding + kernel_size - 1, ...)
+    in_start_h = tile_row * tile_h * stride - padding
+    in_start_w = tile_col * tile_w * stride - padding
+
+    patch_h = (tile_h - 1) * stride + kernel_size
+    patch_w = (tile_w - 1) * stride + kernel_size
+
+    in_end_h = in_start_h + patch_h
+    in_end_w = in_start_w + patch_w
+
     # Create patch with zero padding
-    patch_h = tile_h + 2 * padding
-    patch_w = tile_w + 2 * padding
     patch = torch.zeros(patch_h, patch_w, C, dtype=image.dtype)
-    
+
     # Calculate valid region to copy
     valid_start_h = max(0, in_start_h)
     valid_start_w = max(0, in_start_w)
     valid_end_h = min(H, in_end_h)
     valid_end_w = min(W, in_end_w)
-    
+
     # Calculate offsets in patch
     patch_offset_h = valid_start_h - in_start_h
     patch_offset_w = valid_start_w - in_start_w
-    
+
     # Copy valid region
     patch_h_valid = valid_end_h - valid_start_h
     patch_w_valid = valid_end_w - valid_start_w
-    
+
     patch[
         patch_offset_h:patch_offset_h + patch_h_valid,
         patch_offset_w:patch_offset_w + patch_w_valid,
         :
     ] = image[valid_start_h:valid_end_h, valid_start_w:valid_end_w, :]
-    
+
     return patch
 
 
@@ -107,6 +109,7 @@ def test_conv_tiled(
     tile_w=32,
     out_chan_block=8,
     n_patches=2,
+    stride=1,
     use_aie=False,
     xclbin_path=None,
     insts_path=None,
@@ -138,12 +141,15 @@ def test_conv_tiled(
     print(f"{'='*80}\n")
     
     kernel_size = 3
-    stride = 1
     padding = 1
-    
-    # Calculate tile grid
-    tiles_h = (input_height + tile_h - 1) // tile_h
-    tiles_w = (input_width + tile_w - 1) // tile_w
+
+    # Calculate output dimensions
+    output_height = (input_height + 2 * padding - kernel_size) // stride + 1
+    output_width = (input_width + 2 * padding - kernel_size) // stride + 1
+
+    # Calculate tile grid (tiles over OUTPUT space)
+    tiles_h = (output_height + tile_h - 1) // tile_h
+    tiles_w = (output_width + tile_w - 1) // tile_w
     num_out_blocks = (output_channels + out_chan_block - 1) // out_chan_block
     total_tiles = tiles_h * tiles_w * num_out_blocks
     
@@ -185,12 +191,12 @@ def test_conv_tiled(
         # Extract weights
         weights = torch_conv.conv.weight.data  # (O, I, K, K)
         
-        # Prepare output accumulator
-        output_hwc = torch.zeros(input_height, input_width, output_channels, dtype=torch.bfloat16)
-        
-        # Patch and tile sizes
-        patch_h = tile_h + 2 * padding
-        patch_w = tile_w + 2 * padding
+        # Prepare output accumulator (output dims, not input dims)
+        output_hwc = torch.zeros(output_height, output_width, output_channels, dtype=torch.bfloat16)
+
+        # Patch and tile sizes (accounting for stride)
+        patch_h = (tile_h - 1) * stride + kernel_size
+        patch_w = (tile_w - 1) * stride + kernel_size
         patch_size = patch_h * patch_w * input_channels
         weight_block_size = out_chan_block * input_channels * kernel_size * kernel_size
         output_tile_size = tile_h * tile_w * out_chan_block
@@ -203,17 +209,8 @@ def test_conv_tiled(
         
         # Setup AIE with n_patches input buffer
         print(f"\nSetting up AIE...")
-        app = setup_aie(
-            xclbin_path,
-            insts_path,
-            (n_patches * patch_size,),  # Input buffer holds n_patches
-            np.uint16,
-            (weight_block_size,),
-            np.uint16,
-            (n_patches * output_tile_size,),  # Output buffer holds n_patches tiles
-            np.uint16,
-            kernel_name="MLIR_AIE"
-        )
+        npu_kernel = NPUKernel(xclbin_path, insts_path, kernel_name="MLIR_AIE")
+        kernel_handle = DefaultNPURuntime.load(npu_kernel)
         
         total_execution_time = 0
         tiles_processed = 0
@@ -225,18 +222,19 @@ def test_conv_tiled(
         
         for tile_row in range(tiles_h):
             for tile_col in range(tiles_w):
-                # Extract input patch
+                # Extract input patch (stride-aware)
                 patch = extract_patch_with_halo(
-                    input_hwc, tile_row, tile_col, tile_h, tile_w, padding
+                    input_hwc, tile_row, tile_col, tile_h, tile_w,
+                    padding, stride, kernel_size
                 )
                 patch_uint16 = bf16_to_uint16(patch.flatten())
                 input_patches_list.append(patch_uint16)
-                
+
                 # Pre-calculate output placement coordinates
                 out_start_h = tile_row * tile_h
                 out_start_w = tile_col * tile_w
-                out_end_h = min(out_start_h + tile_h, input_height)
-                out_end_w = min(out_start_w + tile_w, input_width)
+                out_end_h = min(out_start_h + tile_h, output_height)
+                out_end_w = min(out_start_w + tile_w, output_width)
                 actual_tile_h = out_end_h - out_start_h
                 actual_tile_w = out_end_w - out_start_w
                 
@@ -289,16 +287,20 @@ def test_conv_tiled(
                     batch_buffer = np.concatenate([partial_buffer] + padding_patches)
                 
                 # Execute on AIE with n_patches buffer
+                in1 = iron.tensor(batch_buffer, dtype=np.uint16)
+                in2 = iron.tensor(weight_block_uint16, dtype=np.uint16)
+                out = iron.zeros(n_patches * output_tile_size, dtype=np.uint16)
                 start = time.time_ns()
-                output_buffer = execute(app, batch_buffer, weight_block_uint16)
+                ret = DefaultNPURuntime.run(kernel_handle, [in1, in2, out])
                 stop = time.time_ns()
                 exec_time = (stop - start) / 1000  # microseconds
                 total_execution_time += exec_time
-                
-                # Split output buffer into individual tiles
+                output_buffer = out.numpy()
+
+                # Split output buffer into individual tiles (copy to avoid dangling XRT buffer references)
                 for i in range(batch_size):
                     tile_offset = i * output_tile_size
-                    output_tiles.append(output_buffer[tile_offset:tile_offset + output_tile_size])
+                    output_tiles.append(output_buffer[tile_offset:tile_offset + output_tile_size].copy())
                 
                 tiles_processed += batch_size
                 if tiles_processed % 100 == 0:
@@ -363,13 +365,14 @@ def main():
     parser.add_argument("--tile-w", "-tw", type=int, default=32, help="Tile width")
     parser.add_argument("--out-chan-block", "-ob", type=int, default=8, help="Output channel block size")
     parser.add_argument("--n-patches", "-np", type=int, default=2, help="Number of patches per invocation")
+    parser.add_argument("--stride", "-s", type=int, default=1, help="Convolution stride")
     parser.add_argument("--xclbin", "-x", type=str, help="Path to xclbin file")
     parser.add_argument("--insts", "-i", type=str, help="Path to instructions file")
-    
+
     args = parser.parse_args()
-    
+
     use_aie = args.xclbin is not None and args.insts is not None
-    
+
     success = test_conv_tiled(
         args.height,
         args.width,
@@ -379,6 +382,7 @@ def main():
         tile_w=args.tile_w,
         out_chan_block=args.out_chan_block,
         n_patches=args.n_patches,
+        stride=args.stride,
         use_aie=use_aie,
         xclbin_path=args.xclbin,
         insts_path=args.insts,

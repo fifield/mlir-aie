@@ -18,6 +18,11 @@
 #define REL_WRITE 0
 #define REL_READ 1
 
+// Fast sigmoid for SiLU activation (avoids tanh which doesn't link on AIE2P)
+inline float fast_sigmoid_conv(float x) {
+  return 0.5f + x / (2.0f * (1.0f + (x > 0 ? x : -x)));
+}
+
 //*****************************************************************************
 // Conv2D 3x3 stride 1 - bfloat16
 // Simple implementation for MDV6 Conv layer
@@ -155,11 +160,8 @@ void conv3x3_bn_silu_bf16(bfloat16 *input, bfloat16 *weights,
         float bn_b = (float)bn_bias[oc];
         float bn_out = bn_w * sum + bn_b;
         
-        // Apply SiLU: x * sigmoid(x) ≈ x * (0.5 * tanh(0.5 * x) + 0.5)
-        float half_x = 0.5f * bn_out;
-        float tanh_val = tanh((double)half_x);  // Use standard tanh
-        float sigmoid_approx = 0.5f * (tanh_val + 1.0f);
-        float silu_out = bn_out * sigmoid_approx;
+        // Apply SiLU: x * sigmoid(x) using fast sigmoid
+        float silu_out = bn_out * fast_sigmoid_conv(bn_out);
         
         int output_idx = (oh * output_width + ow) * output_channels + oc;
         output[output_idx] = (bfloat16)silu_out;
@@ -185,8 +187,9 @@ void conv3x3_tile_blocked_bf16(bfloat16 *input_patch, bfloat16 *weights,
                                const int32_t stride, const int32_t padding) {
   event0();
 
-  const int patch_height = tile_height + 2 * padding;
-  const int patch_width = tile_width + 2 * padding;
+  // Input patch dimensions: (tile-1)*stride + kernel_size
+  const int patch_height = (tile_height - 1) * stride + 3;
+  const int patch_width = (tile_width - 1) * stride + 3;
 
   // For each output channel in the block
   for (int oc = 0; oc < output_channels_block; oc++) {
@@ -237,8 +240,8 @@ void conv3x3_partial_accum_bf16(bfloat16 *input_patch, bfloat16 *weights,
                                 const int32_t stride, const int32_t padding) {
   event0();
 
-  const int patch_height = tile_height + 2 * padding;
-  const int patch_width = tile_width + 2 * padding;
+  const int patch_height = (tile_height - 1) * stride + 3;
+  const int patch_width = (tile_width - 1) * stride + 3;
 
   // For each output channel in the block
   for (int oc = 0; oc < output_channels_block; oc++) {
@@ -315,6 +318,33 @@ void conv3x3_fused_bf16(bfloat16 *input, bfloat16 *weights,
                        stride, padding);
 }
 
+void conv1x1_fused_bf16(bfloat16 *input, bfloat16 *weights,
+                        bfloat16 *bn_weight, bfloat16 *bn_bias,
+                        bfloat16 *output,
+                        int32_t input_height, int32_t input_width,
+                        int32_t input_channels, int32_t output_channels) {
+  event0();
+  for (int oc = 0; oc < output_channels; oc++) {
+    float bn_w = (float)bn_weight[oc];
+    float bn_b = (float)bn_bias[oc];
+    for (int h = 0; h < input_height; h++) {
+      for (int w = 0; w < input_width; w++) {
+        float sum = 0.0f;
+        for (int ic = 0; ic < input_channels; ic++) {
+          int input_idx = (h * input_width + w) * input_channels + ic;
+          int weight_idx = oc * input_channels + ic;
+          sum += (float)input[input_idx] * (float)weights[weight_idx];
+        }
+        float bn_out = bn_w * sum + bn_b;
+        float silu_out = bn_out * fast_sigmoid_conv(bn_out);
+        int output_idx = (h * input_width + w) * output_channels + oc;
+        output[output_idx] = (bfloat16)silu_out;
+      }
+    }
+  }
+  event1();
+}
+
 void conv3x3_tiled_bf16(bfloat16 *input_patch, bfloat16 *weights,
                         bfloat16 *output_tile,
                         int32_t tile_height, int32_t tile_width,
@@ -338,6 +368,79 @@ void conv3x3_partial_bf16(bfloat16 *input_patch, bfloat16 *weights,
 
 void convert_accum_bf16(float *accum, bfloat16 *output, int32_t size) {
   accum_to_bf16(accum, output, size);
+}
+
+void conv3x3_fused_packed_bf16(bfloat16 *input, bfloat16 *packed_weights,
+                                bfloat16 *output,
+                                int32_t tile_height, int32_t tile_width,
+                                int32_t in_channels, int32_t out_channels,
+                                int32_t stride, int32_t padding) {
+  // Tiled fused conv3x3+BN+SiLU: tile_height/tile_width are OUTPUT dimensions
+  int wt_size = out_channels * in_channels * 3 * 3;
+  bfloat16 *weights = packed_weights;
+  bfloat16 *bn_w = packed_weights + wt_size;
+  bfloat16 *bn_b = bn_w + out_channels;
+
+  int patch_height = (tile_height - 1) * stride + 3;
+  int patch_width = (tile_width - 1) * stride + 3;
+
+  event0();
+  for (int oc = 0; oc < out_channels; oc++) {
+    float bw = (float)bn_w[oc];
+    float bb = (float)bn_b[oc];
+    for (int oh = 0; oh < tile_height; oh++) {
+      for (int ow = 0; ow < tile_width; ow++) {
+        float sum = 0.0f;
+        for (int ic = 0; ic < in_channels; ic++) {
+          for (int kh = 0; kh < 3; kh++) {
+            for (int kw = 0; kw < 3; kw++) {
+              int ih = oh * stride + kh;
+              int iw = ow * stride + kw;
+              int input_idx = (ih * patch_width + iw) * in_channels + ic;
+              int weight_idx = ((oc * in_channels + ic) * 3 + kh) * 3 + kw;
+              sum += (float)input[input_idx] * (float)weights[weight_idx];
+            }
+          }
+        }
+        float bn_out = bw * sum + bb;
+        float silu_out = bn_out * fast_sigmoid_conv(bn_out);
+        int output_idx = (oh * tile_width + ow) * out_channels + oc;
+        output[output_idx] = (bfloat16)silu_out;
+      }
+    }
+  }
+  event1();
+}
+
+void conv1x1_fused_packed_bf16(bfloat16 *input, bfloat16 *packed_weights,
+                                bfloat16 *output,
+                                int32_t tile_height, int32_t tile_width,
+                                int32_t in_channels, int32_t out_channels,
+                                int32_t stride_unused, int32_t padding_unused) {
+  // Tiled fused conv1x1+BN+SiLU: tile dims are output dims (= input dims for 1x1)
+  int wt_size = out_channels * in_channels;
+  bfloat16 *weights = packed_weights;
+  bfloat16 *bn_w = packed_weights + wt_size;
+  bfloat16 *bn_b = bn_w + out_channels;
+
+  event0();
+  for (int oc = 0; oc < out_channels; oc++) {
+    float bw = (float)bn_w[oc];
+    float bb = (float)bn_b[oc];
+    for (int h = 0; h < tile_height; h++) {
+      for (int w = 0; w < tile_width; w++) {
+        float sum = 0.0f;
+        for (int ic = 0; ic < in_channels; ic++) {
+          int idx = (h * tile_width + w) * in_channels + ic;
+          sum += (float)input[idx] * (float)weights[oc * in_channels + ic];
+        }
+        float bn_out = bw * sum + bb;
+        float silu_out = bn_out * fast_sigmoid_conv(bn_out);
+        output[(h * tile_width + w) * out_channels + oc] = (bfloat16)silu_out;
+      }
+    }
+  }
+  event1();
 }
 
 } // extern "C"

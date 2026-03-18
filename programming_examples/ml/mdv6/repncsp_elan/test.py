@@ -18,6 +18,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../../python")
 import torch
 from mdv6.layers import RepNCSPELAN
 
+import aie.iron as iron
+from aie.utils import NPUKernel, DefaultNPURuntime
+
 
 def bf16_to_uint16(tensor):
     """Convert bfloat16 tensor to uint16 numpy array."""
@@ -26,7 +29,7 @@ def bf16_to_uint16(tensor):
 
 def uint16_to_bf16(array):
     """Convert uint16 numpy array to bfloat16 tensor."""
-    return torch.from_numpy(array).view(torch.bfloat16)
+    return torch.from_numpy(array.copy()).view(torch.bfloat16)
 
 
 def extract_repncsp_weights(repncsp_module):
@@ -224,29 +227,27 @@ def test_repncsp_elan(
         print(f"  Weights: {len(weights_uint16)} elements ({len(weights_uint16) * 2} bytes)")
         print(f"  Output:  {output_size} elements ({output_size * 2} bytes)")
         
-        # Setup AIE application
+        # Setup NPU kernel
         print(f"\nSetting up AIE application...")
-        app = setup_aie(
-            "build/final.xclbin",
-            "build/insts.bin",
-            input_uint16.shape, np.uint16,
-            weights_uint16.shape, np.uint16,
-            (output_size,), np.uint16,
-            kernel_name="MLIR_AIE"
-        )
-        
+        npu_kernel = NPUKernel("build/final.xclbin", "build/insts.bin", kernel_name="MLIR_AIE")
+        kernel_handle = DefaultNPURuntime.load(npu_kernel)
+
+        in1 = iron.tensor(input_uint16, dtype=np.uint16)
+        in2 = iron.tensor(weights_uint16, dtype=np.uint16)
+        out_buf = iron.zeros(output_size, dtype=np.uint16)
+
         # Execute on AIE
         print(f"\nExecuting kernel on NPU2...")
         import time
         start = time.time_ns()
-        output_buffer = execute(app, input_uint16, weights_uint16)
+        ret = DefaultNPURuntime.run(kernel_handle, [in1, in2, out_buf])
         stop = time.time_ns()
         npu_time = (stop - start) / 1000
-        
+
         print(f"  Execution time: {npu_time:.2f} μs ({npu_time/1000:.3f} ms)")
-        
+
         # Extract output
-        output_uint16 = output_buffer[:output_size]
+        output_uint16 = out_buf.numpy()[:output_size]
         
         # Convert back to bfloat16
         output_hwc_aie = uint16_to_bf16(output_uint16).reshape(height, width, out_channels)
