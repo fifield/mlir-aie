@@ -10,7 +10,7 @@ import sys
 
 from aie.iron import (
     Kernel,
-    LocalBuffer,
+    Buffer,
     ObjectFifo,
     Program,
     Runtime,
@@ -108,14 +108,14 @@ def elan_layer_bf16(
     of_weights_L3L2 = ObjectFifo(weight_ty, depth=1, name="weights_L3L2")
     of_output_L2L3 = ObjectFifo(output_ty, depth=1, name="output_L2L3")
 
+    # Local buffers for intermediate results (created at top level, placed by Worker)
+    conv1_output_buffer = Buffer(conv1_ty, name="conv1_output")
+    x3_buffer = Buffer(process_ty, name="x3")
+    x4_buffer = Buffer(process_ty, name="x4")
+    concat_buffer = Buffer(concat_ty, name="concat_buffer")
+
     # Task for the core to perform
-    def core_fn(of_in, of_wts, of_out, kernel):
-        # Allocate local buffers for intermediate results
-        conv1_output_buffer = LocalBuffer(conv1_ty, name="conv1_output")
-        x3_buffer = LocalBuffer(process_ty, name="x3")
-        x4_buffer = LocalBuffer(process_ty, name="x4")
-        concat_buffer = LocalBuffer(concat_ty, name="concat_buffer")
-        
+    def core_fn(of_in, of_wts, of_out, kernel, conv1_output_buffer, x3_buffer, x4_buffer, concat_buffer):
         # Acquire input and output buffers
         elem_in = of_in.acquire(1)
         elem_wts = of_wts.acquire(1)
@@ -151,7 +151,12 @@ def elan_layer_bf16(
             of_weights_L3L2.cons(),
             of_output_L2L3.prod(),
             elan_kernel,
+            conv1_output_buffer,
+            x3_buffer,
+            x4_buffer,
+            concat_buffer,
         ],
+        stack_size=4096,
     )
 
     # Runtime operations

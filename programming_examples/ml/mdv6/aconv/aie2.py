@@ -9,8 +9,8 @@ import numpy as np
 import sys
 
 from aie.iron import (
+    Buffer,
     Kernel,
-    LocalBuffer,
     ObjectFifo,
     Program,
     Runtime,
@@ -78,11 +78,11 @@ def aconv_layer_bf16(
     of_weights_L3L2 = ObjectFifo(weight_ty, depth=1, name="weights_L3L2")
     of_output_L2L3 = ObjectFifo(output_ty, depth=1, name="output_L2L3")
 
+    # Local buffer for intermediate pooled output
+    temp_buffer = Buffer(temp_ty, name="temp_pooled")
+
     # Task for the core to perform
-    def core_fn(of_in, of_wts, of_out, kernel):
-        # Allocate local buffer for intermediate pooled output
-        temp_buffer = LocalBuffer(temp_ty, name="temp_pooled")
-        
+    def core_fn(of_in, of_wts, of_out, temp_buf, kernel):
         # Acquire input and output buffers
         elem_in = of_in.acquire(1)
         elem_wts = of_wts.acquire(1)
@@ -93,7 +93,7 @@ def aconv_layer_bf16(
             elem_in,
             elem_wts,
             elem_out,
-            temp_buffer,
+            temp_buf,
             input_height,
             input_width,
             input_channels,
@@ -112,6 +112,7 @@ def aconv_layer_bf16(
             of_input_L3L2.cons(),
             of_weights_L3L2.cons(),
             of_output_L2L3.prod(),
+            temp_buffer,
             aconv_kernel,
         ],
     )

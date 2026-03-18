@@ -11,7 +11,7 @@ import sys
 
 from aie.iron import (
     Kernel,
-    LocalBuffer,
+    Buffer,
     ObjectFifo,
     Program,
     Runtime,
@@ -198,72 +198,75 @@ def repncsp_elan_bf16(
     of_weights_L3L2 = ObjectFifo(weight_ty, depth=1, name="weights_L3L2")
     of_output_L2L3 = ObjectFifo(output_ty, depth=1, name="output_L2L3")
 
+    # Local buffers for intermediate results (created at top level, placed by Worker)
+    conv1_output_buffer = Buffer(conv1_ty, name="conv1_output")
+    # x3 and x4 share buffers (x3 repncsp output is consumed by x3 conv before x4 starts)
+    x3_repncsp_buffer = Buffer(repncsp_ty, name="x3x4_repncsp_out")
+    x3_conv_buffer = Buffer(repncsp_ty, name="x3x4_conv_out")
+    x4_repncsp_buffer = x3_repncsp_buffer  # shared
+    x4_conv_buffer = x3_conv_buffer        # shared
+    concat_buffer = Buffer(concat_ty, name="concat_buffer")
+
+    # RepNCSP #1 buffers
+    rn1_conv1_buffer = Buffer(rn1_neck_ty, name="rn1_conv1_out")
+    rn1_bottleneck_buffer = Buffer(rn1_neck_ty, name="rn1_bottleneck_out")
+    rn1_conv2_buffer = Buffer(rn1_neck_ty, name="rn1_conv2_out")
+    rn1_concat_buffer = Buffer(rn1_concat_ty, name="rn1_concat")
+    rn1_bn_input_copy_buffer = Buffer(rn1_neck_ty, name="rn1_bn_input_copy")
+    rn1_bn_temp1_buffer = Buffer(rn1_neck_ty, name="rn1_bn_temp1")
+    rn1_bn_temp2_buffer = Buffer(rn1_neck_ty, name="rn1_bn_temp2")
+    rn1_bn_temp3_buffer = Buffer(rn1_neck_ty, name="rn1_bn_temp3")
+    rn1_bn_temp4_buffer = Buffer(rn1_neck_ty, name="rn1_bn_temp4")
+
+    # RepNCSP #2 shares buffers with #1 (sequential execution, same sizes)
+    rn2_conv1_buffer = rn1_conv1_buffer
+    rn2_bottleneck_buffer = rn1_bottleneck_buffer
+    rn2_conv2_buffer = rn1_conv2_buffer
+    rn2_concat_buffer = rn1_concat_buffer
+    rn2_bn_input_copy_buffer = rn1_bn_input_copy_buffer
+    rn2_bn_temp1_buffer = rn1_bn_temp1_buffer
+    rn2_bn_temp2_buffer = rn1_bn_temp2_buffer
+    rn2_bn_temp3_buffer = rn1_bn_temp3_buffer
+    rn2_bn_temp4_buffer = rn1_bn_temp4_buffer
+
     # Task for the core to perform
-    def core_fn(of_in, of_wts, of_out, kernel):
-        # Allocate local buffers for intermediate results
-        conv1_output_buffer = LocalBuffer(conv1_ty, name="conv1_output")
-        x3_repncsp_buffer = LocalBuffer(repncsp_ty, name="x3_repncsp_out")
-        x3_conv_buffer = LocalBuffer(repncsp_ty, name="x3_conv_out")
-        x4_repncsp_buffer = LocalBuffer(repncsp_ty, name="x4_repncsp_out")
-        x4_conv_buffer = LocalBuffer(repncsp_ty, name="x4_conv_out")
-        concat_buffer = LocalBuffer(concat_ty, name="concat_buffer")
-        
-        # RepNCSP #1 buffers
-        rn1_conv1_buffer = LocalBuffer(rn1_neck_ty, name="rn1_conv1_out")
-        rn1_bottleneck_buffer = LocalBuffer(rn1_neck_ty, name="rn1_bottleneck_out")
-        rn1_conv2_buffer = LocalBuffer(rn1_neck_ty, name="rn1_conv2_out")
-        rn1_concat_buffer = LocalBuffer(rn1_concat_ty, name="rn1_concat")
-        rn1_bn_input_copy_buffer = LocalBuffer(rn1_neck_ty, name="rn1_bn_input_copy")
-        rn1_bn_temp1_buffer = LocalBuffer(rn1_neck_ty, name="rn1_bn_temp1")
-        rn1_bn_temp2_buffer = LocalBuffer(rn1_neck_ty, name="rn1_bn_temp2")
-        rn1_bn_temp3_buffer = LocalBuffer(rn1_neck_ty, name="rn1_bn_temp3")
-        rn1_bn_temp4_buffer = LocalBuffer(rn1_neck_ty, name="rn1_bn_temp4")
-        
-        # RepNCSP #2 buffers
-        rn2_conv1_buffer = LocalBuffer(rn2_neck_ty, name="rn2_conv1_out")
-        rn2_bottleneck_buffer = LocalBuffer(rn2_neck_ty, name="rn2_bottleneck_out")
-        rn2_conv2_buffer = LocalBuffer(rn2_neck_ty, name="rn2_conv2_out")
-        rn2_concat_buffer = LocalBuffer(rn2_concat_ty, name="rn2_concat")
-        rn2_bn_input_copy_buffer = LocalBuffer(rn2_neck_ty, name="rn2_bn_input_copy")
-        rn2_bn_temp1_buffer = LocalBuffer(rn2_neck_ty, name="rn2_bn_temp1")
-        rn2_bn_temp2_buffer = LocalBuffer(rn2_neck_ty, name="rn2_bn_temp2")
-        rn2_bn_temp3_buffer = LocalBuffer(rn2_neck_ty, name="rn2_bn_temp3")
-        rn2_bn_temp4_buffer = LocalBuffer(rn2_neck_ty, name="rn2_bn_temp4")
-        
+    # rn1_* and rn2_* share the same buffers (sequential execution)
+    def core_fn(of_in, of_wts, of_out, kernel, conv1_out, x3x4_repncsp, x3x4_conv, concat_buf, rn_conv1, rn_bottleneck, rn_conv2, rn_concat, rn_bn_input_copy, rn_bn_temp1, rn_bn_temp2, rn_bn_temp3, rn_bn_temp4):
         # Acquire input and output buffers
         elem_in = of_in.acquire(1)
         elem_wts = of_wts.acquire(1)
         elem_out = of_out.acquire(1)
 
         # Call the RepNCSPELAN kernel
+        # Pass shared rn_* buffers for both RepNCSP #1 and #2
         kernel(
             elem_in,
             elem_wts,
             elem_out,
-            conv1_output_buffer,
-            x3_repncsp_buffer,
-            x3_conv_buffer,
-            x4_repncsp_buffer,
-            x4_conv_buffer,
-            concat_buffer,
-            rn1_conv1_buffer,
-            rn1_bottleneck_buffer,
-            rn1_conv2_buffer,
-            rn1_concat_buffer,
-            rn1_bn_input_copy_buffer,
-            rn1_bn_temp1_buffer,
-            rn1_bn_temp2_buffer,
-            rn1_bn_temp3_buffer,
-            rn1_bn_temp4_buffer,
-            rn2_conv1_buffer,
-            rn2_bottleneck_buffer,
-            rn2_conv2_buffer,
-            rn2_concat_buffer,
-            rn2_bn_input_copy_buffer,
-            rn2_bn_temp1_buffer,
-            rn2_bn_temp2_buffer,
-            rn2_bn_temp3_buffer,
-            rn2_bn_temp4_buffer,
+            conv1_out,
+            x3x4_repncsp,
+            x3x4_conv,
+            x3x4_repncsp,  # x4 reuses x3 buffers
+            x3x4_conv,
+            concat_buf,
+            rn_conv1,        # rn1 buffers
+            rn_bottleneck,
+            rn_conv2,
+            rn_concat,
+            rn_bn_input_copy,
+            rn_bn_temp1,
+            rn_bn_temp2,
+            rn_bn_temp3,
+            rn_bn_temp4,
+            rn_conv1,        # rn2 reuses same buffers
+            rn_bottleneck,
+            rn_conv2,
+            rn_concat,
+            rn_bn_input_copy,
+            rn_bn_temp1,
+            rn_bn_temp2,
+            rn_bn_temp3,
+            rn_bn_temp4,
             height,
             width,
             in_channels,
@@ -278,6 +281,7 @@ def repncsp_elan_bf16(
         of_out.release(1)
 
     # Create a worker to perform the task
+    # Only pass unique buffers (rn1 and rn2 share)
     worker = Worker(
         core_fn,
         [
@@ -285,7 +289,21 @@ def repncsp_elan_bf16(
             of_weights_L3L2.cons(),
             of_output_L2L3.prod(),
             repncsp_elan_kernel,
+            conv1_output_buffer,
+            x3_repncsp_buffer,
+            x3_conv_buffer,
+            concat_buffer,
+            rn1_conv1_buffer,
+            rn1_bottleneck_buffer,
+            rn1_conv2_buffer,
+            rn1_concat_buffer,
+            rn1_bn_input_copy_buffer,
+            rn1_bn_temp1_buffer,
+            rn1_bn_temp2_buffer,
+            rn1_bn_temp3_buffer,
+            rn1_bn_temp4_buffer,
         ],
+        stack_size=4096,
     )
 
     # Runtime operations

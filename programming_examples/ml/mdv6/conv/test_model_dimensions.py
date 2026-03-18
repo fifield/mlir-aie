@@ -28,7 +28,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../../python")
 import torch
 import torch.nn as nn
 from mdv6.layers import Conv
-from aie.utils.xrt import setup_aie, execute
+import aie.iron as iron
+from aie.utils import NPUKernel, DefaultNPURuntime
 
 
 def bf16_to_uint16(bf16_tensor):
@@ -38,7 +39,7 @@ def bf16_to_uint16(bf16_tensor):
 
 def uint16_to_bf16(uint16_array):
     """Convert uint16 array from AIE to bfloat16 tensor."""
-    return torch.from_numpy(uint16_array).view(torch.bfloat16)
+    return torch.from_numpy(uint16_array.copy()).view(torch.bfloat16)
 
 
 def test_conv_configuration(
@@ -160,26 +161,21 @@ def test_conv_configuration(
         
         # Setup AIE application
         print(f"Setting up AIE application...")
-        app = setup_aie(
-            xclbin_path,
-            insts_path,
-            input_uint16.shape,
-            np.uint16,
-            weights_uint16.shape,
-            np.uint16,
-            (output_size,),
-            np.uint16,
-            kernel_name="MLIR_AIE"
-        )
-        
+        npu_kernel = NPUKernel(xclbin_path, insts_path, kernel_name="MLIR_AIE")
+        kernel_handle = DefaultNPURuntime.load(npu_kernel)
+
         # Execute on hardware
         print(f"Executing kernel on NPU2...")
+        in1 = iron.tensor(input_uint16, dtype=np.uint16)
+        in2 = iron.tensor(weights_uint16, dtype=np.uint16)
+        out = iron.zeros(output_size, dtype=np.uint16)
         start = time.time_ns()
-        output_buffer = execute(app, input_uint16, weights_uint16)
+        ret = DefaultNPURuntime.run(kernel_handle, [in1, in2, out])
         stop = time.time_ns()
         npu_time = (stop - start) / 1000
-        
+
         print(f"  Execution time: {npu_time:.2f} μs ({npu_time/1000:.3f} ms)")
+        output_buffer = out.numpy()
         
         # Convert output back to bfloat16
         output_bf16 = uint16_to_bf16(output_buffer[:output_size])

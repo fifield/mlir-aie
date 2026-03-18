@@ -9,7 +9,6 @@ import numpy as np
 import sys
 
 from aie.iron import (
-    GlobalBuffer,
     Kernel,
     ObjectFifo,
     Program,
@@ -18,7 +17,6 @@ from aie.iron import (
 )
 from aie.iron.placers import SequentialPlacer
 from aie.iron.device import NPU2Col1
-from aie.iron.controlflow import range_
 
 
 def conv_layer_bf16(

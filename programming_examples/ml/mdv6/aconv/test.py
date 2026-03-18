@@ -19,6 +19,9 @@ import torch
 import torch.nn as nn
 from mdv6.layers import AConv
 
+import aie.iron as iron
+from aie.utils import NPUKernel, DefaultNPURuntime
+
 
 def bf16_to_uint16(bf16_tensor):
     """Convert bfloat16 tensor to uint16 array for AIE."""
@@ -27,7 +30,7 @@ def bf16_to_uint16(bf16_tensor):
 
 def uint16_to_bf16(uint16_array):
     """Convert uint16 array from AIE to bfloat16 tensor."""
-    return torch.from_numpy(uint16_array).view(torch.bfloat16)
+    return torch.from_numpy(uint16_array.copy()).view(torch.bfloat16)
 
 
 def test_aconv_layer(
@@ -144,34 +147,29 @@ def test_aconv_layer(
         print(f"  Total wts:  {total_weight_size} elements ({total_weight_size * 2} bytes)")
         print(f"  Output:     {output_size} elements ({output_size * 2} bytes)")
         
-        # Setup AIE application
+        # Setup NPU kernel
         print(f"\nSetting up AIE application...")
         print(f"  XCLBin: {xclbin_path}")
         print(f"  Instructions: {insts_path}")
-        
-        app = setup_aie(
-            xclbin_path,
-            insts_path,
-            input_uint16.shape,      # Input shape
-            np.uint16,               # Input dtype (bf16 as uint16)
-            weights_uint16.shape,    # Weights shape
-            np.uint16,               # Weights dtype
-            (output_size,),          # Output shape
-            np.uint16,               # Output dtype
-            kernel_name="MLIR_AIE"
-        )
-        
+
+        npu_kernel = NPUKernel(xclbin_path, insts_path, kernel_name="MLIR_AIE")
+        kernel_handle = DefaultNPURuntime.load(npu_kernel)
+
+        in1 = iron.tensor(input_uint16, dtype=np.uint16)
+        in2 = iron.tensor(weights_uint16, dtype=np.uint16)
+        out = iron.zeros(output_size, dtype=np.uint16)
+
         # Execute on hardware
         print(f"\nExecuting kernel on NPU2...")
         start = time.time_ns()
-        output_buffer = execute(app, input_uint16, weights_uint16)
+        ret = DefaultNPURuntime.run(kernel_handle, [in1, in2, out])
         stop = time.time_ns()
         npu_time = (stop - start) / 1000  # Convert to microseconds
-        
+
         print(f"  Execution time: {npu_time:.2f} μs ({npu_time/1000:.3f} ms)")
-        
+
         # Convert output back to bfloat16
-        output_bf16 = uint16_to_bf16(output_buffer[:output_size])
+        output_bf16 = uint16_to_bf16(out.numpy()[:output_size])
         
         # Reshape to (H, W, C) then convert to (1, C, H, W) for PyTorch
         output_hwc = output_bf16.reshape(output_height, output_width, output_channels)
