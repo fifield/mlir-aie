@@ -27,7 +27,7 @@ import numpy as np
 import sys
 
 from aie.iron import (
-    GlobalBuffer,
+    Buffer,
     Kernel,
     ObjectFifo,
     Program,
@@ -83,12 +83,15 @@ def conv_layer_bf16_tiled(
     tiles_w = (output_width + tile_w - 1) // tile_w
     num_out_blocks = (output_channels + out_chan_block - 1) // out_chan_block
     
-    # Patch dimensions (includes halo for convolution)
-    patch_h = tile_h + 2 * padding
-    patch_w = tile_w + 2 * padding
+    # Patch dimensions (input needed to produce tile_h × tile_w output)
+    # For stride=1: patch = tile + 2*padding
+    # For stride>1: patch = (tile-1)*stride + kernel_size
+    patch_h = (tile_h - 1) * stride + kernel_size
+    patch_w = (tile_w - 1) * stride + kernel_size
     
-    # Calculate buffer sizes
-    patch_size = patch_h * patch_w * input_channels
+    # Calculate buffer sizes (pad to even for 4-byte DMA alignment)
+    patch_size_raw = patch_h * patch_w * input_channels
+    patch_size = patch_size_raw + (patch_size_raw % 2)  # pad to even uint16 = 4-byte aligned
     weight_block_size = out_chan_block * input_channels * kernel_size * kernel_size
     output_tile_size = tile_h * tile_w * out_chan_block
     
@@ -176,6 +179,7 @@ def conv_layer_bf16_tiled(
             of_output_tile.prod(),
             conv_tiled_kernel,
         ],
+        stack_size=4096,
     )
     
     # Runtime sequence
@@ -218,22 +222,25 @@ if __name__ == "__main__":
         tile_w = int(sys.argv[7]) if len(sys.argv) > 7 else 32
         out_chan_block = int(sys.argv[8]) if len(sys.argv) > 8 else 8
         n_patches = int(sys.argv[9]) if len(sys.argv) > 9 else 2
-        
+        stride = int(sys.argv[10]) if len(sys.argv) > 10 else 1
+
     except (IndexError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
-        print("Usage: python aie2_tiled.py npu2 [H] [W] [C_in] [C_out] [tile_h] [tile_w] [out_chan_block] [n_patches]", file=sys.stderr)
-        print("Example: python aie2_tiled.py npu2 640 640 3 32 32 32 8 2", file=sys.stderr)
+        print("Usage: python aie2_tiled.py npu2 H W C_in C_out tile_h tile_w oc_block n_patches [stride]", file=sys.stderr)
+        print("Example: python aie2_tiled.py npu2 640 640 3 32 32 32 8 1 2", file=sys.stderr)
         sys.exit(1)
     
+    out_h = (input_height + 2 - 3) // stride + 1  # padding=1
+    out_w = (input_width + 2 - 3) // stride + 1
     print(f"Generating tiled convolution:", file=sys.stderr)
     print(f"  Input: {input_height}×{input_width}×{input_channels}", file=sys.stderr)
-    print(f"  Output: {input_height}×{input_width}×{output_channels}", file=sys.stderr)
+    print(f"  Output: {out_h}×{out_w}×{output_channels} (stride={stride})", file=sys.stderr)
     print(f"  Tile size: {tile_h}×{tile_w}", file=sys.stderr)
     print(f"  Output channel block: {out_chan_block}", file=sys.stderr)
     print(f"  Patches per invocation: {n_patches}", file=sys.stderr)
-    
-    tiles_h = (input_height + tile_h - 1) // tile_h
-    tiles_w = (input_width + tile_w - 1) // tile_w
+
+    tiles_h = (out_h + tile_h - 1) // tile_h
+    tiles_w = (out_w + tile_w - 1) // tile_w
     num_out_blocks = (output_channels + out_chan_block - 1) // out_chan_block
     total_tiles = tiles_h * tiles_w * num_out_blocks
     
@@ -246,7 +253,7 @@ if __name__ == "__main__":
         input_channels,
         output_channels,
         kernel_size=3,
-        stride=1,
+        stride=stride,
         padding=1,
         tile_h=tile_h,
         tile_w=tile_w,
