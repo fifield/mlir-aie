@@ -869,6 +869,41 @@ xilinx::AIE::AIERTControl::configureSwitches(DeviceOp &targetOp,
     }
   }
 
+  // For AIE4: enable 32-bit stream switch subordinate trace ports for each
+  // packet flow originating from a Trace32 source. The pathfinder routes these
+  // flows through the 512-bit switch's Switch32 port (the 32b→512b bridge), but
+  // the 32-bit switch's own trace slave ports must also be explicitly enabled.
+  for (auto pktFlowOp : targetOp.getOps<PacketFlowOp>()) {
+    Region &r = pktFlowOp.getPorts();
+    Block &b = r.front();
+    int flowID = pktFlowOp.IDInt();
+    for (Operation &op : b.getOperations()) {
+      auto pktSource = dyn_cast<PacketSourceOp>(op);
+      if (!pktSource)
+        continue;
+      WireBundle srcBundle = pktSource.getBundle();
+      if (srcBundle != WireBundle::Trace32)
+        continue;
+      int srcChannel = pktSource.channelIndex();
+      TileOp srcTile =
+          dyn_cast<TileOp>(pktSource.getTile().getDefiningOp());
+      XAie_LocType tileLoc =
+          XAie_TileLoc(srcTile.getCol(), srcTile.getRow());
+      // Enable the 32-bit switch trace subordinate port.
+      TRY_XAIE_API_EMIT_ERROR(pktFlowOp, XAie_StrmPktSwSlavePortEnable,
+                              &aiert->devInst, tileLoc,
+                              StrmSwPortType::_32B_TRACE, srcChannel);
+      // Enable the slot to forward all packets from this trace port.
+      // Mask=0x1f (exact match), packet ID = flowID, arbiter=0, msel=0.
+      auto packetInit = XAie_PacketInit(flowID, /*PktType*/ 0);
+      TRY_XAIE_API_EMIT_ERROR(pktFlowOp, XAie_StrmPktSwSlaveSlotEnable,
+                              &aiert->devInst, tileLoc,
+                              StrmSwPortType::_32B_TRACE, srcChannel,
+                              /*slot*/ 0, packetInit,
+                              /*mask*/ 0x1f, /*msel*/ 0, /*arbiter*/ 0);
+    }
+  }
+
   for (auto muxOp : targetOp.getOps<ShimMuxOp>()) {
     // NOTE ShimMux always connects from the south as directions are
     // defined relative to the tile stream switch.
