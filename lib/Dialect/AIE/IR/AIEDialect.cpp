@@ -5260,6 +5260,18 @@ uint32_t DMABDOp::getAxcacheOrDefault() {
 
 static LogicalResult FoldDMAStartOp(DMAStartOp op, PatternRewriter &rewriter) {
 
+  // Disable block folding for AIE4/AIE4z shim tiles due to complex
+  // per-channel BD pool allocation. Different channels may share BD pools
+  // or have private pools depending on channel number, making it unsafe
+  // to merge blocks across channels even when content is identical.
+  if (auto shimDMA = op->getParentOfType<ShimDMAOp>()) {
+    const auto &tm = getTargetModel(shimDMA);
+    if (isa<AIE4TargetModel>(tm)) {
+      // Skip folding for AIE4/AIE4z shim tiles
+      return failure();
+    }
+  }
+
   llvm::SetVector<Block *> reachable;
   SmallVector<Block *, 16> worklist;
   Block *firstBD = op.getSuccessor(0);
