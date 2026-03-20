@@ -173,14 +173,28 @@ with [conv_weights, fused_bn_weight, fused_bn_bias]. The fused BN params are pre
   bn_w_fused = gamma / sqrt(var + eps)
   bn_b_fused = beta - gamma * mean / sqrt(var + eps)
 
-## Implementation Plan (beads)
-1. **Phase 1** (`mlir-aie-uf8`): Fix LocalBuffer→Buffer, get all 10 layers passing on NPU
-2. **Phase 2** (`mlir-aie-rwx`): Conv at model dimensions with tiling (640×640)
-3. **Phase 3** (`mlir-aie-0oh`): RepNCSPELAN at model dimensions (most-used block, 7 instances)
-4. **Phase 4** (`mlir-aie-tqf`): SPPELAN + AConv at model dimensions
-5. **Phase 5** (`mlir-aie-pq2`): Upsample + Concat operations
-6. **Phase 6** (`mlir-aie-akf`): Detection head (DFL + classification)
-7. **Phase 7** (`mlir-aie-bzr`): Full model integration + end-to-end test
+## Full Model Status
+**End-to-end MDV6 forward pass PASS on NPU** (2026-03-17)
+- max_class_diff=0.020, max_vector_diff=0.031 (vs PyTorch bf16 reference)
+- Total: 96.3s (single-core scalar kernels, ~30 xclbin configs)
+- On NPU: conv0, conv1, ELAN, all AConv, all RepNCSPELAN (×7), SPPELAN, Conv sub-layers
+- On CPU: detection head (grouped conv + softmax), RepConv sub-layers, AvgPool, Upsample
+
+## Performance Optimization Plan (`mlir-aie-mi7`)
+| Phase | Optimization | Expected speedup | Target |
+|-------|-------------|-----------------|--------|
+| A (`mlir-aie-326`) | Vectorized bf16 kernels (aie::mmul) | 10-30× | 3-10s |
+| B (`mlir-aie-1wy`) | Multi-core spatial parallelism (8+ cores) | 8× | 0.4-1.2s |
+| C | On-chip pipelining (layer chaining) | 2-3× | <0.5s |
+| D (`mlir-aie-9xq`) | Move RepConv/AvgPool/Upsample/detect to NPU | — | True E2E |
+
+Priority: A > B > D > C
+
+## Completed Phases
+1. Phase 1: All 10 layer types pass on NPU at 8×8 test dims ✓
+2. Phase 2: Tiled conv at model dims (stride-1 and stride-2) ✓
+3. Phase 3-6: All backbone/neck/head layers at model dims ✓
+4. Phase 7: Full model integration and end-to-end validation ✓
 
 ## Data Layout Conventions
 - PyTorch: NCHW (batch, channels, height, width)
