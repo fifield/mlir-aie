@@ -29,6 +29,36 @@ def fuse_bn(conv_module):
         beta - gamma * mean * inv_std,
     ]))
 
+
+def fuse_bn_transposed(conv_module):
+    """Return [transposed_conv_weights, fused_bn_w, fused_bn_b] as packed uint16.
+
+    Conv weights are transposed from OC-major [oc][ic] to block layout
+    [ic/8][oc/8][8ic][8oc] for contiguous vector loads in the AIE kernel.
+    Only supports 1x1 convolutions.
+    """
+    eps = conv_module.bn.eps
+    gamma = conv_module.bn.weight.data
+    beta = conv_module.bn.bias.data
+    mean = conv_module.bn.running_mean.data
+    var = conv_module.bn.running_var.data
+    inv_std = 1.0 / torch.sqrt(var + eps)
+
+    # Original weight: (oc, ic, 1, 1) for 1x1 conv
+    w = conv_module.conv.weight.data.squeeze(-1).squeeze(-1)  # (oc, ic)
+    oc, ic = w.shape
+
+    # Transpose to block layout: [ic/8][oc/8][8ic][8oc]
+    w_blocks = w.reshape(oc // 8, 8, ic // 8, 8)  # [oc_blk, 8oc, ic_blk, 8ic]
+    w_blocks = w_blocks.permute(2, 0, 3, 1)        # [ic_blk, oc_blk, 8ic, 8oc]
+    w_transposed = w_blocks.contiguous().flatten()
+
+    return bf16_to_uint16(torch.cat([
+        w_transposed,
+        gamma * inv_std,
+        beta - gamma * mean * inv_std,
+    ]))
+
 def extract_patch(image_hwc, tile_row, tile_col, tile_h, tile_w, stride=1, ks=3, pad=1):
     """Extract input patch for tiled conv."""
     H, W, C = image_hwc.shape
