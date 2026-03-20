@@ -990,8 +990,8 @@ struct AIEDMATasksToNPUPass
         iteration_stride = 0;
       }
 
-      // Ensure the total transfer length and the length expressed in the lowest
-      // three dimensions of strides/wraps agree. (Fourth dimension is
+      // Ensure the total transfer length and the length expressed in the
+      // lowest three dimensions of strides/wraps agree. (Fourth dimension is
       // iteration/repeat count and repeats the whole BD, so should not be
       // incorporated in length of a single BD invocation.)
       uint64_t len_dims_addr_granularity = 1;
@@ -1095,7 +1095,8 @@ struct AIEDMATasksToNPUPass
               bd_op.emitOpError("Cannot specify both next_bd_id attribute and "
                                 "aie.next_bd operation.");
           error.attachNote(next_bd_op.getLoc())
-              << "Potentially conflicting next buffer descriptor ID specified "
+              << "Potentially conflicting next buffer descriptor ID "
+                 "specified "
                  "here.";
           return failure();
         }
