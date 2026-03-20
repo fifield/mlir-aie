@@ -72,23 +72,22 @@ void conv1x1_vec_v2_bf16(bfloat16 *__restrict input,
       // Extract result as 4×8 = 32 bf16 values
       aie::vector<bfloat16, MMUL::size_C> result = acc.template to_vector<bfloat16>();
 
-      // Apply BN + SiLU per 8-element row (4 rows of 8)
+      // Apply BN + SiLU per 8-element row, all vectorized
       for (int p = 0; p < 4; p++) {
         int pidx = sp + p;
         if (pidx < spatial) {
-          // Extract this pixel's 8 output channels
           aie::vector<bfloat16, 8> row = result.extract<8>(p);
 
-          // BN: out = w * x + b (vector ops)
+          // BN: out = w * x + b
           aie::accum<accfloat, 8> bn_acc = aie::mul(row, bn_w_vec);
           aie::vector<bfloat16, 8> bn_out = aie::add(bn_acc.to_vector<bfloat16>(), bn_b_vec);
 
-          // SiLU: x * sigmoid(x) — scalar for now, sigmoid is hard to vectorize
-          // TODO: replace with vector approximation when available
+          // SiLU scalar — AIE2P lacks bf16→float vector conversion for vectorized sigmoid
+          bfloat16 *out_ptr = output + pidx * oc + oc_blk * 8;
           for (int j = 0; j < 8; j++) {
             float x = (float)bn_out[j];
-            float sig = 0.5f + x / (2.0f * (1.0f + (x > 0 ? x : -x)));
-            output[pidx * oc + oc_blk * 8 + j] = (bfloat16)(x * sig);
+            float ax = x > 0.0f ? x : -x;
+            out_ptr[j] = (bfloat16)(x * (0.5f + x / (2.0f + 2.0f * ax)));
           }
         }
       }
