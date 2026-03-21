@@ -333,12 +333,12 @@ void test_aie4_lookup_register() {
     throw std::runtime_error("Failed to load database");
   }
 
-  // Trace0_Control0 in CORE_MODULE, offset 0xA00D0
+  // Trace0_Control0 in core module, offset 0xA00D0
   auto traceCtrl =
-      db->lookupRegister("Trace0_Control0", "CORE_MODULE");
+      db->lookupRegister("Trace0_Control0", "core");
   if (!traceCtrl) {
     throw std::runtime_error(
-        "Failed to find Trace0_Control0 in CORE_MODULE");
+        "Failed to find Trace0_Control0 in core");
   }
   std::cout << "  ✓ Trace0_Control0 found\n";
   std::cout << "    - offset: 0x" << std::hex << traceCtrl->offset << std::dec
@@ -359,7 +359,7 @@ void test_aie4_bitfield_parsing() {
   }
 
   auto traceCtrl =
-      db->lookupRegister("Trace0_Control0", "CORE_MODULE");
+      db->lookupRegister("Trace0_Control0", "core");
   if (!traceCtrl) {
     throw std::runtime_error("Failed to find Trace0_Control0");
   }
@@ -404,12 +404,12 @@ void test_aie4_encode_field_value() {
     throw std::runtime_error("Failed to load database");
   }
 
-  // Use Performance_Start_Stop_0_1 from MEMORY_TILE_MODULE
+  // Use Performance_Start_Stop_0_1 from memory_tile module
   auto perfCtrl = db->lookupRegister("Performance_Start_Stop_0_1",
-                                     "MEMORY_TILE_MODULE");
+                                     "memory_tile");
   if (!perfCtrl) {
     throw std::runtime_error(
-        "Failed to find Performance_Start_Stop_0_1 in MEMORY_TILE_MODULE");
+        "Failed to find Performance_Start_Stop_0_1 in memory_tile");
   }
 
   // Cnt0_Start_Event (bits 7:0) - value 0x25 should stay at bits 0-7
@@ -466,31 +466,31 @@ void test_aie4_cross_module() {
     throw std::runtime_error("Failed to load database");
   }
 
-  // Performance_Start_Stop_0_1 exists in both MEMORY_TILE_MODULE and PL_MODULE
+  // Performance_Start_Stop_0_1 exists in both memory_tile and shim modules
   // with different offsets
   auto memTileReg = db->lookupRegister("Performance_Start_Stop_0_1",
-                                       "MEMORY_TILE_MODULE");
+                                       "memory_tile");
   auto plReg =
-      db->lookupRegister("Performance_Start_Stop_0_1", "PL_MODULE");
+      db->lookupRegister("Performance_Start_Stop_0_1", "shim");
 
   if (!memTileReg) {
     throw std::runtime_error(
-        "Failed to find Performance_Start_Stop_0_1 in MEMORY_TILE_MODULE");
+        "Failed to find Performance_Start_Stop_0_1 in memory_tile");
   }
   if (!plReg) {
     throw std::runtime_error(
-        "Failed to find Performance_Start_Stop_0_1 in PL_MODULE");
+        "Failed to find Performance_Start_Stop_0_1 in shim");
   }
 
-  // MEMORY_TILE_MODULE offset=0x00000000, PL_MODULE offset=0x00004000
+  // memory_tile offset=0x00000000, shim offset=0x00004000
   if (memTileReg->offset != 0x0) {
-    throw std::runtime_error("MEMORY_TILE_MODULE offset mismatch");
+    throw std::runtime_error("memory_tile offset mismatch");
   }
   if (plReg->offset != 0x4000) {
-    throw std::runtime_error("PL_MODULE offset mismatch");
+    throw std::runtime_error("shim offset mismatch");
   }
-  std::cout << "  ✓ MEMORY_TILE_MODULE offset=0x" << std::hex
-            << memTileReg->offset << ", PL_MODULE offset=0x" << plReg->offset
+  std::cout << "  ✓ memory_tile offset=0x" << std::hex
+            << memTileReg->offset << ", shim offset=0x" << plReg->offset
             << std::dec << "\n";
 }
 
@@ -502,11 +502,11 @@ void test_aie4_wrong_module() {
     throw std::runtime_error("Failed to load database");
   }
 
-  // Trace0_Control0 exists in CORE_MODULE, not in MEMORY_MODULE
-  auto result = db->lookupRegister("Trace0_Control0", "MEMORY_MODULE");
+  // Trace0_Control0 exists in core module, not in memory module
+  auto result = db->lookupRegister("Trace0_Control0", "memory");
   if (result != nullptr) {
     throw std::runtime_error(
-        "Expected nullptr when looking up core register in MEMORY_MODULE");
+        "Expected nullptr when looking up core register in memory");
   }
   std::cout << "  ✓ Correctly returns nullptr when module is wrong\n";
 }
@@ -519,7 +519,7 @@ void test_aie4_nonexistent_register() {
     throw std::runtime_error("Failed to load database");
   }
 
-  auto result = db->lookupRegister("NONEXISTENT_REGISTER", "CORE_MODULE");
+  auto result = db->lookupRegister("NONEXISTENT_REGISTER", "core");
   if (result != nullptr) {
     throw std::runtime_error("Expected nullptr for non-existent register");
   }
