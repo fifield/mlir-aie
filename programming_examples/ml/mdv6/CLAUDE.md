@@ -190,6 +190,22 @@ with [conv_weights, fused_bn_weight, fused_bn_bias]. The fused BN params are pre
 
 Priority: A > B > D > C
 
+### Verified 30-core spatial layout
+- 6 columns × 5 compute tiles = 30 cores
+- DMA per column: shim 3/4, memtile 11/12, compute 2/2 — all fit
+- Weight broadcast: 1 ObjectFifo → 5 consumers per column (saves 4 DMA channels)
+- L1 memory: all operators verified ≤ 64KB
+- Dataflow: 20×20 chains via L2 (200KB), larger go external
+- Skip connections (B3/B4/N3/N4) must go external (1.6MB each)
+
+### Test plan (bottom-up)
+Level 0-1: Single tile scalar/vec ✓
+Level 2: 2-tile weight broadcast (next step)
+Level 3: 5-tile full column
+Level 4: Operator chain L1→L2→L1
+Level 5: 30-tile spatial parallel
+Level 6: Full model integration
+
 ## Completed Phases
 1. Phase 1: All 10 layer types pass on NPU at 8×8 test dims ✓
 2. Phase 2: Tiled conv at model dims (stride-1 and stride-2) ✓
