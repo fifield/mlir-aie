@@ -202,11 +202,12 @@ Priority: A > B > D > C
 
 ### Test plan (bottom-up)
 Level 0-1: Single tile scalar/vec ✓
-Level 2: 2-tile weight broadcast (next step)
-Level 3: 4-tile full column
-Level 4: Operator chain L1→L2→L1
-Level 5: 32-tile spatial parallel (8 columns)
-Level 6: Full model integration
+Level 2: 2-tile weight broadcast ✓ (max_diff=0.125, 1.8ms)
+Level 3: 4-tile full column ✓ (max_diff=0.125, 1.6ms)
+Level 4: Operator chain L1→L2→L1 ✓ (Conv1x1→Conv1x1, max_diff=0.5, 12.1ms)
+Level 5: 32-tile spatial parallel ✓ (8 columns, max_diff=0.125, 4.1ms; 80×80 layer in 7.5ms)
+Level 5b: Skip connections + DMA overlap (next)
+Level 6: Full model 32-core integration
 
 ## Completed Phases
 1. Phase 1: All 10 layer types pass on NPU at 8×8 test dims ✓
