@@ -6,7 +6,7 @@ from aie.iron import (
     Kernel, ObjectFifo, Program, Runtime, Worker,
 )
 from aie.iron.placers import SequentialPlacer
-from aie.iron.device import NPU2Col1, NPU2Col2, NPU2Col3, NPU2Col4
+from aie.iron.device import NPU2
 from aie.iron.controlflow import range_
 
 
@@ -113,12 +113,8 @@ def conv_tiled_fused_multicore_bf16(dev, input_height, input_width, input_channe
 
 
 if __name__ == "__main__":
-    devices = {'1': NPU2Col1, '2': NPU2Col2, '3': NPU2Col3, '4': NPU2Col4}
+    dev = NPU2()  # Full 8-column 6-row array
     n_cores = int(sys.argv[10]) if len(sys.argv) > 10 else 4
-    # Use enough columns for the cores (each column has ~4 usable compute tiles)
-    n_cols = max(1, n_cores)  # 1 column per core for now
-    dev_cls = devices.get(str(n_cols), NPU2Col1)
-    dev = dev_cls()
     H = int(sys.argv[2]); W = int(sys.argv[3])
     ic = int(sys.argv[4]); oc = int(sys.argv[5])
     ks = int(sys.argv[6]); th = int(sys.argv[7]); tw = int(sys.argv[8])
