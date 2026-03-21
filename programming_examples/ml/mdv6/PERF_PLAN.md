@@ -251,29 +251,30 @@ Bottom-up validation, each level proves a capability before scaling.
 - 3.2× speedup (limited by scalar SiLU)
 - 15.4× speedup without SiLU
 
-### Level 2: 2-tile weight broadcast ← NEXT (`mlir-aie-kot`)
-- 2 Workers on same column
+### Level 2: 2-tile weight broadcast ✅ DONE (`mlir-aie-kot`)
+- 2 Workers on same column, per-core ObjectFifos + TensorAccessPattern
 - 1 weight ObjectFifo → 2 consumers (broadcast)
-- Each tile processes different spatial patch
-- Validates: broadcast, BD chaining, concurrent execution
+- Conv1x1 16→16, tile 8×8: max_diff=0.125, 1.8ms
+- **Architecture**: per-core FIFOs with TAP (not split/join) for multi-column support
 
-### Level 3: 4-tile full column (`mlir-aie-03i`)
+### Level 3: 4-tile full column ✅ DONE (`mlir-aie-03i`)
 - 4 Workers, full column utilization (rows 2-5)
-- Weight broadcast → 4 consumers
-- DMA budget: 9/12 memtile channels (3 spare for double-buffering/L2)
-- Expected: ~4× speedup over single tile
+- Per-column: bulk input FIFO → split at memtile → 4 cores, join output
+- Per-column weight FIFO → broadcast to 4 consumers
+- Conv1x1 16→16, tile 8×8: max_diff=0.125, 1.6ms
+- Shim DMA: 3/4 channels (1 weight + 1 input + 1 output)
 
-### Level 4: Operator chain L1→L2→L1 (`mlir-aie-0m4`)
-- 2 operators chained via memtile (no external)
-- Conv1x1 → Conv3x3 in same column
-- Validates: L2 staging, zero external traffic
-- Independent of Level 2/3 (can develop in parallel)
+### Level 4: Operator chain L1→L2→L1 ✅ DONE (`mlir-aie-0m4`)
+- 2 conv1x1 Workers chained: Worker1 output → Worker2 input (same column)
+- Intermediate ObjectFifo stays on-chip (no external round-trip)
+- Conv1x1 16→16 × 2, tile 8×8: max_diff=0.5 (cumulative error), 12.1ms
 
-### Level 5: 8-column 32-tile spatial (`mlir-aie-646`)
-- Full array (`npu2`), all 8 columns active
-- Per-column weight broadcast × 8
-- Expected: ~32× over single tile
-- Model target: ~1.5s (scalar), ~0.5s (vectorized)
+### Level 5: 8-column 32-tile spatial ✅ DONE (`mlir-aie-646`)
+- Full array (`npu2`), all 8 columns active, 32 cores total
+- Hierarchical: per-column split/join at memtile + per-column weight broadcast
+- Conv1x1 16→16, tile 8×8: max_diff=0.125, 4.1ms (32 patches)
+- Conv1x1 16→16, tile 10×10, 80×80 layer: 7.5ms (64 tiles in 2 invocations)
+- **Key pattern**: `aie2_multicore_broadcast.py` scales 1-32 cores automatically
 
 ### Level 5b: Skip connections + DMA overlap (`mlir-aie-xdg`)
 - B3/B4/N3/N4 write to external during compute
@@ -294,9 +295,9 @@ Bottom-up validation, each level proves a capability before scaling.
 | mlir-aie-326 | Phase A: Vectorized kernels | In progress |
 | mlir-aie-1wy | Phase B: Multi-core spatial | In progress |
 | mlir-aie-9xq | Phase D: RepConv/AvgPool/Upsample to NPU | Open |
-| mlir-aie-kot | Level 2: 2-tile broadcast | Blocked on Phase A |
-| mlir-aie-03i | Level 3: 5-tile column | Blocked on Level 2 |
-| mlir-aie-0m4 | Level 4: L1→L2→L1 chain | Ready |
-| mlir-aie-646 | Level 5: 30-tile spatial | Blocked on Level 3 |
-| mlir-aie-xdg | Level 5b: Skip connections | Blocked on Level 5 |
-| mlir-aie-zuq | Level 6: Full model 30-core | Blocked on Level 5+5b+4 |
+| mlir-aie-kot | Level 2: 2-tile broadcast | ✅ Done |
+| mlir-aie-03i | Level 3: 4-tile column | ✅ Done |
+| mlir-aie-0m4 | Level 4: L1→L2→L1 chain | ✅ Done |
+| mlir-aie-646 | Level 5: 32-tile spatial | ✅ Done |
+| mlir-aie-xdg | Level 5b: Skip connections | Ready |
+| mlir-aie-zuq | Level 6: Full model 32-core | Ready (blocked on 5b) |
