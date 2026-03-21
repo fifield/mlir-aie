@@ -190,20 +190,22 @@ with [conv_weights, fused_bn_weight, fused_bn_bias]. The fused BN params are pre
 
 Priority: A > B > D > C
 
-### Verified 30-core spatial layout
-- 6 columns × 5 compute tiles = 30 cores
-- DMA per column: shim 3/4, memtile 11/12, compute 2/2 — all fit
-- Weight broadcast: 1 ObjectFifo → 5 consumers per column (saves 4 DMA channels)
+### Verified 32-core spatial layout
+- Array: 8 columns × 4 compute tiles (rows 2-5) = 32 cores
+- Device model: `npu2` (Strix Halo 6×8: 6 rows, 8 columns)
+- DMA per column: shim 3/4, memtile 9/12 (3 spare), compute 2/2 — all fit
+- Weight broadcast: 1 ObjectFifo → 4 consumers per column (saves 3 DMA/col)
 - L1 memory: all operators verified ≤ 64KB
 - Dataflow: 20×20 chains via L2 (200KB), larger go external
 - Skip connections (B3/B4/N3/N4) must go external (1.6MB each)
+- Full plan: see PERF_PLAN.md
 
 ### Test plan (bottom-up)
 Level 0-1: Single tile scalar/vec ✓
 Level 2: 2-tile weight broadcast (next step)
-Level 3: 5-tile full column
+Level 3: 4-tile full column
 Level 4: Operator chain L1→L2→L1
-Level 5: 30-tile spatial parallel
+Level 5: 32-tile spatial parallel (8 columns)
 Level 6: Full model integration
 
 ## Completed Phases

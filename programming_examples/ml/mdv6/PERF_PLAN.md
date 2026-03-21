@@ -44,22 +44,22 @@ All are **100-1000× below per-tile peak** (~16 GFLOP/s bf16 mmul).
 
 ## Hardware Model
 
-### Strix Halo AIE2P (6×8 array)
+### Strix Halo AIE2P (6 rows × 8 columns)
+
+Device model: `npu2` (xrt-smi reports topology `6x8`)
 
 ```
-        Col 0     Col 1     Col 2     Col 3     Col 4     Col 5
-       ┌────────┬────────┬────────┬────────┬────────┬────────┐
-Row 7  │Compute │Compute │Compute │Compute │Compute │Compute │  5 compute
-Row 6  │Compute │Compute │Compute │Compute │Compute │Compute │  tiles per
-Row 5  │Compute │Compute │Compute │Compute │Compute │Compute │  column
-Row 4  │Compute │Compute │Compute │Compute │Compute │Compute │  (rows 2-6)
-Row 3  │Compute │Compute │Compute │Compute │Compute │Compute │
-Row 2  │Compute │Compute │Compute │Compute │Compute │Compute │
-       ├────────┼────────┼────────┼────────┼────────┼────────┤
-Row 1  │MemTile │MemTile │MemTile │MemTile │MemTile │MemTile │  512KB each
-       ├────────┼────────┼────────┼────────┼────────┼────────┤
-Row 0  │  Shim  │  Shim  │  Shim  │  Shim  │  Shim  │  Shim  │  Host DMA
-       └────────┴────────┴────────┴────────┴────────┴────────┘
+        Col 0     Col 1     Col 2     Col 3     Col 4     Col 5     Col 6     Col 7
+       ┌────────┬────────┬────────┬────────┬────────┬────────┬────────┬────────┐
+Row 5  │Compute │Compute │Compute │Compute │Compute │Compute │Compute │Compute │
+Row 4  │Compute │Compute │Compute │Compute │Compute │Compute │Compute │Compute │  4 compute
+Row 3  │Compute │Compute │Compute │Compute │Compute │Compute │Compute │Compute │  tiles per
+Row 2  │Compute │Compute │Compute │Compute │Compute │Compute │Compute │Compute │  column
+       ├────────┼────────┼────────┼────────┼────────┼────────┼────────┼────────┤
+Row 1  │MemTile │MemTile │MemTile │MemTile │MemTile │MemTile │MemTile │MemTile │  512KB each
+       ├────────┼────────┼────────┼────────┼────────┼────────┼────────┼────────┤
+Row 0  │  Shim  │  Shim  │  Shim  │  Shim  │  Shim  │  Shim  │  Shim  │  Shim  │  Host DMA
+       └────────┴────────┴────────┴────────┴────────┴────────┴────────┴────────┘
 ```
 
 **Per tile:**
@@ -69,12 +69,12 @@ Row 0  │  Shim  │  Shim  │  Shim  │  Shim  │  Shim  │  Shim  │  Ho
 **Per column:**
 - Shim: 4 DMA channels (2 S2MM + 2 MM2S)
 - Memtile: 512KB, 12 DMA channels (6 S2MM + 6 MM2S)
-- Compute: 5 tiles × 64KB, 2 DMA each (BD-chainable for multiplexing)
+- Compute: 4 tiles × 64KB, 2 DMA each (BD-chainable for multiplexing)
 
 **Array totals:**
-- 30 usable compute tiles (6 cols × 5 tiles)
-- ~768 GFLOP/s peak (bf16 mmul)
-- 6 × 512KB = 3MB L2 (memtile)
+- 32 usable compute tiles (8 cols × 4 tiles)
+- ~512 GFLOP/s peak (bf16 mmul, 32 tiles × 16 GFLOP/s)
+- 8 × 512KB = 4MB L2 (memtile)
 
 ### Roofline
 
@@ -83,14 +83,14 @@ Row 0  │  Shim  │  Shim  │  Shim  │  Shim  │  Shim  │  Shim  │  Ho
 | 1 tile, scalar | 0.25 | 145s (current) |
 | 1 tile, vectorized (mmul+BN) | 4-16 | 2-9s |
 | 1 tile, vectorized (mmul+BN+SiLU) | 2-4 | 9-17s |
-| 30 tiles, vectorized | 60-480 | 0.07-0.6s |
-| Array peak | 768 | 0.044s = 44ms |
+| 32 tiles, vectorized | 64-512 | 0.07-0.5s |
+| Array peak | 512 | 0.066s = 66ms |
 
 ---
 
 ## DMA Channel Budget (verified)
 
-### Per column, 5 compute tiles, spatial parallel with weight broadcast
+### Per column, 4 compute tiles, spatial parallel with weight broadcast
 
 ```
 Shim (4 channels):
@@ -101,11 +101,12 @@ Shim (4 channels):
   = 3/4 ✓
 
 Memtile (12 channels):
-  MM2S #0: Weight broadcast → 5 compute tiles   (used, 1 DMA, multicast)
-  MM2S #1-5: Input patch → compute tile 0-4     (used, 5 DMAs, unicast)
-  S2MM #0-4: Output tile ← compute tile 0-4     (used, 5 DMAs)
-  S2MM #5: (spare)
-  = 11/12 ✓
+  MM2S #0: Weight broadcast → 4 compute tiles   (used, 1 DMA, multicast)
+  MM2S #1-4: Input patch → compute tile 0-3     (used, 4 DMAs, unicast)
+  S2MM #0-3: Output tile ← compute tile 0-3     (used, 4 DMAs)
+  S2MM #4-5: (spare)
+  MM2S #5: (spare)
+  = 9/12 ✓ (3 spare channels available for L2 staging or double-buffering)
 
 Compute tile (2 channels each):
   S2MM #0: Weight + Input via BD chaining        (used, time-multiplexed)
@@ -113,8 +114,13 @@ Compute tile (2 channels each):
   = 2/2 ✓
 ```
 
-**Weight broadcast** saves 4 memtile DMA channels vs per-tile unicast.
+**Weight broadcast** saves 3 memtile DMA channels vs per-tile unicast.
 All spatial tiles within the same oc_block share identical weights.
+
+**Spare channels (3 per column)** can be used for:
+- Double-buffering input/output for latency hiding
+- L2 staging for operator chaining (Level 4)
+- Skip connection writes to external
 
 ---
 
@@ -201,32 +207,33 @@ Single core, but faster kernels and fewer host round-trips.
 
 ### Tier 2: Multi-core spatial parallel → ~0.5-2s (100×)
 
-30 tiles process same layer in parallel.
+32 tiles (8 cols × 4 tiles) process same layer in parallel.
 
-| Layer group | Current | 30-core est. | Speedup |
+| Layer group | Current | 32-core est. | Speedup |
 |------------|---------|-------------|---------|
 | 80×80 layers | 50.5s | ~0.3s | 170× |
-| 160×160 layers | 15.1s | ~0.13s | 116× |
+| 160×160 layers | 15.1s | ~0.12s | 126× |
 | 40×40 layers | 41.1s | ~0.4s | 103× |
-| 20×20 layers | 12.1s | ~0.16s | 76× |
+| 20×20 layers | 12.1s | ~0.14s | 86× |
 | Stride-2 convs | 17.1s | ~0.2s | 86× |
-| **Total** | **145.5s** | **~1.7s** | **85×** |
+| **Total** | **145.5s** | **~1.5s** | **97×** |
 
-With vectorized kernels on top: **~0.6s** (240×).
+With vectorized kernels on top: **~0.5s** (290×).
 
 ### Tier 3: On-chip pipeline → <100ms (1000×+)
 
 Layers mapped to different columns, data flows tile-to-tile.
 
 ```
-Col 0-1 (16 tiles): conv0 + conv1 + elan2
-Col 2-3 (16 tiles): aconv3 + re4 + aconv5
-Col 4   (8 tiles):  re6 + aconv7 + re8 + spp9
-Col 5   (8 tiles):  neck + head
+Col 0-1 (8 tiles):  conv0 + conv1 + elan2 (large spatial, few channels)
+Col 2-3 (8 tiles):  aconv3 + re4 + aconv5 (mid backbone)
+Col 4-5 (8 tiles):  re6 + aconv7 + re8 + spp9 (deep backbone)
+Col 6-7 (8 tiles):  neck + head (re12, re15, re18, re21, detect)
 ```
 
 - Pipeline latency: ~50ms (one frame)
-- Pipeline throughput: ~10ms/frame (~100 FPS) for streaming
+- Pipeline throughput: ~12ms/frame (~80 FPS) for streaming
+- 8 columns allows more balanced pipeline stages
 
 ---
 
@@ -250,11 +257,11 @@ Bottom-up validation, each level proves a capability before scaling.
 - Each tile processes different spatial patch
 - Validates: broadcast, BD chaining, concurrent execution
 
-### Level 3: 5-tile full column (`mlir-aie-03i`)
-- 5 Workers, full column utilization
-- Weight broadcast → 5 consumers
-- DMA budget: 11/12 memtile channels
-- Expected: ~5× speedup over single tile
+### Level 3: 4-tile full column (`mlir-aie-03i`)
+- 4 Workers, full column utilization (rows 2-5)
+- Weight broadcast → 4 consumers
+- DMA budget: 9/12 memtile channels (3 spare for double-buffering/L2)
+- Expected: ~4× speedup over single tile
 
 ### Level 4: Operator chain L1→L2→L1 (`mlir-aie-0m4`)
 - 2 operators chained via memtile (no external)
@@ -262,20 +269,20 @@ Bottom-up validation, each level proves a capability before scaling.
 - Validates: L2 staging, zero external traffic
 - Independent of Level 2/3 (can develop in parallel)
 
-### Level 5: 6-column 30-tile spatial (`mlir-aie-646`)
-- Full array, all columns active
-- Per-column weight broadcast × 6
-- Expected: ~30× over single tile
-- Model target: ~1.7s (scalar), ~0.6s (vectorized)
+### Level 5: 8-column 32-tile spatial (`mlir-aie-646`)
+- Full array (`npu2`), all 8 columns active
+- Per-column weight broadcast × 8
+- Expected: ~32× over single tile
+- Model target: ~1.5s (scalar), ~0.5s (vectorized)
 
 ### Level 5b: Skip connections + DMA overlap (`mlir-aie-xdg`)
 - B3/B4/N3/N4 write to external during compute
 - Concurrent DMA + compute validation
 
-### Level 6: Full model 30-core (`mlir-aie-zuq`)
-- Complete MDV6 on 30 cores
+### Level 6: Full model 32-core (`mlir-aie-zuq`)
+- Complete MDV6 on 32 cores (8 cols × 4 tiles)
 - L2 for 20×20 chains, external for rest
-- Target: <2s scalar, <0.6s vectorized, <100ms pipelined
+- Target: <1.5s scalar, <0.5s vectorized, <100ms pipelined
 
 ---
 
