@@ -103,24 +103,26 @@ def multicore_conv(dev, tile_h=8, tile_w=8, ic=16, oc=16,
         col_in_ty = np.ndarray[(col_in_size,), np.dtype[np.uint16]]
         col_out_ty = np.ndarray[(col_out_size,), np.dtype[np.uint16]]
 
-        # Bulk input → split at memtile
-        col_in_fifo = ObjectFifo(col_in_ty, name=f"col_in_{col}")
+        # Bulk input → split at memtile (depth=1 to save L1 memory)
+        col_in_fifo = ObjectFifo(col_in_ty, depth=1, name=f"col_in_{col}")
         in_splits = col_in_fifo.cons().split(
             offsets=[core_input_size * i for i in range(cores_this_col)],
             obj_types=[patch_ty] * cores_this_col,
+            depths=[1] * cores_this_col,
             names=[f"in_{col}_{i}" for i in range(cores_this_col)],
         )
 
-        # Per-core output → join at memtile
-        col_out_fifo = ObjectFifo(col_out_ty, name=f"col_out_{col}")
+        # Per-core output → join at memtile (depth=1)
+        col_out_fifo = ObjectFifo(col_out_ty, depth=1, name=f"col_out_{col}")
         out_joins = col_out_fifo.prod().join(
             offsets=[core_output_size * i for i in range(cores_this_col)],
             obj_types=[output_tile_ty] * cores_this_col,
+            depths=[1] * cores_this_col,
             names=[f"out_{col}_{i}" for i in range(cores_this_col)],
         )
 
-        # Weight broadcast for this column
-        wt_fifo = ObjectFifo(weight_ty, name=f"wt_{col}")
+        # Weight broadcast for this column (depth=1)
+        wt_fifo = ObjectFifo(weight_ty, depth=1, name=f"wt_{col}")
 
         col_in_fifos.append(col_in_fifo)
         col_out_fifos.append(col_out_fifo)
