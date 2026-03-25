@@ -43,7 +43,12 @@ endif()
 
 # test_utils library
 if (BUILD_TEST_UTILS_LIBRARY)
-  add_library(test_utils STATIC test_utils.cpp cert_utils.cpp)
+  if (${XRT_FOUND})
+    # XRT-only build: skip cert_utils (simulator-only)
+    add_library(test_utils STATIC test_utils.cpp)
+  else()
+    add_library(test_utils STATIC test_utils.cpp cert_utils.cpp)
+  endif()
   set_target_properties(test_utils PROPERTIES PUBLIC_HEADER "test_utils.h;cert_utils.h;xrt_test_wrapper.h;hrx_test_wrapper.h;cxxopts.hpp;parameter_scratchpad.h")
   add_runtime_pic_flag(test_utils)
 

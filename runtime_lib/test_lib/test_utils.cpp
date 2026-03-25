@@ -8,7 +8,9 @@
 // This file contains common helper functions for the generic host code
 
 #include "test_utils.h"
+#ifndef TEST_UTILS_XRT_ONLY
 #include "memory_allocator.h"
+#endif
 
 #include <cassert>
 #include <filesystem>
@@ -245,6 +247,10 @@ void test_utils::print_test_banner(const char *test_name, const char *message) {
             << std::setfill('0') << ltm->tm_sec << std::endl;
   std::cout << message << std::endl;
 }
+
+// The following functions use mlir_aie_sim_read32/write32 from
+// memory_allocator.h and are only available in simulation builds.
+#ifndef TEST_UTILS_XRT_ONLY
 
 // TODO: Add a timeout
 void test_utils::wait_on_lock(uint64_t lock_addr, uint32_t lock_value) {
@@ -557,6 +563,8 @@ void test_utils::write_transaction_binary(unsigned char *data,
     assert(0 && "unhandled transaction binary version");
   }
 }
+
+#endif // TEST_UTILS_XRT_ONLY
 
 /* Tensor and Matrix processing utilities
 These include CPU reference implementations for tensor operators
