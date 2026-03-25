@@ -29,7 +29,7 @@ int main(int argc, const char *argv[]) {
   // Set up XRT with full ELF flow
   auto device = xrt::device(0);
   std::string kernelName = "main:sequence";
-  xrt::elf ctx_elf{"aie_npu3.elf"};
+  xrt::elf ctx_elf{"aie.elf"};
   xrt::hw_context context = xrt::hw_context(device, ctx_elf);
   auto kernel = xrt::ext::kernel(context, kernelName);
 
