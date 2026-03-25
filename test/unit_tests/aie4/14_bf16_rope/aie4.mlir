@@ -5,6 +5,7 @@
 //
 // (c) Copyright 2024 Advanced Micro Devices Inc.
 //
+// REQUIRES: aiesimulator
 // RUN: xchesscc_wrapper aie4 -c %S/kernel.cc
 // RUN: aiecc.py --alloc-scheme=basic-sequential --xchesscc --xbridge --no-compile-host --aie-generate-txn --txn-name=transaction.bin --aiesim %s %test_utils_flags %S/test.cpp
 // RUN: aie4.mlir.prj/aiesim.sh | FileCheck --check-prefix=AIESIM %s

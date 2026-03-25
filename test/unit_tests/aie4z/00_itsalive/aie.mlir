@@ -8,6 +8,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+// REQUIRES: mesimulator
 // RUN: %python aiecc.py --no-compile --aiesim %s %S/test.cpp
 // RUN: aie.mlir.prj/mesim.sh | FileCheck --check-prefix=MESIM %s
 //
