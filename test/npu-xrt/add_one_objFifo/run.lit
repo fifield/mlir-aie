@@ -16,7 +16,7 @@
 // RUN: %run_on_npu2% %python %S/test.py -x aie.xclbin -k MLIR_AIE -i insts.bin
 //
 // NPU3: full ELF flow
-// RUN: %run_on_npu3% %python %S/aie_npu3.py > aie_npu3.mlir
+// RUN: %run_on_npu3% %python %S/aie_npu3.py -o aie_npu3.mlir
 // RUN: %run_on_npu3% %python aiecc.py --xchesscc --xbridge --no-compile-host --generate-full-elf --full-elf-name=aie_npu3.elf aie_npu3.mlir
 // RUN: %run_on_npu3% clang %S/test_npu3.cpp -o test_npu3.exe -std=c++17 -Wall %xrt_flags -lrt -lstdc++
 // RUN: %run_on_npu3% ./test_npu3.exe

@@ -6,6 +6,7 @@
 #
 # (c) Copyright 2026 Advanced Micro Devices, Inc. or its affiliates
 
+import argparse
 import numpy as np
 import sys
 
@@ -83,7 +84,14 @@ def add_one_objFifo():
                 dma_start_task(in_task, out_task)
                 dma_await_task(in_task, out_task)
 
-    print(ctx.module)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-o", dest="output", default=None)
+    args = parser.parse_args()
+    if args.output:
+        with open(args.output, "w") as f:
+            f.write(str(ctx.module))
+    else:
+        print(ctx.module)
 
 
 add_one_objFifo()
