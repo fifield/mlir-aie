@@ -1,0 +1,106 @@
+name: Build and Test medusa-dev
+
+on:
+  push:
+    branches:
+      - medusa-dev
+  pull_request:
+    branches:
+      - medusa-dev
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ci-build-test-medusa-dev-${{ github.event.number || github.sha }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+
+jobs:
+  # ============================================================================
+  # XRT Tests on NPU3 hardware
+  # ============================================================================
+  xrt-tests:
+    name: XRT NPU3 Tests
+    runs-on: ryzen-ai-npu3
+    env:
+      VITIS: /home/labuser/vitis-HEAD/Vitis
+      LM_LICENSE_FILE: 1757@172.19.220.188:2100@172.19.6.231
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install and Pull Git LFS
+        run: |
+          git lfs install --local
+          git lfs pull
+          git submodule foreach git lfs pull
+
+      - name: Setup Python venv and dependencies
+        run: |
+          python3.12 -m venv aie-venv
+          source aie-venv/bin/activate
+          python -m pip install --upgrade pip
+
+          pip install -r python/requirements.txt
+          pip install -r python/requirements_ml.txt
+          pip install -r python/requirements_dev.txt
+
+          VERSION=$(utils/clone-llvm.sh --get-wheel-version)
+          pip -q download mlir==$VERSION \
+            -f https://github.com/Xilinx/mlir-aie/releases/expanded_assets/mlir-distro
+          unzip -q mlir-*.whl
+
+      - name: Check NPU Device
+        run: |
+          source /opt/xilinx/xrt/setup.sh
+          xrt-smi examine
+
+      - name: Build mlir-aie
+        run: |
+          source aie-venv/bin/activate
+          source /opt/xilinx/xrt/setup.sh
+
+          export PATH=$PATH:${VITIS}/aietools/bin:${VITIS}/bin
+
+          sed -i 's/\t\tVITIS_DSPLIB_INCLUDE_DIR/\t\t#VITIS_DSPLIB_INCLUDE_DIR/g' cmake/modulesXilinx/FindVitis.cmake
+
+          mkdir build
+          pushd build
+
+          cmake .. -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPython3_EXECUTABLE=$(which python) \
+            -DCMAKE_MODULE_PATH=$PWD/../cmake/modulesXilinx \
+            -DLLVM_EXTERNAL_LIT=$(which lit) \
+            -DCMAKE_INSTALL_PREFIX=$PWD/../mlir_aie \
+            -DMLIR_DIR=$PWD/../mlir/lib/cmake/mlir \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_EXE_LINKER_FLAGS_INIT="-fuse-ld=lld" \
+            -DCMAKE_MODULE_LINKER_FLAGS_INIT="-fuse-ld=lld" \
+            -DCMAKE_SHARED_LINKER_FLAGS_INIT="-fuse-ld=lld" \
+            -DXRT_ROOT=/opt/xilinx/xrt \
+            -DAIE_ENABLE_PYTHON_PASSES=OFF \
+            -DAIE_ENABLE_XRT_PYTHON_BINDINGS=ON \
+            -DAIE_INCLUDE_INTEGRATION_TESTS=OFF
+
+          ninja install
+          popd
+
+      - name: Run XRT NPU3 tests
+        run: |
+          source aie-venv/bin/activate
+          source /opt/xilinx/xrt/setup.sh
+          export PATH=$PATH:${VITIS}/aietools/bin:${VITIS}/bin
+
+          pushd build
+          export LIT_OPTS="-sv --time-tests -j4 --timeout 600"
+          ninja check-aie
+          popd
