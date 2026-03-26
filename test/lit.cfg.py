@@ -18,7 +18,7 @@ import lit.util
 from lit.llvm import llvm_config
 from lit.llvm.subst import ToolSubst
 from lit.llvm.subst import FindTool
-from aie_lit_utils import LitConfigHelper, SanitizerLogShTest
+from aie_lit_utils import LitConfigHelper, HardwareConfig, SanitizerLogShTest
 
 # Configuration file for the 'lit' test runner.
 
@@ -207,8 +207,8 @@ xrt_config = LitConfigHelper.detect_xrt(
     can_use_peano_feature_gate=can_use_peano_feature_gate,
 )
 
-# Detect aiesimulator
-aiesim_config = LitConfigHelper.detect_aiesimulator(config.aie_obj_root)
+# Detect aiesimulator — disabled on medusa-dev (no aie4simmsm on npu3 runner)
+aiesim_config = HardwareConfig()
 
 # Detect mesimulator (AIE4)
 mesim_config = LitConfigHelper.detect_mesimulator(llvm_config)
