@@ -82,7 +82,7 @@ class PythocKernel(Kernel):
 
             # Call parent Kernel constructor with object file
             super().__init__(
-                name=kernel_fn_or_name, bin_name=str(obj_path), arg_types=types
+                name=kernel_fn_or_name, object_file_name=str(obj_path), arg_types=types
             )
 
             self._target_arch = target_arch
@@ -126,7 +126,7 @@ class PythocKernel(Kernel):
             # Call parent Kernel constructor with compiled object file
             super().__init__(
                 name=kernel_fn_or_name.__aie_name__,
-                bin_name=str(obj_file),
+                object_file_name=str(obj_file),
                 arg_types=llvm_ir_path_or_types,
             )
 
