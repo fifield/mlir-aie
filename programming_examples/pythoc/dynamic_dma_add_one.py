@@ -276,7 +276,7 @@ def build_mlir_module(dev, kernel):
             # Core: call the PythoC kernel
             # in_addr_words = 0 (byte addr 0 / 4)
             # out_addr_words = N (byte addr N*4 / 4)
-            @core(t02, kernel.bin_name)
+            @core(t02)
             def core_body():
                 kernel(in_buf, out_buf, 0, N, N)
 
@@ -386,7 +386,7 @@ def main():
             target_arch=target_arch,
             extra_globals=_REGDB_GLOBALS,
         )
-        print(f"      -> {kernel.bin_name}")
+        print(f"      -> {kernel.object_file_name}")
 
         print("[2/4] Building MLIR module with raw flows + dynamic DMA")
         module = build_mlir_module(dev, kernel)
