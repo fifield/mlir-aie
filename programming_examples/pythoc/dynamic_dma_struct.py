@@ -221,7 +221,7 @@ def build_mlir_module(dev, kernel):
             shim_dma_allocation("in_alloc", t00, DMAChannelDir.MM2S, 0)
             shim_dma_allocation("out_alloc", t00, DMAChannelDir.S2MM, 0)
 
-            @core(t02, kernel.bin_name)
+            @core(t02)
             def core_body():
                 kernel(in_buf, out_buf, 0, N, N)
 
@@ -329,7 +329,7 @@ def main():
             extra_globals=_REGDB_GLOBALS,
             helpers=[program_bd_and_start, wait_for_lock],
         )
-        print(f"      -> {kernel.bin_name}")
+        print(f"      -> {kernel.object_file_name}")
 
         print("[2/4] Building MLIR module with raw flows + dynamic DMA")
         module = build_mlir_module(dev, kernel)

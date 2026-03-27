@@ -158,7 +158,7 @@ def build_mlir_module(dev):
                 )
 
             # Core program: read lock values via processor bus and write to output
-            @core(t02, kernel.bin_name)
+            @core(t02)
             def core_body():
                 for _ in range_(8):
                     of_in1.acquire(ObjectFifoPort.Consume, 1)
