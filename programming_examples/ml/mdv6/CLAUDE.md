@@ -4,8 +4,8 @@
 Implement the full MDV6-mit-yolov9-c (MegaDetector V6) wildlife detection model using IRON for AMD AIE2P (Strix Halo NPU). BFloat16 throughout.
 
 ## Hardware
-- AMD Strix Halo with NPU (AIE2P, 6×8 tile array)
-- Device target: `npu2` in aie2.py scripts
+- AMD Strix Halo with NPU (AIE2P, 8 columns × 6 rows: 4 compute + 1 memtile + 1 shim)
+- Device target: `npu2` (full array, 32 compute tiles)
 - XRT at `/opt/xilinx/xrt`, Peano toolchain for AIE kernel compilation
 
 ## References
@@ -51,7 +51,7 @@ from aie.iron import (
     Worker,
 )
 from aie.iron.placers import SequentialPlacer
-from aie.iron.device import NPU2Col1
+from aie.iron.device import NPU2  # full array; NPU2Col1 for single-column
 ```
 
 ## XRT Runtime API (for test.py hardware execution)
@@ -124,7 +124,7 @@ Detect([P3,P4,P5])
 - N3 (256ch, 20×20) → concat with downsampled P4
 - N4 (192ch, 40×40) → concat with downsampled P3
 
-## Current Status (2026-03-16)
+## Current Status (2026-03-28)
 
 ### NPU hardware test results (8×8 test dimensions)
 | Layer | Build | NPU Run | Notes |
@@ -174,11 +174,22 @@ with [conv_weights, fused_bn_weight, fused_bn_bias]. The fused BN params are pre
   bn_b_fused = beta - gamma * mean / sqrt(var + eps)
 
 ## Full Model Status
-**End-to-end MDV6 forward pass PASS on NPU** (2026-03-17)
-- max_class_diff=0.020, max_vector_diff=0.031 (vs PyTorch bf16 reference)
-- Total: 96.3s (single-core scalar kernels, ~30 xclbin configs)
-- On NPU: conv0, conv1, ELAN, all AConv, all RepNCSPELAN (×7), SPPELAN, Conv sub-layers
-- On CPU: detection head (grouped conv + softmax), RepConv sub-layers, AvgPool, Upsample
+
+### Single-core baseline (2026-03-17)
+- **145.5s** total, max_class_diff=0.020, max_vector_diff=0.031
+- All conv sub-layers on NPU (scalar kernels, ~30 xclbin configs)
+- RepConv, detection, AvgPool, Upsample on CPU
+
+### 32-core multicore (2026-03-28)
+- **6.0s** total (24× speedup), all 14 layers complete
+- 28 unique multicore xclbins (deduplicated to fit 32-slot XRT cache)
+- Output has NaN — correctness bug in `_run_tiled_mc_inner` weight/patch packing
+  (SC path produces correct non-zero output for same layer; MC path returns zeros)
+- Key files:
+  - `conv/aie2_multicore.py` — generalized N-core IRON program (1-32 cores)
+  - `conv/build_multicore.py` — batch build script for all model layer configs
+  - `run_tiled_mc.py` — multicore `run_tiled_fused_conv` with lazy SC fallback
+  - `test_full_model_mc.py` — 32-core full model test
 
 ## Performance Optimization Plan (`mlir-aie-mi7`)
 | Phase | Optimization | Expected speedup | Target |
@@ -206,8 +217,7 @@ Level 2: 2-tile weight broadcast ✓ (max_diff=0.125, 1.8ms)
 Level 3: 4-tile full column ✓ (max_diff=0.125, 1.6ms)
 Level 4: Operator chain L1→L2→L1 ✓ (Conv1x1→Conv1x1, max_diff=0.5, 12.1ms)
 Level 5: 32-tile spatial parallel ✓ (8 columns, max_diff=0.125, 4.1ms; 80×80 layer in 7.5ms)
-Level 5b: Skip connections + DMA overlap (next)
-Level 6: Full model 32-core integration
+Level 6: Full model 32-core ✓ timing (6.0s), correctness bug (NaN output)
 
 ## Completed Phases
 1. Phase 1: All 10 layer types pass on NPU at 8×8 test dims ✓

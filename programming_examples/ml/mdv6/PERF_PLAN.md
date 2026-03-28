@@ -2,11 +2,38 @@
 
 ## Current State
 
-Full MDV6-mit-yolov9-c forward pass validated on Strix Halo NPU.
+Full MDV6-mit-yolov9-c forward pass on Strix Halo NPU.
+
+### 32-core multicore (2026-03-28)
+- **6.0s** total, 32 cores, scalar kernels — **24× over single-core baseline**
+- Correctness: NaN in output (bug in MC weight/patch packing, see `mlir-aie-mi7.1`)
+- 28 unique MC xclbins, hierarchical split/join + per-column weight broadcast
+- `test_full_model_mc.py` runs all 14 layers end-to-end
+
+### Single-core baseline (2026-03-17)
 - **145.5s** total (single-core scalar kernels, host-orchestrated tiling)
 - **0.25 GFLOP/s** effective (0.03% of peak)
 - 34 GFLOP total model compute
 - ~10,000 host→NPU round-trips (1 per spatial tile)
+
+### 32-core per-layer timing
+| Layer | SC time | MC time | Speedup |
+|-------|---------|---------|---------|
+| conv0 | 3.3s | 0.3s | 11× |
+| conv1 | 6.8s | 0.2s | 34× |
+| elan2 | 15.1s | 0.5s | 30× |
+| aconv3 | 5.8s | 0.2s | 29× |
+| rep_elan4 | 24.0s | 0.8s | 30× |
+| aconv5 | 5.3s | 0.2s | 27× |
+| rep_elan6 | 15.0s | 0.6s | 25× |
+| aconv7 | 2.8s | 0.2s | 14× |
+| rep_elan8 | 7.9s | 0.5s | 16× |
+| spp9 | 2.1s | 0.1s | 21× |
+| rep_elan12 | 16.6s | 0.5s | 33× |
+| rep_elan15 | 26.5s | 0.8s | 33× |
+| head P4 | 9.5s | 0.6s | 16× |
+| head P5 | 4.9s | 0.4s | 12× |
+| **Total** | **145.5s** | **6.0s** | **24×** |
 
 ### Time Breakdown
 
@@ -276,14 +303,21 @@ Bottom-up validation, each level proves a capability before scaling.
 - Conv1x1 16→16, tile 10×10, 80×80 layer: 7.5ms (64 tiles in 2 invocations)
 - **Key pattern**: `aie2_multicore_broadcast.py` scales 1-32 cores automatically
 
+### Level 6: Full model 32-core ✅ TIMING DONE, CORRECTNESS WIP (`mlir-aie-zuq`)
+- All 14 layers complete in **6.0s** (24× over 145.5s baseline)
+- 28 unique MC xclbins (deduplicated from 34 to fit 32-slot XRT cache)
+- Architecture: per-column split/join + per-column weight broadcast + TensorAccessPattern
+- RepNCSP sub-layers also use MC (RepConv still on CPU)
+- Bug: MC path returns zeros for some layers → NaN in detection output
+  - SC path produces correct non-zero output for same inputs
+  - Root cause: likely weight packing or patch extraction in `_run_tiled_mc_inner`
+- Fixed: mc_re4_rn3 buffer mismatch (tile=12→16, oc=16→32) that was crashing NPU
+- Fixed: mc_re6_rnm buffer mismatch (ic=192→96)
+
 ### Level 5b: Skip connections + DMA overlap (`mlir-aie-xdg`)
 - B3/B4/N3/N4 write to external during compute
 - Concurrent DMA + compute validation
-
-### Level 6: Full model 32-core (`mlir-aie-zuq`)
-- Complete MDV6 on 32 cores (8 cols × 4 tiles)
-- L2 for 20×20 chains, external for rest
-- Target: <1.5s scalar, <0.5s vectorized, <100ms pipelined
+- Not yet started (lower priority than L6 correctness)
 
 ---
 
@@ -299,5 +333,6 @@ Bottom-up validation, each level proves a capability before scaling.
 | mlir-aie-03i | Level 3: 4-tile column | ✅ Done |
 | mlir-aie-0m4 | Level 4: L1→L2→L1 chain | ✅ Done |
 | mlir-aie-646 | Level 5: 32-tile spatial | ✅ Done |
+| mlir-aie-zuq | Level 6: Full model 32-core | ⚠️ 6.0s timing done, correctness WIP |
+| mlir-aie-mi7.1 | MC correctness bug (zeros) | Open P1 |
 | mlir-aie-xdg | Level 5b: Skip connections | Ready |
-| mlir-aie-zuq | Level 6: Full model 32-core | Ready (blocked on 5b) |
