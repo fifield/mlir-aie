@@ -12,7 +12,7 @@ Full MDV6-mit-yolov9-c forward pass on Strix Halo NPU.
 
 ### Single-core baseline (2026-03-17)
 - **145.5s** total (single-core scalar kernels, host-orchestrated tiling)
-- **0.25 GFLOP/s** effective (0.03% of peak)
+- **0.25 GFLOP/s** effective (0.005% of per-tile peak)
 - 34 GFLOP total model compute
 - ~10,000 host→NPU round-trips (1 per spatial tile)
 
@@ -65,7 +65,8 @@ All operators are **compute-bound** (arithmetic intensity 20-340).
 | Conv3x3 (any size) | 2-17 | 0.25-0.30 | 140-340 | highest AI |
 | Conv3x3 stride=2 | 1-8 | 0.21-0.29 | 190-270 | AConv inner conv |
 
-All are **100-1000× below per-tile peak** (~16 GFLOP/s bf16 mmul).
+All are **500-1600× below per-tile peak** (160 GFLOP/s bf16 mmul @ 1.25 GHz;
+see AIE2P ArchSpec Table 2-1: 0.16 TOPS = 64 bf16 multipliers × 2 ops/MAC × 1.25 GHz).
 
 ---
 
@@ -91,7 +92,7 @@ Row 0  │  Shim  │  Shim  │  Shim  │  Shim  │  Shim  │  Shim  │  Sh
 
 **Per tile:**
 - Compute: 64KB data memory, 16KB program memory, 2 DMA (1 S2MM + 1 MM2S)
-- bf16 mmul<4,8,8>: ~16 GFLOP/s peak
+- bf16 mmul<4,8,8>: 160 GFLOP/s peak (0.16 TOPS @ 1.25 GHz, 64 multipliers)
 
 **Per column:**
 - Shim: 4 DMA channels (2 S2MM + 2 MM2S)
@@ -100,18 +101,19 @@ Row 0  │  Shim  │  Shim  │  Shim  │  Shim  │  Shim  │  Shim  │  Sh
 
 **Array totals:**
 - 32 usable compute tiles (8 cols × 4 tiles)
-- ~512 GFLOP/s peak (bf16 mmul, 32 tiles × 16 GFLOP/s)
+- ~5,120 GFLOP/s peak (bf16 mmul, 32 tiles × 160 GFLOP/s)
 - 8 × 512KB = 4MB L2 (memtile)
 
 ### Roofline
 
-| | GFLOP/s | Time for 34 GFLOP |
-|---|---------|-------------------|
-| 1 tile, scalar | 0.25 | 145s (current) |
-| 1 tile, vectorized (mmul+BN) | 4-16 | 2-9s |
-| 1 tile, vectorized (mmul+BN+SiLU) | 2-4 | 9-17s |
-| 32 tiles, vectorized | 64-512 | 0.07-0.5s |
-| Array peak | 512 | 0.066s = 66ms |
+| | GFLOP/s | % of peak | Time for 34 GFLOP |
+|---|---------|-----------|-------------------|
+| 1 tile, scalar | 0.25 | 0.16% | 145s (current) |
+| 1 tile, vectorized (mmul+BN) | 4-16 | 2.5-10% | 2-9s |
+| 1 tile, vectorized (mmul+BN+SiLU) | 2-4 | 1.3-2.5% | 9-17s |
+| 1 tile, peak | 160 | 100% | 0.2s |
+| 32 tiles, vectorized | 64-512 | 1.3-10% | 0.07-0.5s |
+| Array peak | 5,120 | 100% | 6.6ms |
 
 ---
 
