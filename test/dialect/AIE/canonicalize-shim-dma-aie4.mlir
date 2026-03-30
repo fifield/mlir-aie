@@ -62,3 +62,61 @@ module @test_aie4_shim_dma_no_fold {
     }
   }
 }
+
+// -----
+
+// Regression test: MLIR's built-in block merging must not combine BD blocks
+// from different channels. When two channels have structurally identical BD
+// chains, block merging collapses them into a single shared chain. On AIE4
+// where channels have private BD pools, this causes both channels to program
+// the same BD slots, leading to data corruption or deadlock.
+
+// CHECK-LABEL: module @test_aie4_shim_dma_no_block_merge
+// CHECK:       aie.shim_dma
+//              Two channels with 2 BDs each = 4 total BDs must be preserved.
+// CHECK-COUNT-4: aie.dma_bd
+// CHECK-NOT:     aie.dma_bd
+module @test_aie4_shim_dma_no_block_merge {
+  aie.device(npu3z) {
+    %buf0 = aie.external_buffer {address = 2147483648 : i64} : memref<64xi32>
+    %buf1 = aie.external_buffer {address = 2147484160 : i64} : memref<64xi32>
+    %shim = aie.tile(0, 0)
+    %lock0 = aie.lock(%shim, 0) {init = 0 : i32}
+    %lock1 = aie.lock(%shim, 1) {init = 0 : i32}
+
+    %shim_dma = aie.shim_dma(%shim) {
+      // ---- Channel 0 ----
+      %0 = aie.dma_start(MM2S, 0, ^ch0_bd0, ^ch2_start)
+    ^ch0_bd0:
+      aie.use_lock(%lock0, Acquire, 1)
+      aie.dma_bd(%buf0 : memref<64xi32>, 0, 64, [<size = 64, stride = 1>]) {bd_id = 0 : i32}
+      aie.use_lock(%lock1, Release, 1)
+      aie.next_bd ^ch0_bd1
+    ^ch0_bd1:
+      aie.use_lock(%lock0, Acquire, 1)
+      aie.dma_bd(%buf1 : memref<64xi32>, 0, 64, [<size = 64, stride = 1>]) {bd_id = 1 : i32}
+      aie.use_lock(%lock1, Release, 1)
+      aie.next_bd ^ch0_end
+    ^ch0_end:
+      aie.end
+
+      // ---- Channel 2 (identical BD content, must NOT merge with ch0) ----
+    ^ch2_start:
+      %1 = aie.dma_start(MM2S, 2, ^ch2_bd0, ^done)
+    ^ch2_bd0:
+      aie.use_lock(%lock0, Acquire, 1)
+      aie.dma_bd(%buf0 : memref<64xi32>, 0, 64, [<size = 64, stride = 1>]) {bd_id = 0 : i32}
+      aie.use_lock(%lock1, Release, 1)
+      aie.next_bd ^ch2_bd1
+    ^ch2_bd1:
+      aie.use_lock(%lock0, Acquire, 1)
+      aie.dma_bd(%buf1 : memref<64xi32>, 0, 64, [<size = 64, stride = 1>]) {bd_id = 1 : i32}
+      aie.use_lock(%lock1, Release, 1)
+      aie.next_bd ^ch2_end
+    ^ch2_end:
+      aie.end
+    ^done:
+      aie.end
+    }
+  }
+}

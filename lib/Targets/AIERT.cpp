@@ -1118,15 +1118,46 @@ xilinx::AIE::AIERTControl::addInitConfig(DeviceOp &targetOp,
             return failure();
         }
     } else {
+      // Build a map from BD blocks to all (channel, dir) pairs that reference
+      // them. Block merging (canonicalization) may cause multiple DMA channels
+      // to share the same BD blocks, but each channel's private BD pool must
+      // be configured separately.
+      llvm::DenseMap<Block *, SmallVector<std::pair<uint32_t, DMAChannelDir>>>
+          blockChannelMap;
       for (auto &t : blockVector) {
         Block *block = std::get<0>(t);
-        uint32_t channel = std::get<1>(t);
-        DMAChannelDir dir = std::get<2>(t);
+        for (auto startOp : block->getOps<DMAStartOp>()) {
+          uint32_t ch = startOp.getChannelIndex();
+          DMAChannelDir d = startOp.getChannelDir();
+          // Walk the BD chain from this DMAStartOp's destination.
+          Block *bdBlock = startOp.getDest();
+          llvm::SmallPtrSet<Block *, 8> visited;
+          while (bdBlock && visited.insert(bdBlock).second) {
+            blockChannelMap[bdBlock].push_back({ch, d});
+            auto successors = bdBlock->getTerminator()->getSuccessors();
+            bdBlock = successors.empty() ? nullptr : successors[0];
+          }
+        }
+      }
+
+      for (auto &t : blockVector) {
+        Block *block = std::get<0>(t);
         if (block->getOps<DMABDOp>().empty())
           continue;
-        if (failed(configureLocksAndBd(*block, channel, dir, col, row,
-                                       unchainedBlocks.contains(block))))
-          return failure();
+        auto it = blockChannelMap.find(block);
+        if (it != blockChannelMap.end()) {
+          for (auto &[ch, d] : it->second) {
+            if (failed(configureLocksAndBd(*block, ch, d, col, row,
+                                           unchainedBlocks.contains(block))))
+              return failure();
+          }
+        } else {
+          uint32_t channel = std::get<1>(t);
+          DMAChannelDir dir = std::get<2>(t);
+          if (failed(configureLocksAndBd(*block, channel, dir, col, row,
+                                         unchainedBlocks.contains(block))))
+            return failure();
+        }
       }
     }
 

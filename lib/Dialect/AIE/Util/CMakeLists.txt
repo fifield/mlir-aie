@@ -40,5 +40,6 @@ add_dependencies(MLIRAIEUtil MLIRAIERegDBResources GenerateAIEEventsTD)
 install(FILES
   ${AIE_BINARY_DIR}/lib/regdb/aie_registers_aie2.json
   ${AIE_BINARY_DIR}/lib/regdb/aie_registers_aie4.json
+  ${AIE_BINARY_DIR}/lib/regdb/aie_registers_aie4z.json
   ${AIE_BINARY_DIR}/lib/regdb/events_database.json
   DESTINATION lib${LLVM_LIBDIR_SUFFIX}/regdb)
