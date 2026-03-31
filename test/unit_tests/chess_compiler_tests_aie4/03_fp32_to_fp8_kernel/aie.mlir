@@ -10,7 +10,7 @@
 
 // REQUIRES: valid_xchess_license, !hsa
 
-// RUN: %PYTHON aiecc.py --aiesim --xchesscc --xbridge --no-compile-host --no-compile %s %test_utils_flags %S/test.cpp
+// RUN: %PYTHON aiecc.py --aiesim --xchesscc --xbridge --no-compile-host --dump-intermediates %s %test_utils_flags %S/test.cpp
 // RUN: xchesscc_wrapper aie4 +l aie.mlir.prj/main_core_1_3.bcf %S/kernel.cc -o custom_1_3.elf
 // RUN: aie-opt --convert-aie-to-transaction='elf-dir=.' aie.mlir.prj/input_physical.mlir -o transaction.mlir
 // RUN: aie-translate --aie-npu-to-binary transaction.mlir -o transaction.bin
