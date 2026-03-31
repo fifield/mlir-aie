@@ -837,6 +837,8 @@ struct AIEInsertTraceFlowsPass
         xilinx::AIEX::NpuWriteBdOp::create(
             builder, runtimeSeq.getLoc(),
             shimCol,           // column
+            0,                 // row (shim row)
+            0,                 // direction
             chanDesc.bdId,     // bd_id
             bufferLengthWords, // buffer_length (in 32-bit words)
             0,                 // buffer_offset

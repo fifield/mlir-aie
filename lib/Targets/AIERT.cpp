@@ -722,7 +722,8 @@ LogicalResult xilinx::AIE::AIERTControl::configureLocksAndBd(Block &block,
 LogicalResult xilinx::AIE::AIERTControl::initLocks(DeviceOp &targetOp) {
   for (auto tileOp : targetOp.getOps<TileOp>()) {
     auto tileLoc = XAie_TileLoc(tileOp.colIndex(), tileOp.rowIndex());
-    if (!tileOp.isShimTile() && tileOp.getCoreOp()) {
+    if (!tileOp.isShimTile() && tileOp.getCoreOp() &&
+        tileOp.getCoreOp().getElfFile()) {
       TxnLocBracket bracket(*this, tileOp.getLoc());
       TRY_XAIE_API_EMIT_ERROR(tileOp, XAie_CoreReset, &aiert->devInst, tileLoc);
       TRY_XAIE_API_EMIT_ERROR(tileOp, XAie_CoreUnreset, &aiert->devInst,
@@ -1198,10 +1199,13 @@ xilinx::AIE::AIERTControl::addInitConfig(DeviceOp &targetOp,
 }
 
 LogicalResult xilinx::AIE::AIERTControl::addCoreEnable(DeviceOp &targetOp) {
-  // Start execution of all the cores.
+  // Start execution of all the cores that have an ELF loaded.
+  // Skip cores without elf_file to avoid enabling a core that has no program
+  // (which causes the core to run off the end of memory).
   for (auto tileOp : targetOp.getOps<TileOp>()) {
     auto tileLoc = XAie_TileLoc(tileOp.colIndex(), tileOp.rowIndex());
-    if (!tileOp.isShimTile() && tileOp.getCoreOp()) {
+    if (!tileOp.isShimTile() && tileOp.getCoreOp() &&
+        tileOp.getCoreOp().getElfFile()) {
       CoreOp coreOp = tileOp.getCoreOp();
       TxnLocBracket bracket(*this, coreOp.getLoc());
       // A core reaching its own tile's registers goes through the processor
