@@ -466,7 +466,9 @@ class LitConfigHelper:
                         logger.warning(
                             "NPU2 detected but no AIE2P backend is available"
                         )
-                elif model in LitConfigHelper.NPU_MODELS["npu3"]:
+                elif any(
+                    known in model for known in LitConfigHelper.NPU_MODELS["npu3"]
+                ):
                     if "AIE4" in vitis_components:
                         run_on_npu3 = LitConfigHelper._run_on_npu_wrap(
                             aie_src_root, "npu3"
@@ -474,7 +476,9 @@ class LitConfigHelper:
                         config.features.extend(["ryzen_ai", "ryzen_ai_npu3"])
                         config.substitutions["%run_on_npu3%"] = run_on_npu3
                         detected_npu_device = "npu3"
-                        logger.info("Running tests on NPU3 with command line: %s", run_on_npu3)
+                        logger.info(
+                            "Running tests on NPU3 with command line: %s", run_on_npu3
+                        )
                     else:
                         logger.warning("NPU3 detected but aietools for aie4 not available")
                 else:
