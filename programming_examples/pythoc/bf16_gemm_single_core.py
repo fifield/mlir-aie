@@ -313,6 +313,8 @@ def parse_args():
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--compile-only", action="store_true",
                         help="Generate MLIR and compile but skip NPU execution")
+    parser.add_argument("--benchmark", action="store_true",
+                        help="Run performance benchmark (10 warmup + 20 measurement)")
     return parser.parse_args()
 
 
@@ -429,6 +431,58 @@ def untile_matrix_c(C_tiled_flat, M, N):
     return tiled.transpose(1, 2, 0, 3).reshape(M, N)
 
 
+# ── Performance benchmark ────────────────────────────────────────────────────
+#
+# Replicates the methodology from mlir-air/programming_examples/
+# matrix_multiplication/bf16/test.cpp:
+#   - 10 warmup iterations (discarded)
+#   - 20 measurement iterations
+#   - Wall-clock timing per iteration (kernel dispatch + wait + sync)
+#   - Metric: GFLOPS = 2*M*K*N / (time_us * 1000)
+
+WARMUP_ITERS = 10
+MEASURE_ITERS = 20
+
+
+def run_benchmark(kernel_handle, A_tiled, B_tiled):
+    """Run performance benchmark and report GFLOPS."""
+    import time
+
+    macs = 2.0 * M * K * N
+    total_iters = WARMUP_ITERS + MEASURE_ITERS
+    times_us = []
+
+    print(f"[3/3] Benchmarking: {M}×{K}×{N} bf16 GEMM, single core")
+    print(f"      {WARMUP_ITERS} warmup + {MEASURE_ITERS} measurement iterations")
+
+    for i in range(total_iters):
+        in_a = iron.tensor(A_tiled, dtype=np.uint16)
+        in_b = iron.tensor(B_tiled, dtype=np.uint16)
+        out_c = iron.zeros(M * N, dtype=np.float32)
+
+        t0 = time.perf_counter()
+        DefaultNPURuntime.run(kernel_handle, [in_a, in_b, out_c])
+        t1 = time.perf_counter()
+
+        elapsed_us = (t1 - t0) * 1e6
+        if i >= WARMUP_ITERS:
+            times_us.append(elapsed_us)
+
+    avg_us = sum(times_us) / len(times_us)
+    min_us = min(times_us)
+    max_us = max(times_us)
+
+    avg_gflops = macs / (avg_us * 1000)
+    max_gflops = macs / (min_us * 1000)
+    min_gflops = macs / (max_us * 1000)
+
+    print()
+    print(f"      Avg latency: {avg_us:10.1f} us  ->  {avg_gflops:.4f} GFLOPS")
+    print(f"      Min latency: {min_us:10.1f} us  ->  {max_gflops:.4f} GFLOPS (peak)")
+    print(f"      Max latency: {max_us:10.1f} us  ->  {min_gflops:.4f} GFLOPS")
+    return 0
+
+
 def main():
     args = parse_args()
     work_dir = args.work_dir.resolve()
@@ -460,8 +514,6 @@ def main():
             print("PASS! (compile-only)")
             return 0
 
-        print("[3/3] Running on NPU and validating results")
-
         # Generate test data
         np.random.seed(42)
         A_f32 = np.random.randn(M, K).astype(np.float32) * 0.1
@@ -470,18 +522,24 @@ def main():
         A_bf16_flat = bf16_to_uint16(A_f32)
         B_bf16_flat = bf16_to_uint16(B_f32)
 
-        # Reference: compute in f32 using bf16-rounded inputs
-        A_ref = uint16_to_float(A_bf16_flat).reshape(M, K)
-        B_ref = uint16_to_float(B_bf16_flat).reshape(K, N)
-        C_ref = A_ref @ B_ref
-
         # Pre-tile inputs to match kernel's expected block layout
         A_tiled = tile_matrix_a(A_bf16_flat, M, K)
         B_tiled = tile_matrix_b(B_bf16_flat, K, N)
 
-        # Create NPU buffers
+        # Load kernel
         npu_kernel = NPUKernel(str(xclbin_path), str(insts_path), kernel_name="MLIR_AIE")
         kernel_handle = DefaultNPURuntime.load(npu_kernel)
+
+        if args.benchmark:
+            return run_benchmark(kernel_handle, A_tiled, B_tiled)
+
+        # ── Validation run ───────────────────────────────────────────────
+        print("[3/3] Running on NPU and validating results")
+
+        # Reference: compute in f32 using bf16-rounded inputs
+        A_ref = uint16_to_float(A_bf16_flat).reshape(M, K)
+        B_ref = uint16_to_float(B_bf16_flat).reshape(K, N)
+        C_ref = A_ref @ B_ref
 
         in_a = iron.tensor(A_tiled, dtype=np.uint16)
         in_b = iron.tensor(B_tiled, dtype=np.uint16)
