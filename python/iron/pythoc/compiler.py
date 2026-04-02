@@ -14,11 +14,30 @@ object files that can be linked into IRON programs.
 
 import ast
 import os
+import re
 import sys
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import Optional
+
+
+def _strip_vector_alignment(ir_str: str) -> str:
+    """Strip explicit alignment from vector load/store instructions.
+
+    The AIE2p llc backend selects vlda/vldb vector loads only when the LLVM IR
+    load/store carries no explicit alignment (or an alignment >= the vector
+    width).  An element-size annotation such as ``align 2`` on a
+    ``load <64 x bfloat>`` tells llc the pointer is only 2-byte aligned, so it
+    falls back to 128 scalar ``lda.s16`` + ``vpush.hi`` instructions.
+
+    aiecc performs the same strip in its "peanohack" pre-processing step.
+    Removing the annotation lets the backend assume the AIE ABI natural
+    alignment and choose vlda/vldb.
+    """
+    # Only strip alignment from vector (non-scalar) load/store lines.
+    pattern = re.compile(r'((?:load|store)\s+<\d+\s+x\s+\w+>.*?),\s*align\s+\d+')
+    return pattern.sub(r'\1', ir_str)
 
 
 def _find_pythoc_installation() -> Path:
@@ -442,9 +461,15 @@ def compile_pythoc_source(
                 print(f"Optimizing with -O{optimization_level}...")
             compiler.optimize_module(optimization_level)
 
-        # Save LLVM IR to file
+        # Save LLVM IR to file.
+        # Strip explicit alignment from vector load/store instructions before
+        # passing to llc.  The AIE2p backend selects vlda/vldb only when there
+        # is no (or a sufficiently large) alignment annotation on the load; an
+        # explicit "align 2" (element-size) annotation tells llc the pointer is
+        # only 2-byte aligned and forces scalar lda + vpush.hi fallback.
+        # aiecc performs the same strip in its "peanohack" pre-processing step.
         ll_file = output_dir / f"{function_name}.ll"
-        ir_str = compiler.get_ir()
+        ir_str = _strip_vector_alignment(compiler.get_ir())
         with open(ll_file, "w") as f:
             f.write(ir_str)
 
