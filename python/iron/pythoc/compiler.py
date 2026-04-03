@@ -14,6 +14,7 @@ object files that can be linked into IRON programs.
 
 import ast
 import os
+import re
 import sys
 import subprocess
 import tempfile
@@ -131,6 +132,30 @@ def _make_helper_wrapper(name, func_info, user_globals):
     wrapper.handle_call = handle_call
     wrapper._is_compiled = True
     user_globals[name] = wrapper
+
+
+# Pattern to match alignment annotations on bfloat/half vector load/store.
+# The AIE2p llc backend only selects vlda/vldb (vector loads) when the IR
+# has no explicit alignment or alignment >= vector width.  PythoC emits
+# element-size alignment (align 2 for bfloat, align 2 for half) which forces
+# a scalar fallback.  Stripping the alignment for these small-element types
+# lets the backend use the efficient vector instructions.
+#
+# We intentionally do NOT strip alignment from float/i32/i64 vectors —
+# those rely on correct alignment for proper address masking.
+_BF16_HALF_ALIGN_RE = re.compile(
+    r"((?:load|store)\s+<\d+\s+x\s+(?:bfloat|half)>.*?),\s*align\s+\d+"
+)
+
+
+def _strip_vector_alignment(ir: str) -> str:
+    """Strip alignment annotations from bfloat/half vector load/store ops.
+
+    This enables the AIE2p backend to select vlda/vldb (vector load/store)
+    instructions instead of falling back to scalar element-by-element loads.
+    Only bfloat and half types are affected; float/i32 alignment is preserved.
+    """
+    return _BF16_HALF_ALIGN_RE.sub(r"\1", ir)
 
 
 def compile_pythoc_kernel(
@@ -445,6 +470,7 @@ def compile_pythoc_source(
         # Save LLVM IR to file
         ll_file = output_dir / f"{function_name}.ll"
         ir_str = compiler.get_ir()
+        ir_str = _strip_vector_alignment(ir_str)
         with open(ll_file, "w") as f:
             f.write(ir_str)
 
