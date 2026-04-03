@@ -56,34 +56,36 @@ def _find_pythoc_installation() -> Path:
         )
 
 
-def _get_llc_path() -> str:
-    """Get path to llc (LLVM compiler) from AIE environment.
+def _find_peano_tool(name: str) -> str:
+    """Get path to a Peano tool (opt, llc, etc.) from the AIE environment.
 
     Returns:
-        Path to llc executable
+        Path to the tool executable
 
     Raises:
-        RuntimeError: If llc cannot be found
+        RuntimeError: If the tool cannot be found
     """
-    # Try llvm-aie installation first (required for AIE2 target support)
-    llvm_aie_bin = os.environ.get("LLVM_AIE_BIN")
-    if llvm_aie_bin:
-        llc_path = Path(llvm_aie_bin) / "llc"
-        if llc_path.exists():
-            return str(llc_path)
-
-    llvm_aie_bin = os.environ.get("PEANO_INSTALL_DIR")
-    if llvm_aie_bin:
-        llc_path = Path(llvm_aie_bin) / "bin" / "llc"
-        if llc_path.exists():
-            return str(llc_path)
+    for env_var, suffix in [("LLVM_AIE_BIN", ""), ("PEANO_INSTALL_DIR", "bin")]:
+        base = os.environ.get(env_var)
+        if base:
+            tool_path = Path(base) / suffix / name if suffix else Path(base) / name
+            if tool_path.exists():
+                return str(tool_path)
 
     raise RuntimeError(
-        "llvm-aie llc not found. Please ensure:\n"
+        f"llvm-aie {name} not found. Please ensure:\n"
         "1. LLVM_AIE_BIN environment variable is set, or\n"
         "2. PEANO_INSTALL_DIR environment variable is set\n"
-        "Note: System llc does not support AIE2/AIE2P target"
+        f"Note: System {name} does not support AIE2/AIE2P target"
     )
+
+
+def _get_llc_path() -> str:
+    return _find_peano_tool("llc")
+
+
+def _get_opt_path() -> str:
+    return _find_peano_tool("opt")
 
 
 def _make_helper_wrapper(name, func_info, user_globals):
@@ -134,28 +136,40 @@ def _make_helper_wrapper(name, func_info, user_globals):
     user_globals[name] = wrapper
 
 
-# Pattern to match alignment annotations on bfloat/half vector load/store.
-# The AIE2p llc backend only selects vlda/vldb (vector loads) when the IR
-# has no explicit alignment or alignment >= vector width.  PythoC emits
-# element-size alignment (align 2 for bfloat, align 2 for half) which forces
-# a scalar fallback.  Stripping the alignment for these small-element types
-# lets the backend use the efficient vector instructions.
+# Strip alignment annotations from bfloat/half/float vector load/store ops.
 #
-# We intentionally do NOT strip alignment from float/i32/i64 vectors —
-# those rely on correct alignment for proper address masking.
-_BF16_HALF_ALIGN_RE = re.compile(
-    r"((?:load|store)\s+<\d+\s+x\s+(?:bfloat|half)>.*?),\s*align\s+\d+"
+# "peanohack" alignment strip — matches the mlir-aie/aiecc compilation flow.
+#
+# The AIE2p llc backend selects vlda/vldb only when alignment is absent or
+# >= vector width.  MLIR-generated IR carries element-size alignment (e.g.
+# align 2 for bfloat) which forces scalar fallback.  The aiecc pipeline
+# strips ALL vector alignment *before* running Peano opt -O2, which then
+# recomputes natural alignment where beneficial.  We replicate that here.
+_ALL_VECTOR_ALIGN_RE = re.compile(
+    r"((?:load|store)\s+<\d+\s+x\s+\w+>.*?),\s*align\s+\d+"
 )
 
 
 def _strip_vector_alignment(ir: str) -> str:
-    """Strip alignment annotations from bfloat/half vector load/store ops.
+    """Strip alignment from ALL vector load/store ops (peanohack).
 
-    This enables the AIE2p backend to select vlda/vldb (vector load/store)
-    instructions instead of falling back to scalar element-by-element loads.
-    Only bfloat and half types are affected; float/i32 alignment is preserved.
+    This matches the mlir-aie aiecc compilation flow where alignment is
+    stripped before Peano opt, which then recomputes alignment as needed.
     """
-    return _BF16_HALF_ALIGN_RE.sub(r"\1", ir)
+    return _ALL_VECTOR_ALIGN_RE.sub(r"\1", ir)
+
+
+def _strip_unsupported_flags(ir: str) -> str:
+    """Strip LLVM IR flags/attributes not supported by llvm-aie.
+
+    llvmlite targets upstream LLVM 20+ and may emit attributes that
+    Peano's fork of LLVM doesn't recognise.
+    """
+    # Remove 'samesign' from icmp instructions
+    ir = re.sub(r'\bicmp\s+samesign\s+', 'icmp ', ir)
+    # Remove 'initializes(...)' attribute from function parameters
+    ir = re.sub(r'\s+initializes\(\([^)]*\)\)', '', ir)
+    return ir
 
 
 def compile_pythoc_kernel(
@@ -240,9 +254,11 @@ def compile_pythoc_source(
     except ImportError as e:
         raise RuntimeError(f"Failed to import PythoC: {e}")
 
-    # Create output directory
+    # Create output directory (PYTHOC_DEBUG_DIR overrides tmpdir for inspection)
     if output_dir is None:
-        output_dir = tempfile.mkdtemp(prefix="pythoc_iron_")
+        output_dir = os.environ.get("PYTHOC_DEBUG_DIR") or tempfile.mkdtemp(
+            prefix="pythoc_iron_"
+        )
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -461,23 +477,56 @@ def compile_pythoc_source(
             user_globals=user_globals,
         )
 
-        # Optimize if requested
-        if optimization_level > 0:
-            if verbose:
-                print(f"Optimizing with -O{optimization_level}...")
-            compiler.optimize_module(optimization_level)
+        # ── Pipeline matching mlir-aie/aiecc flow ──────────────────────
+        # 1. Get raw IR from llvmlite (no in-process optimization)
+        # 2. Strip all vector alignment ("peanohack")
+        # 3. Peano opt -O2  (preserves loop metadata, recomputes alignment)
+        # 4. Peano llc       (generates object file)
 
-        # Save LLVM IR to file
         ll_file = output_dir / f"{function_name}.ll"
         ir_str = compiler.get_ir()
         ir_str = _strip_vector_alignment(ir_str)
+        ir_str = _strip_unsupported_flags(ir_str)
         with open(ll_file, "w") as f:
             f.write(ir_str)
 
         if verbose:
-            print(f"LLVM IR saved to: {ll_file}")
+            print(f"Raw IR (peanohack) saved to: {ll_file}")
 
-        # Compile LLVM IR to object file using llc
+        # Run Peano opt -O2
+        opt_path = _get_opt_path()
+        opt_ll_file = output_dir / f"{function_name}.opt.ll"
+        opt_cmd = [
+            opt_path,
+            f"-O{optimization_level}" if optimization_level > 0 else "-O2",
+            "-S",
+            str(ll_file),
+            "-o", str(opt_ll_file),
+        ]
+
+        if verbose:
+            print(f"Running Peano opt: {' '.join(opt_cmd)}")
+
+        result = subprocess.run(opt_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            error_msg = result.stderr if result.stderr else result.stdout
+            raise RuntimeError(f"Peano opt failed:\n{error_msg}")
+
+        if verbose:
+            print(f"Optimized IR saved to: {opt_ll_file}")
+
+        # Strip vector alignment from opt output before llc
+        # (opt recomputes natural alignment which can trigger a Peano llc
+        # codegen bug; stripping after opt preserves opt's optimizations
+        # while avoiding the bug)
+        with open(opt_ll_file, "r") as f:
+            opt_ir = f.read()
+        opt_ir = _strip_vector_alignment(opt_ir)
+        opt_ir = _strip_unsupported_flags(opt_ir)
+        with open(opt_ll_file, "w") as f:
+            f.write(opt_ir)
+
+        # Compile optimized IR to object file using llc
         obj_file = output_dir / f"{function_name}.o"
         llc_path = _get_llc_path()
 
@@ -486,11 +535,11 @@ def compile_pythoc_source(
             f"-march={target_arch}",
             "-filetype=obj",
             f"-o={obj_file}",
-            str(ll_file),
+            str(opt_ll_file),
         ]
 
         if verbose:
-            print(f"Compiling LLVM IR to object file: {' '.join(llc_cmd)}")
+            print(f"Compiling to object: {' '.join(llc_cmd)}")
 
         result = subprocess.run(llc_cmd, capture_output=True, text=True)
         if result.returncode != 0:

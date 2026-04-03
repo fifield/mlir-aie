@@ -168,6 +168,15 @@ def bf16_gemm_kernel(
     C_M_STRIDE: i32 = 64       # BLOCK
     C_N_STRIDE: i32 = 256      # M_BLOCKS * BLOCK = 4 * 64
 
+    # ── Zero-initialize entire C buffer ──────────────────────────────
+    # Matches the reference which zeroes C in a separate loop nest
+    # before any compute, preventing opt from folding store+load.
+    z: aie_vector[f32, 64] = zeros(f32, 64)
+    zi: i32 = 0
+    while zi < 16:                             # N_BLOCKS * M_BLOCKS = 4 * 4 = 16
+        store_v(c_buf + zi * 64, z)
+        zi = zi + 1
+
     # ── 2×2 register-blocked GEMM ─────────────────────────────────
     # Outer loops: M (step 2) × N (step 2) over output blocks
     # Inner loop: K-micro (4 iterations) over reduction dimension
@@ -176,44 +185,46 @@ def bf16_gemm_kernel(
     while m < 4:                           # M_BLOCKS, step 2
         n: i32 = 0
         while n < 4:                       # N_BLOCKS, step 2
-            # Initialize 4 accumulators to zero (2×2 register tile)
-            acc_c00: aie_vector[f32, 64] = zeros(f32, 64)
-            acc_c10: aie_vector[f32, 64] = zeros(f32, 64)
-            acc_c01: aie_vector[f32, 64] = zeros(f32, 64)
-            acc_c11: aie_vector[f32, 64] = zeros(f32, 64)
-
+            # Compute C buffer offsets for 2×2 tile
             c00_off: i32 = n * C_N_STRIDE + m * C_M_STRIDE
             c10_off: i32 = c00_off + C_M_STRIDE
             c01_off: i32 = c00_off + C_N_STRIDE
             c11_off: i32 = c00_off + C_N_STRIDE + C_M_STRIDE
 
-            # K-micro reduction loop
-            a_base: i32 = m * 64               # A[k=0, m] element offset
-            b0_base: i32 = n * B_N_STRIDE      # B[n, k=0]
-            b1_base: i32 = (n + 1) * B_N_STRIDE  # B[n+1, k=0]
+            # Load accumulators from pre-zeroed C buffer
+            acc_c00: aie_vector[f32, 64] = load_v(c_buf + c00_off, 64)
+            acc_c10: aie_vector[f32, 64] = load_v(c_buf + c10_off, 64)
+            acc_c01: aie_vector[f32, 64] = load_v(c_buf + c01_off, 64)
+            acc_c11: aie_vector[f32, 64] = load_v(c_buf + c11_off, 64)
+
+            # K-micro reduction loop — use incrementing pointer offsets
+            # (matches reference IR pattern: phi-carried offsets with
+            # simple add strides, instead of recomputing k*STRIDE)
+            a0_off: i32 = m * 64                  # A[k=0, m]
+            a1_off: i32 = a0_off + 64             # A[k=0, m+1]
+            b0_off: i32 = n * B_N_STRIDE          # B[n, k=0]
+            b1_off: i32 = (n + 1) * B_N_STRIDE    # B[n+1, k=0]
 
             with prepare_for_pipelining():
                 k: i32 = 0
                 while k < 4:                   # K_MICRO
-                    # ── Load & convert A block [m, k] ──────────────────
-                    a0_off: i32 = a_base + k * A_K_STRIDE
-                    va0: aie_vector[bf16, 64] = load_v(a_buf + a0_off, 64)
+                    # ── Interleaved load/convert/MAC (matches reference)
+                    # At each MAC only 2 BFP pairs live, not 3.
 
-                    # bf16 → accfloat → bfp16 (A path, no vshuffle)
+                    # ── Load A0, Load B0 ───────────────────────────────
+                    va0: aie_vector[bf16, 64] = load_v(a_buf + a0_off, 64)
+                    a0_off = a0_off + A_K_STRIDE
+                    vb0: aie_vector[bf16, 64] = load_v(b_buf + b0_off, 64)
+                    b0_off = b0_off + B_K_STRIDE
+
+                    # ── Convert A0 (no vshuffle) ───────────────────────
                     a0_lo: aie_vector[bf16, 32] = vector_extract(va0, 0, 32)
                     a0_hi: aie_vector[bf16, 32] = vector_extract(va0, 32, 32)
                     a0_acc_lo: aie_vector[f32, 32] = v32bf16_to_v32accfloat(a0_lo)
                     a0_acc_hi: aie_vector[f32, 32] = v32bf16_to_v32accfloat(a0_hi)
                     a0_acc: aie_vector[f32, 64] = concat(a0_acc_lo, a0_acc_hi)
-                    a0_mant, a0_exp = v64accfloat_to_v64bfp16ebs8(a0_acc)
 
-                    # ── Load & convert B block [n, k] with vshuffle ────
-                    # B is in row-major order within tiles. The vshuffle
-                    # rearranges for the transposed MAC operand layout.
-                    b0_off: i32 = b0_base + k * B_K_STRIDE
-                    vb0: aie_vector[bf16, 64] = load_v(b_buf + b0_off, 64)
-
-                    # bitcast bf16→i32, split, vshuffle(52/53), concat, bitcast back
+                    # ── Convert B0 (vshuffle path) ─────────────────────
                     b0_i32: aie_vector[i32, 32] = vector_cast(vb0, i32, 32)
                     b0_lo_i: aie_vector[i32, 16] = vector_extract(b0_i32, 0, 16)
                     b0_hi_i: aie_vector[i32, 16] = vector_extract(b0_i32, 16, 16)
@@ -221,17 +232,25 @@ def bf16_gemm_kernel(
                     b0_odd: aie_vector[i32, 16] = vshuffle(b0_lo_i, b0_hi_i, 53)
                     b0_cat: aie_vector[i32, 32] = concat(b0_even, b0_odd)
                     vb0_s: aie_vector[bf16, 64] = vector_cast(b0_cat, bf16, 64)
-
                     b0_s_lo: aie_vector[bf16, 32] = vector_extract(vb0_s, 0, 32)
                     b0_s_hi: aie_vector[bf16, 32] = vector_extract(vb0_s, 32, 32)
                     b0_acc_lo: aie_vector[f32, 32] = v32bf16_to_v32accfloat(b0_s_lo)
                     b0_acc_hi: aie_vector[f32, 32] = v32bf16_to_v32accfloat(b0_s_hi)
                     b0_acc: aie_vector[f32, 64] = concat(b0_acc_lo, b0_acc_hi)
+
+                    # ── BFP16 convert A0, B0 ───────────────────────────
+                    a0_mant, a0_exp = v64accfloat_to_v64bfp16ebs8(a0_acc)
                     b0_mant, b0_exp = v64accfloat_to_v64bfp16ebs8(b0_acc)
 
-                    # ── Load & convert B block [n+1, k] with vshuffle ──
-                    b1_off: i32 = b1_base + k * B_K_STRIDE
+                    # ── MAC: C00 += A0 × B0 ───────────────────────────
+                    acc_i00: aie_vector[i32, 64] = vector_cast(acc_c00, i32, 64)
+                    res00: aie_vector[i32, 64] = BFP576_BFP576_ACC2048_mac_conf(
+                    a0_mant, a0_exp, b0_mant, b0_exp, acc_i00, MAC_CONF
+                    )
+
+                    # ── Load & convert B1 (vshuffle) ──────────────────
                     vb1: aie_vector[bf16, 64] = load_v(b_buf + b1_off, 64)
+                    b1_off = b1_off + B_K_STRIDE
 
                     b1_i32: aie_vector[i32, 32] = vector_cast(vb1, i32, 32)
                     b1_lo_i: aie_vector[i32, 16] = vector_extract(b1_i32, 0, 16)
@@ -240,7 +259,6 @@ def bf16_gemm_kernel(
                     b1_odd: aie_vector[i32, 16] = vshuffle(b1_lo_i, b1_hi_i, 53)
                     b1_cat: aie_vector[i32, 32] = concat(b1_even, b1_odd)
                     vb1_s: aie_vector[bf16, 64] = vector_cast(b1_cat, bf16, 64)
-
                     b1_s_lo: aie_vector[bf16, 32] = vector_extract(vb1_s, 0, 32)
                     b1_s_hi: aie_vector[bf16, 32] = vector_extract(vb1_s, 32, 32)
                     b1_acc_lo: aie_vector[f32, 32] = v32bf16_to_v32accfloat(b1_s_lo)
@@ -248,25 +266,15 @@ def bf16_gemm_kernel(
                     b1_acc: aie_vector[f32, 64] = concat(b1_acc_lo, b1_acc_hi)
                     b1_mant, b1_exp = v64accfloat_to_v64bfp16ebs8(b1_acc)
 
-                    # ── 2×2 MAC: 4 matmul-accumulates ─────────────────
-                    # Accumulator is <64 x i32> (hardware v64accfloat stored as i32)
-                    acc_i00: aie_vector[i32, 64] = vector_cast(acc_c00, i32, 64)
-                    acc_i10: aie_vector[i32, 64] = vector_cast(acc_c10, i32, 64)
+                    # ── MAC: C01 += A0 × B1  (A0 reused) ─────────────
                     acc_i01: aie_vector[i32, 64] = vector_cast(acc_c01, i32, 64)
-                    acc_i11: aie_vector[i32, 64] = vector_cast(acc_c11, i32, 64)
-
-                    # C00 += A0 × B0
-                    res00: aie_vector[i32, 64] = BFP576_BFP576_ACC2048_mac_conf(
-                    a0_mant, a0_exp, b0_mant, b0_exp, acc_i00, MAC_CONF
-                    )
-                    # C01 += A0 × B1   (A0 reused)
                     res01: aie_vector[i32, 64] = BFP576_BFP576_ACC2048_mac_conf(
                     a0_mant, a0_exp, b1_mant, b1_exp, acc_i01, MAC_CONF
                     )
 
-                    # ── Load & convert A block [m+1, k] ───────────────
-                    a1_off: i32 = a0_off + 64   # next M-block (stride = BLOCK = 64)
+                    # ── Load & convert A1 (no vshuffle) ───────────────
                     va1: aie_vector[bf16, 64] = load_v(a_buf + a1_off, 64)
+                    a1_off = a1_off + A_K_STRIDE
 
                     a1_lo: aie_vector[bf16, 32] = vector_extract(va1, 0, 32)
                     a1_hi: aie_vector[bf16, 32] = vector_extract(va1, 32, 32)
@@ -275,16 +283,17 @@ def bf16_gemm_kernel(
                     a1_acc: aie_vector[f32, 64] = concat(a1_acc_lo, a1_acc_hi)
                     a1_mant, a1_exp = v64accfloat_to_v64bfp16ebs8(a1_acc)
 
-                    # C10 += A1 × B0   (B0 reused)
+                    # ── MAC: C10 += A1 × B0, C11 += A1 × B1 ──────────
+                    acc_i10: aie_vector[i32, 64] = vector_cast(acc_c10, i32, 64)
                     res10: aie_vector[i32, 64] = BFP576_BFP576_ACC2048_mac_conf(
                     a1_mant, a1_exp, b0_mant, b0_exp, acc_i10, MAC_CONF
                     )
-                    # C11 += A1 × B1   (both A1, B1 new for this pair)
+                    acc_i11: aie_vector[i32, 64] = vector_cast(acc_c11, i32, 64)
                     res11: aie_vector[i32, 64] = BFP576_BFP576_ACC2048_mac_conf(
                     a1_mant, a1_exp, b1_mant, b1_exp, acc_i11, MAC_CONF
                     )
 
-                    # Bitcast results back to f32 for next iteration's phi
+                    # Bitcast results back to f32 for next iteration
                     acc_c00 = vector_cast(res00, f32, 64)
                     acc_c10 = vector_cast(res10, f32, 64)
                     acc_c01 = vector_cast(res01, f32, 64)
