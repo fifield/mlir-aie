@@ -48,6 +48,8 @@ from aie.iron.placers import SequentialPlacer
 from aie.iron.pythoc import aie_kernel, PythocKernel
 from aie.utils.compile import compile_mlir_module
 from aie.utils import DefaultNPURuntime, NPUKernel
+from aie.utils.trace import TraceConfig
+from aie.utils.trace.utils import get_cycles_summary
 
 # PythoC types and intrinsics
 from pythoc import ptr, i8, i32, f32, bf16, void
@@ -315,10 +317,14 @@ def parse_args():
                         help="Generate MLIR and compile but skip NPU execution")
     parser.add_argument("--benchmark", action="store_true",
                         help="Run performance benchmark (10 warmup + 20 measurement)")
+    parser.add_argument("--trace-size", type=lambda x: int(x, 0), default=0,
+                        metavar="BYTES",
+                        help="Enable event tracing; size of DDR trace buffer in bytes "
+                             "(e.g. 0x20000). 0 = disabled (default)")
     return parser.parse_args()
 
 
-def build_mlir_module(device):
+def build_mlir_module(device, trace_size=0):
     """Build IRON program: shim → mem-tile → compute tile → mem-tile → shim."""
 
     # NumPy types for IRON ObjectFifos
@@ -360,10 +366,13 @@ def build_mlir_module(device):
         core_fn,
         [of_a.cons(), of_b.cons(), of_c.prod(), kernel],
         stack_size=0xD00,
+        trace=1 if trace_size > 0 else None,
     )
 
     runtime = Runtime()
     with runtime.sequence(A_host_ty, B_host_ty, C_host_ty) as (a_in, b_in, c_out):
+        if trace_size > 0:
+            runtime.enable_trace(trace_size, workers=[worker])
         runtime.start(worker)
         runtime.fill(of_a.prod(), a_in)
         runtime.fill(of_b.prod(), b_in)
@@ -491,8 +500,10 @@ def main():
     device = NPU2Col1()
 
     try:
-        print(f"[1/3] Building IRON program with PythoC bf16 GEMM kernel")
-        module = build_mlir_module(device)
+        trace_size = args.trace_size
+        print(f"[1/3] Building IRON program with PythoC bf16 GEMM kernel"
+              + (f" [trace={trace_size:#x}]" if trace_size else ""))
+        module = build_mlir_module(device, trace_size=trace_size)
         mlir_path = work_dir / "kernel.mlir"
         with open(mlir_path, "w") as f:
             print(module, file=f)
@@ -527,7 +538,12 @@ def main():
         B_tiled = tile_matrix_b(B_bf16_flat, K, N)
 
         # Load kernel
-        npu_kernel = NPUKernel(str(xclbin_path), str(insts_path), kernel_name="MLIR_AIE")
+        trace_config = (
+            TraceConfig(trace_size, trace_file=str(work_dir / "trace.txt"))
+            if trace_size > 0 else None
+        )
+        npu_kernel = NPUKernel(str(xclbin_path), str(insts_path), kernel_name="MLIR_AIE",
+                               trace_config=trace_config)
         kernel_handle = DefaultNPURuntime.load(npu_kernel)
 
         if args.benchmark:
@@ -545,7 +561,14 @@ def main():
         in_b = iron.tensor(B_tiled, dtype=np.uint16)
         out_c = iron.zeros(M * N, dtype=np.float32)
 
-        DefaultNPURuntime.run(kernel_handle, [in_a, in_b, out_c])
+        if trace_config:
+            run_args = [in_a, in_b, out_c]
+            DefaultNPURuntime.prepare_args_for_trace(run_args, trace_config)
+            DefaultNPURuntime.run(kernel_handle, run_args)
+            trace_buf, _ = DefaultNPURuntime.extract_trace_from_args(run_args, trace_config)
+            DefaultNPURuntime.process_trace(trace_buf, None, trace_config)
+        else:
+            DefaultNPURuntime.run(kernel_handle, [in_a, in_b, out_c])
 
         # Untile output C from [N_BLOCKS, M_BLOCKS, 8, 8] → [M, N]
         C_npu = untile_matrix_c(np.array(out_c.numpy()), M, N)
@@ -558,6 +581,20 @@ def main():
 
         if rel_err < 0.05:  # 5% tolerance for bf16→bfp16 path
             print("PASS!")
+            if trace_config:
+                trace_json = work_dir / "trace_mlir.json"
+                print(f"\n[trace] Parsing trace → {trace_json}")
+                trace_config.trace_to_json(str(mlir_path), str(trace_json))
+                print("[trace] Cycle summary (event0→event1):")
+                cycles = get_cycles_summary(str(trace_json))
+                for entry in cycles:
+                    name, vals = entry[0], entry[1:]
+                    if vals:
+                        print(f"  {name}: {len(vals)} invocations  "
+                              f"first={vals[0]}  min={min(vals)}  "
+                              f"avg={sum(vals)//len(vals)}  max={max(vals)} cycles")
+                    else:
+                        print(f"  {name}: no complete invocations captured")
             return 0
         else:
             print(f"FAILED: relative error {rel_err:.4f} > 5% tolerance")
