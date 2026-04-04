@@ -90,6 +90,7 @@ MEASURE_ITERS = 20
 #   B: [K_MICRO, N_BLOCKS, 8, 8]  →  B[k_blk, n_blk] at (k*N_BLOCKS + n)*64
 #   C: [M_BLOCKS, N_BLOCKS, 8, 8] →  C[m_blk, n_blk] at (m*N_BLOCKS + n)*64
 
+
 @aie_kernel
 def bf16_gemm_tile_kernel(
     a_buf: ptr[bf16, True],
@@ -118,10 +119,10 @@ def bf16_gemm_tile_kernel(
 
             # Incrementing pointer offsets (phi-carried pattern)
             # Matches reference IR: simple add strides each iteration
-            a0_off: i32 = m * A_M_STRIDE_CONST          # A[m, k=0]
-            a1_off: i32 = a0_off + A_M_STRIDE_CONST     # A[m+1, k=0]
-            b0_off: i32 = n * B_N_STRIDE_CONST           # B[k=0, n]
-            b1_off: i32 = (n + 1) * B_N_STRIDE_CONST     # B[k=0, n+1]
+            a0_off: i32 = m * A_M_STRIDE_CONST  # A[m, k=0]
+            a1_off: i32 = a0_off + A_M_STRIDE_CONST  # A[m+1, k=0]
+            b0_off: i32 = n * B_N_STRIDE_CONST  # B[k=0, n]
+            b1_off: i32 = (n + 1) * B_N_STRIDE_CONST  # B[k=0, n+1]
 
             k: i32 = 0
             while k < K_MICRO_CONST:
@@ -159,7 +160,7 @@ def bf16_gemm_tile_kernel(
                 # ── C00 += A0 × B0 ────────────────────────────────
                 acc_i00: aie_vector[i32, 64] = vector_cast(acc_c00, i32, 64)
                 res00: aie_vector[i32, 64] = BFP576_BFP576_ACC2048_mac_conf(
-                a0_mant, a0_exp, b0_mant, b0_exp, acc_i00, MAC_CONF
+                    a0_mant, a0_exp, b0_mant, b0_exp, acc_i00, MAC_CONF
                 )
 
                 # ── Load & convert B1 (vshuffle) ──────────────────
@@ -183,7 +184,7 @@ def bf16_gemm_tile_kernel(
                 # ── C01 += A0 × B1   (A0 reused) ─────────────────
                 acc_i01: aie_vector[i32, 64] = vector_cast(acc_c01, i32, 64)
                 res01: aie_vector[i32, 64] = BFP576_BFP576_ACC2048_mac_conf(
-                a0_mant, a0_exp, b1_mant, b1_exp, acc_i01, MAC_CONF
+                    a0_mant, a0_exp, b1_mant, b1_exp, acc_i01, MAC_CONF
                 )
 
                 # ── Load & convert A1 (no vshuffle) ───────────────
@@ -200,13 +201,13 @@ def bf16_gemm_tile_kernel(
                 # ── C10 += A1 × B0   (B0 reused, then dies) ───────
                 acc_i10: aie_vector[i32, 64] = vector_cast(acc_c10, i32, 64)
                 res10: aie_vector[i32, 64] = BFP576_BFP576_ACC2048_mac_conf(
-                a1_mant, a1_exp, b0_mant, b0_exp, acc_i10, MAC_CONF
+                    a1_mant, a1_exp, b0_mant, b0_exp, acc_i10, MAC_CONF
                 )
 
                 # ── C11 += A1 × B1   (B1 reused, then dies) ───────
                 acc_i11: aie_vector[i32, 64] = vector_cast(acc_c11, i32, 64)
                 res11: aie_vector[i32, 64] = BFP576_BFP576_ACC2048_mac_conf(
-                a1_mant, a1_exp, b1_mant, b1_exp, acc_i11, MAC_CONF
+                    a1_mant, a1_exp, b1_mant, b1_exp, acc_i11, MAC_CONF
                 )
 
                 # Bitcast results back to f32 for next iteration
@@ -231,6 +232,7 @@ def bf16_gemm_tile_kernel(
 
 # ── PythoC Kernel: zero C buffer ────────────────────────────────────────────
 
+
 @aie_kernel
 def bf16_zero_kernel(c_buf: ptr[f32, True]) -> void:
     i: i32 = 0
@@ -241,6 +243,7 @@ def bf16_zero_kernel(c_buf: ptr[f32, True]) -> void:
 
 
 # ── IRON program builder ────────────────────────────────────────────────────
+
 
 def ceildiv(a, b):
     return (a + b - 1) // b
@@ -254,11 +257,13 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols):
     r, s, t = R, S, T
 
     # ── Validate dimensions ──────────────────────────────────────────────
-    assert M % (m * n_aie_rows) == 0, \
-        f"M={M} must be divisible by m*n_aie_rows={m * n_aie_rows}"
+    assert (
+        M % (m * n_aie_rows) == 0
+    ), f"M={M} must be divisible by m*n_aie_rows={m * n_aie_rows}"
     assert K % k == 0, f"K={K} must be divisible by k={k}"
-    assert N % (n * n_aie_cols) == 0, \
-        f"N={N} must be divisible by n*n_aie_cols={n * n_aie_cols}"
+    assert (
+        N % (n * n_aie_cols) == 0
+    ), f"N={N} must be divisible by n*n_aie_cols={n * n_aie_cols}"
     assert m % r == 0, f"m={m} must be divisible by r={r}"
     assert k % s == 0, f"k={k} must be divisible by s={s}"
     assert n % t == 0, f"n={n} must be divisible by t={t}"
@@ -336,9 +341,7 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols):
     )
 
     # ── Tile declarations ────────────────────────────────────────────────
-    tiles = [
-        [(col, row) for col in range(n_aie_cols)] for row in range(6)
-    ]
+    tiles = [[(col, row) for col in range(n_aie_cols)] for row in range(6)]
     core_tiles = tiles[2:]
 
     # ── ObjectFifo topology ──────────────────────────────────────────────
@@ -353,9 +356,7 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols):
 
     # Input A: split/distribute across rows
     for i in range(n_shim_mem_A):
-        A_l3l2_fifos[i] = ObjectFifo(
-            A_l2_ty, name=f"A_L3L2_{i}", depth=fifo_depth
-        )
+        A_l3l2_fifos[i] = ObjectFifo(A_l2_ty, name=f"A_L3L2_{i}", depth=fifo_depth)
         start_row = i * n_A_tiles_per_shim
         stop_row = start_row + n_A_tiles_per_shim
         of_offsets = [m * k * j for j in range(stop_row - start_row)]
@@ -375,9 +376,7 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols):
                 obj_types=[A_l1_ty] * (stop_row - start_row),
                 names=[f"A_L2L1_{row}" for row in range(start_row, stop_row)],
                 dims_to_stream=dims_to_stream,
-                placement=Tile(
-                    2 * i if n_aie_cols == 8 else i, 1
-                ),
+                placement=Tile(2 * i if n_aie_cols == 8 else i, 1),
             )
         )
         for j in range(stop_row - start_row):
@@ -385,12 +384,8 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols):
 
     # Input B: forward/broadcast to columns
     for col in range(n_aie_cols):
-        B_l3l2_fifos[col] = ObjectFifo(
-            B_l2_ty, name=f"B_L3L2_{col}", depth=fifo_depth
-        )
-        b_dims_to_stream = [
-            (k // s, s * n), (n // t, t), (s, n), (t, 1)
-        ]
+        B_l3l2_fifos[col] = ObjectFifo(B_l2_ty, name=f"B_L3L2_{col}", depth=fifo_depth)
+        b_dims_to_stream = [(k // s, s * n), (n // t, t), (s, n), (t, 1)]
         B_l2l1_fifos[col] = (
             B_l3l2_fifos[col]
             .cons()
@@ -407,9 +402,7 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols):
             C_l2_ty,
             name=f"C_L2L3_{col}",
             depth=fifo_depth,
-            dims_to_stream=[
-                (m // r, r * n), (r, t), (n // t, r * t), (t, 1)
-            ],
+            dims_to_stream=[(m // r, r * n), (r, t), (n // t, r * t), (t, 1)],
         )
         of_offsets = [m * n * i for i in range(n_aie_rows)]
         c_tmp_fifos = (
@@ -528,9 +521,7 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols):
                                 A,
                                 tap=A_tiles[tile_offset],
                                 task_group=tg,
-                                placement=Tile(
-                                    2 * col if n_aie_cols == 8 else col, 0
-                                ),
+                                placement=Tile(2 * col if n_aie_cols == 8 else col, 0),
                             )
 
                         rt.fill(
@@ -555,6 +546,7 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols):
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Multi-core BF16 GEMM with PythoC + IRON",
@@ -568,14 +560,21 @@ def parse_args():
     parser.add_argument("--n-aie-cols", type=int, choices=[1, 2, 4, 8], default=4)
     parser.add_argument("--work-dir", type=Path, default=DEFAULT_BUILD_DIR)
     parser.add_argument("--verbose", action="store_true")
-    parser.add_argument("--compile-only", action="store_true",
-                        help="Generate MLIR and compile but skip NPU execution")
-    parser.add_argument("--benchmark", action="store_true",
-                        help="Run performance benchmark (10 warmup + 20 measurement)")
+    parser.add_argument(
+        "--compile-only",
+        action="store_true",
+        help="Generate MLIR and compile but skip NPU execution",
+    )
+    parser.add_argument(
+        "--benchmark",
+        action="store_true",
+        help="Run performance benchmark (10 warmup + 20 measurement)",
+    )
     return parser.parse_args()
 
 
 # ── Host data helpers ────────────────────────────────────────────────────────
+
 
 def bf16_to_uint16(x):
     """Convert float32 array to bf16 stored as uint16 (vectorized)."""
@@ -590,6 +589,7 @@ def uint16_to_float(x):
 
 
 # ── Benchmark ────────────────────────────────────────────────────────────────
+
 
 def run_benchmark(kernel_handle, A_bf16, B_bf16, M, K, N):
     """Run performance benchmark and report GFLOPS."""
@@ -633,6 +633,7 @@ def run_benchmark(kernel_handle, A_bf16, B_bf16, M, K, N):
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
+
 def main():
     args = parse_args()
     M, K, N = args.M, args.K, args.N
@@ -642,8 +643,10 @@ def main():
     work_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        print(f"[1/3] Building IRON program: {M}×{K}×{N} bf16 GEMM, "
-              f"{N_AIE_ROWS}×{n_aie_cols} cores, tile {m}×{k}×{n}")
+        print(
+            f"[1/3] Building IRON program: {M}×{K}×{N} bf16 GEMM, "
+            f"{N_AIE_ROWS}×{n_aie_cols} cores, tile {m}×{k}×{n}"
+        )
         module = build_mlir_module(M, K, N, m, k, n, n_aie_cols)
         mlir_path = work_dir / "kernel.mlir"
         with open(mlir_path, "w") as f:
@@ -678,7 +681,9 @@ def main():
 
         trace_config = None
         npu_kernel = NPUKernel(
-            str(xclbin_path), str(insts_path), kernel_name="MLIR_AIE",
+            str(xclbin_path),
+            str(insts_path),
+            kernel_name="MLIR_AIE",
         )
         kernel_handle = DefaultNPURuntime.load(npu_kernel)
 
@@ -718,6 +723,7 @@ def main():
     except Exception as e:
         print(f"\nFAILED: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
 
