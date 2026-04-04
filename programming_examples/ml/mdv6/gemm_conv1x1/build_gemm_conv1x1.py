@@ -73,8 +73,29 @@ MODEL_LAYERS_1x1 = [
 ]
 
 
+XRT_BUF_MAX = 16 * 1024 * 1024  # 16MB per XRT buffer argument
+L2_BUDGET = 400 * 1024  # ~400KB usable per memtile column (512KB minus overhead)
+
+
+def compute_ppc(M, tile_m, ic, oc_block):
+    """Compute optimal patches_per_core to process all spatial tiles in one call."""
+    ideal = math.ceil(M / (32 * tile_m))
+    # Cap by XRT host buffer limits
+    in_bytes = 32 * tile_m * ic * 2
+    out_bytes = 32 * tile_m * oc_block * 2
+    max_xrt_in = XRT_BUF_MAX // in_bytes if in_bytes > 0 else 999
+    max_xrt_out = XRT_BUF_MAX // out_bytes if out_bytes > 0 else 999
+    # Cap by L2 memtile budget per column (4 cores per column)
+    col_in = 4 * tile_m * ic * 2       # per-column input per patch
+    col_out = 4 * tile_m * oc_block * 2  # per-column output per patch
+    wt = (ic * oc_block + 2 * oc_block) * 2
+    per_ppc = col_in + col_out  # additional L2 per ppc increment
+    max_l2 = (L2_BUDGET - wt) // per_ppc if per_ppc > 0 else 999
+    return max(1, min(ideal, max_xrt_in, max_xrt_out, max_l2, 32))
+
+
 def derive_configs():
-    """Derive unique (name, n_cores, tile_m, ic, oc_block) configs."""
+    """Derive unique (name, n_cores, tile_m, ic, oc_block, ppc) configs."""
     seen = {}
     configs = []
     for name, H, W, IC, OC in MODEL_LAYERS_1x1:
@@ -82,25 +103,21 @@ def derive_configs():
         if oc_block is None:
             print(f"WARNING: {name} ({IC}→{OC}) does not fit in L1!", file=sys.stderr)
             continue
-        # Cap tile_m for practical buffer sizes
         tile_m = min(tile_m, 256)
         M = H * W
-        key = (tile_m, IC, oc_block)
-        # Name by actual config — matches run_tiled_mc.py's actual_name
-        xclbin_name = f"gemm_t{tile_m}_ic{IC}_oc{oc_block}"
+        ppc = compute_ppc(M, tile_m, IC, oc_block)
+        key = (tile_m, IC, oc_block, ppc)
+        xclbin_name = f"gemm_t{tile_m}_ic{IC}_oc{oc_block}_p{ppc}"
         if key in seen:
             print(f"  {name}: reuse {xclbin_name}", file=sys.stderr)
             continue
-        n_oc_passes = OC // oc_block
-        pixels_per_call = 32 * tile_m
-        n_spatial = math.ceil(M / pixels_per_call)
-        total_calls = n_oc_passes * n_spatial
-        wt_kb = (IC * oc_block + 2 * oc_block) * 2 / 1024
-        print(f"  {xclbin_name}: {IC}→{oc_block}, "
-              f"wt={wt_kb:.1f}KB, {total_calls} calls for {name} {H}×{W}",
+        n_oc = OC // oc_block
+        calls = n_oc * math.ceil(M / (32 * tile_m * ppc))
+        print(f"  {xclbin_name}: {IC}→{oc_block}, ppc={ppc}, "
+              f"{calls} calls for {name} {H}×{W}",
               file=sys.stderr)
         seen[key] = xclbin_name
-        configs.append((xclbin_name, 32, tile_m, IC, oc_block))
+        configs.append((xclbin_name, 32, tile_m, IC, oc_block, ppc))
     return configs
 
 
@@ -121,7 +138,7 @@ def build_kernel(build_dir):
     return True
 
 
-def build_one(name, n_cores, tile_m, ic, oc_block, build_dir):
+def build_one(name, n_cores, tile_m, ic, oc_block, ppc, build_dir):
     """Generate MLIR and compile one GEMM conv1x1 xclbin."""
     xclbin_path = os.path.join(build_dir, f"{name}.xclbin")
     if os.path.exists(xclbin_path):
@@ -132,7 +149,7 @@ def build_one(name, n_cores, tile_m, ic, oc_block, build_dir):
     mlir_path = os.path.join(build_dir, f"{name}.mlir")
 
     # Generate MLIR
-    cmd = f"python3 {script} {n_cores} {tile_m} {ic} {oc_block} 1"
+    cmd = f"python3 {script} {n_cores} {tile_m} {ic} {oc_block} {ppc}"
     print(f"  {name}: MLIR...", end=" ", flush=True)
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     if result.returncode != 0:
