@@ -209,6 +209,26 @@ def _gemm_choose_oc_block(ic, oc):
     return None
 
 
+_XRT_BUF_MAX = 16 * 1024 * 1024
+_L2_BUDGET = 400 * 1024
+
+
+def _gemm_compute_ppc(M, tile_m, ic, oc_block):
+    """Compute optimal patches_per_core to minimize NPU calls."""
+    import math
+    ideal = math.ceil(M / (32 * tile_m))
+    in_bytes = 32 * tile_m * ic * 2
+    out_bytes = 32 * tile_m * oc_block * 2
+    max_xrt_in = _XRT_BUF_MAX // in_bytes if in_bytes > 0 else 999
+    max_xrt_out = _XRT_BUF_MAX // out_bytes if out_bytes > 0 else 999
+    col_in = 4 * tile_m * ic * 2
+    col_out = 4 * tile_m * oc_block * 2
+    wt = (ic * oc_block + 2 * oc_block) * 2
+    per_ppc = col_in + col_out
+    max_l2 = (_L2_BUDGET - wt) // per_ppc if per_ppc > 0 else 999
+    return max(1, min(ideal, max_xrt_in, max_xrt_out, max_l2, 32))
+
+
 def _load_gemm_handle(name):
     """Load a GEMM conv1x1 xclbin."""
     xclbin = os.path.join(_gemm_bd, f"{name}.xclbin")
@@ -294,95 +314,89 @@ def run_gemm_conv1x1_mc(gemm_name, sc_name, input_hwc, weights_uint16,
             out_h, out_w, out_ch, 8, 8, 16, 1, 1, 0)
 
     tile_m = min(_gemm_tile_m(IC, oc_block), 256)
+    ppc = _gemm_compute_ppc(M, tile_m, IC, oc_block)
 
-    # Derive xclbin name from actual (tile_m, ic, oc_block) — avoids
-    # mc_name aliasing issues where different layers share the same mc_name
-    actual_name = f"gemm_t{tile_m}_ic{IC}_oc{oc_block}"
-    n_oc_blocks = out_ch // oc_block
-
-    # Try to load GEMM handle (keyed by actual tile/channel config)
+    # Try batched xclbin first, fall back to ppc=1
+    actual_name = f"gemm_t{tile_m}_ic{IC}_oc{oc_block}_p{ppc}"
     gemm_kh = _get_gemm_handle(actual_name)
+    if gemm_kh is None and ppc > 1:
+        # Try ppc=1 fallback
+        actual_name = f"gemm_t{tile_m}_ic{IC}_oc{oc_block}_p1"
+        gemm_kh = _get_gemm_handle(actual_name)
+        if gemm_kh is None:
+            # Try legacy name without _p suffix
+            actual_name = f"gemm_t{tile_m}_ic{IC}_oc{oc_block}"
+            gemm_kh = _get_gemm_handle(actual_name)
+        ppc = 1
     if gemm_kh is None:
-        # Fall back to scalar MC
         mc_fallback = gemm_name.replace('gemm_', 'mc_')
         return run_tiled_fused_conv_mc(
             mc_fallback, sc_name,
             input_hwc, weights_uint16,
             out_h, out_w, out_ch, 8, 8, min(oc_block, 64), 1, 1, 0)
 
-    # Repack weights to GEMM blocked layout
+    n_oc_blocks = out_ch // oc_block
     wt_blocks = _repack_weights_for_gemm(weights_uint16, IC, out_ch, oc_block)
 
-    input_size = tile_m * IC
-    output_size = tile_m * oc_block
+    input_size = tile_m * IC         # per core per patch
+    output_size = tile_m * oc_block  # per core per patch
+    pixels_per_call = N_CORES * tile_m * ppc  # total pixels per NPU call
 
-    # Flatten input to [M, IC]
     input_flat = input_hwc.reshape(M, IC)
     output = torch.zeros(out_h, out_w, out_ch, dtype=torch.bfloat16)
+    output_flat = output.reshape(M, out_ch)
 
     for ocb in range(n_oc_blocks):
         oc_start = ocb * oc_block
         oc_end = min(oc_start + oc_block, out_ch)
         actual_oc = oc_end - oc_start
+        wt_buf = iron.tensor(wt_blocks[ocb].copy(), dtype=np.uint16)
 
-        wt_buf = iron.tensor(wt_blocks[ocb], dtype=np.uint16)
-
-        # Process M pixels in batches of N_CORES * tile_m
-        pixels_per_call = N_CORES * tile_m
         for batch_start in range(0, M, pixels_per_call):
             batch_end = min(batch_start + pixels_per_call, M)
             batch_pixels = batch_end - batch_start
 
-            # Pack input: tile_m pixels per core
-            # All cores must receive valid data (zeros cause hangs).
-            # Unused cores get a copy of core 0's data — output is discarded.
-            in_chunks = []
-            n_active_cores = (batch_pixels + tile_m - 1) // tile_m
-            core0_chunk = None
-            for c in range(N_CORES):
-                pix_start = batch_start + c * tile_m
-                pix_end = min(pix_start + tile_m, batch_end)
-                if pix_start < batch_end:
-                    chunk = bf16_to_uint16(input_flat[pix_start:pix_end].flatten())
-                    if len(chunk) < input_size:
-                        chunk = np.pad(chunk, (0, input_size - len(chunk)))
-                    if core0_chunk is None:
-                        core0_chunk = chunk
-                else:
-                    chunk = core0_chunk.copy()
-                in_chunks.append(chunk)
+            # Pack: ppc patches per core, each tile_m pixels
+            # Total slots = N_CORES * ppc, each slot = tile_m pixels
+            total_slots = N_CORES * ppc
+            host_in_size = total_slots * input_size
+            host_in = np.zeros(host_in_size, dtype=np.uint16)
 
-            in_buf = iron.tensor(np.concatenate(in_chunks), dtype=np.uint16)
-            out_buf = iron.zeros(N_CORES * output_size, dtype=np.uint16)
+            # Fill slots with actual pixel data
+            n_active_slots = (batch_pixels + tile_m - 1) // tile_m
+            active_end = min(batch_start + n_active_slots * tile_m, batch_end)
+            active_u16 = bf16_to_uint16(input_flat[batch_start:active_end].flatten())
+            host_in[:len(active_u16)] = active_u16
+
+            # Fill unused slots with slot 0's data to avoid hangs
+            slot0 = host_in[:input_size]
+            for s in range(n_active_slots, total_slots):
+                host_in[s * input_size:(s + 1) * input_size] = slot0
+
+            in_buf = iron.tensor(host_in, dtype=np.uint16)
+            out_buf = iron.zeros(total_slots * output_size, dtype=np.uint16)
 
             try:
                 DefaultNPURuntime.run(gemm_kh, [in_buf, wt_buf, out_buf])
             except Exception as e:
-                # Reload handle and retry once
                 _mc_cache[f"gemm_{actual_name}"] = _load_gemm_handle(actual_name)
                 gemm_kh = _mc_cache[f"gemm_{actual_name}"]
                 if gemm_kh is None:
                     raise
                 DefaultNPURuntime.run(gemm_kh, [in_buf, wt_buf, out_buf])
 
-            # Unpack results back to [H, W, OC]
+            # Unpack — each slot is tile_m pixels of output
             out_data = out_buf.numpy().copy()
-            for c in range(min(n_active_cores, N_CORES)):
-                pix_start = batch_start + c * tile_m
+            for s in range(min(n_active_slots, total_slots)):
+                pix_start = batch_start + s * tile_m
                 pix_end = min(pix_start + tile_m, batch_end)
                 if pix_start >= batch_end:
                     break
                 n_pix = pix_end - pix_start
-                start = c * output_size
+                start = s * output_size
                 tile_out = uint16_to_bf16(out_data[start:start + n_pix * oc_block])
                 tile_out = tile_out.reshape(n_pix, oc_block)
-                # Map flat pixel indices back to (h, w)
-                for p in range(n_pix):
-                    flat_idx = pix_start + p
-                    h = flat_idx // W
-                    w = flat_idx % W
-                    if h < out_h and w < out_w:
-                        output[h, w, oc_start:oc_end] = \
-                            tile_out[p, :actual_oc].to(torch.bfloat16)
+                output_flat[pix_start:pix_end, oc_start:oc_end] = \
+                    tile_out[:, :actual_oc].to(torch.bfloat16)
 
     return output
