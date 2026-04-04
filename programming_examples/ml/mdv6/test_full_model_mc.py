@@ -20,13 +20,26 @@ spec3 = importlib.util.spec_from_file_location('mcr', os.path.join(_base, 'run_t
 mcr = importlib.util.module_from_spec(spec3); spec3.loader.exec_module(mcr)
 
 fuse_bn = ett.fuse_bn
+fuse_bn_transposed = ett.fuse_bn_transposed
 run_tiled_mc = mcr.run_tiled_fused_conv_mc
+run_gemm_conv1x1 = mcr.run_gemm_conv1x1_mc
+
+# Set to True to use GEMM conv1x1 for all 1×1 convs
+USE_GEMM_CONV1X1 = os.environ.get("USE_GEMM_CONV1X1", "1") == "1"
 
 def to_nchw(hwc):
     return hwc.float().permute(2, 0, 1).unsqueeze(0).to(torch.bfloat16)
 
 def rt(mc_name, sc_name, input_hwc, weights, oh, ow, oc, th, tw, ob, s=1, ks=1, pad=0):
-    """Run tiled conv with multicore (SC loaded lazily only on fallback)."""
+    """Run tiled conv with multicore (SC loaded lazily only on fallback).
+
+    For 1×1 convs with USE_GEMM_CONV1X1=1, dispatches to the GEMM path which
+    uses mmul<4,8,8> vectorized kernels instead of scalar loops.
+    """
+    if ks == 1 and s == 1 and USE_GEMM_CONV1X1:
+        gemm_name = mc_name.replace('mc_', 'gemm_')
+        return run_gemm_conv1x1(gemm_name, sc_name, input_hwc, weights,
+                                 oh, ow, oc)
     return run_tiled_mc(mc_name, sc_name, input_hwc, weights,
                          oh, ow, oc, th, tw, ob, s, ks, pad)
 
