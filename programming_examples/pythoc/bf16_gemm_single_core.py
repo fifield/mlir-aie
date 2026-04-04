@@ -99,20 +99,20 @@ KERNEL_EXTRA_GLOBALS = {
 # Layout: A[K_MICRO, M_BLOCKS, 8, 8], B[N_BLOCKS, K_MICRO, 8, 8],
 #         C[N_BLOCKS, M_BLOCKS, 8, 8]
 
-TILE_M = 32           # M dimension of output tile
-TILE_N = 32           # N dimension of output tile
-TILE_K = 32           # K (reduction) dimension
+TILE_M = 32  # M dimension of output tile
+TILE_N = 32  # N dimension of output tile
+TILE_K = 32  # K (reduction) dimension
 
-M_BLOCKS = 4          # TILE_M / 8
-N_BLOCKS = 4          # TILE_N / 8
-K_MICRO = 4           # TILE_K / 8
-BLOCK = 64            # 8 × 8 elements per block
-MAC_CONF = 780        # sgn_x=1, sgn_y=1, amode=2, bmode=1
+M_BLOCKS = 4  # TILE_M / 8
+N_BLOCKS = 4  # TILE_N / 8
+K_MICRO = 4  # TILE_K / 8
+BLOCK = 64  # 8 × 8 elements per block
+MAC_CONF = 780  # sgn_x=1, sgn_y=1, amode=2, bmode=1
 
 # Element sizes for buffer types
-A_ELEMS = TILE_M * TILE_K      # 1024 bf16
-B_ELEMS = TILE_K * TILE_N      # 1024 bf16
-C_ELEMS = TILE_M * TILE_N      # 8192 f32
+A_ELEMS = TILE_M * TILE_K  # 1024 bf16
+B_ELEMS = TILE_K * TILE_N  # 1024 bf16
+C_ELEMS = TILE_M * TILE_N  # 8192 f32
 
 # For single-core demo: full matrix = one tile
 M = TILE_M
@@ -137,11 +137,12 @@ DEFAULT_BUILD_DIR = Path(__file__).resolve().parent / "bf16_gemm_build"
 #   C[n+1,m] += A[m,k]   × B[n+1,k]     (C01 += A0 × B1)  ← A0 reused, B1 new
 #   C[n+1,m+1] += A[m+1,k] × B[n+1,k]   (C11 += A1 × B1)  ← both reused
 
+
 @aie_kernel
 def bf16_gemm_kernel(
-    a_buf: ptr[bf16, True],   # A tile: 1024 bf16 elems [K_MICRO, M_BLOCKS, 8, 8]
-    b_buf: ptr[bf16, True],   # B tile: 1024 bf16 elems [N_BLOCKS, K_MICRO, 8, 8]
-    c_buf: ptr[f32, True],    # C tile: 1024 f32 elems  [N_BLOCKS, M_BLOCKS, 8, 8]
+    a_buf: ptr[bf16, True],  # A tile: 1024 bf16 elems [K_MICRO, M_BLOCKS, 8, 8]
+    b_buf: ptr[bf16, True],  # B tile: 1024 bf16 elems [N_BLOCKS, K_MICRO, 8, 8]
+    c_buf: ptr[f32, True],  # C tile: 1024 f32 elems  [N_BLOCKS, M_BLOCKS, 8, 8]
 ) -> void:
     """BF16 GEMM tile kernel: C += A × B via BFP16 hardware matmul.
 
@@ -162,18 +163,18 @@ def bf16_gemm_kernel(
     # A layout: [K_MICRO=4, M_BLOCKS=4, 8, 8] → A[k,m] at (k*M_BLOCKS + m)*64
     # B layout: [N_BLOCKS=4, K_MICRO=4, 8, 8] → B[n,k] at (n*K_MICRO + k)*64
     # C layout: [N_BLOCKS=4, M_BLOCKS=4, 8, 8] → C[n,m] at (n*M_BLOCKS + m)*64
-    A_K_STRIDE: i32 = 256      # M_BLOCKS * BLOCK = 4 * 64
-    B_K_STRIDE: i32 = 64       # BLOCK
-    B_N_STRIDE: i32 = 256      # K_MICRO * BLOCK = 4 * 64
-    C_M_STRIDE: i32 = 64       # BLOCK
-    C_N_STRIDE: i32 = 256      # M_BLOCKS * BLOCK = 4 * 64
+    A_K_STRIDE: i32 = 256  # M_BLOCKS * BLOCK = 4 * 64
+    B_K_STRIDE: i32 = 64  # BLOCK
+    B_N_STRIDE: i32 = 256  # K_MICRO * BLOCK = 4 * 64
+    C_M_STRIDE: i32 = 64  # BLOCK
+    C_N_STRIDE: i32 = 256  # M_BLOCKS * BLOCK = 4 * 64
 
     # ── Zero-initialize entire C buffer ──────────────────────────────
     # Matches the reference which zeroes C in a separate loop nest
     # before any compute, preventing opt from folding store+load.
     z: aie_vector[f32, 64] = zeros(f32, 64)
     zi: i32 = 0
-    while zi < 16:                             # N_BLOCKS * M_BLOCKS = 4 * 4 = 16
+    while zi < 16:  # N_BLOCKS * M_BLOCKS = 4 * 4 = 16
         store_v(c_buf + zi * 64, z)
         zi = zi + 1
 
@@ -182,9 +183,9 @@ def bf16_gemm_kernel(
     # Inner loop: K-micro (4 iterations) over reduction dimension
 
     m: i32 = 0
-    while m < 4:                           # M_BLOCKS, step 2
+    while m < 4:  # M_BLOCKS, step 2
         n: i32 = 0
-        while n < 4:                       # N_BLOCKS, step 2
+        while n < 4:  # N_BLOCKS, step 2
             # Compute C buffer offsets for 2×2 tile
             c00_off: i32 = n * C_N_STRIDE + m * C_M_STRIDE
             c10_off: i32 = c00_off + C_M_STRIDE
@@ -200,13 +201,13 @@ def bf16_gemm_kernel(
             # K-micro reduction loop — use incrementing pointer offsets
             # (matches reference IR pattern: phi-carried offsets with
             # simple add strides, instead of recomputing k*STRIDE)
-            a0_off: i32 = m * 64                  # A[k=0, m]
-            a1_off: i32 = a0_off + 64             # A[k=0, m+1]
-            b0_off: i32 = n * B_N_STRIDE          # B[n, k=0]
-            b1_off: i32 = (n + 1) * B_N_STRIDE    # B[n+1, k=0]
+            a0_off: i32 = m * 64  # A[k=0, m]
+            a1_off: i32 = a0_off + 64  # A[k=0, m+1]
+            b0_off: i32 = n * B_N_STRIDE  # B[n, k=0]
+            b1_off: i32 = (n + 1) * B_N_STRIDE  # B[n+1, k=0]
 
             k: i32 = 0
-            while k < 4:                   # K_MICRO
+            while k < 4:  # K_MICRO
                 # ── Interleaved load/convert/MAC (matches reference)
                 # At each MAC only 2 BFP pairs live, not 3.
 
@@ -244,7 +245,7 @@ def bf16_gemm_kernel(
                 # ── MAC: C00 += A0 × B0 ───────────────────────────
                 acc_i00: aie_vector[i32, 64] = vector_cast(acc_c00, i32, 64)
                 res00: aie_vector[i32, 64] = BFP576_BFP576_ACC2048_mac_conf(
-                a0_mant, a0_exp, b0_mant, b0_exp, acc_i00, MAC_CONF
+                    a0_mant, a0_exp, b0_mant, b0_exp, acc_i00, MAC_CONF
                 )
 
                 # ── Load & convert B1 (vshuffle) ──────────────────
@@ -268,7 +269,7 @@ def bf16_gemm_kernel(
                 # ── MAC: C01 += A0 × B1  (A0 reused) ─────────────
                 acc_i01: aie_vector[i32, 64] = vector_cast(acc_c01, i32, 64)
                 res01: aie_vector[i32, 64] = BFP576_BFP576_ACC2048_mac_conf(
-                a0_mant, a0_exp, b1_mant, b1_exp, acc_i01, MAC_CONF
+                    a0_mant, a0_exp, b1_mant, b1_exp, acc_i01, MAC_CONF
                 )
 
                 # ── Load & convert A1 (no vshuffle) ───────────────
@@ -285,11 +286,11 @@ def bf16_gemm_kernel(
                 # ── MAC: C10 += A1 × B0, C11 += A1 × B1 ──────────
                 acc_i10: aie_vector[i32, 64] = vector_cast(acc_c10, i32, 64)
                 res10: aie_vector[i32, 64] = BFP576_BFP576_ACC2048_mac_conf(
-                a1_mant, a1_exp, b0_mant, b0_exp, acc_i10, MAC_CONF
+                    a1_mant, a1_exp, b0_mant, b0_exp, acc_i10, MAC_CONF
                 )
                 acc_i11: aie_vector[i32, 64] = vector_cast(acc_c11, i32, 64)
                 res11: aie_vector[i32, 64] = BFP576_BFP576_ACC2048_mac_conf(
-                a1_mant, a1_exp, b1_mant, b1_exp, acc_i11, MAC_CONF
+                    a1_mant, a1_exp, b1_mant, b1_exp, acc_i11, MAC_CONF
                 )
 
                 # Bitcast results back to f32 for next iteration
@@ -314,6 +315,7 @@ def bf16_gemm_kernel(
 
 # ── IRON integration ─────────────────────────────────────────────────────────
 
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="BF16 GEMM on single AIE2p core with PythoC + IRON",
@@ -321,14 +323,24 @@ def parse_args():
     parser.add_argument("--device", choices=("npu2",), default="npu2")
     parser.add_argument("--work-dir", type=Path, default=DEFAULT_BUILD_DIR)
     parser.add_argument("--verbose", action="store_true")
-    parser.add_argument("--compile-only", action="store_true",
-                        help="Generate MLIR and compile but skip NPU execution")
-    parser.add_argument("--benchmark", action="store_true",
-                        help="Run performance benchmark (10 warmup + 20 measurement)")
-    parser.add_argument("--trace-size", type=lambda x: int(x, 0), default=0,
-                        metavar="BYTES",
-                        help="Enable event tracing; size of DDR trace buffer in bytes "
-                             "(e.g. 0x20000). 0 = disabled (default)")
+    parser.add_argument(
+        "--compile-only",
+        action="store_true",
+        help="Generate MLIR and compile but skip NPU execution",
+    )
+    parser.add_argument(
+        "--benchmark",
+        action="store_true",
+        help="Run performance benchmark (10 warmup + 20 measurement)",
+    )
+    parser.add_argument(
+        "--trace-size",
+        type=lambda x: int(x, 0),
+        default=0,
+        metavar="BYTES",
+        help="Enable event tracing; size of DDR trace buffer in bytes "
+        "(e.g. 0x20000). 0 = disabled (default)",
+    )
     return parser.parse_args()
 
 
@@ -336,8 +348,8 @@ def build_mlir_module(device, trace_size=0):
     """Build IRON program: shim → mem-tile → compute tile → mem-tile → shim."""
 
     # NumPy types for IRON ObjectFifos
-    a_ty = np.ndarray[(A_ELEMS,), np.dtype[np.uint16]]   # bf16 as uint16
-    b_ty = np.ndarray[(B_ELEMS,), np.dtype[np.uint16]]   # bf16 as uint16
+    a_ty = np.ndarray[(A_ELEMS,), np.dtype[np.uint16]]  # bf16 as uint16
+    b_ty = np.ndarray[(B_ELEMS,), np.dtype[np.uint16]]  # bf16 as uint16
     c_ty = np.ndarray[(C_ELEMS,), np.dtype[np.float32]]
 
     # Flat host buffers (one tile each for single-core demo)
@@ -509,8 +521,10 @@ def main():
 
     try:
         trace_size = args.trace_size
-        print(f"[1/3] Building IRON program with PythoC bf16 GEMM kernel"
-              + (f" [trace={trace_size:#x}]" if trace_size else ""))
+        print(
+            f"[1/3] Building IRON program with PythoC bf16 GEMM kernel"
+            + (f" [trace={trace_size:#x}]" if trace_size else "")
+        )
         module = build_mlir_module(device, trace_size=trace_size)
         mlir_path = work_dir / "kernel.mlir"
         with open(mlir_path, "w") as f:
@@ -548,10 +562,15 @@ def main():
         # Load kernel
         trace_config = (
             TraceConfig(trace_size, trace_file=str(work_dir / "trace.txt"))
-            if trace_size > 0 else None
+            if trace_size > 0
+            else None
         )
-        npu_kernel = NPUKernel(str(xclbin_path), str(insts_path), kernel_name="MLIR_AIE",
-                               trace_config=trace_config)
+        npu_kernel = NPUKernel(
+            str(xclbin_path),
+            str(insts_path),
+            kernel_name="MLIR_AIE",
+            trace_config=trace_config,
+        )
         kernel_handle = DefaultNPURuntime.load(npu_kernel)
 
         if args.benchmark:
@@ -573,7 +592,9 @@ def main():
             run_args = [in_a, in_b, out_c]
             DefaultNPURuntime.prepare_args_for_trace(run_args, trace_config)
             DefaultNPURuntime.run(kernel_handle, run_args)
-            trace_buf, _ = DefaultNPURuntime.extract_trace_from_args(run_args, trace_config)
+            trace_buf, _ = DefaultNPURuntime.extract_trace_from_args(
+                run_args, trace_config
+            )
             DefaultNPURuntime.process_trace(trace_buf, None, trace_config)
         else:
             DefaultNPURuntime.run(kernel_handle, [in_a, in_b, out_c])
@@ -598,9 +619,11 @@ def main():
                 for entry in cycles:
                     name, vals = entry[0], entry[1:]
                     if vals:
-                        print(f"  {name}: {len(vals)} invocations  "
-                              f"first={vals[0]}  min={min(vals)}  "
-                              f"avg={sum(vals)//len(vals)}  max={max(vals)} cycles")
+                        print(
+                            f"  {name}: {len(vals)} invocations  "
+                            f"first={vals[0]}  min={min(vals)}  "
+                            f"avg={sum(vals)//len(vals)}  max={max(vals)} cycles"
+                        )
                     else:
                         print(f"  {name}: no complete invocations captured")
             return 0
@@ -611,6 +634,7 @@ def main():
     except Exception as e:
         print(f"\nFAILED: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
 
