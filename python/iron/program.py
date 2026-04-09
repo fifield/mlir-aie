@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 from ..extras.context import mlir_mod_ctx  # pyright: ignore[reportMissingImports]
 from ..helpers.dialects.func import FuncBase
-from ..dialects.aie import device
+from ..dialects.aie import device, tile
 
 from .device import Device
 from .runtime import Runtime

@@ -98,6 +98,8 @@ class Runtime(Resolvable):
         self._open_task_groups = []
         self._trace_size = None
         self._trace_workers = None
+        self._trace_shim_col = None
+        self._trace_shim_op = None
         self._strict_task_groups = strict_task_groups
         self._task_group_index = itertools.count()
         self._reuse_output_buffer = False
@@ -374,6 +376,8 @@ class Runtime(Resolvable):
         memtile_events: list | None = None,
         shimtile_events: list | None = None,
         egress_shim_col: int = 0,
+        ddr_id: int = 0,
+        shim_col: int | None = None,
     ):
         """Enable hardware tracing for this program.
 
@@ -402,10 +406,17 @@ class Runtime(Resolvable):
                 Defaults to None (uses hardware defaults).
             egress_shim_col (int, optional): Column of the shim tile used to
                 egress trace packets to DDR. Defaults to 0.
+            ddr_id (int, optional): DDR buffer id used for the trace buffer.
+                Defaults to 0.
+            shim_col (int | None, optional): Column of the shim tile that
+                egresses trace packets, when explicitly pinned. Defaults to None
+                (the shim is taken from the program, matching prior behavior).
         """
         self._trace_size = trace_size
         self._trace_workers = workers
         self._reuse_output_buffer = reuse_output_buffer
+        self._ddr_id = ddr_id
+        self._trace_shim_col = shim_col
         self._coretile_events = coretile_events
         self._coremem_events = coremem_events
         self._memtile_events = memtile_events
@@ -449,6 +460,16 @@ class Runtime(Resolvable):
         rt_dtypes = [rt_data.arr_type for rt_data in self._rt_data]
 
         task_group_actions = defaultdict(list)
+
+        # Create the override shim tile at device scope (before @runtime_sequence
+        # sets a nested InsertionPoint) so it has the correct parent attributes.
+        # If program.py already created it (stored in _trace_shim_op), reuse it.
+        if self._trace_size is not None and self._trace_shim_col is not None:
+            if self._trace_shim_op is None:
+                self._trace_shim_op = tile(self._trace_shim_col, 0)
+            trace_shim_tile = self._trace_shim_op
+        else:
+            trace_shim_tile = None
 
         @runtime_sequence(*rt_dtypes)
         def sequence(*args):
