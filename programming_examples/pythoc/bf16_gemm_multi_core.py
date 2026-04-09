@@ -46,6 +46,8 @@ from aie.iron.placers import SequentialPlacer
 from aie.iron.pythoc import aie_kernel, PythocKernel
 from aie.utils.compile import compile_mlir_module
 from aie.utils import DefaultNPURuntime, NPUKernel
+from aie.utils.trace import TraceConfig
+from aie.utils.trace.utils import get_cycles_summary
 from aie.helpers.taplib import TensorTiler2D
 
 # PythoC types and intrinsics
@@ -234,12 +236,16 @@ def bf16_gemm_tile_kernel(
 
 
 @aie_kernel
-def bf16_zero_kernel(c_buf: ptr[f32, True]) -> void:
+def bf16_zero_kernel(c_buf: ptr[i32, True]) -> void:
+    # event0()
     i: i32 = 0
-    zero_vec: aie_vector[f32, 64] = zeros(f32, 64)
+    z: aie_vector[i32, 16] = zeros(i32, 16)
+    # vshuffle is opaque to opt, preventing memset conversion
+    zero_vec: aie_vector[i32, 16] = vshuffle(z, z, 0)
     while i < C_ELEMS_CONST:
         store_v(c_buf + i, zero_vec)
-        i = i + 64
+        i = i + 16
+    # event1()
 
 
 # ── IRON program builder ────────────────────────────────────────────────────
@@ -249,7 +255,7 @@ def ceildiv(a, b):
     return (a + b - 1) // b
 
 
-def build_mlir_module(M, K, N, m, k, n, n_aie_cols):
+def build_mlir_module(M, K, N, m, k, n, n_aie_cols, trace_size=0):
     """Build IRON multi-core GEMM program following whole_array_iron.py topology."""
 
     n_aie_rows = N_AIE_ROWS
@@ -333,6 +339,7 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols):
 
     zero_extra_globals = {
         "C_ELEMS_CONST": m * n,
+        "vshuffle": vshuffle,
     }
     zero_kernel = PythocKernel(
         bf16_zero_kernel,
@@ -437,10 +444,17 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols):
             out_c.release(1)
 
     # ── Set up compute tiles ─────────────────────────────────────────────
+    # The top-row, last-column worker is marked for tracing when enabled.
+    # Row 2 tiles (row==0 here) cannot be traced because the mem_tile row
+    # directly below is fully saturated with A/B/C data flows, leaving no
+    # south channel for the trace packet.  A higher row avoids the congestion.
+    # Trace packets route to shim col=n_aie_cols (one past the last data column)
+    # to avoid stream-switch contention on the in-use columns.
     workers = []
     for row in range(n_aie_rows):
         for col in range(n_aie_cols):
             tile_col, tile_row = core_tiles[row][col]
+            is_trace_tile = trace_size > 0 and row == n_aie_rows - 1 and col == n_aie_cols - 1
             workers.append(
                 Worker(
                     core_fn,
@@ -453,6 +467,7 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols):
                     ],
                     placement=Tile(tile_col, tile_row),
                     stack_size=0xD00,
+                    trace=1 if is_trace_tile else None,
                 )
             )
 
@@ -486,6 +501,11 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols):
 
     rt = Runtime()
     with rt.sequence(A_ty, B_ty, C_ty) as (A, B, C):
+        if trace_size > 0:
+            # Trace the top-row, last-column worker (row=n_aie_rows-1 in worker list).
+            # Route to shim col=n_aie_cols (neighbour column, free of data flows).
+            trace_worker = workers[n_aie_rows * n_aie_cols - 1]
+            rt.enable_trace(trace_size, workers=[trace_worker], shim_col=n_aie_cols)
         rt.start(*workers)
 
         tg = rt.task_group()
@@ -570,6 +590,14 @@ def parse_args():
         action="store_true",
         help="Run performance benchmark (10 warmup + 20 measurement)",
     )
+    parser.add_argument(
+        "--trace-size",
+        type=lambda x: int(x, 0),
+        default=0,
+        metavar="BYTES",
+        help="Enable event tracing for tile (col=n_aie_cols-1, row=5); size of DDR trace buffer in bytes "
+        "(e.g. 0x8000). 0 = disabled (default)",
+    )
     return parser.parse_args()
 
 
@@ -646,8 +674,9 @@ def main():
         print(
             f"[1/3] Building IRON program: {M}×{K}×{N} bf16 GEMM, "
             f"{N_AIE_ROWS}×{n_aie_cols} cores, tile {m}×{k}×{n}"
+            + (f" [trace={args.trace_size:#x}]" if args.trace_size else "")
         )
-        module = build_mlir_module(M, K, N, m, k, n, n_aie_cols)
+        module = build_mlir_module(M, K, N, m, k, n, n_aie_cols, trace_size=args.trace_size)
         mlir_path = work_dir / "kernel.mlir"
         with open(mlir_path, "w") as f:
             print(module, file=f)
@@ -679,11 +708,16 @@ def main():
         A_bf16 = A_f32.astype(bfloat16).flatten()
         B_bf16 = B_f32.astype(bfloat16).flatten()
 
-        trace_config = None
+        trace_config = (
+            TraceConfig(args.trace_size, trace_file=str(work_dir / "trace.txt"))
+            if args.trace_size > 0
+            else None
+        )
         npu_kernel = NPUKernel(
             str(xclbin_path),
             str(insts_path),
             kernel_name="MLIR_AIE",
+            trace_config=trace_config,
         )
         kernel_handle = DefaultNPURuntime.load(npu_kernel)
 
@@ -702,7 +736,16 @@ def main():
         in_b = iron.tensor(B_bf16, dtype=bfloat16)
         out_c = iron.zeros(M * N, dtype=np.float32)
 
-        DefaultNPURuntime.run(kernel_handle, [in_a, in_b, out_c])
+        if trace_config:
+            run_args = [in_a, in_b, out_c]
+            DefaultNPURuntime.prepare_args_for_trace(run_args, trace_config)
+            DefaultNPURuntime.run(kernel_handle, run_args)
+            trace_buf, _ = DefaultNPURuntime.extract_trace_from_args(
+                run_args, trace_config
+            )
+            DefaultNPURuntime.process_trace(trace_buf, None, trace_config)
+        else:
+            DefaultNPURuntime.run(kernel_handle, [in_a, in_b, out_c])
 
         # Output is row-major (dims_to_stream on C handles retiling)
         C_npu = np.array(out_c.numpy()).reshape(M, N)
@@ -714,6 +757,20 @@ def main():
 
         if rel_err < 0.05:  # 5% tolerance for bf16→bfp16 path
             print("PASS!")
+            if trace_config:
+                trace_json = work_dir / "trace_mlir.json"
+                print(f"\n[trace] Parsing trace → {trace_json}")
+                trace_config.trace_to_json(str(mlir_path), str(trace_json))
+                print("[trace] Cycle summary (event0→event1):")
+                cycles = get_cycles_summary(str(trace_json))
+                for entry in cycles:
+                    name, vals = entry[0], entry[1:]
+                    if vals:
+                        print(
+                            f"  {name}: {len(vals)} invocations  "
+                            f"first={vals[0]}  min={min(vals)}  "
+                            f"avg={sum(vals)//len(vals)}  max={max(vals)} cycles"
+                        )
         else:
             print(f"FAILED: relative error {rel_err:.4f} > 5% tolerance")
             return 1
