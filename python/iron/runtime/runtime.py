@@ -66,6 +66,8 @@ class Runtime(Resolvable):
         self._open_task_groups = []
         self._trace_size = None
         self._trace_workers = None
+        self._trace_shim_col = None
+        self._trace_shim_op = None
         self._strict_task_groups = strict_task_groups
         self._ddr_id = 4
 
@@ -276,6 +278,7 @@ class Runtime(Resolvable):
         self._trace_size = trace_size
         self._trace_workers = workers
         self._ddr_id = ddr_id
+        self._trace_shim_col = shim_col
         self._coretile_events = coretile_events
         self._coremem_events = coremem_events
         self._memtile_events = memtile_events
@@ -319,6 +322,16 @@ class Runtime(Resolvable):
         rt_dtypes = [rt_data.arr_type for rt_data in self._rt_data]
 
         task_group_actions = defaultdict(list)
+
+        # Create the override shim tile at device scope (before @runtime_sequence
+        # sets a nested InsertionPoint) so it has the correct parent attributes.
+        # If program.py already created it (stored in _trace_shim_op), reuse it.
+        if self._trace_size is not None and self._trace_shim_col is not None:
+            if self._trace_shim_op is None:
+                self._trace_shim_op = tile(self._trace_shim_col, 0)
+            trace_shim_tile = self._trace_shim_op
+        else:
+            trace_shim_tile = None
 
         @runtime_sequence(*rt_dtypes)
         def sequence(*args):
