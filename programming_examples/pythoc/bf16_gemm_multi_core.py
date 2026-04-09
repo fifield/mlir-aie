@@ -503,9 +503,8 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols, trace_size=0):
     with rt.sequence(A_ty, B_ty, C_ty) as (A, B, C):
         if trace_size > 0:
             # Trace the top-row, last-column worker (row=n_aie_rows-1 in worker list).
-            # Route to shim col=n_aie_cols (neighbour column, free of data flows).
             trace_worker = workers[n_aie_rows * n_aie_cols - 1]
-            rt.enable_trace(trace_size, workers=[trace_worker], shim_col=n_aie_cols)
+            rt.enable_trace(trace_size, workers=[trace_worker])
         rt.start(*workers)
 
         tg = rt.task_group()
