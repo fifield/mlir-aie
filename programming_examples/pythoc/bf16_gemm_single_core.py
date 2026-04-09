@@ -157,7 +157,7 @@ def bf16_gemm_kernel(
     set_ctrl_reg(9, 1)
     set_ctrl_reg(1, 12)
 
-    event0()
+    # event0()
 
     # Buffer strides (in elements)
     # A layout: [K_MICRO=4, M_BLOCKS=4, 8, 8] → A[k,m] at (k*M_BLOCKS + m)*64
@@ -177,6 +177,8 @@ def bf16_gemm_kernel(
     while zi < 16:  # N_BLOCKS * M_BLOCKS = 4 * 4 = 16
         store_v(c_buf + zi * 64, z)
         zi = zi + 1
+
+    event0()
 
     # ── 2×2 register-blocked GEMM ─────────────────────────────────
     # Outer loops: M (step 2) × N (step 2) over output blocks
