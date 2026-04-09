@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 from ..extras.context import mlir_mod_ctx  # type: ignore
 from ..helpers.dialects.func import FuncBase
-from ..dialects.aie import device
+from ..dialects.aie import device, tile
 
 from .device import Device
 from .runtime import Runtime
@@ -73,6 +73,21 @@ class Program:
                         self._device, self._rt, self._rt.workers, all_fifos
                     )
 
+                # If a shim_col override is requested, create that tile first so it
+                # appears at the top of the device body. This ensures its lock
+                # definitions dominate any core/fifo bodies that are generated below.
+                # Also declare stub tiles at the intermediate rows of shim_col so the
+                # pathfinder has a valid routing path from the traced compute tile
+                # (row 2) eastward into column shim_col and then south to shim row 0.
+                if (
+                    self._rt._trace_size is not None
+                    and self._rt._trace_shim_col is not None
+                ):
+                    col = self._rt._trace_shim_col
+                    self._rt._trace_shim_op = tile(col, 0)  # shim
+                    tile(col, 1)  # mem tile stub — bridges row 2 → row 0
+                    tile(col, 2)  # compute tile stub — accepts East from traced col
+
                 # Collect all tiles
                 all_tiles = []
                 for w in self._rt.workers:
@@ -115,7 +130,10 @@ class Program:
                         if w.trace is not None:
                             tiles_to_trace.append(w.tile.op)
                 if self._rt._trace_size is not None:
-                    trace_shim_tile = self._rt.get_first_cons_shimtile()
+                    if self._rt._trace_shim_op is not None:
+                        trace_shim_tile = self._rt._trace_shim_op
+                    else:
+                        trace_shim_tile = self._rt.get_first_cons_shimtile()
                     trace_utils.configure_packet_tracing_flow(
                         tiles_to_trace, trace_shim_tile
                     )

@@ -67,6 +67,8 @@ class Runtime(Resolvable):
         self._trace_size = None
         self._trace_offset = None
         self._trace_workers = None
+        self._trace_shim_col = None
+        self._trace_shim_op = None
         self._strict_task_groups = strict_task_groups
         self.ddr_id = None
 
@@ -245,6 +247,7 @@ class Runtime(Resolvable):
         trace_offset: int = None,
         workers: list | None = None,
         ddr_id: int = None,
+        shim_col: int | None = None,
         coretile_events: list | None = None,
         coremem_events: list | None = None,
         memtile_events: list | None = None,
@@ -263,6 +266,10 @@ class Runtime(Resolvable):
                 all workers with ``trace`` set will be traced. Defaults to None.
             ddr_id (int | None, optional): XRT inout buffer index to write trace data into.
                 Defaults to None (treated as 4, the conventional last buffer slot).
+            shim_col (int | None, optional): Column index of the shim tile to route trace
+                packets to. Defaults to None (auto-detect: first consumer ObjectFifo on row 0).
+                Use this to route trace through a neighbouring shim when the natural shim
+                column has no free stream-switch resources.
             coretile_events (list | None, optional): List of up to 8 core tile trace events.
                 See ``https://xilinx.github.io/mlir-aie/AIEXDialect.html`` for available
                 events under (type)EventAIE such as CoreEventAIE.
@@ -278,6 +285,7 @@ class Runtime(Resolvable):
         self._trace_offset = trace_offset
         self._trace_workers = workers
         self._ddr_id = ddr_id
+        self._trace_shim_col = shim_col
         self._coretile_events = coretile_events
         self._coremem_events = coremem_events
         self._memtile_events = memtile_events
@@ -322,6 +330,16 @@ class Runtime(Resolvable):
 
         task_group_actions = defaultdict(list)
 
+        # Create the override shim tile at device scope (before @runtime_sequence
+        # sets a nested InsertionPoint) so it has the correct parent attributes.
+        # If program.py already created it (stored in _trace_shim_op), reuse it.
+        if self._trace_size is not None and self._trace_shim_col is not None:
+            if self._trace_shim_op is None:
+                self._trace_shim_op = tile(self._trace_shim_col, 0)
+            trace_shim_tile = self._trace_shim_op
+        else:
+            trace_shim_tile = None
+
         @runtime_sequence(*rt_dtypes)
         def sequence(*args):
 
@@ -335,13 +353,13 @@ class Runtime(Resolvable):
                         if w.trace is not None:
                             tiles_to_trace.append(w.tile.op)
 
-                trace_shim_tile = self.get_first_cons_shimtile()
+                shim = trace_shim_tile if trace_shim_tile is not None else self.get_first_cons_shimtile()
 
                 logger.debug("config_trace")
                 trace_utils.configure_packet_tracing_aie2(
                     # tiles_to_trace=[ tiles_to_trace[0] ],
                     tiles_to_trace=tiles_to_trace,
-                    shim=trace_shim_tile,
+                    shim=shim,
                     trace_size=self._trace_size // 4,
                     trace_offset=(
                         self._trace_offset if self._trace_offset is not None else 0
@@ -416,4 +434,4 @@ class Runtime(Resolvable):
                 finish_task_group(default_task_group, task_group_actions)
 
             if self._trace_size is not None:
-                trace_utils.gen_trace_done_aie2(trace_shim_tile)
+                trace_utils.gen_trace_done_aie2(shim)
