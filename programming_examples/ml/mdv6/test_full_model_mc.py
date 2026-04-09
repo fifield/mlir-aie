@@ -6,6 +6,7 @@ All Conv+BN+SiLU sub-layers use 32-core spatial parallelism.
 RepConv, AvgPool, Upsample, concat, split, detection run on host CPU.
 """
 import sys, os, time, importlib.util
+import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../python"))
 import torch
 import torch.nn as nn
@@ -118,9 +119,26 @@ def main():
     inp = x.squeeze(0).permute(1, 2, 0).contiguous()
 
     # Conv0 (640→320, 3→32, s=2)
+    # Pad IC=3→8: Peano auto-vectorizes IC loop with 8-wide vectors,
+    # so IC < 8 produces incorrect results. Zero-pad input and weights.
     print("  conv0...", end=" ", flush=True); t = time.time()
-    conv0_hwc = rt('mc_ftconv0', 'ftconv0', inp, fuse_bn(model.conv0),
-                    320, 320, 32, 24, 24, 32, 2, 3, 1)
+    inp_padded = torch.zeros(640, 640, 8, dtype=torch.bfloat16)
+    inp_padded[:, :, :3] = inp
+    conv0_wt = fuse_bn(model.conv0)
+    # Pad weights: [OC*IC*K*K + BN] with IC=3→8
+    oc0, ic0, ks0 = 32, 3, 3
+    ic0_pad = 8
+    wt_conv = conv0_wt[:oc0*ic0*ks0*ks0]
+    wt_bn = conv0_wt[oc0*ic0*ks0*ks0:]
+    w_orig = torch.from_numpy(wt_conv.copy()).view(torch.bfloat16).reshape(oc0, ic0, ks0, ks0)
+    w_pad = torch.zeros(oc0, ic0_pad, ks0, ks0, dtype=torch.bfloat16)
+    w_pad[:, :ic0, :, :] = w_orig
+    conv0_wt_padded = np.concatenate([
+        w_pad.flatten().view(torch.uint16).numpy(),
+        wt_bn,
+    ])
+    conv0_hwc = rt('mc_ftconv0', 'ftconv0', inp_padded, conv0_wt_padded,
+                    320, 320, 32, 20, 20, 32, 2, 3, 1)
     print(f"{time.time()-t:.1f}s")
 
     # Conv1 (320→160, 32→64, s=2)

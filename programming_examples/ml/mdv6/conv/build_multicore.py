@@ -7,7 +7,7 @@ import os, sys, subprocess, time
 # (name, n_cores, tile_h, tile_w, ic, oc_block, kernel_size, stride)
 CONFIGS = [
     # Conv0/Conv1 (stride-2 stem)
-    ("mc_ftconv0",     32, 24, 24,   3, 32, 3, 2),
+    ("mc_ftconv0",     32, 20, 20,   8, 32, 3, 2),  # IC padded 3→8 (Peano vectorization)
     ("mc_ftconv1",     32, 12, 12,  32, 16, 3, 2),
     # ELAN2 sub-layers
     ("mc_elan_c1",     32,  8,  8,  64, 64, 1, 1),  # 1x1 64→64
