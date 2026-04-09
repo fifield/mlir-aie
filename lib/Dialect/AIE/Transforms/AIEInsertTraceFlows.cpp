@@ -370,7 +370,10 @@ struct AIEInsertTraceFlowsPass
       }
 
       // Determine trace port based on packet type
-      WireBundle tracePort = WireBundle::Trace;
+      // AIE4 uses Trace32 (32-bit trace ports); AIE1/AIE2/AIE2p use Trace
+      WireBundle tracePort = isa<AIE4TargetModel>(&targetModel)
+                                 ? WireBundle::Trace32
+                                 : WireBundle::Trace;
       int traceChannel = 0;
       if (*packetType == TracePacketType::Mem) {
         traceChannel = 1; // Mem trace uses port 1
@@ -838,6 +841,7 @@ struct AIEInsertTraceFlowsPass
             builder, runtimeSeq.getLoc(),
             shimCol,           // column
             0,                 // row (shim row)
+            chanDesc.channel,  // channel
             0,                 // direction
             chanDesc.bdId,     // bd_id
             bufferLengthWords, // buffer_length (in 32-bit words)
@@ -978,8 +982,13 @@ struct AIEInsertTraceFlowsPass
             builder.getI32IntegerAttr(0));
 
         // Configure broadcast register with USER_EVENT_1
+        // AIE4 shim/memtile: "Event_Broadcast_A_N"; AIE2: "Event_BroadcastN_A"
         std::string broadcastRegName =
-            "Event_Broadcast" + std::to_string(*shimInfo.startBroadcast) + "_A";
+            isa<AIE4TargetModel>(&targetModel)
+                ? "Event_Broadcast_A_" +
+                      std::to_string(*shimInfo.startBroadcast)
+                : "Event_Broadcast" + std::to_string(*shimInfo.startBroadcast) +
+                      "_A";
         const RegisterInfo *broadcastReg = targetModel.lookupRegister(
             broadcastRegName, shimInfo.shimTile.getTileID());
         if (!broadcastReg)
@@ -994,10 +1003,15 @@ struct AIEInsertTraceFlowsPass
             builder.getI32IntegerAttr(0));
 
         // Generate USER_EVENT_1 to trigger the broadcast
+        // AIE4 shim: "Event_Generate_A"; AIE2: "Event_Generate"
+        std::string eventGenName = isa<AIE4TargetModel>(&targetModel)
+                                       ? "Event_Generate_A"
+                                       : "Event_Generate";
         const RegisterInfo *eventGenReg = targetModel.lookupRegister(
-            "Event_Generate", shimInfo.shimTile.getTileID());
+            eventGenName, shimInfo.shimTile.getTileID());
         if (!eventGenReg)
-          llvm::report_fatal_error("Failed to lookup Event_Generate register");
+          llvm::report_fatal_error(llvm::Twine("Failed to lookup ") +
+                                   eventGenName + " register");
         xilinx::AIEX::NpuWrite32Op::create(
             builder, runtimeSeq.getLoc(),
             AIEX::createConstantI32(builder, runtimeSeq.getLoc(),
@@ -1025,8 +1039,12 @@ struct AIEInsertTraceFlowsPass
       if (!userEvent0)
         llvm::report_fatal_error("Failed to lookup USER_EVENT_0 event");
 
+      // AIE4 shim/memtile: "Event_Broadcast_A_N"; AIE2: "Event_BroadcastN_A"
       std::string broadcastRegName =
-          "Event_Broadcast" + std::to_string(*shimInfo.stopBroadcast) + "_A";
+          isa<AIE4TargetModel>(&targetModel)
+              ? "Event_Broadcast_A_" + std::to_string(*shimInfo.stopBroadcast)
+              : "Event_Broadcast" + std::to_string(*shimInfo.stopBroadcast) +
+                    "_A";
       const RegisterInfo *broadcastReg = targetModel.lookupRegister(
           broadcastRegName, shimInfo.shimTile.getTileID());
       if (!broadcastReg)
@@ -1040,10 +1058,15 @@ struct AIEInsertTraceFlowsPass
           nullptr, builder.getI32IntegerAttr(shimCol),
           builder.getI32IntegerAttr(0));
 
+      // AIE4 shim: "Event_Generate_A"; AIE2: "Event_Generate"
+      std::string stopEventGenName = isa<AIE4TargetModel>(&targetModel)
+                                         ? "Event_Generate_A"
+                                         : "Event_Generate";
       const RegisterInfo *stopEventGenReg = targetModel.lookupRegister(
-          "Event_Generate", shimInfo.shimTile.getTileID());
+          stopEventGenName, shimInfo.shimTile.getTileID());
       if (!stopEventGenReg)
-        llvm::report_fatal_error("Failed to lookup Event_Generate register");
+        llvm::report_fatal_error(llvm::Twine("Failed to lookup ") +
+                                 stopEventGenName + " register");
       xilinx::AIEX::NpuWrite32Op::create(
           builder, runtimeSeq.getLoc(),
           AIEX::createConstantI32(builder, runtimeSeq.getLoc(),
@@ -1068,10 +1091,10 @@ private:
     tile->setAttr("controller_id", pktInfoAttr);
   }
 
-  uint32_t computeBDAddress(int col, int bdId, TileOp shimTile,
+  uint32_t computeBDAddress(int col, int bdId, int channel, TileOp shimTile,
                             const AIETargetModel &tm) {
     int row = shimTile.getRow();
-    return tm.getDmaBdAddress(col, row, bdId) +
+    return tm.getDmaBdAddress(col, row, bdId, channel, DMAChannelDir::S2MM) +
            tm.getDmaBdAddressOffset(col, row);
   }
 
@@ -1110,9 +1133,12 @@ private:
   // Compute timer control address based on tile type
   uint32_t computeTimerCtrlAddress(TileOp tile, const AIETargetModel &tm,
                                    bool isMemTrace) {
-    // Use register database to lookup Timer_Control for the appropriate module
+    // Use register database to lookup Timer_Control for the appropriate module.
+    // AIE4 shim/memtile uses "Timer_A_Control" instead of "Timer_Control".
     const RegisterInfo *reg =
         tm.lookupRegister("Timer_Control", tile.getTileID(), isMemTrace);
+    if (!reg)
+      reg = tm.lookupRegister("Timer_A_Control", tile.getTileID(), isMemTrace);
     if (!reg)
       llvm::report_fatal_error("Failed to lookup Timer_Control register");
     return reg->offset;

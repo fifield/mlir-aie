@@ -20,14 +20,18 @@ from aie.dialects._aie_enum_gen import (  # pyright: ignore[reportMissingImports
     CoreEventAIE,
     CoreEventAIE2,
     CoreEventAIE2P,
+    CoreEventAIE4,
     MemEventAIE,
     MemEventAIE2,
     MemEventAIE2P,
+    MemEventAIE4,
     MemTileEventAIE2,
     MemTileEventAIE2P,
+    MemTileEventAIE4,
     ShimTileEventAIE,
     ShimTileEventAIE2,
     ShimTileEventAIE2P,
+    ShimTileEventAIE4,
 )
 from aie.dialects.aie import (
     DMAChannelDir,  # pyright: ignore[reportAttributeAccessIssue]
@@ -69,6 +73,13 @@ def get_events_for_device(device: str):
             MemEvent=MemEventAIE2P,
             ShimTileEvent=ShimTileEventAIE2P,
             MemTileEvent=MemTileEventAIE2P,
+        )
+    elif "npu3" in device:
+        return SimpleNamespace(
+            CoreEvent=CoreEventAIE4,
+            MemEvent=MemEventAIE4,
+            ShimTileEvent=ShimTileEventAIE4,
+            MemTileEvent=MemTileEventAIE4,
         )
     else:
         return SimpleNamespace(

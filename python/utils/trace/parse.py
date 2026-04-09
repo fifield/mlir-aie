@@ -599,6 +599,35 @@ def parse_mlir_trace_events(mlir_module_str, colshift=None, device_name=None):
     # write32 carries address/value as SSA i32 operands (materialized via
     # arith.constant); row/column remain optional attributes. fold_constant_operand
     # folds the operand back to its constant integer (None if non-constant).
+
+    is_aie4 = "npu3" in str(device)
+
+    # Build address-to-(trace_type, event_half) mapping based on device.
+    # event_half 0 = events 0-3 (Event0 register), 1 = events 4-7 (Event1 register).
+    # trace_type indices: 0=core, 1=mem, 2=shim, 3=memtile
+    if is_aie4:
+        # AIE4: core and shim have distinct address ranges
+        addr_map = {
+            0xA00E0: (0, 0),   # core Trace0_Event0
+            0xA00E4: (0, 1),   # core Trace0_Event1
+            0xA0100: (1, 0),   # mem (core tile) Trace1_Event0
+            0xA0104: (1, 1),   # mem (core tile) Trace1_Event1
+            0x4130:  (2, 0),   # shim Trace_A_Event0
+            0x4134:  (2, 1),   # shim Trace_A_Event1
+            0x120:   (3, 0),   # memtile Trace_A_Event0
+            0x124:   (3, 1),   # memtile Trace_A_Event1
+        }
+    else:
+        # AIE2/AIE2P: core and shim share the same address, disambiguated by row
+        addr_map = {
+            0x340E0: (0, 0),   # core/shim Trace_Event0
+            0x340E4: (0, 1),   # core/shim Trace_Event1
+            0x140E0: (1, 0),   # mem Trace_Event0
+            0x140E4: (1, 1),   # mem Trace_Event1
+            0x940E0: (3, 0),   # memtile Trace_Event0
+            0x940E4: (3, 1),   # memtile Trace_Event1
+        }
+
     for write32 in write32s:
         address = None
         row = None
@@ -645,75 +674,25 @@ def parse_mlir_trace_events(mlir_module_str, colshift=None, device_name=None):
         if address == 0x340D0 and row != 0:
             trace_modes[PacketType.CORE][key] = value & 0b11
 
-        # core event 0
-        if address == 0x340E0:  # 213216, match ignoring case
-            if row == 0:  # shim
-                if pid_events[2].get(key) is None:
-                    pid_events[2][key] = [0] * 8
-                logger.debug("Trace event 0 configured to be %s", hex(value))
-                pid_events[2][key][0] = value & 0xFF
-                pid_events[2][key][1] = (value >> 8) & 0xFF
-                pid_events[2][key][2] = (value >> 16) & 0xFF
-                pid_events[2][key][3] = (value >> 24) & 0xFF
-            else:  # core
-                if pid_events[0].get(key) is None:
-                    pid_events[0][key] = [0] * 8
-                logger.debug("Trace event 0 configured to be %s", hex(value))
-                pid_events[0][key][0] = value & 0xFF
-                pid_events[0][key][1] = (value >> 8) & 0xFF
-                pid_events[0][key][2] = (value >> 16) & 0xFF
-                pid_events[0][key][3] = (value >> 24) & 0xFF
-        # core event 1
-        elif address == 0x340E4:  # 213220, match ignoring case
-            if row == 0:  # shim
-                if pid_events[2].get(key) is None:
-                    pid_events[2][key] = [0] * 8
-                pid_events[2][key][4] = value & 0xFF
-                pid_events[2][key][5] = (value >> 8) & 0xFF
-                pid_events[2][key][6] = (value >> 16) & 0xFF
-                pid_events[2][key][7] = (value >> 24) & 0xFF
-            else:  # core
-                if pid_events[0].get(key) is None:
-                    pid_events[0][key] = [0] * 8
-                pid_events[0][key][4] = value & 0xFF
-                pid_events[0][key][5] = (value >> 8) & 0xFF
-                pid_events[0][key][6] = (value >> 16) & 0xFF
-                pid_events[0][key][7] = (value >> 24) & 0xFF
-        # mem event 0
-        elif address == 0x140E0:  # 82144
-            if pid_events[1].get(key) is None:
-                pid_events[1][key] = [0] * 8
-            logger.debug("Trace event 0 configured to be %s", hex(value))
-            pid_events[1][key][0] = value & 0xFF
-            pid_events[1][key][1] = (value >> 8) & 0xFF
-            pid_events[1][key][2] = (value >> 16) & 0xFF
-            pid_events[1][key][3] = (value >> 24) & 0xFF
-        # mem event 1
-        elif address == 0x140E4:  # 82148
-            if pid_events[1].get(key) is None:
-                pid_events[1][key] = [0] * 8
-            pid_events[1][key][4] = value & 0xFF
-            pid_events[1][key][5] = (value >> 8) & 0xFF
-            pid_events[1][key][6] = (value >> 16) & 0xFF
-            pid_events[1][key][7] = (value >> 24) & 0xFF
-        # memtile event 0
-        elif address == 0x940E0:  # 606432
-            if pid_events[3].get(key) is None:
-                pid_events[3][key] = [0] * 8
-            logger.debug("Trace event 0 configured to be %s", hex(value))
-            pid_events[3][key][0] = value & 0xFF
-            pid_events[3][key][1] = (value >> 8) & 0xFF
-            pid_events[3][key][2] = (value >> 16) & 0xFF
-            pid_events[3][key][3] = (value >> 24) & 0xFF
-        # memtile event 1
-        elif address == 0x940E4:  # 606436
-            if pid_events[3].get(key) is None:
-                pid_events[3][key] = [0] * 8
-            pid_events[3][key][4] = value & 0xFF
-            pid_events[3][key][5] = (value >> 8) & 0xFF
-            pid_events[3][key][6] = (value >> 16) & 0xFF
-            pid_events[3][key][7] = (value >> 24) & 0xFF
-        # TODO shim event 0, 1 needs to also be defined
+        if address not in addr_map:
+            continue
+
+        trace_type, event_half = addr_map[address]
+
+        # AIE2/AIE2P: core and shim share the same address (0x340E0/0x340E4),
+        # disambiguated by row==0 for shim
+        if not is_aie4 and trace_type == 0 and row == 0:
+            trace_type = 2  # shim
+
+        if pid_events[trace_type].get(key) is None:
+            pid_events[trace_type][key] = [0] * 8
+
+        base = event_half * 4
+        logger.debug("Trace event %d configured to be %s", event_half, hex(value))
+        pid_events[trace_type][key][base + 0] = value & 0xFF
+        pid_events[trace_type][key][base + 1] = (value >> 8) & 0xFF
+        pid_events[trace_type][key][base + 2] = (value >> 16) & 0xFF
+        pid_events[trace_type][key][base + 3] = (value >> 24) & 0xFF
 
     logger.debug("Found labels: %s", pid_events)
     return pid_events, trace_modes, events_module
@@ -738,6 +717,12 @@ def lookup_event_name_by_type(trace_type, code, events_module):
         return enum_class(code).name
     except ValueError:
         pass
+    # AIE4 has no separate MemEvent enum; mem trace uses CoreEvent codes
+    if trace_type == PacketType.MEM:
+        try:
+            return events_module.CoreEvent(code).name
+        except ValueError:
+            pass
     return "Unknown"
 
 
