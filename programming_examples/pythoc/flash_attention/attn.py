@@ -1,7 +1,7 @@
 from aie.iron.pythoc import aie_kernel
 
 from pythoc import ptr, i16, i32, i64, f32, bf16, void
-from pythoc.aie import ACC2048_accfloat_add_conf, I512_I512_ACC1024_bf_mac_conf, I512_I512_ACC1024_bf_mul_conf, I512_I512_ACC1024_bf_negmul_conf, acc_extract, acc_grow, aie_vector, broadcast, getExpBf16, load_v, set_ctrl_reg, store_v, v32accfloat_to_v32bf16, vector_add, vector_blend, vector_cast, vector_extract, vector_insert, vector_mul, vector_sub, vmax_ltbf16, zeros
+from pythoc.aie import ACC2048_accfloat_add_conf, I512_I512_ACC1024_bf_mac_conf, I512_I512_ACC1024_bf_mul_conf, I512_I512_ACC1024_bf_negmul_conf, acc_extract, acc_grow, aie_vector, broadcast, getExpBf16, load_v, set_ctrl_reg, store_v, v32accfloat_to_v32bf16, v32bf16_to_v32accfloat, vector_add, vector_blend, vector_cast, vector_extract, vector_insert, vector_mul, vector_sub, vmax_ltbf16, zeros
 
 
 @aie_kernel
@@ -196,6 +196,31 @@ def add_gp_g_pythoc(gp: ptr[bf16, True], g: ptr[bf16, True]) -> void:
 		store_v(p_g, out_vec)
 		p_gp = p_gp + vec_size
 		p_g = p_g + vec_size
+		i = i + 1
+
+
+@aie_kernel
+def accum_sp_r_s_pythoc(sp: ptr[bf16, True], r: ptr[bf16, True], s: ptr[bf16, True]) -> void:
+	vec_size: i32 = 32
+	iterations: i32 = 2
+	conf: i32 = 60
+	p_sp: ptr[bf16] = sp
+	p_r: ptr[bf16] = r
+	p_s: ptr[bf16] = s
+	set_ctrl_reg(1, 12)
+
+	i: i32 = 0
+	while i < iterations:
+		sp_vec: aie_vector[bf16, 32] = load_v(p_sp, 32)
+		r_vec: aie_vector[bf16, 32] = load_v(p_r, 32)
+		s_vec: aie_vector[bf16, 32] = load_v(p_s, 32)
+		s_acc: aie_vector[f32, 32] = v32bf16_to_v32accfloat(s_vec)
+		out_lo: aie_vector[f32, 32] = I512_I512_ACC1024_bf_mac_conf(r_vec, sp_vec, s_acc, conf)
+		out_vec: aie_vector[bf16, 32] = v32accfloat_to_v32bf16(out_lo)
+		store_v(p_s, out_vec)
+		p_sp = p_sp + vec_size
+		p_r = p_r + vec_size
+		p_s = p_s + vec_size
 		i = i + 1
 
 
