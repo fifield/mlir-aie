@@ -1,0 +1,244 @@
+
+MEMORY
+{
+   program (RX) : ORIGIN = 0, LENGTH = 0x0020000
+   data (!RX) : ORIGIN = 0x7E280, LENGTH = 0x1D80
+}
+ENTRY(__start)
+SECTIONS
+{
+  . = 0x0;
+  .text : {
+     /* the __start symbol has to come at address zero. */
+     *crt0.o(.text*)
+     _ctors_start = .;
+     _init_array_start = .;
+     KEEP(SORT(*.init_array))
+     _ctors_end = .;
+     _init_array_end = .;
+     _dtors_start = .;
+     _dtors_end = .;
+     *(.text*)
+  } > program
+  .data : {
+     *(.data*)
+     *(.rodata*)
+  } > data
+  .comment : {
+     *(.comment*)
+  }
+  .symtab : {
+     *(.symtab)
+  }
+  .shstrtab : {
+     *(.shstrtab)
+  }
+  .strtab : {
+     *(.strtab)
+  }
+  .stack_sizes : {
+     *(.stack_sizes)
+  }
+
+. = 0x70000;
+_sp_start_value_DM_stack = .;
+. += 0x400; /* stack */
+. = 0x40400;
+qk_seg0_s0_q2 = .;
+. += 0x2000;
+. = 0x44000;
+q_seg0_s0_q2 = .;
+. += 0x2000;
+. = 0x48000;
+v_seg0_s0_q2 = .;
+. += 0x2000;
+. = 0x4C000;
+g_seg0_s0_q2 = .;
+. += 0x2000;
+. = 0x46000;
+gp_seg0_s0_q2 = .;
+. += 0x2000;
+. = 0x4E000;
+up_seg0_s0_q2 = .;
+. += 0x80;
+. = 0x42400;
+sp_seg0_s0_q2 = .;
+. += 0x80;
+. = 0x4E080;
+s_seg0_s0_q2 = .;
+. += 0x80;
+. = 0x42480;
+r_seg0_s0_q2 = .;
+. += 0x80;
+. = 0x4A000;
+merged_gp_seg0_q2 = .;
+. += 0x2000;
+. = 0x4E100;
+merged_up_seg0_q2 = .;
+. += 0x80;
+. = 0x42500;
+merged_sp_seg0_q2 = .;
+. += 0x80;
+. = 0x4E180;
+prev_up_seg0_q2 = .;
+. += 0x80;
+. = 0x42580;
+r_cascade_seg0_q2 = .;
+. += 0x80;
+. = 0x4E200;
+r_local_seg0_q2 = .;
+. += 0x80;
+. = 0x42600;
+tmp_sp_seg0_q2 = .;
+. += 0x80;
+. = 0x50400;
+qk_seg0_s1_q1 = .;
+. += 0x2000;
+. = 0x54000;
+q_seg0_s1_q1 = .;
+. += 0x2000;
+. = 0x58000;
+v_seg0_s1_q1 = .;
+. += 0x2000;
+. = 0x5C000;
+g_seg0_s1_q1 = .;
+. += 0x2000;
+. = 0x56000;
+gp_seg0_s1_q1 = .;
+. += 0x2000;
+. = 0x5E000;
+up_seg0_s1_q1 = .;
+. += 0x80;
+. = 0x52400;
+sp_seg0_s1_q1 = .;
+. += 0x80;
+. = 0x5E080;
+s_seg0_s1_q1 = .;
+. += 0x80;
+. = 0x52480;
+r_seg0_s1_q1 = .;
+. += 0x80;
+. = 0x5A000;
+merged_gp_seg0_s1_q1 = .;
+. += 0x2000;
+. = 0x5E100;
+merged_up_seg0_s1_q1 = .;
+. += 0x80;
+. = 0x52500;
+merged_sp_seg0_s1_q1 = .;
+. += 0x80;
+. = 0x5E180;
+prev_up_seg0_s1_q1 = .;
+. += 0x80;
+. = 0x52580;
+r_cascade_seg0_s1_q1 = .;
+. += 0x80;
+. = 0x5E200;
+r_local_seg0_s1_q1 = .;
+. += 0x80;
+. = 0x52600;
+tmp_sp_seg0_s1_q1 = .;
+. += 0x80;
+. = 0x60400;
+qk_seg0_s2_q2 = .;
+. += 0x2000;
+. = 0x64000;
+q_seg0_s2_q2 = .;
+. += 0x2000;
+. = 0x68000;
+v_seg0_s2_q2 = .;
+. += 0x2000;
+. = 0x6C000;
+g_seg0_s2_q2 = .;
+. += 0x2000;
+. = 0x66000;
+gp_seg0_s2_q2 = .;
+. += 0x2000;
+. = 0x6E000;
+up_seg0_s2_q2 = .;
+. += 0x80;
+. = 0x62400;
+sp_seg0_s2_q2 = .;
+. += 0x80;
+. = 0x6E080;
+s_seg0_s2_q2 = .;
+. += 0x80;
+. = 0x62480;
+r_seg0_s2_q2 = .;
+. += 0x80;
+. = 0x6A000;
+merged_gp_seg0_s2_q2 = .;
+. += 0x2000;
+. = 0x6E100;
+merged_up_seg0_s2_q2 = .;
+. += 0x80;
+. = 0x62500;
+merged_sp_seg0_s2_q2 = .;
+. += 0x80;
+. = 0x6E180;
+prev_up_seg0_s2_q2 = .;
+. += 0x80;
+. = 0x62580;
+r_cascade_seg0_s2_q2 = .;
+. += 0x80;
+. = 0x6E200;
+r_local_seg0_s2_q2 = .;
+. += 0x80;
+. = 0x62600;
+tmp_sp_seg0_s2_q2 = .;
+. += 0x80;
+. = 0x70400;
+qk_seg0_s1_q2 = .;
+. += 0x2000;
+. = 0x74000;
+q_seg0_s1_q2 = .;
+. += 0x2000;
+. = 0x78000;
+v_seg0_s1_q2 = .;
+. += 0x2000;
+. = 0x7C000;
+g_seg0_s1_q2 = .;
+. += 0x2000;
+. = 0x76000;
+gp_seg0_s1_q2 = .;
+. += 0x2000;
+. = 0x7E000;
+up_seg0_s1_q2 = .;
+. += 0x80;
+. = 0x72400;
+sp_seg0_s1_q2 = .;
+. += 0x80;
+. = 0x7E080;
+s_seg0_s1_q2 = .;
+. += 0x80;
+. = 0x72480;
+r_seg0_s1_q2 = .;
+. += 0x80;
+. = 0x7A000;
+merged_gp_seg0_s1_q2 = .;
+. += 0x2000;
+. = 0x7E100;
+merged_up_seg0_s1_q2 = .;
+. += 0x80;
+. = 0x72500;
+merged_sp_seg0_s1_q2 = .;
+. += 0x80;
+. = 0x7E180;
+prev_up_seg0_s1_q2 = .;
+. += 0x80;
+. = 0x72580;
+r_cascade_seg0_s1_q2 = .;
+. += 0x80;
+. = 0x7E200;
+r_local_seg0_s1_q2 = .;
+. += 0x80;
+. = 0x72600;
+tmp_sp_seg0_s1_q2 = .;
+. += 0x80;
+  .bss : { *(.bss*) } > data
+}
+INPUT(/work/npu-dev/mlir-aie/programming_examples/pythoc/flash_attention/flash_attention_kernel_fusion_build/zero_fill_gp_bf16_pythoc.o)
+INPUT(/work/npu-dev/mlir-aie/programming_examples/pythoc/flash_attention/flash_attention_kernel_fusion_build/zero_fill_sp_bf16_pythoc.o)
+INPUT(/work/npu-dev/mlir-aie/programming_examples/pythoc/flash_attention/flash_attention_kernel_fusion_build/attn.o)
+INPUT(/work/npu-dev/mlir-aie/programming_examples/pythoc/flash_attention/flash_attention_kernel_fusion_build/zero_fill_g_bf16_pythoc.o)
+PROVIDE(main = core_2_3);
