@@ -86,6 +86,7 @@ from attn import (
     copy_tile_pythoc,
     div_gp_sp_pythoc,
     exp_up_minus_u_pythoc,
+    matmul_a_b_bf16_pythoc,
     matmul_g_b_bf16_pythoc,
     maximum_up_u_bf16_pythoc,
     mul_r_gp_pythoc,
@@ -443,6 +444,12 @@ def declare_kernels(
         target_arch="aie2p",
         extra_globals=FLASH_ATTN_KERNEL_GLOBALS,
     )
+    matmul_a_b_kernel = PythocKernel(
+        matmul_a_b_bf16_pythoc,
+        [q_ty, qk_ty, g_flat_ty],
+        target_arch="aie2p",
+        extra_globals=FLASH_ATTN_KERNEL_GLOBALS,
+    )
     matmul_g_b_kernel = PythocKernel(
         matmul_g_b_bf16_pythoc,
         [g_flat_ty, v_ty, gp_ty],
@@ -494,7 +501,9 @@ def declare_kernels(
             link_with=copy_tile_kernel.object_file_name,
         ),
         matmul_a_b=external_func(
-            "matmul_a_b_bf16", inputs=[q_ty, qk_ty, g_flat_ty], link_with=KERNEL_OBJECT
+            "matmul_a_b_bf16_pythoc",
+            inputs=[q_ty, qk_ty, g_flat_ty],
+            link_with=matmul_a_b_kernel.object_file_name,
         ),
         fused_softmax=external_func(
             "fused_softmax", inputs=[g_flat_ty, row_ty, row_ty, row_ty], link_with=KERNEL_OBJECT
