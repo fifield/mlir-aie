@@ -78,10 +78,11 @@ from aie.iron.pythoc import PythocKernel
 from aie.ir import AffineDimExpr, AffineMap, MemRefType
 from aie.utils import DefaultNPURuntime, NPUKernel
 from aie.utils.compile import compile_mlir_module
-from pythoc.aie import vector_blend, vector_cast
+from pythoc.aie import vector_blend, vector_cast, vector_insert, vector_mul
 
 from attn import (
     copy_tile_pythoc,
+    mul_r_gp_pythoc,
     neg_inf_fill_up_bf16_pythoc,
     vector_copy_32elems_pythoc,
     zero_fill_g_bf16_pythoc,
@@ -93,6 +94,8 @@ from attn import (
 FLASH_ATTN_KERNEL_GLOBALS = {
     "vector_blend": vector_blend,
     "vector_cast": vector_cast,
+    "vector_insert": vector_insert,
+    "vector_mul": vector_mul,
 }
 
 
@@ -379,6 +382,12 @@ def declare_kernels(
         [np.int32, row_ty, row_ty],
         target_arch="aie2p",
     )
+    mul_r_gp_kernel = PythocKernel(
+        mul_r_gp_pythoc,
+        [row_ty, gp_ty],
+        target_arch="aie2p",
+        extra_globals=FLASH_ATTN_KERNEL_GLOBALS,
+    )
     zero_fill_g_kernel = PythocKernel(
         zero_fill_g_bf16_pythoc,
         [g_flat_ty],
@@ -429,7 +438,11 @@ def declare_kernels(
         fused_softmax=external_func(
             "fused_softmax", inputs=[g_flat_ty, row_ty, row_ty, row_ty], link_with=KERNEL_OBJECT
         ),
-        mul_r_gp=external_func("mul_r_gp", inputs=[row_ty, gp_ty], link_with=KERNEL_OBJECT),
+        mul_r_gp=external_func(
+            "mul_r_gp_pythoc",
+            inputs=[row_ty, gp_ty],
+            link_with=mul_r_gp_kernel.object_file_name,
+        ),
         matmul_g_b=external_func(
             "matmul_g_b_bf16", inputs=[g_flat_ty, v_ty, gp_ty], link_with=KERNEL_OBJECT
         ),
