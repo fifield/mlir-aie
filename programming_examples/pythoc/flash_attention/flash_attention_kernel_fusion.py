@@ -78,10 +78,11 @@ from aie.iron.pythoc import PythocKernel
 from aie.ir import AffineDimExpr, AffineMap, MemRefType
 from aie.utils import DefaultNPURuntime, NPUKernel
 from aie.utils.compile import compile_mlir_module
-from pythoc.aie import vector_blend, vector_cast, vector_insert, vector_mul
+from pythoc.aie import getExpBf16, vector_blend, vector_cast, vector_insert, vector_mul, vector_sub
 
 from attn import (
     copy_tile_pythoc,
+    exp_up_minus_u_pythoc,
     mul_r_gp_pythoc,
     neg_inf_fill_up_bf16_pythoc,
     vector_copy_32elems_pythoc,
@@ -92,10 +93,12 @@ from attn import (
 
 
 FLASH_ATTN_KERNEL_GLOBALS = {
+    "getExpBf16": getExpBf16,
     "vector_blend": vector_blend,
     "vector_cast": vector_cast,
     "vector_insert": vector_insert,
     "vector_mul": vector_mul,
+    "vector_sub": vector_sub,
 }
 
 
@@ -388,6 +391,12 @@ def declare_kernels(
         target_arch="aie2p",
         extra_globals=FLASH_ATTN_KERNEL_GLOBALS,
     )
+    exp_up_minus_u_kernel = PythocKernel(
+        exp_up_minus_u_pythoc,
+        [row_ty, row_ty, row_ty],
+        target_arch="aie2p",
+        extra_globals=FLASH_ATTN_KERNEL_GLOBALS,
+    )
     zero_fill_g_kernel = PythocKernel(
         zero_fill_g_bf16_pythoc,
         [g_flat_ty],
@@ -458,7 +467,9 @@ def declare_kernels(
             "maximum_up_u_bf16", inputs=[row_ty, row_ty], link_with=KERNEL_OBJECT
         ),
         exp_up_minus_u=external_func(
-            "exp_up_minus_u", inputs=[row_ty, row_ty, row_ty], link_with=KERNEL_OBJECT
+            "exp_up_minus_u_pythoc",
+            inputs=[row_ty, row_ty, row_ty],
+            link_with=exp_up_minus_u_kernel.object_file_name,
         ),
         add_gp_g=external_func("add_gp_g", inputs=[gp_ty, gp_ty], link_with=KERNEL_OBJECT),
         div_gp_sp=external_func("div_gp_sp", inputs=[row_ty, gp_ty], link_with=KERNEL_OBJECT),

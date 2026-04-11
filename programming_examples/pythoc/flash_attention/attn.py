@@ -1,7 +1,7 @@
 from aie.iron.pythoc import aie_kernel
 
 from pythoc import ptr, i32, bf16, void
-from pythoc.aie import aie_vector, broadcast, load_v, store_v, vector_blend, vector_cast, vector_insert, vector_mul, zeros
+from pythoc.aie import aie_vector, broadcast, getExpBf16, load_v, store_v, vector_blend, vector_cast, vector_insert, vector_mul, vector_sub, zeros
 
 
 @aie_kernel
@@ -137,6 +137,29 @@ def mul_r_gp_pythoc(r: ptr[bf16, True], gp: ptr[bf16, True]) -> void:
 
 			half = half + 1
 		rb = rb + 1
+
+
+@aie_kernel
+def exp_up_minus_u_pythoc(up: ptr[bf16, True], u: ptr[bf16, True], r: ptr[bf16, True]) -> void:
+	vec_size: i32 = 16
+	iterations: i32 = 4
+	log2e_vec: aie_vector[bf16, 16] = broadcast(bf16, 16, 0.18033688011112042)
+	p_up: ptr[bf16] = up
+	p_u: ptr[bf16] = u
+	p_r: ptr[bf16] = r
+
+	i: i32 = 0
+	while i < iterations:
+		up_vec: aie_vector[bf16, 16] = load_v(p_up, 16)
+		u_vec: aie_vector[bf16, 16] = load_v(p_u, 16)
+		diff: aie_vector[bf16, 16] = vector_sub(up_vec, u_vec)
+		scaled: aie_vector[bf16, 16] = vector_mul(diff, log2e_vec)
+		exp_vec: aie_vector[bf16, 16] = getExpBf16(scaled)
+		store_v(p_r, exp_vec)
+		p_up = p_up + vec_size
+		p_u = p_u + vec_size
+		p_r = p_r + vec_size
+		i = i + 1
 
 
 
