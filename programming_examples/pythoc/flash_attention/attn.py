@@ -1,7 +1,7 @@
 from aie.iron.pythoc import aie_kernel
 
 from pythoc import ptr, i32, bf16, void
-from pythoc.aie import aie_vector, broadcast, load_v, store_v, vector_blend, vector_cast, zeros
+from pythoc.aie import aie_vector, broadcast, load_v, store_v, vector_blend, vector_cast, vector_insert, vector_mul, zeros
 
 
 @aie_kernel
@@ -100,6 +100,43 @@ def copy_tile_pythoc(src: ptr[bf16, True], dst: ptr[bf16, True]) -> void:
 		p_src = p_src + vec_size
 		p_dst = p_dst + vec_size
 		i = i + 1
+
+
+@aie_kernel
+def mul_r_gp_pythoc(r: ptr[bf16, True], gp: ptr[bf16, True]) -> void:
+	vec_size: i32 = 32
+	block_size: i32 = 64
+	rows_per_block: i32 = 8
+	col_blocks: i32 = 8
+	row_blocks: i32 = 8
+	block_stride: i32 = 512
+
+	rb: i32 = 0
+	while rb < row_blocks:
+		half: i32 = 0
+		while half < 2:
+			row_start: i32 = rb * rows_per_block + half * 4
+			p_r: ptr[bf16] = r + row_start
+			r_vec: aie_vector[bf16, 32] = broadcast(bf16, 32, p_r[0])
+			r1: aie_vector[bf16, 8] = broadcast(bf16, 8, p_r[1])
+			r2: aie_vector[bf16, 8] = broadcast(bf16, 8, p_r[2])
+			r3: aie_vector[bf16, 8] = broadcast(bf16, 8, p_r[3])
+			r_vec = vector_insert(r_vec, r1, 8)
+			r_vec = vector_insert(r_vec, r2, 16)
+			r_vec = vector_insert(r_vec, r3, 24)
+
+			base: i32 = rb * block_size + half * vec_size
+			cb: i32 = 0
+			while cb < col_blocks:
+				off: i32 = base + cb * block_stride
+				p_gp: ptr[bf16] = gp + off
+				v: aie_vector[bf16, 32] = load_v(p_gp, 32)
+				v_out: aie_vector[bf16, 32] = vector_mul(v, r_vec)
+				store_v(p_gp, v_out)
+				cb = cb + 1
+
+			half = half + 1
+		rb = rb + 1
 
 
 
