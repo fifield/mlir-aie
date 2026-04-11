@@ -78,7 +78,7 @@ from aie.iron.pythoc import PythocKernel
 from aie.ir import AffineDimExpr, AffineMap, MemRefType
 from aie.utils import DefaultNPURuntime, NPUKernel
 from aie.utils.compile import compile_mlir_module
-from pythoc.aie import ACC2048_accfloat_add_conf, I512_I512_ACC1024_bf_mac_conf, I512_I512_ACC1024_bf_mul_conf, I512_I512_ACC1024_bf_negmul_conf, acc_extract, acc_grow, getExpBf16, set_ctrl_reg, v32accfloat_to_v32bf16, v32bf16_to_v32accfloat, vector_add, vector_blend, vector_cast, vector_extract, vector_insert, vector_mul, vector_sub, vmax_ltbf16
+from pythoc.aie import ACC2048_accfloat_add_conf, BFP576_BFP576_ACC2048_mac_conf, I1024_I1024_ACC2048_bf_mul_conf, I512_I512_ACC1024_bf_mac_conf, I512_I512_ACC1024_bf_mul_conf, I512_I512_ACC1024_bf_negmul_conf, acc_extract, acc_grow, concat, getExpBf16, set_ctrl_reg, v32accfloat_to_v32bf16, v32bf16_to_v32accfloat, v64accfloat_to_v64bfp16ebs8, vector_add, vector_blend, vector_cast, vector_extract, vector_insert, vector_mul, vector_sub, vmax_ltbf16, vshuffle
 
 from attn import (
     add_gp_g_pythoc,
@@ -86,6 +86,7 @@ from attn import (
     copy_tile_pythoc,
     div_gp_sp_pythoc,
     exp_up_minus_u_pythoc,
+    matmul_g_b_bf16_pythoc,
     maximum_up_u_bf16_pythoc,
     mul_r_gp_pythoc,
     neg_inf_fill_up_bf16_pythoc,
@@ -98,15 +99,19 @@ from attn import (
 
 FLASH_ATTN_KERNEL_GLOBALS = {
     "ACC2048_accfloat_add_conf": ACC2048_accfloat_add_conf,
+    "BFP576_BFP576_ACC2048_mac_conf": BFP576_BFP576_ACC2048_mac_conf,
+    "I1024_I1024_ACC2048_bf_mul_conf": I1024_I1024_ACC2048_bf_mul_conf,
     "I512_I512_ACC1024_bf_mac_conf": I512_I512_ACC1024_bf_mac_conf,
     "I512_I512_ACC1024_bf_mul_conf": I512_I512_ACC1024_bf_mul_conf,
     "I512_I512_ACC1024_bf_negmul_conf": I512_I512_ACC1024_bf_negmul_conf,
     "acc_extract": acc_extract,
     "acc_grow": acc_grow,
+    "concat": concat,
     "getExpBf16": getExpBf16,
     "set_ctrl_reg": set_ctrl_reg,
     "v32accfloat_to_v32bf16": v32accfloat_to_v32bf16,
     "v32bf16_to_v32accfloat": v32bf16_to_v32accfloat,
+    "v64accfloat_to_v64bfp16ebs8": v64accfloat_to_v64bfp16ebs8,
     "vector_add": vector_add,
     "vector_blend": vector_blend,
     "vector_cast": vector_cast,
@@ -115,6 +120,7 @@ FLASH_ATTN_KERNEL_GLOBALS = {
     "vector_mul": vector_mul,
     "vector_sub": vector_sub,
     "vmax_ltbf16": vmax_ltbf16,
+    "vshuffle": vshuffle,
 }
 
 
@@ -437,6 +443,12 @@ def declare_kernels(
         target_arch="aie2p",
         extra_globals=FLASH_ATTN_KERNEL_GLOBALS,
     )
+    matmul_g_b_kernel = PythocKernel(
+        matmul_g_b_bf16_pythoc,
+        [g_flat_ty, v_ty, gp_ty],
+        target_arch="aie2p",
+        extra_globals=FLASH_ATTN_KERNEL_GLOBALS,
+    )
     zero_fill_g_kernel = PythocKernel(
         zero_fill_g_bf16_pythoc,
         [g_flat_ty],
@@ -493,7 +505,9 @@ def declare_kernels(
             link_with=mul_r_gp_kernel.object_file_name,
         ),
         matmul_g_b=external_func(
-            "matmul_g_b_bf16", inputs=[g_flat_ty, v_ty, gp_ty], link_with=KERNEL_OBJECT
+            "matmul_g_b_bf16_pythoc",
+            inputs=[g_flat_ty, v_ty, gp_ty],
+            link_with=matmul_g_b_kernel.object_file_name,
         ),
         accum_sp_r_s=external_func(
             "accum_sp_r_s_pythoc",
