@@ -16,7 +16,7 @@
           }
         ],
         "file_name": "/work/npu-dev/mlir-aie/programming_examples/pythoc/flash_attention/flash_attention_kernel_fusion_build/main.pdi",
-        "uuid": "aa2377c9-d103-455a-af4e-f2d6b7526267"
+        "uuid": "00bc041b-adbb-4730-af75-bea4e6529c40"
       }
     ],
     "inference_fingerprint": "23423",

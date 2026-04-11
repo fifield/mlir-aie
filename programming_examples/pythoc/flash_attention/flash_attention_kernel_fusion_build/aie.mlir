@@ -4,17 +4,17 @@ module {
     %K = aie.external_buffer {sym_name = "K"} : memref<2x512x64xbf16>
     %V = aie.external_buffer {sym_name = "V"} : memref<2x512x64xbf16>
     %Out = aie.external_buffer {sym_name = "Out"} : memref<2x512x64xbf16>
-    func.func private @zero_fill_g_bf16_pythoc(memref<4096xbf16>) attributes {link_with = "/tmp/pythoc_iron_nsazey6l/zero_fill_g_bf16_pythoc.o"}
-    func.func private @zero_fill_gp_bf16_pythoc(memref<64x64xbf16>) attributes {link_with = "/tmp/pythoc_iron_hlxqhxap/zero_fill_gp_bf16_pythoc.o"}
-    func.func private @zero_fill_sp_bf16_pythoc(memref<64x1xbf16>) attributes {link_with = "/tmp/pythoc_iron_0nyt73b1/zero_fill_sp_bf16_pythoc.o"}
-    func.func private @neg_inf_fill_up_bf16(memref<64x1xbf16>) attributes {link_with = "attn.o"}
-    func.func private @copy_tile(memref<64x64xbf16>, memref<64x64xbf16>) attributes {link_with = "attn.o"}
+    func.func private @zero_fill_g_bf16_pythoc(memref<4096xbf16>) attributes {link_with = "/tmp/pythoc_iron_9dxibvue/zero_fill_g_bf16_pythoc.o"}
+    func.func private @zero_fill_gp_bf16_pythoc(memref<64x64xbf16>) attributes {link_with = "/tmp/pythoc_iron_tf76whxs/zero_fill_gp_bf16_pythoc.o"}
+    func.func private @zero_fill_sp_bf16_pythoc(memref<64x1xbf16>) attributes {link_with = "/tmp/pythoc_iron_fvmho0qs/zero_fill_sp_bf16_pythoc.o"}
+    func.func private @neg_inf_fill_up_bf16_pythoc(memref<64x1xbf16>) attributes {link_with = "/tmp/pythoc_iron_gvq3wbc0/neg_inf_fill_up_bf16_pythoc.o"}
+    func.func private @copy_tile_pythoc(memref<64x64xbf16>, memref<64x64xbf16>) attributes {link_with = "/tmp/pythoc_iron_w4qe1xyv/copy_tile_pythoc.o"}
     func.func private @matmul_a_b_bf16(memref<64x64xbf16>, memref<64x64xbf16>, memref<4096xbf16>) attributes {link_with = "attn.o"}
     func.func private @fused_softmax(memref<4096xbf16>, memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) attributes {link_with = "attn.o"}
     func.func private @mul_r_gp(memref<64x1xbf16>, memref<64x64xbf16>) attributes {link_with = "attn.o"}
     func.func private @matmul_g_b_bf16(memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) attributes {link_with = "attn.o"}
     func.func private @accum_sp_r_s(memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) attributes {link_with = "attn.o"}
-    func.func private @vector_copy_32elems(i32, memref<64x1xbf16>, memref<64x1xbf16>) attributes {link_with = "attn.o"}
+    func.func private @vector_copy_32elems_pythoc(i32, memref<64x1xbf16>, memref<64x1xbf16>) attributes {link_with = "/tmp/pythoc_iron_m04puyht/vector_copy_32elems_pythoc.o"}
     func.func private @maximum_up_u_bf16(memref<64x1xbf16>, memref<64x1xbf16>) attributes {link_with = "attn.o"}
     func.func private @exp_up_minus_u(memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) attributes {link_with = "attn.o"}
     func.func private @add_gp_g(memref<64x64xbf16>, memref<64x64xbf16>) attributes {link_with = "attn.o"}
@@ -1278,9 +1278,9 @@ module {
         aie.use_lock(%lock_0_2_40, AcquireGreaterEqual, 1)
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg0_s0_q0) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg0_s0_q0) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg0_s0_q0) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg0_s0_q0) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_0_2_42, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg0_s0_q0, %q_seg0_s0_q0) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg0_s0_q0, %q_seg0_s0_q0) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_0_2_41, Release, 1)
         aie.use_lock(%lock_0_2_42, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_0_2_41, Release, 1)
@@ -1302,7 +1302,7 @@ module {
           func.call @mul_r_gp(%r_seg0_s0_q0, %gp_seg0_s0_q0) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_163, %v_seg0_s0_q0, %gp_seg0_s0_q0) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg0_s0_q0, %r_seg0_s0_q0, %s_seg0_s0_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg0_s0_q0, %sp_seg0_s0_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg0_s0_q0, %sp_seg0_s0_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_0_2_43, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %merged_gp_seg0_q0 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -1332,7 +1332,7 @@ module {
           %0 = aie.get_cascade() : vector<32xbf16>
           vector.transfer_write %0, %subview[%c0] {in_bounds = [true]} : vector<32xbf16>, memref<32xbf16, strided<[1], offset: ?>>
         }
-        func.call @vector_copy_32elems(%c0_i32, %up_seg0_s0_q0, %prev_up_seg0_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %up_seg0_s0_q0, %prev_up_seg0_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @maximum_up_u_bf16(%merged_up_seg0_q0, %up_seg0_s0_q0) : (memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%merged_up_seg0_q0, %up_seg0_s0_q0, %r_cascade_seg0_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%prev_up_seg0_q0, %up_seg0_s0_q0, %r_local_seg0_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
@@ -1342,7 +1342,7 @@ module {
         func.call @zero_fill_sp_bf16_pythoc(%tmp_sp_seg0_q0) : (memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%merged_sp_seg0_q0, %r_cascade_seg0_q0, %tmp_sp_seg0_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%sp_seg0_s0_q0, %r_local_seg0_q0, %tmp_sp_seg0_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-        func.call @vector_copy_32elems(%c0_i32, %tmp_sp_seg0_q0, %merged_sp_seg0_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %tmp_sp_seg0_q0, %merged_sp_seg0_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @div_gp_sp(%merged_sp_seg0_q0, %merged_gp_seg0_q0) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_0_2, Release, 1)
       }
@@ -1375,9 +1375,9 @@ module {
       scf.for %arg0 = %c0_152 to %c9223372036854775807 step %c1 {
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg0_s1_q0) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg0_s1_q0) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg0_s1_q0) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg0_s1_q0) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_0_3_45, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg0_s1_q0, %q_seg0_s1_q0) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg0_s1_q0, %q_seg0_s1_q0) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_0_3, Release, 1)
         aie.use_lock(%lock_0_3_45, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_0_3, Release, 1)
@@ -1399,7 +1399,7 @@ module {
           func.call @mul_r_gp(%r_seg0_s1_q0, %gp_seg0_s1_q0) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_175, %v_seg0_s1_q0, %gp_seg0_s1_q0) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg0_s1_q0, %r_seg0_s1_q0, %s_seg0_s1_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg0_s1_q0, %sp_seg0_s1_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg0_s1_q0, %sp_seg0_s1_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_0_3_46, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %merged_gp_seg0_s1_q0 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -1429,7 +1429,7 @@ module {
           %0 = aie.get_cascade() : vector<32xbf16>
           vector.transfer_write %0, %subview[%c0] {in_bounds = [true]} : vector<32xbf16>, memref<32xbf16, strided<[1], offset: ?>>
         }
-        func.call @vector_copy_32elems(%c0_i32, %up_seg0_s1_q0, %prev_up_seg0_s1_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %up_seg0_s1_q0, %prev_up_seg0_s1_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @maximum_up_u_bf16(%merged_up_seg0_s1_q0, %up_seg0_s1_q0) : (memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%merged_up_seg0_s1_q0, %up_seg0_s1_q0, %r_cascade_seg0_s1_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%prev_up_seg0_s1_q0, %up_seg0_s1_q0, %r_local_seg0_s1_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
@@ -1439,7 +1439,7 @@ module {
         func.call @zero_fill_sp_bf16_pythoc(%tmp_sp_seg0_s1_q0) : (memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%merged_sp_seg0_s1_q0, %r_cascade_seg0_s1_q0, %tmp_sp_seg0_s1_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%sp_seg0_s1_q0, %r_local_seg0_s1_q0, %tmp_sp_seg0_s1_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-        func.call @vector_copy_32elems(%c0_i32, %tmp_sp_seg0_s1_q0, %merged_sp_seg0_s1_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %tmp_sp_seg0_s1_q0, %merged_sp_seg0_s1_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         %collapse_shape_163 = memref.collapse_shape %merged_gp_seg0_s1_q0 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
         %c0_164 = arith.constant 0 : index
         %c4096_165 = arith.constant 4096 : index
@@ -1497,9 +1497,9 @@ module {
       scf.for %arg0 = %c0_152 to %c9223372036854775807 step %c1 {
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg0_s2_q0) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg0_s2_q0) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg0_s2_q0) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg0_s2_q0) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_0_4_48, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg0_s2_q0, %q_seg0_s2_q0) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg0_s2_q0, %q_seg0_s2_q0) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_0_4, Release, 1)
         aie.use_lock(%lock_0_4_48, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_0_4, Release, 1)
@@ -1521,7 +1521,7 @@ module {
           func.call @mul_r_gp(%r_seg0_s2_q0, %gp_seg0_s2_q0) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_175, %v_seg0_s2_q0, %gp_seg0_s2_q0) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg0_s2_q0, %r_seg0_s2_q0, %s_seg0_s2_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg0_s2_q0, %sp_seg0_s2_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg0_s2_q0, %sp_seg0_s2_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_0_4_49, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %merged_gp_seg0_s2_q0 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -1551,7 +1551,7 @@ module {
           %0 = aie.get_cascade() : vector<32xbf16>
           vector.transfer_write %0, %subview[%c0] {in_bounds = [true]} : vector<32xbf16>, memref<32xbf16, strided<[1], offset: ?>>
         }
-        func.call @vector_copy_32elems(%c0_i32, %up_seg0_s2_q0, %prev_up_seg0_s2_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %up_seg0_s2_q0, %prev_up_seg0_s2_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @maximum_up_u_bf16(%merged_up_seg0_s2_q0, %up_seg0_s2_q0) : (memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%merged_up_seg0_s2_q0, %up_seg0_s2_q0, %r_cascade_seg0_s2_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%prev_up_seg0_s2_q0, %up_seg0_s2_q0, %r_local_seg0_s2_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
@@ -1561,7 +1561,7 @@ module {
         func.call @zero_fill_sp_bf16_pythoc(%tmp_sp_seg0_s2_q0) : (memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%merged_sp_seg0_s2_q0, %r_cascade_seg0_s2_q0, %tmp_sp_seg0_s2_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%sp_seg0_s2_q0, %r_local_seg0_s2_q0, %tmp_sp_seg0_s2_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-        func.call @vector_copy_32elems(%c0_i32, %tmp_sp_seg0_s2_q0, %merged_sp_seg0_s2_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %tmp_sp_seg0_s2_q0, %merged_sp_seg0_s2_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         %collapse_shape_163 = memref.collapse_shape %merged_gp_seg0_s2_q0 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
         %c0_164 = arith.constant 0 : index
         %c4096_165 = arith.constant 4096 : index
@@ -1619,9 +1619,9 @@ module {
       scf.for %arg0 = %c0_152 to %c9223372036854775807 step %c1 {
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg0_s3_q0) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg0_s3_q0) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg0_s3_q0) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg0_s3_q0) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_0_5_51, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg0_s3_q0, %q_seg0_s3_q0) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg0_s3_q0, %q_seg0_s3_q0) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_0_5, Release, 1)
         aie.use_lock(%lock_0_5_51, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_0_5, Release, 1)
@@ -1643,7 +1643,7 @@ module {
           func.call @mul_r_gp(%r_seg0_s3_q0, %gp_seg0_s3_q0) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_163, %v_seg0_s3_q0, %gp_seg0_s3_q0) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg0_s3_q0, %r_seg0_s3_q0, %s_seg0_s3_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg0_s3_q0, %sp_seg0_s3_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg0_s3_q0, %sp_seg0_s3_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_0_5_52, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %gp_seg0_s3_q0 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -1711,11 +1711,11 @@ module {
         aie.use_lock(%lock_1_2_54, AcquireGreaterEqual, 1)
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg0_s0_q1) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg0_s0_q1) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg0_s0_q1) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg0_s0_q1) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_1_2_56, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_1_2_55, Release, 1)
         aie.use_lock(%lock_1_2_56, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg0_s0_q1, %q_seg0_s0_q1) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg0_s0_q1, %q_seg0_s0_q1) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_1_2_55, Release, 1)
         aie.use_lock(%lock_1_2_56, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_1_2_55, Release, 1)
@@ -1735,7 +1735,7 @@ module {
           func.call @mul_r_gp(%r_seg0_s0_q1, %gp_seg0_s0_q1) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_163, %v_seg0_s0_q1, %gp_seg0_s0_q1) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg0_s0_q1, %r_seg0_s0_q1, %s_seg0_s0_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg0_s0_q1, %sp_seg0_s0_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg0_s0_q1, %sp_seg0_s0_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_1_2_57, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %merged_gp_seg0_q1 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -1765,7 +1765,7 @@ module {
           %0 = aie.get_cascade() : vector<32xbf16>
           vector.transfer_write %0, %subview[%c0] {in_bounds = [true]} : vector<32xbf16>, memref<32xbf16, strided<[1], offset: ?>>
         }
-        func.call @vector_copy_32elems(%c0_i32, %up_seg0_s0_q1, %prev_up_seg0_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %up_seg0_s0_q1, %prev_up_seg0_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @maximum_up_u_bf16(%merged_up_seg0_q1, %up_seg0_s0_q1) : (memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%merged_up_seg0_q1, %up_seg0_s0_q1, %r_cascade_seg0_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%prev_up_seg0_q1, %up_seg0_s0_q1, %r_local_seg0_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
@@ -1775,7 +1775,7 @@ module {
         func.call @zero_fill_sp_bf16_pythoc(%tmp_sp_seg0_q1) : (memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%merged_sp_seg0_q1, %r_cascade_seg0_q1, %tmp_sp_seg0_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%sp_seg0_s0_q1, %r_local_seg0_q1, %tmp_sp_seg0_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-        func.call @vector_copy_32elems(%c0_i32, %tmp_sp_seg0_q1, %merged_sp_seg0_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %tmp_sp_seg0_q1, %merged_sp_seg0_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @div_gp_sp(%merged_sp_seg0_q1, %merged_gp_seg0_q1) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_1_2, Release, 1)
       }
@@ -1808,11 +1808,11 @@ module {
       scf.for %arg0 = %c0_152 to %c9223372036854775807 step %c1 {
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg0_s1_q1) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg0_s1_q1) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg0_s1_q1) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg0_s1_q1) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_1_3_59, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_1_3, Release, 1)
         aie.use_lock(%lock_1_3_59, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg0_s1_q1, %q_seg0_s1_q1) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg0_s1_q1, %q_seg0_s1_q1) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_1_3, Release, 1)
         aie.use_lock(%lock_1_3_59, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_1_3, Release, 1)
@@ -1832,7 +1832,7 @@ module {
           func.call @mul_r_gp(%r_seg0_s1_q1, %gp_seg0_s1_q1) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_175, %v_seg0_s1_q1, %gp_seg0_s1_q1) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg0_s1_q1, %r_seg0_s1_q1, %s_seg0_s1_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg0_s1_q1, %sp_seg0_s1_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg0_s1_q1, %sp_seg0_s1_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_1_3_60, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %merged_gp_seg0_s1_q1 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -1862,7 +1862,7 @@ module {
           %0 = aie.get_cascade() : vector<32xbf16>
           vector.transfer_write %0, %subview[%c0] {in_bounds = [true]} : vector<32xbf16>, memref<32xbf16, strided<[1], offset: ?>>
         }
-        func.call @vector_copy_32elems(%c0_i32, %up_seg0_s1_q1, %prev_up_seg0_s1_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %up_seg0_s1_q1, %prev_up_seg0_s1_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @maximum_up_u_bf16(%merged_up_seg0_s1_q1, %up_seg0_s1_q1) : (memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%merged_up_seg0_s1_q1, %up_seg0_s1_q1, %r_cascade_seg0_s1_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%prev_up_seg0_s1_q1, %up_seg0_s1_q1, %r_local_seg0_s1_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
@@ -1872,7 +1872,7 @@ module {
         func.call @zero_fill_sp_bf16_pythoc(%tmp_sp_seg0_s1_q1) : (memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%merged_sp_seg0_s1_q1, %r_cascade_seg0_s1_q1, %tmp_sp_seg0_s1_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%sp_seg0_s1_q1, %r_local_seg0_s1_q1, %tmp_sp_seg0_s1_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-        func.call @vector_copy_32elems(%c0_i32, %tmp_sp_seg0_s1_q1, %merged_sp_seg0_s1_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %tmp_sp_seg0_s1_q1, %merged_sp_seg0_s1_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         %collapse_shape_163 = memref.collapse_shape %merged_gp_seg0_s1_q1 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
         %c0_164 = arith.constant 0 : index
         %c4096_165 = arith.constant 4096 : index
@@ -1930,11 +1930,11 @@ module {
       scf.for %arg0 = %c0_152 to %c9223372036854775807 step %c1 {
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg0_s2_q1) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg0_s2_q1) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg0_s2_q1) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg0_s2_q1) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_1_4_62, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_1_4, Release, 1)
         aie.use_lock(%lock_1_4_62, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg0_s2_q1, %q_seg0_s2_q1) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg0_s2_q1, %q_seg0_s2_q1) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_1_4, Release, 1)
         aie.use_lock(%lock_1_4_62, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_1_4, Release, 1)
@@ -1954,7 +1954,7 @@ module {
           func.call @mul_r_gp(%r_seg0_s2_q1, %gp_seg0_s2_q1) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_175, %v_seg0_s2_q1, %gp_seg0_s2_q1) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg0_s2_q1, %r_seg0_s2_q1, %s_seg0_s2_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg0_s2_q1, %sp_seg0_s2_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg0_s2_q1, %sp_seg0_s2_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_1_4_63, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %merged_gp_seg0_s2_q1 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -1984,7 +1984,7 @@ module {
           %0 = aie.get_cascade() : vector<32xbf16>
           vector.transfer_write %0, %subview[%c0] {in_bounds = [true]} : vector<32xbf16>, memref<32xbf16, strided<[1], offset: ?>>
         }
-        func.call @vector_copy_32elems(%c0_i32, %up_seg0_s2_q1, %prev_up_seg0_s2_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %up_seg0_s2_q1, %prev_up_seg0_s2_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @maximum_up_u_bf16(%merged_up_seg0_s2_q1, %up_seg0_s2_q1) : (memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%merged_up_seg0_s2_q1, %up_seg0_s2_q1, %r_cascade_seg0_s2_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%prev_up_seg0_s2_q1, %up_seg0_s2_q1, %r_local_seg0_s2_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
@@ -1994,7 +1994,7 @@ module {
         func.call @zero_fill_sp_bf16_pythoc(%tmp_sp_seg0_s2_q1) : (memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%merged_sp_seg0_s2_q1, %r_cascade_seg0_s2_q1, %tmp_sp_seg0_s2_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%sp_seg0_s2_q1, %r_local_seg0_s2_q1, %tmp_sp_seg0_s2_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-        func.call @vector_copy_32elems(%c0_i32, %tmp_sp_seg0_s2_q1, %merged_sp_seg0_s2_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %tmp_sp_seg0_s2_q1, %merged_sp_seg0_s2_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         %collapse_shape_163 = memref.collapse_shape %merged_gp_seg0_s2_q1 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
         %c0_164 = arith.constant 0 : index
         %c4096_165 = arith.constant 4096 : index
@@ -2052,11 +2052,11 @@ module {
       scf.for %arg0 = %c0_152 to %c9223372036854775807 step %c1 {
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg0_s3_q1) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg0_s3_q1) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg0_s3_q1) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg0_s3_q1) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_1_5_65, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_1_5, Release, 1)
         aie.use_lock(%lock_1_5_65, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg0_s3_q1, %q_seg0_s3_q1) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg0_s3_q1, %q_seg0_s3_q1) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_1_5, Release, 1)
         aie.use_lock(%lock_1_5_65, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_1_5, Release, 1)
@@ -2076,7 +2076,7 @@ module {
           func.call @mul_r_gp(%r_seg0_s3_q1, %gp_seg0_s3_q1) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_163, %v_seg0_s3_q1, %gp_seg0_s3_q1) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg0_s3_q1, %r_seg0_s3_q1, %s_seg0_s3_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg0_s3_q1, %sp_seg0_s3_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg0_s3_q1, %sp_seg0_s3_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_1_5_66, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %gp_seg0_s3_q1 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -2144,13 +2144,13 @@ module {
         aie.use_lock(%lock_2_2_68, AcquireGreaterEqual, 1)
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg0_s0_q2) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg0_s0_q2) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg0_s0_q2) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg0_s0_q2) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_2_2_70, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_2_2_69, Release, 1)
         aie.use_lock(%lock_2_2_70, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_2_2_69, Release, 1)
         aie.use_lock(%lock_2_2_70, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg0_s0_q2, %q_seg0_s0_q2) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg0_s0_q2, %q_seg0_s0_q2) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_2_2_69, Release, 1)
         aie.use_lock(%lock_2_2_70, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_2_2_69, Release, 1)
@@ -2168,7 +2168,7 @@ module {
           func.call @mul_r_gp(%r_seg0_s0_q2, %gp_seg0_s0_q2) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_163, %v_seg0_s0_q2, %gp_seg0_s0_q2) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg0_s0_q2, %r_seg0_s0_q2, %s_seg0_s0_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg0_s0_q2, %sp_seg0_s0_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg0_s0_q2, %sp_seg0_s0_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_2_2_71, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %merged_gp_seg0_q2 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -2198,7 +2198,7 @@ module {
           %0 = aie.get_cascade() : vector<32xbf16>
           vector.transfer_write %0, %subview[%c0] {in_bounds = [true]} : vector<32xbf16>, memref<32xbf16, strided<[1], offset: ?>>
         }
-        func.call @vector_copy_32elems(%c0_i32, %up_seg0_s0_q2, %prev_up_seg0_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %up_seg0_s0_q2, %prev_up_seg0_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @maximum_up_u_bf16(%merged_up_seg0_q2, %up_seg0_s0_q2) : (memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%merged_up_seg0_q2, %up_seg0_s0_q2, %r_cascade_seg0_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%prev_up_seg0_q2, %up_seg0_s0_q2, %r_local_seg0_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
@@ -2208,7 +2208,7 @@ module {
         func.call @zero_fill_sp_bf16_pythoc(%tmp_sp_seg0_q2) : (memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%merged_sp_seg0_q2, %r_cascade_seg0_q2, %tmp_sp_seg0_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%sp_seg0_s0_q2, %r_local_seg0_q2, %tmp_sp_seg0_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-        func.call @vector_copy_32elems(%c0_i32, %tmp_sp_seg0_q2, %merged_sp_seg0_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %tmp_sp_seg0_q2, %merged_sp_seg0_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @div_gp_sp(%merged_sp_seg0_q2, %merged_gp_seg0_q2) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_2_2, Release, 1)
       }
@@ -2241,13 +2241,13 @@ module {
       scf.for %arg0 = %c0_152 to %c9223372036854775807 step %c1 {
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg0_s1_q2) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg0_s1_q2) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg0_s1_q2) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg0_s1_q2) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_2_3_73, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_2_3, Release, 1)
         aie.use_lock(%lock_2_3_73, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_2_3, Release, 1)
         aie.use_lock(%lock_2_3_73, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg0_s1_q2, %q_seg0_s1_q2) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg0_s1_q2, %q_seg0_s1_q2) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_2_3, Release, 1)
         aie.use_lock(%lock_2_3_73, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_2_3, Release, 1)
@@ -2265,7 +2265,7 @@ module {
           func.call @mul_r_gp(%r_seg0_s1_q2, %gp_seg0_s1_q2) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_175, %v_seg0_s1_q2, %gp_seg0_s1_q2) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg0_s1_q2, %r_seg0_s1_q2, %s_seg0_s1_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg0_s1_q2, %sp_seg0_s1_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg0_s1_q2, %sp_seg0_s1_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_2_3_74, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %merged_gp_seg0_s1_q2 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -2295,7 +2295,7 @@ module {
           %0 = aie.get_cascade() : vector<32xbf16>
           vector.transfer_write %0, %subview[%c0] {in_bounds = [true]} : vector<32xbf16>, memref<32xbf16, strided<[1], offset: ?>>
         }
-        func.call @vector_copy_32elems(%c0_i32, %up_seg0_s1_q2, %prev_up_seg0_s1_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %up_seg0_s1_q2, %prev_up_seg0_s1_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @maximum_up_u_bf16(%merged_up_seg0_s1_q2, %up_seg0_s1_q2) : (memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%merged_up_seg0_s1_q2, %up_seg0_s1_q2, %r_cascade_seg0_s1_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%prev_up_seg0_s1_q2, %up_seg0_s1_q2, %r_local_seg0_s1_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
@@ -2305,7 +2305,7 @@ module {
         func.call @zero_fill_sp_bf16_pythoc(%tmp_sp_seg0_s1_q2) : (memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%merged_sp_seg0_s1_q2, %r_cascade_seg0_s1_q2, %tmp_sp_seg0_s1_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%sp_seg0_s1_q2, %r_local_seg0_s1_q2, %tmp_sp_seg0_s1_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-        func.call @vector_copy_32elems(%c0_i32, %tmp_sp_seg0_s1_q2, %merged_sp_seg0_s1_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %tmp_sp_seg0_s1_q2, %merged_sp_seg0_s1_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         %collapse_shape_163 = memref.collapse_shape %merged_gp_seg0_s1_q2 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
         %c0_164 = arith.constant 0 : index
         %c4096_165 = arith.constant 4096 : index
@@ -2363,13 +2363,13 @@ module {
       scf.for %arg0 = %c0_152 to %c9223372036854775807 step %c1 {
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg0_s2_q2) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg0_s2_q2) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg0_s2_q2) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg0_s2_q2) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_2_4_76, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_2_4, Release, 1)
         aie.use_lock(%lock_2_4_76, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_2_4, Release, 1)
         aie.use_lock(%lock_2_4_76, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg0_s2_q2, %q_seg0_s2_q2) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg0_s2_q2, %q_seg0_s2_q2) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_2_4, Release, 1)
         aie.use_lock(%lock_2_4_76, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_2_4, Release, 1)
@@ -2387,7 +2387,7 @@ module {
           func.call @mul_r_gp(%r_seg0_s2_q2, %gp_seg0_s2_q2) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_175, %v_seg0_s2_q2, %gp_seg0_s2_q2) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg0_s2_q2, %r_seg0_s2_q2, %s_seg0_s2_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg0_s2_q2, %sp_seg0_s2_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg0_s2_q2, %sp_seg0_s2_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_2_4_77, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %merged_gp_seg0_s2_q2 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -2417,7 +2417,7 @@ module {
           %0 = aie.get_cascade() : vector<32xbf16>
           vector.transfer_write %0, %subview[%c0] {in_bounds = [true]} : vector<32xbf16>, memref<32xbf16, strided<[1], offset: ?>>
         }
-        func.call @vector_copy_32elems(%c0_i32, %up_seg0_s2_q2, %prev_up_seg0_s2_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %up_seg0_s2_q2, %prev_up_seg0_s2_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @maximum_up_u_bf16(%merged_up_seg0_s2_q2, %up_seg0_s2_q2) : (memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%merged_up_seg0_s2_q2, %up_seg0_s2_q2, %r_cascade_seg0_s2_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%prev_up_seg0_s2_q2, %up_seg0_s2_q2, %r_local_seg0_s2_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
@@ -2427,7 +2427,7 @@ module {
         func.call @zero_fill_sp_bf16_pythoc(%tmp_sp_seg0_s2_q2) : (memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%merged_sp_seg0_s2_q2, %r_cascade_seg0_s2_q2, %tmp_sp_seg0_s2_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%sp_seg0_s2_q2, %r_local_seg0_s2_q2, %tmp_sp_seg0_s2_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-        func.call @vector_copy_32elems(%c0_i32, %tmp_sp_seg0_s2_q2, %merged_sp_seg0_s2_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %tmp_sp_seg0_s2_q2, %merged_sp_seg0_s2_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         %collapse_shape_163 = memref.collapse_shape %merged_gp_seg0_s2_q2 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
         %c0_164 = arith.constant 0 : index
         %c4096_165 = arith.constant 4096 : index
@@ -2485,13 +2485,13 @@ module {
       scf.for %arg0 = %c0_152 to %c9223372036854775807 step %c1 {
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg0_s3_q2) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg0_s3_q2) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg0_s3_q2) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg0_s3_q2) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_2_5_79, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_2_5, Release, 1)
         aie.use_lock(%lock_2_5_79, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_2_5, Release, 1)
         aie.use_lock(%lock_2_5_79, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg0_s3_q2, %q_seg0_s3_q2) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg0_s3_q2, %q_seg0_s3_q2) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_2_5, Release, 1)
         aie.use_lock(%lock_2_5_79, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_2_5, Release, 1)
@@ -2509,7 +2509,7 @@ module {
           func.call @mul_r_gp(%r_seg0_s3_q2, %gp_seg0_s3_q2) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_163, %v_seg0_s3_q2, %gp_seg0_s3_q2) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg0_s3_q2, %r_seg0_s3_q2, %s_seg0_s3_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg0_s3_q2, %sp_seg0_s3_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg0_s3_q2, %sp_seg0_s3_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_2_5_80, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %gp_seg0_s3_q2 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -2577,7 +2577,7 @@ module {
         aie.use_lock(%lock_3_2_82, AcquireGreaterEqual, 1)
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg0_s0_q3) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg0_s0_q3) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg0_s0_q3) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg0_s0_q3) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_3_2_84, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_3_2_83, Release, 1)
         aie.use_lock(%lock_3_2_84, AcquireGreaterEqual, 1)
@@ -2585,7 +2585,7 @@ module {
         aie.use_lock(%lock_3_2_84, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_3_2_83, Release, 1)
         aie.use_lock(%lock_3_2_84, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg0_s0_q3, %q_seg0_s0_q3) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg0_s0_q3, %q_seg0_s0_q3) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_3_2_83, Release, 1)
         %c0_153 = arith.constant 0 : index
         %c2 = arith.constant 2 : index
@@ -2601,7 +2601,7 @@ module {
           func.call @mul_r_gp(%r_seg0_s0_q3, %gp_seg0_s0_q3) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_163, %v_seg0_s0_q3, %gp_seg0_s0_q3) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg0_s0_q3, %r_seg0_s0_q3, %s_seg0_s0_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg0_s0_q3, %sp_seg0_s0_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg0_s0_q3, %sp_seg0_s0_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_3_2_85, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %merged_gp_seg0_q3 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -2631,7 +2631,7 @@ module {
           %0 = aie.get_cascade() : vector<32xbf16>
           vector.transfer_write %0, %subview[%c0] {in_bounds = [true]} : vector<32xbf16>, memref<32xbf16, strided<[1], offset: ?>>
         }
-        func.call @vector_copy_32elems(%c0_i32, %up_seg0_s0_q3, %prev_up_seg0_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %up_seg0_s0_q3, %prev_up_seg0_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @maximum_up_u_bf16(%merged_up_seg0_q3, %up_seg0_s0_q3) : (memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%merged_up_seg0_q3, %up_seg0_s0_q3, %r_cascade_seg0_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%prev_up_seg0_q3, %up_seg0_s0_q3, %r_local_seg0_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
@@ -2641,7 +2641,7 @@ module {
         func.call @zero_fill_sp_bf16_pythoc(%tmp_sp_seg0_q3) : (memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%merged_sp_seg0_q3, %r_cascade_seg0_q3, %tmp_sp_seg0_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%sp_seg0_s0_q3, %r_local_seg0_q3, %tmp_sp_seg0_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-        func.call @vector_copy_32elems(%c0_i32, %tmp_sp_seg0_q3, %merged_sp_seg0_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %tmp_sp_seg0_q3, %merged_sp_seg0_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @div_gp_sp(%merged_sp_seg0_q3, %merged_gp_seg0_q3) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_3_2, Release, 1)
       }
@@ -2674,7 +2674,7 @@ module {
       scf.for %arg0 = %c0_152 to %c9223372036854775807 step %c1 {
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg0_s1_q3) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg0_s1_q3) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg0_s1_q3) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg0_s1_q3) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_3_3_87, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_3_3, Release, 1)
         aie.use_lock(%lock_3_3_87, AcquireGreaterEqual, 1)
@@ -2682,7 +2682,7 @@ module {
         aie.use_lock(%lock_3_3_87, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_3_3, Release, 1)
         aie.use_lock(%lock_3_3_87, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg0_s1_q3, %q_seg0_s1_q3) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg0_s1_q3, %q_seg0_s1_q3) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_3_3, Release, 1)
         %c0_153 = arith.constant 0 : index
         %c2 = arith.constant 2 : index
@@ -2698,7 +2698,7 @@ module {
           func.call @mul_r_gp(%r_seg0_s1_q3, %gp_seg0_s1_q3) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_175, %v_seg0_s1_q3, %gp_seg0_s1_q3) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg0_s1_q3, %r_seg0_s1_q3, %s_seg0_s1_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg0_s1_q3, %sp_seg0_s1_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg0_s1_q3, %sp_seg0_s1_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_3_3_88, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %merged_gp_seg0_s1_q3 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -2728,7 +2728,7 @@ module {
           %0 = aie.get_cascade() : vector<32xbf16>
           vector.transfer_write %0, %subview[%c0] {in_bounds = [true]} : vector<32xbf16>, memref<32xbf16, strided<[1], offset: ?>>
         }
-        func.call @vector_copy_32elems(%c0_i32, %up_seg0_s1_q3, %prev_up_seg0_s1_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %up_seg0_s1_q3, %prev_up_seg0_s1_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @maximum_up_u_bf16(%merged_up_seg0_s1_q3, %up_seg0_s1_q3) : (memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%merged_up_seg0_s1_q3, %up_seg0_s1_q3, %r_cascade_seg0_s1_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%prev_up_seg0_s1_q3, %up_seg0_s1_q3, %r_local_seg0_s1_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
@@ -2738,7 +2738,7 @@ module {
         func.call @zero_fill_sp_bf16_pythoc(%tmp_sp_seg0_s1_q3) : (memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%merged_sp_seg0_s1_q3, %r_cascade_seg0_s1_q3, %tmp_sp_seg0_s1_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%sp_seg0_s1_q3, %r_local_seg0_s1_q3, %tmp_sp_seg0_s1_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-        func.call @vector_copy_32elems(%c0_i32, %tmp_sp_seg0_s1_q3, %merged_sp_seg0_s1_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %tmp_sp_seg0_s1_q3, %merged_sp_seg0_s1_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         %collapse_shape_163 = memref.collapse_shape %merged_gp_seg0_s1_q3 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
         %c0_164 = arith.constant 0 : index
         %c4096_165 = arith.constant 4096 : index
@@ -2796,7 +2796,7 @@ module {
       scf.for %arg0 = %c0_152 to %c9223372036854775807 step %c1 {
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg0_s2_q3) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg0_s2_q3) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg0_s2_q3) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg0_s2_q3) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_3_4_90, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_3_4, Release, 1)
         aie.use_lock(%lock_3_4_90, AcquireGreaterEqual, 1)
@@ -2804,7 +2804,7 @@ module {
         aie.use_lock(%lock_3_4_90, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_3_4, Release, 1)
         aie.use_lock(%lock_3_4_90, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg0_s2_q3, %q_seg0_s2_q3) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg0_s2_q3, %q_seg0_s2_q3) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_3_4, Release, 1)
         %c0_153 = arith.constant 0 : index
         %c2 = arith.constant 2 : index
@@ -2820,7 +2820,7 @@ module {
           func.call @mul_r_gp(%r_seg0_s2_q3, %gp_seg0_s2_q3) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_175, %v_seg0_s2_q3, %gp_seg0_s2_q3) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg0_s2_q3, %r_seg0_s2_q3, %s_seg0_s2_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg0_s2_q3, %sp_seg0_s2_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg0_s2_q3, %sp_seg0_s2_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_3_4_91, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %merged_gp_seg0_s2_q3 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -2850,7 +2850,7 @@ module {
           %0 = aie.get_cascade() : vector<32xbf16>
           vector.transfer_write %0, %subview[%c0] {in_bounds = [true]} : vector<32xbf16>, memref<32xbf16, strided<[1], offset: ?>>
         }
-        func.call @vector_copy_32elems(%c0_i32, %up_seg0_s2_q3, %prev_up_seg0_s2_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %up_seg0_s2_q3, %prev_up_seg0_s2_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @maximum_up_u_bf16(%merged_up_seg0_s2_q3, %up_seg0_s2_q3) : (memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%merged_up_seg0_s2_q3, %up_seg0_s2_q3, %r_cascade_seg0_s2_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%prev_up_seg0_s2_q3, %up_seg0_s2_q3, %r_local_seg0_s2_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
@@ -2860,7 +2860,7 @@ module {
         func.call @zero_fill_sp_bf16_pythoc(%tmp_sp_seg0_s2_q3) : (memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%merged_sp_seg0_s2_q3, %r_cascade_seg0_s2_q3, %tmp_sp_seg0_s2_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%sp_seg0_s2_q3, %r_local_seg0_s2_q3, %tmp_sp_seg0_s2_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-        func.call @vector_copy_32elems(%c0_i32, %tmp_sp_seg0_s2_q3, %merged_sp_seg0_s2_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %tmp_sp_seg0_s2_q3, %merged_sp_seg0_s2_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         %collapse_shape_163 = memref.collapse_shape %merged_gp_seg0_s2_q3 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
         %c0_164 = arith.constant 0 : index
         %c4096_165 = arith.constant 4096 : index
@@ -2918,7 +2918,7 @@ module {
       scf.for %arg0 = %c0_152 to %c9223372036854775807 step %c1 {
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg0_s3_q3) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg0_s3_q3) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg0_s3_q3) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg0_s3_q3) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_3_5_93, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_3_5, Release, 1)
         aie.use_lock(%lock_3_5_93, AcquireGreaterEqual, 1)
@@ -2926,7 +2926,7 @@ module {
         aie.use_lock(%lock_3_5_93, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_3_5, Release, 1)
         aie.use_lock(%lock_3_5_93, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg0_s3_q3, %q_seg0_s3_q3) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg0_s3_q3, %q_seg0_s3_q3) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_3_5, Release, 1)
         %c0_153 = arith.constant 0 : index
         %c2 = arith.constant 2 : index
@@ -2942,7 +2942,7 @@ module {
           func.call @mul_r_gp(%r_seg0_s3_q3, %gp_seg0_s3_q3) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_163, %v_seg0_s3_q3, %gp_seg0_s3_q3) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg0_s3_q3, %r_seg0_s3_q3, %s_seg0_s3_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg0_s3_q3, %sp_seg0_s3_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg0_s3_q3, %sp_seg0_s3_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_3_5_94, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %gp_seg0_s3_q3 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -3010,9 +3010,9 @@ module {
         aie.use_lock(%lock_4_2_96, AcquireGreaterEqual, 1)
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg1_s0_q0) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg1_s0_q0) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg1_s0_q0) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg1_s0_q0) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_4_2_98, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg1_s0_q0, %q_seg1_s0_q0) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg1_s0_q0, %q_seg1_s0_q0) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_4_2_97, Release, 1)
         aie.use_lock(%lock_4_2_98, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_4_2_97, Release, 1)
@@ -3034,7 +3034,7 @@ module {
           func.call @mul_r_gp(%r_seg1_s0_q0, %gp_seg1_s0_q0) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_163, %v_seg1_s0_q0, %gp_seg1_s0_q0) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg1_s0_q0, %r_seg1_s0_q0, %s_seg1_s0_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg1_s0_q0, %sp_seg1_s0_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg1_s0_q0, %sp_seg1_s0_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_4_2_99, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %merged_gp_seg1_q0 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -3064,7 +3064,7 @@ module {
           %0 = aie.get_cascade() : vector<32xbf16>
           vector.transfer_write %0, %subview[%c0] {in_bounds = [true]} : vector<32xbf16>, memref<32xbf16, strided<[1], offset: ?>>
         }
-        func.call @vector_copy_32elems(%c0_i32, %up_seg1_s0_q0, %prev_up_seg1_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %up_seg1_s0_q0, %prev_up_seg1_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @maximum_up_u_bf16(%merged_up_seg1_q0, %up_seg1_s0_q0) : (memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%merged_up_seg1_q0, %up_seg1_s0_q0, %r_cascade_seg1_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%prev_up_seg1_q0, %up_seg1_s0_q0, %r_local_seg1_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
@@ -3074,7 +3074,7 @@ module {
         func.call @zero_fill_sp_bf16_pythoc(%tmp_sp_seg1_q0) : (memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%merged_sp_seg1_q0, %r_cascade_seg1_q0, %tmp_sp_seg1_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%sp_seg1_s0_q0, %r_local_seg1_q0, %tmp_sp_seg1_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-        func.call @vector_copy_32elems(%c0_i32, %tmp_sp_seg1_q0, %merged_sp_seg1_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %tmp_sp_seg1_q0, %merged_sp_seg1_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @div_gp_sp(%merged_sp_seg1_q0, %merged_gp_seg1_q0) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_4_2, Release, 1)
       }
@@ -3107,9 +3107,9 @@ module {
       scf.for %arg0 = %c0_152 to %c9223372036854775807 step %c1 {
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg1_s1_q0) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg1_s1_q0) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg1_s1_q0) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg1_s1_q0) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_4_3_101, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg1_s1_q0, %q_seg1_s1_q0) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg1_s1_q0, %q_seg1_s1_q0) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_4_3, Release, 1)
         aie.use_lock(%lock_4_3_101, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_4_3, Release, 1)
@@ -3131,7 +3131,7 @@ module {
           func.call @mul_r_gp(%r_seg1_s1_q0, %gp_seg1_s1_q0) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_175, %v_seg1_s1_q0, %gp_seg1_s1_q0) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg1_s1_q0, %r_seg1_s1_q0, %s_seg1_s1_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg1_s1_q0, %sp_seg1_s1_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg1_s1_q0, %sp_seg1_s1_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_4_3_102, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %merged_gp_seg1_s1_q0 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -3161,7 +3161,7 @@ module {
           %0 = aie.get_cascade() : vector<32xbf16>
           vector.transfer_write %0, %subview[%c0] {in_bounds = [true]} : vector<32xbf16>, memref<32xbf16, strided<[1], offset: ?>>
         }
-        func.call @vector_copy_32elems(%c0_i32, %up_seg1_s1_q0, %prev_up_seg1_s1_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %up_seg1_s1_q0, %prev_up_seg1_s1_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @maximum_up_u_bf16(%merged_up_seg1_s1_q0, %up_seg1_s1_q0) : (memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%merged_up_seg1_s1_q0, %up_seg1_s1_q0, %r_cascade_seg1_s1_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%prev_up_seg1_s1_q0, %up_seg1_s1_q0, %r_local_seg1_s1_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
@@ -3171,7 +3171,7 @@ module {
         func.call @zero_fill_sp_bf16_pythoc(%tmp_sp_seg1_s1_q0) : (memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%merged_sp_seg1_s1_q0, %r_cascade_seg1_s1_q0, %tmp_sp_seg1_s1_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%sp_seg1_s1_q0, %r_local_seg1_s1_q0, %tmp_sp_seg1_s1_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-        func.call @vector_copy_32elems(%c0_i32, %tmp_sp_seg1_s1_q0, %merged_sp_seg1_s1_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %tmp_sp_seg1_s1_q0, %merged_sp_seg1_s1_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         %collapse_shape_163 = memref.collapse_shape %merged_gp_seg1_s1_q0 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
         %c0_164 = arith.constant 0 : index
         %c4096_165 = arith.constant 4096 : index
@@ -3229,9 +3229,9 @@ module {
       scf.for %arg0 = %c0_152 to %c9223372036854775807 step %c1 {
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg1_s2_q0) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg1_s2_q0) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg1_s2_q0) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg1_s2_q0) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_4_4_104, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg1_s2_q0, %q_seg1_s2_q0) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg1_s2_q0, %q_seg1_s2_q0) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_4_4, Release, 1)
         aie.use_lock(%lock_4_4_104, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_4_4, Release, 1)
@@ -3253,7 +3253,7 @@ module {
           func.call @mul_r_gp(%r_seg1_s2_q0, %gp_seg1_s2_q0) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_175, %v_seg1_s2_q0, %gp_seg1_s2_q0) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg1_s2_q0, %r_seg1_s2_q0, %s_seg1_s2_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg1_s2_q0, %sp_seg1_s2_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg1_s2_q0, %sp_seg1_s2_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_4_4_105, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %merged_gp_seg1_s2_q0 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -3283,7 +3283,7 @@ module {
           %0 = aie.get_cascade() : vector<32xbf16>
           vector.transfer_write %0, %subview[%c0] {in_bounds = [true]} : vector<32xbf16>, memref<32xbf16, strided<[1], offset: ?>>
         }
-        func.call @vector_copy_32elems(%c0_i32, %up_seg1_s2_q0, %prev_up_seg1_s2_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %up_seg1_s2_q0, %prev_up_seg1_s2_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @maximum_up_u_bf16(%merged_up_seg1_s2_q0, %up_seg1_s2_q0) : (memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%merged_up_seg1_s2_q0, %up_seg1_s2_q0, %r_cascade_seg1_s2_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%prev_up_seg1_s2_q0, %up_seg1_s2_q0, %r_local_seg1_s2_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
@@ -3293,7 +3293,7 @@ module {
         func.call @zero_fill_sp_bf16_pythoc(%tmp_sp_seg1_s2_q0) : (memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%merged_sp_seg1_s2_q0, %r_cascade_seg1_s2_q0, %tmp_sp_seg1_s2_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%sp_seg1_s2_q0, %r_local_seg1_s2_q0, %tmp_sp_seg1_s2_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-        func.call @vector_copy_32elems(%c0_i32, %tmp_sp_seg1_s2_q0, %merged_sp_seg1_s2_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %tmp_sp_seg1_s2_q0, %merged_sp_seg1_s2_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         %collapse_shape_163 = memref.collapse_shape %merged_gp_seg1_s2_q0 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
         %c0_164 = arith.constant 0 : index
         %c4096_165 = arith.constant 4096 : index
@@ -3351,9 +3351,9 @@ module {
       scf.for %arg0 = %c0_152 to %c9223372036854775807 step %c1 {
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg1_s3_q0) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg1_s3_q0) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg1_s3_q0) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg1_s3_q0) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_4_5_107, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg1_s3_q0, %q_seg1_s3_q0) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg1_s3_q0, %q_seg1_s3_q0) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_4_5, Release, 1)
         aie.use_lock(%lock_4_5_107, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_4_5, Release, 1)
@@ -3375,7 +3375,7 @@ module {
           func.call @mul_r_gp(%r_seg1_s3_q0, %gp_seg1_s3_q0) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_163, %v_seg1_s3_q0, %gp_seg1_s3_q0) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg1_s3_q0, %r_seg1_s3_q0, %s_seg1_s3_q0) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg1_s3_q0, %sp_seg1_s3_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg1_s3_q0, %sp_seg1_s3_q0) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_4_5_108, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %gp_seg1_s3_q0 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -3443,11 +3443,11 @@ module {
         aie.use_lock(%lock_5_2_110, AcquireGreaterEqual, 1)
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg1_s0_q1) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg1_s0_q1) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg1_s0_q1) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg1_s0_q1) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_5_2_112, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_5_2_111, Release, 1)
         aie.use_lock(%lock_5_2_112, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg1_s0_q1, %q_seg1_s0_q1) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg1_s0_q1, %q_seg1_s0_q1) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_5_2_111, Release, 1)
         aie.use_lock(%lock_5_2_112, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_5_2_111, Release, 1)
@@ -3467,7 +3467,7 @@ module {
           func.call @mul_r_gp(%r_seg1_s0_q1, %gp_seg1_s0_q1) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_163, %v_seg1_s0_q1, %gp_seg1_s0_q1) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg1_s0_q1, %r_seg1_s0_q1, %s_seg1_s0_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg1_s0_q1, %sp_seg1_s0_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg1_s0_q1, %sp_seg1_s0_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_5_2_113, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %merged_gp_seg1_q1 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -3497,7 +3497,7 @@ module {
           %0 = aie.get_cascade() : vector<32xbf16>
           vector.transfer_write %0, %subview[%c0] {in_bounds = [true]} : vector<32xbf16>, memref<32xbf16, strided<[1], offset: ?>>
         }
-        func.call @vector_copy_32elems(%c0_i32, %up_seg1_s0_q1, %prev_up_seg1_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %up_seg1_s0_q1, %prev_up_seg1_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @maximum_up_u_bf16(%merged_up_seg1_q1, %up_seg1_s0_q1) : (memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%merged_up_seg1_q1, %up_seg1_s0_q1, %r_cascade_seg1_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%prev_up_seg1_q1, %up_seg1_s0_q1, %r_local_seg1_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
@@ -3507,7 +3507,7 @@ module {
         func.call @zero_fill_sp_bf16_pythoc(%tmp_sp_seg1_q1) : (memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%merged_sp_seg1_q1, %r_cascade_seg1_q1, %tmp_sp_seg1_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%sp_seg1_s0_q1, %r_local_seg1_q1, %tmp_sp_seg1_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-        func.call @vector_copy_32elems(%c0_i32, %tmp_sp_seg1_q1, %merged_sp_seg1_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %tmp_sp_seg1_q1, %merged_sp_seg1_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @div_gp_sp(%merged_sp_seg1_q1, %merged_gp_seg1_q1) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_5_2, Release, 1)
       }
@@ -3540,11 +3540,11 @@ module {
       scf.for %arg0 = %c0_152 to %c9223372036854775807 step %c1 {
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg1_s1_q1) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg1_s1_q1) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg1_s1_q1) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg1_s1_q1) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_5_3_115, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_5_3, Release, 1)
         aie.use_lock(%lock_5_3_115, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg1_s1_q1, %q_seg1_s1_q1) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg1_s1_q1, %q_seg1_s1_q1) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_5_3, Release, 1)
         aie.use_lock(%lock_5_3_115, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_5_3, Release, 1)
@@ -3564,7 +3564,7 @@ module {
           func.call @mul_r_gp(%r_seg1_s1_q1, %gp_seg1_s1_q1) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_175, %v_seg1_s1_q1, %gp_seg1_s1_q1) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg1_s1_q1, %r_seg1_s1_q1, %s_seg1_s1_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg1_s1_q1, %sp_seg1_s1_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg1_s1_q1, %sp_seg1_s1_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_5_3_116, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %merged_gp_seg1_s1_q1 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -3594,7 +3594,7 @@ module {
           %0 = aie.get_cascade() : vector<32xbf16>
           vector.transfer_write %0, %subview[%c0] {in_bounds = [true]} : vector<32xbf16>, memref<32xbf16, strided<[1], offset: ?>>
         }
-        func.call @vector_copy_32elems(%c0_i32, %up_seg1_s1_q1, %prev_up_seg1_s1_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %up_seg1_s1_q1, %prev_up_seg1_s1_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @maximum_up_u_bf16(%merged_up_seg1_s1_q1, %up_seg1_s1_q1) : (memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%merged_up_seg1_s1_q1, %up_seg1_s1_q1, %r_cascade_seg1_s1_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%prev_up_seg1_s1_q1, %up_seg1_s1_q1, %r_local_seg1_s1_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
@@ -3604,7 +3604,7 @@ module {
         func.call @zero_fill_sp_bf16_pythoc(%tmp_sp_seg1_s1_q1) : (memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%merged_sp_seg1_s1_q1, %r_cascade_seg1_s1_q1, %tmp_sp_seg1_s1_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%sp_seg1_s1_q1, %r_local_seg1_s1_q1, %tmp_sp_seg1_s1_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-        func.call @vector_copy_32elems(%c0_i32, %tmp_sp_seg1_s1_q1, %merged_sp_seg1_s1_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %tmp_sp_seg1_s1_q1, %merged_sp_seg1_s1_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         %collapse_shape_163 = memref.collapse_shape %merged_gp_seg1_s1_q1 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
         %c0_164 = arith.constant 0 : index
         %c4096_165 = arith.constant 4096 : index
@@ -3662,11 +3662,11 @@ module {
       scf.for %arg0 = %c0_152 to %c9223372036854775807 step %c1 {
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg1_s2_q1) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg1_s2_q1) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg1_s2_q1) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg1_s2_q1) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_5_4_118, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_5_4, Release, 1)
         aie.use_lock(%lock_5_4_118, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg1_s2_q1, %q_seg1_s2_q1) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg1_s2_q1, %q_seg1_s2_q1) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_5_4, Release, 1)
         aie.use_lock(%lock_5_4_118, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_5_4, Release, 1)
@@ -3686,7 +3686,7 @@ module {
           func.call @mul_r_gp(%r_seg1_s2_q1, %gp_seg1_s2_q1) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_175, %v_seg1_s2_q1, %gp_seg1_s2_q1) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg1_s2_q1, %r_seg1_s2_q1, %s_seg1_s2_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg1_s2_q1, %sp_seg1_s2_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg1_s2_q1, %sp_seg1_s2_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_5_4_119, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %merged_gp_seg1_s2_q1 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -3716,7 +3716,7 @@ module {
           %0 = aie.get_cascade() : vector<32xbf16>
           vector.transfer_write %0, %subview[%c0] {in_bounds = [true]} : vector<32xbf16>, memref<32xbf16, strided<[1], offset: ?>>
         }
-        func.call @vector_copy_32elems(%c0_i32, %up_seg1_s2_q1, %prev_up_seg1_s2_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %up_seg1_s2_q1, %prev_up_seg1_s2_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @maximum_up_u_bf16(%merged_up_seg1_s2_q1, %up_seg1_s2_q1) : (memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%merged_up_seg1_s2_q1, %up_seg1_s2_q1, %r_cascade_seg1_s2_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%prev_up_seg1_s2_q1, %up_seg1_s2_q1, %r_local_seg1_s2_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
@@ -3726,7 +3726,7 @@ module {
         func.call @zero_fill_sp_bf16_pythoc(%tmp_sp_seg1_s2_q1) : (memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%merged_sp_seg1_s2_q1, %r_cascade_seg1_s2_q1, %tmp_sp_seg1_s2_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%sp_seg1_s2_q1, %r_local_seg1_s2_q1, %tmp_sp_seg1_s2_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-        func.call @vector_copy_32elems(%c0_i32, %tmp_sp_seg1_s2_q1, %merged_sp_seg1_s2_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %tmp_sp_seg1_s2_q1, %merged_sp_seg1_s2_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         %collapse_shape_163 = memref.collapse_shape %merged_gp_seg1_s2_q1 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
         %c0_164 = arith.constant 0 : index
         %c4096_165 = arith.constant 4096 : index
@@ -3784,11 +3784,11 @@ module {
       scf.for %arg0 = %c0_152 to %c9223372036854775807 step %c1 {
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg1_s3_q1) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg1_s3_q1) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg1_s3_q1) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg1_s3_q1) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_5_5_121, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_5_5, Release, 1)
         aie.use_lock(%lock_5_5_121, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg1_s3_q1, %q_seg1_s3_q1) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg1_s3_q1, %q_seg1_s3_q1) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_5_5, Release, 1)
         aie.use_lock(%lock_5_5_121, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_5_5, Release, 1)
@@ -3808,7 +3808,7 @@ module {
           func.call @mul_r_gp(%r_seg1_s3_q1, %gp_seg1_s3_q1) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_163, %v_seg1_s3_q1, %gp_seg1_s3_q1) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg1_s3_q1, %r_seg1_s3_q1, %s_seg1_s3_q1) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg1_s3_q1, %sp_seg1_s3_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg1_s3_q1, %sp_seg1_s3_q1) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_5_5_122, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %gp_seg1_s3_q1 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -3876,13 +3876,13 @@ module {
         aie.use_lock(%lock_6_2_124, AcquireGreaterEqual, 1)
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg1_s0_q2) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg1_s0_q2) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg1_s0_q2) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg1_s0_q2) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_6_2_126, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_6_2_125, Release, 1)
         aie.use_lock(%lock_6_2_126, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_6_2_125, Release, 1)
         aie.use_lock(%lock_6_2_126, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg1_s0_q2, %q_seg1_s0_q2) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg1_s0_q2, %q_seg1_s0_q2) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_6_2_125, Release, 1)
         aie.use_lock(%lock_6_2_126, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_6_2_125, Release, 1)
@@ -3900,7 +3900,7 @@ module {
           func.call @mul_r_gp(%r_seg1_s0_q2, %gp_seg1_s0_q2) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_163, %v_seg1_s0_q2, %gp_seg1_s0_q2) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg1_s0_q2, %r_seg1_s0_q2, %s_seg1_s0_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg1_s0_q2, %sp_seg1_s0_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg1_s0_q2, %sp_seg1_s0_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_6_2_127, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %merged_gp_seg1_q2 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -3930,7 +3930,7 @@ module {
           %0 = aie.get_cascade() : vector<32xbf16>
           vector.transfer_write %0, %subview[%c0] {in_bounds = [true]} : vector<32xbf16>, memref<32xbf16, strided<[1], offset: ?>>
         }
-        func.call @vector_copy_32elems(%c0_i32, %up_seg1_s0_q2, %prev_up_seg1_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %up_seg1_s0_q2, %prev_up_seg1_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @maximum_up_u_bf16(%merged_up_seg1_q2, %up_seg1_s0_q2) : (memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%merged_up_seg1_q2, %up_seg1_s0_q2, %r_cascade_seg1_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%prev_up_seg1_q2, %up_seg1_s0_q2, %r_local_seg1_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
@@ -3940,7 +3940,7 @@ module {
         func.call @zero_fill_sp_bf16_pythoc(%tmp_sp_seg1_q2) : (memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%merged_sp_seg1_q2, %r_cascade_seg1_q2, %tmp_sp_seg1_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%sp_seg1_s0_q2, %r_local_seg1_q2, %tmp_sp_seg1_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-        func.call @vector_copy_32elems(%c0_i32, %tmp_sp_seg1_q2, %merged_sp_seg1_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %tmp_sp_seg1_q2, %merged_sp_seg1_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @div_gp_sp(%merged_sp_seg1_q2, %merged_gp_seg1_q2) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_6_2, Release, 1)
       }
@@ -3973,13 +3973,13 @@ module {
       scf.for %arg0 = %c0_152 to %c9223372036854775807 step %c1 {
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg1_s1_q2) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg1_s1_q2) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg1_s1_q2) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg1_s1_q2) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_6_3_129, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_6_3, Release, 1)
         aie.use_lock(%lock_6_3_129, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_6_3, Release, 1)
         aie.use_lock(%lock_6_3_129, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg1_s1_q2, %q_seg1_s1_q2) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg1_s1_q2, %q_seg1_s1_q2) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_6_3, Release, 1)
         aie.use_lock(%lock_6_3_129, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_6_3, Release, 1)
@@ -3997,7 +3997,7 @@ module {
           func.call @mul_r_gp(%r_seg1_s1_q2, %gp_seg1_s1_q2) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_175, %v_seg1_s1_q2, %gp_seg1_s1_q2) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg1_s1_q2, %r_seg1_s1_q2, %s_seg1_s1_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg1_s1_q2, %sp_seg1_s1_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg1_s1_q2, %sp_seg1_s1_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_6_3_130, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %merged_gp_seg1_s1_q2 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -4027,7 +4027,7 @@ module {
           %0 = aie.get_cascade() : vector<32xbf16>
           vector.transfer_write %0, %subview[%c0] {in_bounds = [true]} : vector<32xbf16>, memref<32xbf16, strided<[1], offset: ?>>
         }
-        func.call @vector_copy_32elems(%c0_i32, %up_seg1_s1_q2, %prev_up_seg1_s1_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %up_seg1_s1_q2, %prev_up_seg1_s1_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @maximum_up_u_bf16(%merged_up_seg1_s1_q2, %up_seg1_s1_q2) : (memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%merged_up_seg1_s1_q2, %up_seg1_s1_q2, %r_cascade_seg1_s1_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%prev_up_seg1_s1_q2, %up_seg1_s1_q2, %r_local_seg1_s1_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
@@ -4037,7 +4037,7 @@ module {
         func.call @zero_fill_sp_bf16_pythoc(%tmp_sp_seg1_s1_q2) : (memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%merged_sp_seg1_s1_q2, %r_cascade_seg1_s1_q2, %tmp_sp_seg1_s1_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%sp_seg1_s1_q2, %r_local_seg1_s1_q2, %tmp_sp_seg1_s1_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-        func.call @vector_copy_32elems(%c0_i32, %tmp_sp_seg1_s1_q2, %merged_sp_seg1_s1_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %tmp_sp_seg1_s1_q2, %merged_sp_seg1_s1_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         %collapse_shape_163 = memref.collapse_shape %merged_gp_seg1_s1_q2 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
         %c0_164 = arith.constant 0 : index
         %c4096_165 = arith.constant 4096 : index
@@ -4095,13 +4095,13 @@ module {
       scf.for %arg0 = %c0_152 to %c9223372036854775807 step %c1 {
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg1_s2_q2) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg1_s2_q2) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg1_s2_q2) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg1_s2_q2) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_6_4_132, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_6_4, Release, 1)
         aie.use_lock(%lock_6_4_132, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_6_4, Release, 1)
         aie.use_lock(%lock_6_4_132, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg1_s2_q2, %q_seg1_s2_q2) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg1_s2_q2, %q_seg1_s2_q2) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_6_4, Release, 1)
         aie.use_lock(%lock_6_4_132, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_6_4, Release, 1)
@@ -4119,7 +4119,7 @@ module {
           func.call @mul_r_gp(%r_seg1_s2_q2, %gp_seg1_s2_q2) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_175, %v_seg1_s2_q2, %gp_seg1_s2_q2) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg1_s2_q2, %r_seg1_s2_q2, %s_seg1_s2_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg1_s2_q2, %sp_seg1_s2_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg1_s2_q2, %sp_seg1_s2_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_6_4_133, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %merged_gp_seg1_s2_q2 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -4149,7 +4149,7 @@ module {
           %0 = aie.get_cascade() : vector<32xbf16>
           vector.transfer_write %0, %subview[%c0] {in_bounds = [true]} : vector<32xbf16>, memref<32xbf16, strided<[1], offset: ?>>
         }
-        func.call @vector_copy_32elems(%c0_i32, %up_seg1_s2_q2, %prev_up_seg1_s2_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %up_seg1_s2_q2, %prev_up_seg1_s2_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @maximum_up_u_bf16(%merged_up_seg1_s2_q2, %up_seg1_s2_q2) : (memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%merged_up_seg1_s2_q2, %up_seg1_s2_q2, %r_cascade_seg1_s2_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%prev_up_seg1_s2_q2, %up_seg1_s2_q2, %r_local_seg1_s2_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
@@ -4159,7 +4159,7 @@ module {
         func.call @zero_fill_sp_bf16_pythoc(%tmp_sp_seg1_s2_q2) : (memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%merged_sp_seg1_s2_q2, %r_cascade_seg1_s2_q2, %tmp_sp_seg1_s2_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%sp_seg1_s2_q2, %r_local_seg1_s2_q2, %tmp_sp_seg1_s2_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-        func.call @vector_copy_32elems(%c0_i32, %tmp_sp_seg1_s2_q2, %merged_sp_seg1_s2_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %tmp_sp_seg1_s2_q2, %merged_sp_seg1_s2_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         %collapse_shape_163 = memref.collapse_shape %merged_gp_seg1_s2_q2 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
         %c0_164 = arith.constant 0 : index
         %c4096_165 = arith.constant 4096 : index
@@ -4217,13 +4217,13 @@ module {
       scf.for %arg0 = %c0_152 to %c9223372036854775807 step %c1 {
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg1_s3_q2) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg1_s3_q2) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg1_s3_q2) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg1_s3_q2) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_6_5_135, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_6_5, Release, 1)
         aie.use_lock(%lock_6_5_135, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_6_5, Release, 1)
         aie.use_lock(%lock_6_5_135, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg1_s3_q2, %q_seg1_s3_q2) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg1_s3_q2, %q_seg1_s3_q2) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_6_5, Release, 1)
         aie.use_lock(%lock_6_5_135, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_6_5, Release, 1)
@@ -4241,7 +4241,7 @@ module {
           func.call @mul_r_gp(%r_seg1_s3_q2, %gp_seg1_s3_q2) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_163, %v_seg1_s3_q2, %gp_seg1_s3_q2) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg1_s3_q2, %r_seg1_s3_q2, %s_seg1_s3_q2) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg1_s3_q2, %sp_seg1_s3_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg1_s3_q2, %sp_seg1_s3_q2) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_6_5_136, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %gp_seg1_s3_q2 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -4309,7 +4309,7 @@ module {
         aie.use_lock(%lock_7_2_138, AcquireGreaterEqual, 1)
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg1_s0_q3) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg1_s0_q3) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg1_s0_q3) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg1_s0_q3) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_7_2_140, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_7_2_139, Release, 1)
         aie.use_lock(%lock_7_2_140, AcquireGreaterEqual, 1)
@@ -4317,7 +4317,7 @@ module {
         aie.use_lock(%lock_7_2_140, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_7_2_139, Release, 1)
         aie.use_lock(%lock_7_2_140, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg1_s0_q3, %q_seg1_s0_q3) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg1_s0_q3, %q_seg1_s0_q3) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_7_2_139, Release, 1)
         %c0_153 = arith.constant 0 : index
         %c2 = arith.constant 2 : index
@@ -4333,7 +4333,7 @@ module {
           func.call @mul_r_gp(%r_seg1_s0_q3, %gp_seg1_s0_q3) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_163, %v_seg1_s0_q3, %gp_seg1_s0_q3) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg1_s0_q3, %r_seg1_s0_q3, %s_seg1_s0_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg1_s0_q3, %sp_seg1_s0_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg1_s0_q3, %sp_seg1_s0_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_7_2_141, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %merged_gp_seg1_q3 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -4363,7 +4363,7 @@ module {
           %0 = aie.get_cascade() : vector<32xbf16>
           vector.transfer_write %0, %subview[%c0] {in_bounds = [true]} : vector<32xbf16>, memref<32xbf16, strided<[1], offset: ?>>
         }
-        func.call @vector_copy_32elems(%c0_i32, %up_seg1_s0_q3, %prev_up_seg1_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %up_seg1_s0_q3, %prev_up_seg1_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @maximum_up_u_bf16(%merged_up_seg1_q3, %up_seg1_s0_q3) : (memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%merged_up_seg1_q3, %up_seg1_s0_q3, %r_cascade_seg1_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%prev_up_seg1_q3, %up_seg1_s0_q3, %r_local_seg1_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
@@ -4373,7 +4373,7 @@ module {
         func.call @zero_fill_sp_bf16_pythoc(%tmp_sp_seg1_q3) : (memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%merged_sp_seg1_q3, %r_cascade_seg1_q3, %tmp_sp_seg1_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%sp_seg1_s0_q3, %r_local_seg1_q3, %tmp_sp_seg1_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-        func.call @vector_copy_32elems(%c0_i32, %tmp_sp_seg1_q3, %merged_sp_seg1_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %tmp_sp_seg1_q3, %merged_sp_seg1_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @div_gp_sp(%merged_sp_seg1_q3, %merged_gp_seg1_q3) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_7_2, Release, 1)
       }
@@ -4406,7 +4406,7 @@ module {
       scf.for %arg0 = %c0_152 to %c9223372036854775807 step %c1 {
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg1_s1_q3) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg1_s1_q3) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg1_s1_q3) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg1_s1_q3) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_7_3_143, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_7_3, Release, 1)
         aie.use_lock(%lock_7_3_143, AcquireGreaterEqual, 1)
@@ -4414,7 +4414,7 @@ module {
         aie.use_lock(%lock_7_3_143, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_7_3, Release, 1)
         aie.use_lock(%lock_7_3_143, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg1_s1_q3, %q_seg1_s1_q3) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg1_s1_q3, %q_seg1_s1_q3) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_7_3, Release, 1)
         %c0_153 = arith.constant 0 : index
         %c2 = arith.constant 2 : index
@@ -4430,7 +4430,7 @@ module {
           func.call @mul_r_gp(%r_seg1_s1_q3, %gp_seg1_s1_q3) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_175, %v_seg1_s1_q3, %gp_seg1_s1_q3) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg1_s1_q3, %r_seg1_s1_q3, %s_seg1_s1_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg1_s1_q3, %sp_seg1_s1_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg1_s1_q3, %sp_seg1_s1_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_7_3_144, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %merged_gp_seg1_s1_q3 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -4460,7 +4460,7 @@ module {
           %0 = aie.get_cascade() : vector<32xbf16>
           vector.transfer_write %0, %subview[%c0] {in_bounds = [true]} : vector<32xbf16>, memref<32xbf16, strided<[1], offset: ?>>
         }
-        func.call @vector_copy_32elems(%c0_i32, %up_seg1_s1_q3, %prev_up_seg1_s1_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %up_seg1_s1_q3, %prev_up_seg1_s1_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @maximum_up_u_bf16(%merged_up_seg1_s1_q3, %up_seg1_s1_q3) : (memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%merged_up_seg1_s1_q3, %up_seg1_s1_q3, %r_cascade_seg1_s1_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%prev_up_seg1_s1_q3, %up_seg1_s1_q3, %r_local_seg1_s1_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
@@ -4470,7 +4470,7 @@ module {
         func.call @zero_fill_sp_bf16_pythoc(%tmp_sp_seg1_s1_q3) : (memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%merged_sp_seg1_s1_q3, %r_cascade_seg1_s1_q3, %tmp_sp_seg1_s1_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%sp_seg1_s1_q3, %r_local_seg1_s1_q3, %tmp_sp_seg1_s1_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-        func.call @vector_copy_32elems(%c0_i32, %tmp_sp_seg1_s1_q3, %merged_sp_seg1_s1_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %tmp_sp_seg1_s1_q3, %merged_sp_seg1_s1_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         %collapse_shape_163 = memref.collapse_shape %merged_gp_seg1_s1_q3 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
         %c0_164 = arith.constant 0 : index
         %c4096_165 = arith.constant 4096 : index
@@ -4528,7 +4528,7 @@ module {
       scf.for %arg0 = %c0_152 to %c9223372036854775807 step %c1 {
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg1_s2_q3) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg1_s2_q3) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg1_s2_q3) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg1_s2_q3) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_7_4_146, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_7_4, Release, 1)
         aie.use_lock(%lock_7_4_146, AcquireGreaterEqual, 1)
@@ -4536,7 +4536,7 @@ module {
         aie.use_lock(%lock_7_4_146, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_7_4, Release, 1)
         aie.use_lock(%lock_7_4_146, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg1_s2_q3, %q_seg1_s2_q3) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg1_s2_q3, %q_seg1_s2_q3) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_7_4, Release, 1)
         %c0_153 = arith.constant 0 : index
         %c2 = arith.constant 2 : index
@@ -4552,7 +4552,7 @@ module {
           func.call @mul_r_gp(%r_seg1_s2_q3, %gp_seg1_s2_q3) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_175, %v_seg1_s2_q3, %gp_seg1_s2_q3) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg1_s2_q3, %r_seg1_s2_q3, %s_seg1_s2_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg1_s2_q3, %sp_seg1_s2_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg1_s2_q3, %sp_seg1_s2_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_7_4_147, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %merged_gp_seg1_s2_q3 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
@@ -4582,7 +4582,7 @@ module {
           %0 = aie.get_cascade() : vector<32xbf16>
           vector.transfer_write %0, %subview[%c0] {in_bounds = [true]} : vector<32xbf16>, memref<32xbf16, strided<[1], offset: ?>>
         }
-        func.call @vector_copy_32elems(%c0_i32, %up_seg1_s2_q3, %prev_up_seg1_s2_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %up_seg1_s2_q3, %prev_up_seg1_s2_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @maximum_up_u_bf16(%merged_up_seg1_s2_q3, %up_seg1_s2_q3) : (memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%merged_up_seg1_s2_q3, %up_seg1_s2_q3, %r_cascade_seg1_s2_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @exp_up_minus_u(%prev_up_seg1_s2_q3, %up_seg1_s2_q3, %r_local_seg1_s2_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
@@ -4592,7 +4592,7 @@ module {
         func.call @zero_fill_sp_bf16_pythoc(%tmp_sp_seg1_s2_q3) : (memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%merged_sp_seg1_s2_q3, %r_cascade_seg1_s2_q3, %tmp_sp_seg1_s2_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         func.call @accum_sp_r_s(%sp_seg1_s2_q3, %r_local_seg1_s2_q3, %tmp_sp_seg1_s2_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-        func.call @vector_copy_32elems(%c0_i32, %tmp_sp_seg1_s2_q3, %merged_sp_seg1_s2_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+        func.call @vector_copy_32elems_pythoc(%c0_i32, %tmp_sp_seg1_s2_q3, %merged_sp_seg1_s2_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
         %collapse_shape_163 = memref.collapse_shape %merged_gp_seg1_s2_q3 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
         %c0_164 = arith.constant 0 : index
         %c4096_165 = arith.constant 4096 : index
@@ -4650,7 +4650,7 @@ module {
       scf.for %arg0 = %c0_152 to %c9223372036854775807 step %c1 {
         func.call @zero_fill_gp_bf16_pythoc(%gp_seg1_s3_q3) : (memref<64x64xbf16>) -> ()
         func.call @zero_fill_sp_bf16_pythoc(%sp_seg1_s3_q3) : (memref<64x1xbf16>) -> ()
-        func.call @neg_inf_fill_up_bf16(%up_seg1_s3_q3) : (memref<64x1xbf16>) -> ()
+        func.call @neg_inf_fill_up_bf16_pythoc(%up_seg1_s3_q3) : (memref<64x1xbf16>) -> ()
         aie.use_lock(%lock_7_5_149, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_7_5, Release, 1)
         aie.use_lock(%lock_7_5_149, AcquireGreaterEqual, 1)
@@ -4658,7 +4658,7 @@ module {
         aie.use_lock(%lock_7_5_149, AcquireGreaterEqual, 1)
         aie.use_lock(%lock_7_5, Release, 1)
         aie.use_lock(%lock_7_5_149, AcquireGreaterEqual, 1)
-        func.call @copy_tile(%qk_seg1_s3_q3, %q_seg1_s3_q3) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
+        func.call @copy_tile_pythoc(%qk_seg1_s3_q3, %q_seg1_s3_q3) : (memref<64x64xbf16>, memref<64x64xbf16>) -> ()
         aie.use_lock(%lock_7_5, Release, 1)
         %c0_153 = arith.constant 0 : index
         %c2 = arith.constant 2 : index
@@ -4674,7 +4674,7 @@ module {
           func.call @mul_r_gp(%r_seg1_s3_q3, %gp_seg1_s3_q3) : (memref<64x1xbf16>, memref<64x64xbf16>) -> ()
           func.call @matmul_g_b_bf16(%collapse_shape_163, %v_seg1_s3_q3, %gp_seg1_s3_q3) : (memref<4096xbf16>, memref<64x64xbf16>, memref<64x64xbf16>) -> ()
           func.call @accum_sp_r_s(%sp_seg1_s3_q3, %r_seg1_s3_q3, %s_seg1_s3_q3) : (memref<64x1xbf16>, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
-          func.call @vector_copy_32elems(%c0_i32, %s_seg1_s3_q3, %sp_seg1_s3_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
+          func.call @vector_copy_32elems_pythoc(%c0_i32, %s_seg1_s3_q3, %sp_seg1_s3_q3) : (i32, memref<64x1xbf16>, memref<64x1xbf16>) -> ()
           aie.use_lock(%lock_7_5_150, Release, 1)
         }
         %collapse_shape = memref.collapse_shape %gp_seg1_s3_q3 [[0, 1]] : memref<64x64xbf16> into memref<4096xbf16>
