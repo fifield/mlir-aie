@@ -38,9 +38,9 @@ declare void @zero_fill_gp_bf16_pythoc(ptr) local_unnamed_addr
 
 declare void @zero_fill_sp_bf16_pythoc(ptr) local_unnamed_addr
 
-declare void @neg_inf_fill_up_bf16(ptr) local_unnamed_addr
+declare void @neg_inf_fill_up_bf16_pythoc(ptr) local_unnamed_addr
 
-declare void @copy_tile(ptr, ptr) local_unnamed_addr
+declare void @copy_tile_pythoc(ptr, ptr) local_unnamed_addr
 
 declare void @matmul_a_b_bf16(ptr, ptr, ptr) local_unnamed_addr
 
@@ -52,7 +52,7 @@ declare void @matmul_g_b_bf16(ptr, ptr, ptr) local_unnamed_addr
 
 declare void @accum_sp_r_s(ptr, ptr, ptr) local_unnamed_addr
 
-declare void @vector_copy_32elems(i32, ptr, ptr) local_unnamed_addr
+declare void @vector_copy_32elems_pythoc(i32, ptr, ptr) local_unnamed_addr
 
 declare void @maximum_up_u_bf16(ptr, ptr) local_unnamed_addr
 
@@ -67,7 +67,7 @@ define void @core_7_3() local_unnamed_addr {
   %1 = phi i64 [ 0, %0 ], [ %41, %40 ]
   tail call void @zero_fill_gp_bf16_pythoc(ptr nonnull @gp_seg1_s1_q3)
   tail call void @zero_fill_sp_bf16_pythoc(ptr nonnull @sp_seg1_s1_q3)
-  tail call void @neg_inf_fill_up_bf16(ptr nonnull @up_seg1_s1_q3)
+  tail call void @neg_inf_fill_up_bf16_pythoc(ptr nonnull @up_seg1_s1_q3)
   tail call void @llvm.aie2p.acquire(i32 48, i32 -1)
   tail call void @llvm.aie2p.release(i32 49, i32 1)
   tail call void @llvm.aie2p.acquire(i32 48, i32 -1)
@@ -75,7 +75,7 @@ define void @core_7_3() local_unnamed_addr {
   tail call void @llvm.aie2p.acquire(i32 48, i32 -1)
   tail call void @llvm.aie2p.release(i32 49, i32 1)
   tail call void @llvm.aie2p.acquire(i32 48, i32 -1)
-  tail call void @copy_tile(ptr nonnull @qk_seg1_s1_q3, ptr nonnull @q_seg1_s1_q3)
+  tail call void @copy_tile_pythoc(ptr nonnull @qk_seg1_s1_q3, ptr nonnull @q_seg1_s1_q3)
   tail call void @llvm.aie2p.release(i32 49, i32 1)
   tail call void @zero_fill_g_bf16_pythoc(ptr nonnull @g_seg1_s1_q3)
   tail call void @llvm.aie2p.acquire(i32 48, i32 -1)
@@ -86,7 +86,7 @@ define void @core_7_3() local_unnamed_addr {
   tail call void @mul_r_gp(ptr nonnull @r_seg1_s1_q3, ptr nonnull @gp_seg1_s1_q3)
   tail call void @matmul_g_b_bf16(ptr nonnull @g_seg1_s1_q3, ptr nonnull @v_seg1_s1_q3, ptr nonnull @gp_seg1_s1_q3)
   tail call void @accum_sp_r_s(ptr nonnull @sp_seg1_s1_q3, ptr nonnull @r_seg1_s1_q3, ptr nonnull @s_seg1_s1_q3)
-  tail call void @vector_copy_32elems(i32 0, ptr nonnull @s_seg1_s1_q3, ptr nonnull @sp_seg1_s1_q3)
+  tail call void @vector_copy_32elems_pythoc(i32 0, ptr nonnull @s_seg1_s1_q3, ptr nonnull @sp_seg1_s1_q3)
   tail call void @llvm.aie2p.release(i32 51, i32 1)
   tail call void @zero_fill_g_bf16_pythoc(ptr nonnull @g_seg1_s1_q3)
   tail call void @llvm.aie2p.acquire(i32 48, i32 -1)
@@ -97,7 +97,7 @@ define void @core_7_3() local_unnamed_addr {
   tail call void @mul_r_gp(ptr nonnull @r_seg1_s1_q3, ptr nonnull @gp_seg1_s1_q3)
   tail call void @matmul_g_b_bf16(ptr nonnull @g_seg1_s1_q3, ptr nonnull @v_seg1_s1_q3, ptr nonnull @gp_seg1_s1_q3)
   tail call void @accum_sp_r_s(ptr nonnull @sp_seg1_s1_q3, ptr nonnull @r_seg1_s1_q3, ptr nonnull @s_seg1_s1_q3)
-  tail call void @vector_copy_32elems(i32 0, ptr nonnull @s_seg1_s1_q3, ptr nonnull @sp_seg1_s1_q3)
+  tail call void @vector_copy_32elems_pythoc(i32 0, ptr nonnull @s_seg1_s1_q3, ptr nonnull @sp_seg1_s1_q3)
   tail call void @llvm.aie2p.release(i32 51, i32 1)
   br label %.preheader11
 
@@ -132,7 +132,7 @@ define void @core_7_3() local_unnamed_addr {
   br i1 %19, label %.preheader9, label %20
 
 20:                                               ; preds = %.preheader9
-  tail call void @vector_copy_32elems(i32 0, ptr nonnull @up_seg1_s1_q3, ptr nonnull @prev_up_seg1_s1_q3)
+  tail call void @vector_copy_32elems_pythoc(i32 0, ptr nonnull @up_seg1_s1_q3, ptr nonnull @prev_up_seg1_s1_q3)
   tail call void @maximum_up_u_bf16(ptr nonnull @merged_up_seg1_s1_q3, ptr nonnull @up_seg1_s1_q3)
   tail call void @exp_up_minus_u(ptr nonnull @merged_up_seg1_s1_q3, ptr nonnull @up_seg1_s1_q3, ptr nonnull @r_cascade_seg1_s1_q3)
   tail call void @exp_up_minus_u(ptr nonnull @prev_up_seg1_s1_q3, ptr nonnull @up_seg1_s1_q3, ptr nonnull @r_local_seg1_s1_q3)
@@ -142,7 +142,7 @@ define void @core_7_3() local_unnamed_addr {
   tail call void @zero_fill_sp_bf16_pythoc(ptr nonnull @tmp_sp_seg1_s1_q3)
   tail call void @accum_sp_r_s(ptr nonnull @merged_sp_seg1_s1_q3, ptr nonnull @r_cascade_seg1_s1_q3, ptr nonnull @tmp_sp_seg1_s1_q3)
   tail call void @accum_sp_r_s(ptr nonnull @sp_seg1_s1_q3, ptr nonnull @r_local_seg1_s1_q3, ptr nonnull @tmp_sp_seg1_s1_q3)
-  tail call void @vector_copy_32elems(i32 0, ptr nonnull @tmp_sp_seg1_s1_q3, ptr nonnull @merged_sp_seg1_s1_q3)
+  tail call void @vector_copy_32elems_pythoc(i32 0, ptr nonnull @tmp_sp_seg1_s1_q3, ptr nonnull @merged_sp_seg1_s1_q3)
   br label %21
 
 21:                                               ; preds = %20, %21
