@@ -79,7 +79,11 @@ from aie.ir import AffineDimExpr, AffineMap, MemRefType
 from aie.utils import DefaultNPURuntime, NPUKernel
 from aie.utils.compile import compile_mlir_module
 
-from attn import zero_fill_gp_bf16_pythoc, zero_fill_sp_bf16_pythoc
+from attn import (
+    zero_fill_g_bf16_pythoc,
+    zero_fill_gp_bf16_pythoc,
+    zero_fill_sp_bf16_pythoc,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -349,6 +353,11 @@ def declare_kernels(
     gp_ty: type[np.ndarray],
     row_ty: type[np.ndarray],
 ) -> KernelSet:
+    zero_fill_g_kernel = PythocKernel(
+        zero_fill_g_bf16_pythoc,
+        [g_flat_ty],
+        target_arch="aie2p",
+    )
     zero_fill_gp_kernel = PythocKernel(
         zero_fill_gp_bf16_pythoc,
         [gp_ty],
@@ -361,7 +370,11 @@ def declare_kernels(
     )
 
     return KernelSet(
-        zero_fill_g=external_func("zero_fill_g_bf16", inputs=[g_flat_ty], link_with=KERNEL_OBJECT),
+        zero_fill_g=external_func(
+            "zero_fill_g_bf16_pythoc",
+            inputs=[g_flat_ty],
+            link_with=zero_fill_g_kernel.object_file_name,
+        ),
         zero_fill_gp=external_func(
             "zero_fill_gp_bf16_pythoc",
             inputs=[gp_ty],

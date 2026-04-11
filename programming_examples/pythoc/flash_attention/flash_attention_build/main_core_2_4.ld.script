@@ -1,0 +1,181 @@
+
+MEMORY
+{
+   program (RX) : ORIGIN = 0, LENGTH = 0x0020000
+   data (!RX) : ORIGIN = 0x7E200, LENGTH = 0x1E00
+}
+ENTRY(__start)
+SECTIONS
+{
+  . = 0x0;
+  .text : {
+     /* the __start symbol has to come at address zero. */
+     *crt0.o(.text*)
+     _ctors_start = .;
+     _init_array_start = .;
+     KEEP(SORT(*.init_array))
+     _ctors_end = .;
+     _init_array_end = .;
+     _dtors_start = .;
+     _dtors_end = .;
+     *(.text*)
+  } > program
+  .data : {
+     *(.data*)
+     *(.rodata*)
+  } > data
+  .comment : {
+     *(.comment*)
+  }
+  .symtab : {
+     *(.symtab)
+  }
+  .shstrtab : {
+     *(.shstrtab)
+  }
+  .strtab : {
+     *(.strtab)
+  }
+  .stack_sizes : {
+     *(.stack_sizes)
+  }
+
+. = 0x70000;
+_sp_start_value_DM_stack = .;
+. += 0x400; /* stack */
+. = 0x48000;
+softmax_gp_stage1 = .;
+. += 0x2000;
+. = 0x4E000;
+softmax_sp_stage1 = .;
+. += 0x80;
+. = 0x43400;
+softmax_up_stage1 = .;
+. += 0x80;
+. = 0x47000;
+softmax_u_stage1 = .;
+. += 0x80;
+. = 0x4E080;
+softmax_r_stage1 = .;
+. += 0x80;
+. = 0x43480;
+softmax_s_stage1 = .;
+. += 0x80;
+. = 0x40400;
+softmax_g_stage1 = .;
+. += 0x3000;
+. = 0x44000;
+softmax_g_copy_stage1 = .;
+. += 0x3000;
+. = 0x4C000;
+softmax_gv_stage1 = .;
+. += 0x2000;
+. = 0x4A000;
+cascade_gp_stage1 = .;
+. += 0x2000;
+. = 0x47080;
+cascade_up_stage1 = .;
+. += 0x80;
+. = 0x4E100;
+cascade_sp_stage1 = .;
+. += 0x80;
+. = 0x43500;
+prev_up_stage1 = .;
+. += 0x80;
+. = 0x47100;
+r_from_cascade_stage1 = .;
+. += 0x80;
+. = 0x4E180;
+r_from_local_stage1 = .;
+. += 0x80;
+. = 0x43580;
+tmp_sp_stage1 = .;
+. += 0x80;
+. = 0x58000;
+gp_in_stage2 = .;
+. += 0x2000;
+. = 0x50400;
+g_in_stage2 = .;
+. += 0x3000;
+. = 0x54000;
+v_stage2 = .;
+. += 0x3000;
+. = 0x68000;
+softmax_gp_stage3 = .;
+. += 0x2000;
+. = 0x63400;
+softmax_sp_stage3 = .;
+. += 0x80;
+. = 0x67000;
+softmax_up_stage3 = .;
+. += 0x80;
+. = 0x6A000;
+softmax_u_stage3 = .;
+. += 0x80;
+. = 0x6E000;
+softmax_r_stage3 = .;
+. += 0x80;
+. = 0x63480;
+softmax_s_stage3 = .;
+. += 0x80;
+. = 0x60400;
+softmax_g_stage3 = .;
+. += 0x3000;
+. = 0x64000;
+softmax_g_copy_stage3 = .;
+. += 0x3000;
+. = 0x6C000;
+softmax_gv_stage3 = .;
+. += 0x2000;
+. = 0x78000;
+softmax_gp_stage2 = .;
+. += 0x2000;
+. = 0x7E000;
+softmax_sp_stage2 = .;
+. += 0x80;
+. = 0x73400;
+softmax_up_stage2 = .;
+. += 0x80;
+. = 0x77000;
+softmax_u_stage2 = .;
+. += 0x80;
+. = 0x7E080;
+softmax_r_stage2 = .;
+. += 0x80;
+. = 0x73480;
+softmax_s_stage2 = .;
+. += 0x80;
+. = 0x70400;
+softmax_g_stage2 = .;
+. += 0x3000;
+. = 0x74000;
+softmax_g_copy_stage2 = .;
+. += 0x3000;
+. = 0x7C000;
+softmax_gv_stage2 = .;
+. += 0x2000;
+. = 0x7A000;
+cascade_gp_stage2 = .;
+. += 0x2000;
+. = 0x77080;
+cascade_up_stage2 = .;
+. += 0x80;
+. = 0x7E100;
+cascade_sp_stage2 = .;
+. += 0x80;
+. = 0x73500;
+prev_up_stage2 = .;
+. += 0x80;
+. = 0x77100;
+r_from_cascade_stage2 = .;
+. += 0x80;
+. = 0x7E180;
+r_from_local_stage2 = .;
+. += 0x80;
+. = 0x73580;
+tmp_sp_stage2 = .;
+. += 0x80;
+  .bss : { *(.bss*) } > data
+}
+INPUT(/work/npu-dev/mlir-aie/programming_examples/pythoc/flash_attention/flash_attention_build/attn.o)
+PROVIDE(main = core_2_4);
