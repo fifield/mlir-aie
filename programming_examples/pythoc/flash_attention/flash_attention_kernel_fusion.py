@@ -78,11 +78,12 @@ from aie.iron.pythoc import PythocKernel
 from aie.ir import AffineDimExpr, AffineMap, MemRefType
 from aie.utils import DefaultNPURuntime, NPUKernel
 from aie.utils.compile import compile_mlir_module
-from pythoc.aie import getExpBf16, vector_add, vector_blend, vector_cast, vector_insert, vector_mul, vector_sub, vmax_ltbf16
+from pythoc.aie import ACC2048_accfloat_add_conf, I512_I512_ACC1024_bf_mac_conf, I512_I512_ACC1024_bf_mul_conf, I512_I512_ACC1024_bf_negmul_conf, acc_extract, acc_grow, getExpBf16, set_ctrl_reg, v32accfloat_to_v32bf16, vector_add, vector_blend, vector_cast, vector_extract, vector_insert, vector_mul, vector_sub, vmax_ltbf16
 
 from attn import (
     add_gp_g_pythoc,
     copy_tile_pythoc,
+    div_gp_sp_pythoc,
     exp_up_minus_u_pythoc,
     maximum_up_u_bf16_pythoc,
     mul_r_gp_pythoc,
@@ -95,10 +96,19 @@ from attn import (
 
 
 FLASH_ATTN_KERNEL_GLOBALS = {
+    "ACC2048_accfloat_add_conf": ACC2048_accfloat_add_conf,
+    "I512_I512_ACC1024_bf_mac_conf": I512_I512_ACC1024_bf_mac_conf,
+    "I512_I512_ACC1024_bf_mul_conf": I512_I512_ACC1024_bf_mul_conf,
+    "I512_I512_ACC1024_bf_negmul_conf": I512_I512_ACC1024_bf_negmul_conf,
+    "acc_extract": acc_extract,
+    "acc_grow": acc_grow,
     "getExpBf16": getExpBf16,
+    "set_ctrl_reg": set_ctrl_reg,
+    "v32accfloat_to_v32bf16": v32accfloat_to_v32bf16,
     "vector_add": vector_add,
     "vector_blend": vector_blend,
     "vector_cast": vector_cast,
+    "vector_extract": vector_extract,
     "vector_insert": vector_insert,
     "vector_mul": vector_mul,
     "vector_sub": vector_sub,
@@ -413,6 +423,12 @@ def declare_kernels(
         target_arch="aie2p",
         extra_globals=FLASH_ATTN_KERNEL_GLOBALS,
     )
+    div_gp_sp_kernel = PythocKernel(
+        div_gp_sp_pythoc,
+        [row_ty, gp_ty],
+        target_arch="aie2p",
+        extra_globals=FLASH_ATTN_KERNEL_GLOBALS,
+    )
     zero_fill_g_kernel = PythocKernel(
         zero_fill_g_bf16_pythoc,
         [g_flat_ty],
@@ -494,7 +510,11 @@ def declare_kernels(
             inputs=[gp_ty, gp_ty],
             link_with=add_gp_g_kernel.object_file_name,
         ),
-        div_gp_sp=external_func("div_gp_sp", inputs=[row_ty, gp_ty], link_with=KERNEL_OBJECT),
+        div_gp_sp=external_func(
+            "div_gp_sp_pythoc",
+            inputs=[row_ty, gp_ty],
+            link_with=div_gp_sp_kernel.object_file_name,
+        ),
     )
 
 
