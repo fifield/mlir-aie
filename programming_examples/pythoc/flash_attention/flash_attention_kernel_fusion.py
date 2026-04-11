@@ -78,12 +78,22 @@ from aie.iron.pythoc import PythocKernel
 from aie.ir import AffineDimExpr, AffineMap, MemRefType
 from aie.utils import DefaultNPURuntime, NPUKernel
 from aie.utils.compile import compile_mlir_module
+from pythoc.aie import vector_blend, vector_cast
 
 from attn import (
+    copy_tile_pythoc,
+    neg_inf_fill_up_bf16_pythoc,
+    vector_copy_32elems_pythoc,
     zero_fill_g_bf16_pythoc,
     zero_fill_gp_bf16_pythoc,
     zero_fill_sp_bf16_pythoc,
 )
+
+
+FLASH_ATTN_KERNEL_GLOBALS = {
+    "vector_blend": vector_blend,
+    "vector_cast": vector_cast,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -353,15 +363,33 @@ def declare_kernels(
     gp_ty: type[np.ndarray],
     row_ty: type[np.ndarray],
 ) -> KernelSet:
+    copy_tile_kernel = PythocKernel(
+        copy_tile_pythoc,
+        [qk_ty, q_ty],
+        target_arch="aie2p",
+        extra_globals=FLASH_ATTN_KERNEL_GLOBALS,
+    )
+    neg_inf_fill_up_kernel = PythocKernel(
+        neg_inf_fill_up_bf16_pythoc,
+        [row_ty],
+        target_arch="aie2p",
+    )
+    vector_copy_32_kernel = PythocKernel(
+        vector_copy_32elems_pythoc,
+        [np.int32, row_ty, row_ty],
+        target_arch="aie2p",
+    )
     zero_fill_g_kernel = PythocKernel(
         zero_fill_g_bf16_pythoc,
         [g_flat_ty],
         target_arch="aie2p",
+        extra_globals=FLASH_ATTN_KERNEL_GLOBALS,
     )
     zero_fill_gp_kernel = PythocKernel(
         zero_fill_gp_bf16_pythoc,
         [gp_ty],
         target_arch="aie2p",
+        extra_globals=FLASH_ATTN_KERNEL_GLOBALS,
     )
     zero_fill_sp_kernel = PythocKernel(
         zero_fill_sp_bf16_pythoc,
@@ -386,9 +414,15 @@ def declare_kernels(
             link_with=zero_fill_sp_kernel.object_file_name,
         ),
         neg_inf_fill_up=external_func(
-            "neg_inf_fill_up_bf16", inputs=[row_ty], link_with=KERNEL_OBJECT
+            "neg_inf_fill_up_bf16_pythoc",
+            inputs=[row_ty],
+            link_with=neg_inf_fill_up_kernel.object_file_name,
         ),
-        copy_tile=external_func("copy_tile", inputs=[qk_ty, q_ty], link_with=KERNEL_OBJECT),
+        copy_tile=external_func(
+            "copy_tile_pythoc",
+            inputs=[qk_ty, q_ty],
+            link_with=copy_tile_kernel.object_file_name,
+        ),
         matmul_a_b=external_func(
             "matmul_a_b_bf16", inputs=[q_ty, qk_ty, g_flat_ty], link_with=KERNEL_OBJECT
         ),
@@ -403,7 +437,9 @@ def declare_kernels(
             "accum_sp_r_s", inputs=[row_ty, row_ty, row_ty], link_with=KERNEL_OBJECT
         ),
         vector_copy_32=external_func(
-            "vector_copy_32elems", inputs=[np.int32, row_ty, row_ty], link_with=KERNEL_OBJECT
+            "vector_copy_32elems_pythoc",
+            inputs=[np.int32, row_ty, row_ty],
+            link_with=vector_copy_32_kernel.object_file_name,
         ),
         maximum_up_u=external_func(
             "maximum_up_u_bf16", inputs=[row_ty, row_ty], link_with=KERNEL_OBJECT

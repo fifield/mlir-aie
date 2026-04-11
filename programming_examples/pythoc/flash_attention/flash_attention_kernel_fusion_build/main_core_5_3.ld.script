@@ -239,6 +239,9 @@ tmp_sp_seg1_s1_q1 = .;
 }
 INPUT(/work/npu-dev/mlir-aie/programming_examples/pythoc/flash_attention/flash_attention_kernel_fusion_build/zero_fill_gp_bf16_pythoc.o)
 INPUT(/work/npu-dev/mlir-aie/programming_examples/pythoc/flash_attention/flash_attention_kernel_fusion_build/zero_fill_sp_bf16_pythoc.o)
-INPUT(/work/npu-dev/mlir-aie/programming_examples/pythoc/flash_attention/flash_attention_kernel_fusion_build/attn.o)
+INPUT(/work/npu-dev/mlir-aie/programming_examples/pythoc/flash_attention/flash_attention_kernel_fusion_build/neg_inf_fill_up_bf16_pythoc.o)
+INPUT(/work/npu-dev/mlir-aie/programming_examples/pythoc/flash_attention/flash_attention_kernel_fusion_build/copy_tile_pythoc.o)
 INPUT(/work/npu-dev/mlir-aie/programming_examples/pythoc/flash_attention/flash_attention_kernel_fusion_build/zero_fill_g_bf16_pythoc.o)
+INPUT(/work/npu-dev/mlir-aie/programming_examples/pythoc/flash_attention/flash_attention_kernel_fusion_build/attn.o)
+INPUT(/work/npu-dev/mlir-aie/programming_examples/pythoc/flash_attention/flash_attention_kernel_fusion_build/vector_copy_32elems_pythoc.o)
 PROVIDE(main = core_5_3);
