@@ -1,7 +1,7 @@
 from aie.iron.pythoc import aie_kernel
 
 from pythoc import ptr, i32, bf16, void
-from pythoc.aie import aie_vector, broadcast, getExpBf16, load_v, store_v, vector_blend, vector_cast, vector_insert, vector_mul, vector_sub, zeros
+from pythoc.aie import aie_vector, broadcast, getExpBf16, load_v, store_v, vector_add, vector_blend, vector_cast, vector_insert, vector_mul, vector_sub, vmax_ltbf16, zeros
 
 
 @aie_kernel
@@ -159,6 +159,42 @@ def exp_up_minus_u_pythoc(up: ptr[bf16, True], u: ptr[bf16, True], r: ptr[bf16, 
 		p_up = p_up + vec_size
 		p_u = p_u + vec_size
 		p_r = p_r + vec_size
+		i = i + 1
+
+
+@aie_kernel
+def maximum_up_u_bf16_pythoc(up: ptr[bf16, True], u: ptr[bf16, True]) -> void:
+	vec_size: i32 = 32
+	iterations: i32 = 2
+	p_up: ptr[bf16] = up
+	p_u: ptr[bf16] = u
+
+	i: i32 = 0
+	while i < iterations:
+		up_vec: aie_vector[bf16, 32] = load_v(p_up, 32)
+		u_vec: aie_vector[bf16, 32] = load_v(p_u, 32)
+		out_vec, cmp_mask = vmax_ltbf16(up_vec, u_vec)
+		store_v(p_u, out_vec)
+		p_up = p_up + vec_size
+		p_u = p_u + vec_size
+		i = i + 1
+
+
+@aie_kernel
+def add_gp_g_pythoc(gp: ptr[bf16, True], g: ptr[bf16, True]) -> void:
+	vec_size: i32 = 32
+	iterations: i32 = 128
+	p_gp: ptr[bf16] = gp
+	p_g: ptr[bf16] = g
+
+	i: i32 = 0
+	while i < iterations:
+		gp_vec: aie_vector[bf16, 32] = load_v(p_gp, 32)
+		g_vec: aie_vector[bf16, 32] = load_v(p_g, 32)
+		out_vec: aie_vector[bf16, 32] = vector_add(gp_vec, g_vec)
+		store_v(p_g, out_vec)
+		p_gp = p_gp + vec_size
+		p_g = p_g + vec_size
 		i = i + 1
 
 
