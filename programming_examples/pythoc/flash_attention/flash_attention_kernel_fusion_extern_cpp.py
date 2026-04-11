@@ -74,12 +74,9 @@ from aie.extras import types as T
 from aie.extras.context import mlir_mod_ctx
 from aie.extras.dialects import arith
 from aie.helpers.dialects.scf import _for as range_
-from aie.iron.pythoc import PythocKernel
 from aie.ir import AffineDimExpr, AffineMap, MemRefType
 from aie.utils import DefaultNPURuntime, NPUKernel
 from aie.utils.compile import compile_mlir_module
-
-from attn import zero_fill_gp_bf16_pythoc, zero_fill_sp_bf16_pythoc
 
 
 # ---------------------------------------------------------------------------
@@ -349,29 +346,10 @@ def declare_kernels(
     gp_ty: type[np.ndarray],
     row_ty: type[np.ndarray],
 ) -> KernelSet:
-    zero_fill_gp_kernel = PythocKernel(
-        zero_fill_gp_bf16_pythoc,
-        [gp_ty],
-        target_arch="aie2p",
-    )
-    zero_fill_sp_kernel = PythocKernel(
-        zero_fill_sp_bf16_pythoc,
-        [row_ty],
-        target_arch="aie2p",
-    )
-
     return KernelSet(
         zero_fill_g=external_func("zero_fill_g_bf16", inputs=[g_flat_ty], link_with=KERNEL_OBJECT),
-        zero_fill_gp=external_func(
-            "zero_fill_gp_bf16_pythoc",
-            inputs=[gp_ty],
-            link_with=zero_fill_gp_kernel.object_file_name,
-        ),
-        zero_fill_sp=external_func(
-            "zero_fill_sp_bf16_pythoc",
-            inputs=[row_ty],
-            link_with=zero_fill_sp_kernel.object_file_name,
-        ),
+        zero_fill_gp=external_func("zero_fill_gp_bf16", inputs=[gp_ty], link_with=KERNEL_OBJECT),
+        zero_fill_sp=external_func("zero_fill_sp_bf16", inputs=[row_ty], link_with=KERNEL_OBJECT),
         neg_inf_fill_up=external_func(
             "neg_inf_fill_up_bf16", inputs=[row_ty], link_with=KERNEL_OBJECT
         ),
