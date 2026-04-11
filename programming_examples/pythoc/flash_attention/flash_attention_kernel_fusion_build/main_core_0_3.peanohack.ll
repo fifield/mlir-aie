@@ -515,9 +515,9 @@ declare void @zero_fill_gp_bf16_pythoc(ptr)
 
 declare void @zero_fill_sp_bf16_pythoc(ptr)
 
-declare void @neg_inf_fill_up_bf16(ptr)
+declare void @neg_inf_fill_up_bf16_pythoc(ptr)
 
-declare void @copy_tile(ptr, ptr)
+declare void @copy_tile_pythoc(ptr, ptr)
 
 declare void @matmul_a_b_bf16(ptr, ptr, ptr)
 
@@ -529,7 +529,7 @@ declare void @matmul_g_b_bf16(ptr, ptr, ptr)
 
 declare void @accum_sp_r_s(ptr, ptr, ptr)
 
-declare void @vector_copy_32elems(i32, ptr, ptr)
+declare void @vector_copy_32elems_pythoc(i32, ptr, ptr)
 
 declare void @maximum_up_u_bf16(ptr, ptr)
 
@@ -550,9 +550,9 @@ define void @core_0_3() {
 4:                                                ; preds = %1
   call void @zero_fill_gp_bf16_pythoc(ptr @gp_seg0_s1_q0)
   call void @zero_fill_sp_bf16_pythoc(ptr @sp_seg0_s1_q0)
-  call void @neg_inf_fill_up_bf16(ptr @up_seg0_s1_q0)
+  call void @neg_inf_fill_up_bf16_pythoc(ptr @up_seg0_s1_q0)
   call void @llvm.aie2p.acquire(i32 48, i32 -1)
-  call void @copy_tile(ptr @qk_seg0_s1_q0, ptr @q_seg0_s1_q0)
+  call void @copy_tile_pythoc(ptr @qk_seg0_s1_q0, ptr @q_seg0_s1_q0)
   call void @llvm.aie2p.release(i32 49, i32 1)
   call void @llvm.aie2p.acquire(i32 48, i32 -1)
   call void @llvm.aie2p.release(i32 49, i32 1)
@@ -577,7 +577,7 @@ define void @core_0_3() {
   call void @mul_r_gp(ptr @r_seg0_s1_q0, ptr @gp_seg0_s1_q0)
   call void @matmul_g_b_bf16(ptr @g_seg0_s1_q0, ptr @v_seg0_s1_q0, ptr @gp_seg0_s1_q0)
   call void @accum_sp_r_s(ptr @sp_seg0_s1_q0, ptr @r_seg0_s1_q0, ptr @s_seg0_s1_q0)
-  call void @vector_copy_32elems(i32 0, ptr @s_seg0_s1_q0, ptr @sp_seg0_s1_q0)
+  call void @vector_copy_32elems_pythoc(i32 0, ptr @s_seg0_s1_q0, ptr @sp_seg0_s1_q0)
   call void @llvm.aie2p.release(i32 51, i32 1)
   %9 = add i64 %6, 1
   br label %5
@@ -622,7 +622,7 @@ define void @core_0_3() {
   br label %26
 
 34:                                               ; preds = %26
-  call void @vector_copy_32elems(i32 0, ptr @up_seg0_s1_q0, ptr @prev_up_seg0_s1_q0)
+  call void @vector_copy_32elems_pythoc(i32 0, ptr @up_seg0_s1_q0, ptr @prev_up_seg0_s1_q0)
   call void @maximum_up_u_bf16(ptr @merged_up_seg0_s1_q0, ptr @up_seg0_s1_q0)
   call void @exp_up_minus_u(ptr @merged_up_seg0_s1_q0, ptr @up_seg0_s1_q0, ptr @r_cascade_seg0_s1_q0)
   call void @exp_up_minus_u(ptr @prev_up_seg0_s1_q0, ptr @up_seg0_s1_q0, ptr @r_local_seg0_s1_q0)
@@ -632,7 +632,7 @@ define void @core_0_3() {
   call void @zero_fill_sp_bf16_pythoc(ptr @tmp_sp_seg0_s1_q0)
   call void @accum_sp_r_s(ptr @merged_sp_seg0_s1_q0, ptr @r_cascade_seg0_s1_q0, ptr @tmp_sp_seg0_s1_q0)
   call void @accum_sp_r_s(ptr @sp_seg0_s1_q0, ptr @r_local_seg0_s1_q0, ptr @tmp_sp_seg0_s1_q0)
-  call void @vector_copy_32elems(i32 0, ptr @tmp_sp_seg0_s1_q0, ptr @merged_sp_seg0_s1_q0)
+  call void @vector_copy_32elems_pythoc(i32 0, ptr @tmp_sp_seg0_s1_q0, ptr @merged_sp_seg0_s1_q0)
   br label %35
 
 35:                                               ; preds = %38, %34
