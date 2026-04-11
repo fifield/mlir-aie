@@ -78,10 +78,11 @@ from aie.iron.pythoc import PythocKernel
 from aie.ir import AffineDimExpr, AffineMap, MemRefType
 from aie.utils import DefaultNPURuntime, NPUKernel
 from aie.utils.compile import compile_mlir_module
-from pythoc.aie import ACC2048_accfloat_add_conf, I512_I512_ACC1024_bf_mac_conf, I512_I512_ACC1024_bf_mul_conf, I512_I512_ACC1024_bf_negmul_conf, acc_extract, acc_grow, getExpBf16, set_ctrl_reg, v32accfloat_to_v32bf16, vector_add, vector_blend, vector_cast, vector_extract, vector_insert, vector_mul, vector_sub, vmax_ltbf16
+from pythoc.aie import ACC2048_accfloat_add_conf, I512_I512_ACC1024_bf_mac_conf, I512_I512_ACC1024_bf_mul_conf, I512_I512_ACC1024_bf_negmul_conf, acc_extract, acc_grow, getExpBf16, set_ctrl_reg, v32accfloat_to_v32bf16, v32bf16_to_v32accfloat, vector_add, vector_blend, vector_cast, vector_extract, vector_insert, vector_mul, vector_sub, vmax_ltbf16
 
 from attn import (
     add_gp_g_pythoc,
+    accum_sp_r_s_pythoc,
     copy_tile_pythoc,
     div_gp_sp_pythoc,
     exp_up_minus_u_pythoc,
@@ -105,6 +106,7 @@ FLASH_ATTN_KERNEL_GLOBALS = {
     "getExpBf16": getExpBf16,
     "set_ctrl_reg": set_ctrl_reg,
     "v32accfloat_to_v32bf16": v32accfloat_to_v32bf16,
+    "v32bf16_to_v32accfloat": v32bf16_to_v32accfloat,
     "vector_add": vector_add,
     "vector_blend": vector_blend,
     "vector_cast": vector_cast,
@@ -423,6 +425,12 @@ def declare_kernels(
         target_arch="aie2p",
         extra_globals=FLASH_ATTN_KERNEL_GLOBALS,
     )
+    accum_sp_r_s_kernel = PythocKernel(
+        accum_sp_r_s_pythoc,
+        [row_ty, row_ty, row_ty],
+        target_arch="aie2p",
+        extra_globals=FLASH_ATTN_KERNEL_GLOBALS,
+    )
     div_gp_sp_kernel = PythocKernel(
         div_gp_sp_pythoc,
         [row_ty, gp_ty],
@@ -488,7 +496,9 @@ def declare_kernels(
             "matmul_g_b_bf16", inputs=[g_flat_ty, v_ty, gp_ty], link_with=KERNEL_OBJECT
         ),
         accum_sp_r_s=external_func(
-            "accum_sp_r_s", inputs=[row_ty, row_ty, row_ty], link_with=KERNEL_OBJECT
+            "accum_sp_r_s_pythoc",
+            inputs=[row_ty, row_ty, row_ty],
+            link_with=accum_sp_r_s_kernel.object_file_name,
         ),
         vector_copy_32=external_func(
             "vector_copy_32elems_pythoc",
