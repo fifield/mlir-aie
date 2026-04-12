@@ -319,19 +319,33 @@ def matmul_a_b_bf16_pythoc(a_in: ptr[bf16, True], b_in: ptr[bf16, True], out: pt
 	while m < row_blocks:
 		n: i32 = 0
 		while n < col_blocks:
-			c_off: i32 = n * c_n_stride + m * c_m_stride
-			vc: aie_vector[bf16, 64] = load_v(out + c_off, 64)
-			vc_lo: aie_vector[bf16, 32] = vector_extract(vc, 0, 32)
-			vc_hi: aie_vector[bf16, 32] = vector_extract(vc, 32, 32)
-			acc_c_lo: aie_vector[f32, 32] = v32bf16_to_v32accfloat(vc_lo)
-			acc_c_hi: aie_vector[f32, 32] = v32bf16_to_v32accfloat(vc_hi)
-			acc_c_lo_i64: aie_vector[i64, 16] = vector_cast(acc_c_lo, i64, 16)
-			acc_c_hi_i64: aie_vector[i64, 16] = vector_cast(acc_c_hi, i64, 16)
-			acc_c_i64: aie_vector[i64, 32] = concat(acc_c_lo_i64, acc_c_hi_i64)
-			acc_c: aie_vector[f32, 64] = vector_cast(acc_c_i64, f32, 64)
+			c00_off: i32 = n * c_n_stride + m * c_m_stride
+			c01_off: i32 = c00_off + c_n_stride
+
+			vc00: aie_vector[bf16, 64] = load_v(out + c00_off, 64)
+			vc01: aie_vector[bf16, 64] = load_v(out + c01_off, 64)
+
+			vc00_lo: aie_vector[bf16, 32] = vector_extract(vc00, 0, 32)
+			vc00_hi: aie_vector[bf16, 32] = vector_extract(vc00, 32, 32)
+			acc_c00_lo: aie_vector[f32, 32] = v32bf16_to_v32accfloat(vc00_lo)
+			acc_c00_hi: aie_vector[f32, 32] = v32bf16_to_v32accfloat(vc00_hi)
+			acc_c00_lo_i64: aie_vector[i64, 16] = vector_cast(acc_c00_lo, i64, 16)
+			acc_c00_hi_i64: aie_vector[i64, 16] = vector_cast(acc_c00_hi, i64, 16)
+			acc_c00_i64: aie_vector[i64, 32] = concat(acc_c00_lo_i64, acc_c00_hi_i64)
+			acc_c00: aie_vector[f32, 64] = vector_cast(acc_c00_i64, f32, 64)
+
+			vc01_lo: aie_vector[bf16, 32] = vector_extract(vc01, 0, 32)
+			vc01_hi: aie_vector[bf16, 32] = vector_extract(vc01, 32, 32)
+			acc_c01_lo: aie_vector[f32, 32] = v32bf16_to_v32accfloat(vc01_lo)
+			acc_c01_hi: aie_vector[f32, 32] = v32bf16_to_v32accfloat(vc01_hi)
+			acc_c01_lo_i64: aie_vector[i64, 16] = vector_cast(acc_c01_lo, i64, 16)
+			acc_c01_hi_i64: aie_vector[i64, 16] = vector_cast(acc_c01_hi, i64, 16)
+			acc_c01_i64: aie_vector[i64, 32] = concat(acc_c01_lo_i64, acc_c01_hi_i64)
+			acc_c01: aie_vector[f32, 64] = vector_cast(acc_c01_i64, f32, 64)
 
 			a_off: i32 = m * block_size
-			b_base_off: i32 = n * b_n_stride
+			b0_base_off: i32 = n * b_n_stride
+			b1_base_off: i32 = b0_base_off + b_n_stride
 
 			k: i32 = 0
 			while k < k_blocks:
@@ -348,7 +362,7 @@ def matmul_a_b_bf16_pythoc(a_in: ptr[bf16, True], b_in: ptr[bf16, True], out: pt
 				va_acc: aie_vector[f32, 64] = vector_cast(va_acc_i64, f32, 64)
 				va_mant, va_exp = v64accfloat_to_v64bfp16ebs8(va_acc)
 
-				b0_off: i32 = k * b_k_stride + b_base_off
+				b0_off: i32 = k * b_k_stride + b0_base_off
 				vb0_lo_bf: aie_vector[bf16, 32] = load_v(b_in + b0_off, 32)
 				vb0_hi_bf: aie_vector[bf16, 32] = load_v(b_in + b0_off + 32, 32)
 				b0_lo_i: aie_vector[i32, 16] = vector_cast(vb0_lo_bf, i32, 16)
@@ -362,22 +376,50 @@ def matmul_a_b_bf16_pythoc(a_in: ptr[bf16, True], b_in: ptr[bf16, True], out: pt
 				b0_acc: aie_vector[f32, 64] = I1024_I1024_ACC2048_bf_mul_conf(vb0_s, one_vec, bf_mul_conf)
 				b0_mant, b0_exp = v64accfloat_to_v64bfp16ebs8(b0_acc)
 
-				acc_i: aie_vector[i32, 64] = vector_cast(acc_c, i32, 64)
-				res: aie_vector[i32, 64] = BFP576_BFP576_ACC2048_mac_conf(
-					va_mant, va_exp, b0_mant, b0_exp, acc_i, mac_conf
+				acc_i00: aie_vector[i32, 64] = vector_cast(acc_c00, i32, 64)
+				res00: aie_vector[i32, 64] = BFP576_BFP576_ACC2048_mac_conf(
+					va_mant, va_exp, b0_mant, b0_exp, acc_i00, mac_conf
 				)
-				acc_c = vector_cast(res, f32, 64)
+				acc_c00 = vector_cast(res00, f32, 64)
+
+				b1_off: i32 = k * b_k_stride + b1_base_off
+				vb1_lo_bf: aie_vector[bf16, 32] = load_v(b_in + b1_off, 32)
+				vb1_hi_bf: aie_vector[bf16, 32] = load_v(b_in + b1_off + 32, 32)
+				b1_lo_i: aie_vector[i32, 16] = vector_cast(vb1_lo_bf, i32, 16)
+				b1_hi_i: aie_vector[i32, 16] = vector_cast(vb1_hi_bf, i32, 16)
+				b1_stage0_even: aie_vector[i32, 16] = vshuffle(b1_lo_i, b1_hi_i, 52)
+				b1_stage0_odd: aie_vector[i32, 16] = vshuffle(b1_lo_i, b1_hi_i, 53)
+				b1_even: aie_vector[i32, 16] = vshuffle(b1_stage0_even, b1_stage0_odd, 52)
+				b1_odd: aie_vector[i32, 16] = vshuffle(b1_stage0_even, b1_stage0_odd, 53)
+				b1_cat: aie_vector[i32, 32] = concat(b1_even, b1_odd)
+				vb1_s: aie_vector[bf16, 64] = vector_cast(b1_cat, bf16, 64)
+				b1_acc: aie_vector[f32, 64] = I1024_I1024_ACC2048_bf_mul_conf(vb1_s, one_vec, bf_mul_conf)
+				b1_mant, b1_exp = v64accfloat_to_v64bfp16ebs8(b1_acc)
+
+				acc_i01: aie_vector[i32, 64] = vector_cast(acc_c01, i32, 64)
+				res01: aie_vector[i32, 64] = BFP576_BFP576_ACC2048_mac_conf(
+					va_mant, va_exp, b1_mant, b1_exp, acc_i01, mac_conf
+				)
+				acc_c01 = vector_cast(res01, f32, 64)
 				k = k + 1
 
-			acc_c_store_i64: aie_vector[i64, 32] = vector_cast(acc_c, i64, 32)
-			acc_c_store_lo_i64: aie_vector[i64, 16] = vector_extract(acc_c_store_i64, 0, 16)
-			acc_c_store_hi_i64: aie_vector[i64, 16] = vector_extract(acc_c_store_i64, 16, 16)
-			acc_c_store_lo: aie_vector[f32, 32] = vector_cast(acc_c_store_lo_i64, f32, 32)
-			acc_c_store_hi: aie_vector[f32, 32] = vector_cast(acc_c_store_hi_i64, f32, 32)
-			store_v(out + c_off, v32accfloat_to_v32bf16(acc_c_store_lo))
-			store_v(out + c_off + 32, v32accfloat_to_v32bf16(acc_c_store_hi))
+			acc_c00_store_i64: aie_vector[i64, 32] = vector_cast(acc_c00, i64, 32)
+			acc_c00_store_lo_i64: aie_vector[i64, 16] = vector_extract(acc_c00_store_i64, 0, 16)
+			acc_c00_store_hi_i64: aie_vector[i64, 16] = vector_extract(acc_c00_store_i64, 16, 16)
+			acc_c00_store_lo: aie_vector[f32, 32] = vector_cast(acc_c00_store_lo_i64, f32, 32)
+			acc_c00_store_hi: aie_vector[f32, 32] = vector_cast(acc_c00_store_hi_i64, f32, 32)
+			store_v(out + c00_off, v32accfloat_to_v32bf16(acc_c00_store_lo))
+			store_v(out + c00_off + 32, v32accfloat_to_v32bf16(acc_c00_store_hi))
 
-			n = n + 1
+			acc_c01_store_i64: aie_vector[i64, 32] = vector_cast(acc_c01, i64, 32)
+			acc_c01_store_lo_i64: aie_vector[i64, 16] = vector_extract(acc_c01_store_i64, 0, 16)
+			acc_c01_store_hi_i64: aie_vector[i64, 16] = vector_extract(acc_c01_store_i64, 16, 16)
+			acc_c01_store_lo: aie_vector[f32, 32] = vector_cast(acc_c01_store_lo_i64, f32, 32)
+			acc_c01_store_hi: aie_vector[f32, 32] = vector_cast(acc_c01_store_hi_i64, f32, 32)
+			store_v(out + c01_off, v32accfloat_to_v32bf16(acc_c01_store_lo))
+			store_v(out + c01_off + 32, v32accfloat_to_v32bf16(acc_c01_store_hi))
+
+			n = n + 2
 		m = m + 1
 
 
