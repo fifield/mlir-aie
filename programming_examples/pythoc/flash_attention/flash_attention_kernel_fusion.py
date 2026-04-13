@@ -78,13 +78,14 @@ from aie.iron.pythoc import PythocKernel
 from aie.ir import AffineDimExpr, AffineMap, MemRefType
 from aie.utils import DefaultNPURuntime, NPUKernel
 from aie.utils.compile import compile_mlir_module
-from pythoc.aie import ACC2048_accfloat_add_conf, BFP576_BFP576_ACC2048_mac_conf, I1024_I1024_ACC2048_bf_mul_conf, I512_I512_ACC1024_bf_mac_conf, I512_I512_ACC1024_bf_mul_conf, I512_I512_ACC1024_bf_negmul_conf, acc_extract, acc_grow, concat, getExpBf16, set_ctrl_reg, v32accfloat_to_v32bf16, v32bf16_to_v32accfloat, v64accfloat_to_v64bfp16ebs8, vector_add, vector_blend, vector_cast, vector_extract, vector_insert, vector_mul, vector_sub, vmax_ltbf16, vshuffle
+from pythoc.aie import ACC2048_accfloat_add_conf, BFP576_BFP576_ACC2048_mac_conf, I1024_I1024_ACC2048_bf_mul_conf, I512_I512_ACC1024_bf_mac_conf, I512_I512_ACC1024_bf_mul_conf, I512_I512_ACC1024_bf_negmul_conf, acc_extract, acc_grow, concat, exp2, getExpBf16, set_ctrl_reg, v32accfloat_to_v32bf16, v32bf16_to_v32accfloat, v64accfloat_to_v64bfp16ebs8, vector_add, vector_blend, vector_cast, vector_extract, vector_grow, vector_insert, vector_mul, vector_sub, vmax_ltbf16, vshuffle
 
 from attn import (
     add_gp_g_pythoc,
     accum_sp_r_s_pythoc,
     copy_tile_pythoc,
     div_gp_sp_pythoc,
+    exp_g_minus_u_pythoc,
     exp_up_minus_u_pythoc,
     matmul_a_b_bf16_pythoc,
     matmul_g_b_bf16_pythoc,
@@ -108,6 +109,7 @@ FLASH_ATTN_KERNEL_GLOBALS = {
     "acc_extract": acc_extract,
     "acc_grow": acc_grow,
     "concat": concat,
+    "exp2": exp2,
     "getExpBf16": getExpBf16,
     "set_ctrl_reg": set_ctrl_reg,
     "v32accfloat_to_v32bf16": v32accfloat_to_v32bf16,
@@ -117,6 +119,7 @@ FLASH_ATTN_KERNEL_GLOBALS = {
     "vector_blend": vector_blend,
     "vector_cast": vector_cast,
     "vector_extract": vector_extract,
+    "vector_grow": vector_grow,
     "vector_insert": vector_insert,
     "vector_mul": vector_mul,
     "vector_sub": vector_sub,
@@ -273,7 +276,9 @@ class KernelSet:
     neg_inf_fill_up: object
     copy_tile: object
     matmul_a_b: object
-    fused_softmax: object
+    max_g: object
+    exp_g_minus_u: object
+    sum_g: object
     mul_r_gp: object
     matmul_g_b: object
     accum_sp_r_s: object
@@ -420,6 +425,12 @@ def declare_kernels(
         target_arch="aie2p",
         extra_globals=FLASH_ATTN_KERNEL_GLOBALS,
     )
+    exp_g_minus_u_kernel = PythocKernel(
+        exp_g_minus_u_pythoc,
+        [row_ty, g_flat_ty],
+        target_arch="aie2p",
+        extra_globals=FLASH_ATTN_KERNEL_GLOBALS,
+    )
     maximum_up_u_kernel = PythocKernel(
         maximum_up_u_bf16_pythoc,
         [row_ty, row_ty],
@@ -505,8 +516,16 @@ def declare_kernels(
             inputs=[q_ty, qk_ty, g_flat_ty],
             link_with=matmul_a_b_kernel.object_file_name,
         ),
-        fused_softmax=external_func(
-            "fused_softmax", inputs=[g_flat_ty, row_ty, row_ty, row_ty], link_with=KERNEL_OBJECT
+        max_g=external_func(
+            "max_g_bf16", inputs=[g_flat_ty, row_ty], link_with=KERNEL_OBJECT
+        ),
+        exp_g_minus_u=external_func(
+            "exp_g_minus_u_pythoc",
+            inputs=[row_ty, g_flat_ty],
+            link_with=exp_g_minus_u_kernel.object_file_name,
+        ),
+        sum_g=external_func(
+            "sum_g", inputs=[g_flat_ty, row_ty], link_with=KERNEL_OBJECT
         ),
         mul_r_gp=external_func(
             "mul_r_gp_pythoc",
@@ -817,7 +836,13 @@ def emit_compute_core(spec: ComputeTileSpec, kernels: KernelSet) -> None:
                 use_lock(spec.qk_dma_acquire, LockAction.Release, value=1)
 
                 use_lock(spec.v_ready, LockAction.AcquireGreaterEqual, value=1)
-                kernels.fused_softmax(g_flat, spec.up, spec.s, spec.r)
+                kernels.max_g(g_flat, spec.r)
+                kernels.maximum_up_u(spec.up, spec.r)
+                kernels.exp_g_minus_u(spec.r, g_flat)
+                kernels.exp_up_minus_u(spec.up, spec.r, spec.s)
+                kernels.vector_copy_32(c0_i32, spec.r, spec.up)
+                kernels.vector_copy_32(c0_i32, spec.s, spec.r)
+                kernels.sum_g(g_flat, spec.s)
                 kernels.mul_r_gp(spec.r, spec.gp)
                 kernels.matmul_g_b(g_flat, spec.v, spec.gp)
                 kernels.accum_sp_r_s(spec.sp, spec.r, spec.s)
