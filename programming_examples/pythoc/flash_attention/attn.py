@@ -1,7 +1,7 @@
 from aie.iron.pythoc import aie_kernel
 
 from pythoc import ptr, i16, i32, i64, f32, bf16, void
-from pythoc.aie import ACC2048_accfloat_add_conf, BFP576_BFP576_ACC2048_mac_conf, I1024_I1024_ACC2048_bf_mul_conf, I512_I512_ACC1024_bf_mac_conf, I512_I512_ACC1024_bf_mul_conf, I512_I512_ACC1024_bf_negmul_conf, acc_extract, acc_grow, aie_vector, broadcast, concat, getExpBf16, load_v, set_ctrl_reg, store_v, v32accfloat_to_v32bf16, v32bf16_to_v32accfloat, v64accfloat_to_v64bfp16ebs8, vector_add, vector_blend, vector_cast, vector_extract, vector_insert, vector_mul, vector_sub, vmax_ltbf16, vshuffle, zeros
+from pythoc.aie import ACC2048_accfloat_add_conf, BFP576_BFP576_ACC2048_mac_conf, I1024_I1024_ACC2048_bf_mul_conf, I512_I512_ACC1024_bf_mac_conf, I512_I512_ACC1024_bf_mul_conf, I512_I512_ACC1024_bf_negmul_conf, acc_extract, acc_grow, aie_vector, broadcast, concat, exp2, getExpBf16, load_v, set_ctrl_reg, store_v, v32accfloat_to_v32bf16, v32bf16_to_v32accfloat, v64accfloat_to_v64bfp16ebs8, vector_add, vector_blend, vector_cast, vector_extract, vector_grow, vector_insert, vector_mul, vector_sub, vmax_ltbf16, vshuffle, zeros
 
 
 @aie_kernel
@@ -144,18 +144,29 @@ def mul_r_gp_pythoc(r: ptr[bf16, True], gp: ptr[bf16, True]) -> void:
 def exp_up_minus_u_pythoc(up: ptr[bf16, True], u: ptr[bf16, True], r: ptr[bf16, True]) -> void:
 	vec_size: i32 = 16
 	iterations: i32 = 4
-	log2e_vec: aie_vector[bf16, 16] = broadcast(bf16, 16, 0.18033688011112042)
+	log2e_vec: aie_vector[bf16, 32] = broadcast(bf16, 32, 0.18033688011112042)
+	lowest_vec: aie_vector[bf16, 32] = broadcast(bf16, 32, -3.389e38)
 	p_up: ptr[bf16] = up
 	p_u: ptr[bf16] = u
 	p_r: ptr[bf16] = r
+	set_ctrl_reg(1, 12)
 
 	i: i32 = 0
 	while i < iterations:
 		up_vec: aie_vector[bf16, 16] = load_v(p_up, 16)
 		u_vec: aie_vector[bf16, 16] = load_v(p_u, 16)
 		diff: aie_vector[bf16, 16] = vector_sub(up_vec, u_vec)
-		scaled: aie_vector[bf16, 16] = vector_mul(diff, log2e_vec)
-		exp_vec: aie_vector[bf16, 16] = getExpBf16(scaled)
+		diff_i32: aie_vector[i32, 8] = vector_cast(diff, i32, 8)
+		diff_wide: aie_vector[i32, 16] = vector_grow(diff_i32, 16, 0)
+		diff_bf32: aie_vector[bf16, 32] = vector_cast(diff_wide, bf16, 32)
+		clamped, cmp_mask = vmax_ltbf16(diff_bf32, lowest_vec)
+		clamped_i32: aie_vector[i32, 16] = vector_cast(clamped, i32, 16)
+		lo_i32: aie_vector[i32, 8] = vector_extract(clamped_i32, 0, 8)
+		lo_wide: aie_vector[i32, 16] = vector_grow(lo_i32, 16, 0)
+		lo_bf: aie_vector[bf16, 32] = vector_cast(lo_wide, bf16, 32)
+		lo_mul: aie_vector[f32, 32] = I512_I512_ACC1024_bf_mul_conf(lo_bf, log2e_vec, 60)
+		lo_acc: aie_vector[f32, 16] = acc_extract(lo_mul, 0)
+		exp_vec: aie_vector[bf16, 16] = exp2(lo_acc)
 		store_v(p_r, exp_vec)
 		p_up = p_up + vec_size
 		p_u = p_u + vec_size
@@ -197,6 +208,63 @@ def add_gp_g_pythoc(gp: ptr[bf16, True], g: ptr[bf16, True]) -> void:
 		p_gp = p_gp + vec_size
 		p_g = p_g + vec_size
 		i = i + 1
+
+
+@aie_kernel
+def exp_g_minus_u_pythoc(u: ptr[bf16, True], g: ptr[bf16, True]) -> void:
+	vec_size: i32 = 32
+	block_size: i32 = 64
+	col_blocks: i32 = 8
+	row_blocks: i32 = 8
+	block_stride: i32 = 512
+	rows_per_block: i32 = 8
+	log2e_vec: aie_vector[bf16, 32] = broadcast(bf16, 32, 0.18033688011112042)
+	lowest_vec: aie_vector[bf16, 32] = broadcast(bf16, 32, -3.389e38)
+	set_ctrl_reg(1, 12)
+
+	rb: i32 = 0
+	while rb < row_blocks:
+		half: i32 = 0
+		while half < 2:
+			row_start: i32 = rb * rows_per_block + half * 4
+			u_vec: aie_vector[bf16, 32] = broadcast(bf16, 32, u[row_start])
+			u1: aie_vector[bf16, 8] = broadcast(bf16, 8, u[row_start + 1])
+			u2: aie_vector[bf16, 8] = broadcast(bf16, 8, u[row_start + 2])
+			u3: aie_vector[bf16, 8] = broadcast(bf16, 8, u[row_start + 3])
+			u_vec = vector_insert(u_vec, u1, 8)
+			u_vec = vector_insert(u_vec, u2, 16)
+			u_vec = vector_insert(u_vec, u3, 24)
+
+			base: i32 = rb * block_size + half * vec_size
+			cb: i32 = 0
+			while cb < col_blocks:
+				off: i32 = base + cb * block_stride
+				p_g: ptr[bf16] = g + off
+				v: aie_vector[bf16, 32] = load_v(p_g, 32)
+				diff: aie_vector[bf16, 32] = vector_sub(v, u_vec)
+				clamped, cmp_mask = vmax_ltbf16(diff, lowest_vec)
+				clamped_i32: aie_vector[i32, 16] = vector_cast(clamped, i32, 16)
+				lo_i32: aie_vector[i32, 8] = vector_extract(clamped_i32, 0, 8)
+				hi_i32: aie_vector[i32, 8] = vector_extract(clamped_i32, 8, 8)
+				lo_wide: aie_vector[i32, 16] = vector_grow(lo_i32, 16, 0)
+				hi_wide: aie_vector[i32, 16] = vector_grow(hi_i32, 16, 0)
+				lo_bf: aie_vector[bf16, 32] = vector_cast(lo_wide, bf16, 32)
+				hi_bf: aie_vector[bf16, 32] = vector_cast(hi_wide, bf16, 32)
+				lo_mul: aie_vector[f32, 32] = I512_I512_ACC1024_bf_mul_conf(lo_bf, log2e_vec, 60)
+				hi_mul: aie_vector[f32, 32] = I512_I512_ACC1024_bf_mul_conf(hi_bf, log2e_vec, 60)
+				lo_acc: aie_vector[f32, 16] = acc_extract(lo_mul, 0)
+				hi_acc: aie_vector[f32, 16] = acc_extract(hi_mul, 0)
+				lo_exp: aie_vector[bf16, 16] = exp2(lo_acc)
+				hi_exp: aie_vector[bf16, 16] = exp2(hi_acc)
+				lo_exp_i32: aie_vector[i32, 8] = vector_cast(lo_exp, i32, 8)
+				hi_exp_i32: aie_vector[i32, 8] = vector_cast(hi_exp, i32, 8)
+				result_i32: aie_vector[i32, 16] = concat(lo_exp_i32, hi_exp_i32)
+				result: aie_vector[bf16, 32] = vector_cast(result_i32, bf16, 32)
+				store_v(p_g, result)
+				cb = cb + 1
+
+			half = half + 1
+		rb = rb + 1
 
 
 @aie_kernel
