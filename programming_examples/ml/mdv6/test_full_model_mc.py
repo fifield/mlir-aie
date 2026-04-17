@@ -104,7 +104,20 @@ def main():
     print("MDV6 Full Model — 32-Core Multicore")
     print("=" * 70)
 
-    model = MDV6MITYOLOv9c(num_classes=3).eval().to(torch.bfloat16)
+    model = MDV6MITYOLOv9c(num_classes=3).eval()
+    # Load trained weights if available (random weights cause signal attenuation → NaN)
+    _weights_path = os.path.join(os.path.dirname(__file__), 'mdv6_bf16_weights.pt')
+    if not os.path.exists(_weights_path):
+        _jit_path = '/home/jfifield/mdv6/mdv6.pt'
+        if os.path.exists(_jit_path):
+            _jit = torch.jit.load(_jit_path, map_location='cpu')
+            _sd = {k.replace('model.', '', 1): v for k, v in _jit.state_dict().items()}
+            model.load_state_dict(_sd, strict=False)
+            print("  (loaded trained weights from TorchScript)")
+    elif os.path.exists(_weights_path):
+        model.load_state_dict(torch.load(_weights_path, map_location='cpu', weights_only=True))
+        print("  (loaded trained bf16 weights)")
+    model = model.to(torch.bfloat16)
     torch.manual_seed(42)
     x = torch.randn(1, 3, 640, 640, dtype=torch.bfloat16)
 
