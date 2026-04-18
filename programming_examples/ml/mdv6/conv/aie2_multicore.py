@@ -160,8 +160,10 @@ def multicore_conv(dev, tile_h=8, tile_w=8, ic=16, oc=16,
                 strides=[0, 1],
             )
             rt.fill(col_in_fifos[col].prod(), I, tap_in)
-            rt.drain(col_out_fifos[col].cons(), O, tap_out,
-                     wait=(col == n_cols - 1))
+            # Full 8-column runs are not reliably synchronized by waiting only
+            # on the final drain. Require a completion token from every column
+            # output DMA before the runtime sequence frees/reuses tasks.
+            rt.drain(col_out_fifos[col].cons(), O, tap_out, wait=True)
 
     return Program(dev, rt).resolve_program(SequentialPlacer())
 
