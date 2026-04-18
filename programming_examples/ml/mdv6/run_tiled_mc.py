@@ -271,15 +271,8 @@ def _gemm_choose_k_block(ic, oc, M):
     return best_kb, best_tm
 
 
-# Force ppc=1 — ppc>1 has an ObjectFifo split bug causing ~half-zero outputs.
-# See mlir-aie-m6b.
-_FORCE_PPC_1 = True
-
-
 def _gemm_compute_ppc(M, tile_m, ic, oc_block):
     """Compute optimal patches_per_core to minimize NPU calls."""
-    if _FORCE_PPC_1:
-        return 1
     ideal = math.ceil(M / (32 * tile_m))
     in_bytes = 32 * tile_m * ic * 2
     out_bytes = 32 * tile_m * oc_block * 2
@@ -295,8 +288,6 @@ def _gemm_compute_ppc(M, tile_m, ic, oc_block):
 
 def _gemm_compute_ppc_kblocked(M, tile_m, ic, oc, k_block):
     """Compute ppc for K-blocked config."""
-    if _FORCE_PPC_1:
-        return 1
     ideal = math.ceil(M / (N_CORES * tile_m))
     in_bytes = N_CORES * tile_m * ic * 2
     out_bytes = N_CORES * tile_m * oc * 2

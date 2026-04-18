@@ -115,17 +115,8 @@ XRT_BUF_MAX = 16 * 1024 * 1024  # 16MB per XRT buffer argument
 L2_BUDGET = 400 * 1024  # ~400KB usable per memtile column
 
 
-# Force ppc=1 until the ObjectFifo split bug for ppc>1 is fixed.
-# With ppc>1, each core's 2nd+ patch iteration reads stale data (the memtile
-# split only delivers 1 patch per core per cycle), causing ~half the pixels
-# to be silently zero. See mlir-aie-m6b.
-_FORCE_PPC_1 = True
-
-
 def compute_ppc_kblocked(M, tile_m, ic, oc, k_block, n_cores=32):
     """Compute optimal patches_per_core for K-blocked config."""
-    if _FORCE_PPC_1:
-        return 1
     ideal = math.ceil(M / (n_cores * tile_m))
 
     # Cap by XRT host buffer limits
@@ -148,8 +139,6 @@ def compute_ppc_kblocked(M, tile_m, ic, oc, k_block, n_cores=32):
 
 def compute_ppc(M, tile_m, ic, oc_block):
     """Compute optimal patches_per_core (legacy, non-K-blocked)."""
-    if _FORCE_PPC_1:
-        return 1
     ideal = math.ceil(M / (32 * tile_m))
     in_bytes = 32 * tile_m * ic * 2
     out_bytes = 32 * tile_m * oc_block * 2
