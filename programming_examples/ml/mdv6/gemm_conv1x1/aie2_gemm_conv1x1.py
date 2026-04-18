@@ -160,7 +160,12 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
                 of_out.release(1)
             of_wt.release(1)
 
-    # Build per-column infrastructure
+    # Build per-column infrastructure.
+    #
+    # Super-FIFO sizing: one patch per core per super-FIFO cycle. Split/join
+    # semantics require sum(sub-FIFO sizes) == super-FIFO size. The runtime
+    # TAPs below produce `patches_per_core` super-FIFO cycles per call,
+    # gathering the p-th patch from each core into cycle p.
     col_in_fifos = []
     col_out_fifos = []
     wt_fifos = []
@@ -169,15 +174,15 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
     for col in range(n_cols):
         cores_this_col = min(cores_per_col, n_cores - col * cores_per_col)
 
-        col_in_size = cores_this_col * core_in_size
-        col_out_size = cores_this_col * core_out_size
+        col_in_size = cores_this_col * input_tile_size
+        col_out_size = cores_this_col * output_tile_size
         col_in_ty = np.ndarray[(col_in_size,), np.dtype[np.uint16]]
         col_out_ty = np.ndarray[(col_out_size,), np.dtype[np.uint16]]
 
         # Input: shim → memtile(split) → compute, depth=1
         col_in_fifo = ObjectFifo(col_in_ty, depth=1, name=f"col_in_{col}")
         in_splits = col_in_fifo.cons().split(
-            offsets=[core_in_size * i for i in range(cores_this_col)],
+            offsets=[input_tile_size * i for i in range(cores_this_col)],
             obj_types=[input_ty] * cores_this_col,
             names=[f"input_{col}_{i}" for i in range(cores_this_col)],
         )
@@ -185,7 +190,7 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
         # Output: compute → memtile(join) → shim, depth=1
         col_out_fifo = ObjectFifo(col_out_ty, depth=1, name=f"col_out_{col}")
         out_joins = col_out_fifo.prod().join(
-            offsets=[core_out_size * i for i in range(cores_this_col)],
+            offsets=[output_tile_size * i for i in range(cores_this_col)],
             obj_types=[output_ty] * cores_this_col,
             names=[f"output_{col}_{i}" for i in range(cores_this_col)],
         )
@@ -240,23 +245,39 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
             for wf in wt_fifos:
                 rt.fill(wf.prod(), W)
 
-        # Distribute input and collect output per column
+        # Distribute input / collect output per column.
+        #
+        # Host layout: patches are packed per core (core_0's ppc patches,
+        # then core_1's ppc patches, ...). Super-FIFO element holds one
+        # patch per core, so we emit `patches_per_core` cycles per call.
+        # Cycle p gathers patch p from each core: offset = c*core_in_size +
+        # p*input_tile_size within the column.
+        #
+        # DMA BD inner dim is limited to 1023 for multi-dim transfers;
+        # factor input_tile_size / output_tile_size as needed.
+        def _factor_for_dma(n, max_inner=1023):
+            for inner in range(max_inner, 0, -1):
+                if n % inner == 0:
+                    return n // inner, inner
+            return n, 1
+
+        in_d1, in_d0 = _factor_for_dma(input_tile_size)
+        out_d1, out_d0 = _factor_for_dma(output_tile_size)
+
         for col in range(n_cols):
             cores_this_col = min(cores_per_col, n_cores - col * cores_per_col)
-            col_in_sz = cores_this_col * core_in_size
-            col_out_sz = cores_this_col * core_out_size
 
             tap_in = TensorAccessPattern(
                 (host_in_size,),
                 offset=col * cores_per_col * core_in_size,
-                sizes=[1, col_in_sz],
-                strides=[0, 1],
+                sizes=[patches_per_core, cores_this_col, in_d1, in_d0],
+                strides=[input_tile_size, core_in_size, in_d0, 1],
             )
             tap_out = TensorAccessPattern(
                 (host_out_size,),
                 offset=col * cores_per_col * core_out_size,
-                sizes=[1, col_out_sz],
-                strides=[0, 1],
+                sizes=[patches_per_core, cores_this_col, out_d1, out_d0],
+                strides=[output_tile_size, core_out_size, out_d0, 1],
             )
             rt.fill(col_in_fifos[col].prod(), I, tap_in)
             rt.drain(col_out_fifos[col].cons(), O, tap_out,
