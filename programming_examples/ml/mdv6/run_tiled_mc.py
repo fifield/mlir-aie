@@ -94,6 +94,22 @@ def run_tiled_fused_conv_mc(mc_name, sc_name, input_hwc, weights_uint16,
                           stride, kernel_size, padding)
 
 
+def _pack_3x3_weights(conv_block_u16, oc_block, ic):
+    """Repack OIHW [oc_block, ic, 3, 3] bf16 (as uint16) to vectorized layout
+    [oc_block/8, ic/8, 9, 8ic, 8oc] for aie::mmul<4,8,8>.
+
+    Both oc_block and ic must be multiples of 8.
+    """
+    w_f = uint16_to_bf16(conv_block_u16).reshape(oc_block, ic, 9)
+    oc_blks = oc_block // 8
+    ic_blks = ic // 8
+    w_f = w_f.reshape(oc_blks, 8, ic_blks, 8, 9)
+    # Permute (oc_blk=0, 8_oc=1, ic_blk=2, 8_ic=3, 9=4)
+    #  → (oc_blk=0, ic_blk=2, 9=4, 8_ic=3, 8_oc=1)
+    w_blocked = w_f.permute(0, 2, 4, 3, 1).contiguous()
+    return bf16_to_uint16(w_blocked.flatten())
+
+
 def _run_tiled_mc_inner(mc_kh, input_hwc, weights_uint16,
                          out_h, out_w, out_ch, tile_h, tile_w, oc_block,
                          stride=1, kernel_size=3, padding=1):
@@ -122,9 +138,17 @@ def _run_tiled_mc_inner(mc_kh, input_hwc, weights_uint16,
         oc_end = min(oc_start + oc_block, out_ch)
         actual_oc = oc_end - oc_start
 
-        # Extract per-block weights
+        # Extract per-block weights (flat OIHW)
         cw_per_oc = C * kernel_size * kernel_size
         conv_block = all_conv_wts[oc_start * cw_per_oc:oc_end * cw_per_oc]
+        # Pad conv_block to full oc_block (zero-fill if actual_oc < oc_block)
+        if actual_oc < oc_block:
+            conv_block = np.pad(conv_block, (0, (oc_block - actual_oc) * cw_per_oc))
+
+        # For 3x3, repack OIHW → [oc_block/8, ic/8, 9, 8ic, 8oc] vectorized layout
+        if kernel_size == 3:
+            conv_block = _pack_3x3_weights(conv_block, oc_block, C)
+
         bn_w_block = all_bn_w[oc_start:oc_end]
         bn_b_block = all_bn_b[oc_start:oc_end]
         wt_block = np.concatenate([conv_block, bn_w_block, bn_b_block])
@@ -151,10 +175,11 @@ def _run_tiled_mc_inner(mc_kh, input_hwc, weights_uint16,
             batch_end = min(batch_start + N_CORES, len(all_patches))
             batch_size = batch_end - batch_start
 
-            # Pack input: concatenate patches, pad to N_CORES
-            batch_patches = all_patches[batch_start:batch_end]
+            # Pack input: concatenate patches, pad to N_CORES with slot-0 data
+            # (zero-padded slots cause NPU to produce all-zero output on real slots too)
+            batch_patches = list(all_patches[batch_start:batch_end])
             while len(batch_patches) < N_CORES:
-                batch_patches.append(np.zeros(patch_size, dtype=np.uint16))
+                batch_patches.append(batch_patches[0])
             input_concat = np.concatenate(batch_patches)
 
             in_buf = iron.tensor(input_concat, dtype=np.uint16)
@@ -246,8 +271,15 @@ def _gemm_choose_k_block(ic, oc, M):
     return best_kb, best_tm
 
 
+# Force ppc=1 — ppc>1 has an ObjectFifo split bug causing ~half-zero outputs.
+# See mlir-aie-m6b.
+_FORCE_PPC_1 = True
+
+
 def _gemm_compute_ppc(M, tile_m, ic, oc_block):
     """Compute optimal patches_per_core to minimize NPU calls."""
+    if _FORCE_PPC_1:
+        return 1
     ideal = math.ceil(M / (32 * tile_m))
     in_bytes = 32 * tile_m * ic * 2
     out_bytes = 32 * tile_m * oc_block * 2
@@ -263,6 +295,8 @@ def _gemm_compute_ppc(M, tile_m, ic, oc_block):
 
 def _gemm_compute_ppc_kblocked(M, tile_m, ic, oc, k_block):
     """Compute ppc for K-blocked config."""
+    if _FORCE_PPC_1:
+        return 1
     ideal = math.ceil(M / (N_CORES * tile_m))
     in_bytes = N_CORES * tile_m * ic * 2
     out_bytes = N_CORES * tile_m * oc * 2
