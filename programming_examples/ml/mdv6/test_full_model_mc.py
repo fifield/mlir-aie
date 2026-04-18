@@ -53,11 +53,42 @@ def run_elan_mc(model_elan, input_hwc, H, W, ic, oc,
                 mc_c1, sc_c1, mc_c3, sc_c3, mc_c4, sc_c4,
                 t1, o1, t3, o3, t4, o4, part, proc):
     c1 = rt(mc_c1, sc_c1, input_hwc, fuse_bn(model_elan.conv1), H, W, part, t1, t1, o1, 1, 1, 0)
+    if os.environ.get("DEBUG_ELAN2_SUB"):
+        with torch.no_grad():
+            ref = model_elan.conv1(input_hwc.float().permute(2,0,1).unsqueeze(0).to(torch.bfloat16)).squeeze(0).permute(1,2,0).bfloat16()
+        # Also compare ABSOLUTE value distributions + a few elements
+        diff = (c1.float() - ref.float()).abs()
+        print(f"\n      [c1 1x1] npu:std={c1.float().std():.4f} ref:std={ref.float().std():.4f} "
+              f"ratio={c1.float().std()/max(ref.float().std(),1e-9):.3f} max_diff={diff.max():.4f}")
+        # Per-channel ratio to see if uniform loss
+        npu_ch_std = c1.float().std(dim=(0,1))
+        ref_ch_std = ref.float().std(dim=(0,1))
+        ratios = (npu_ch_std / ref_ch_std.clamp(min=1e-9))
+        print(f"        per-channel ratio min={ratios.min():.3f} max={ratios.max():.3f} mean={ratios.mean():.3f}")
+        # Sample a few pixels
+        for (h, w, c) in [(0,0,0), (80,80,10), (100,50,30), (150,150,63)]:
+            print(f"        [{h},{w},{c}] npu={c1[h,w,c].float():.5f} ref={ref[h,w,c].float():.5f}")
     x1 = c1[:,:,:proc]; x2 = c1[:,:,proc:]
     x3 = rt(mc_c3, sc_c3, x2, fuse_bn(model_elan.conv2), H, W, proc, t3, t3, o3, 1, 3, 1)
+    if os.environ.get("DEBUG_ELAN2_SUB"):
+        with torch.no_grad():
+            ref = model_elan.conv2(x2.float().permute(2,0,1).unsqueeze(0).to(torch.bfloat16)).squeeze(0).permute(1,2,0).bfloat16()
+        print(f"      [c2 3x3] npu:std={x3.float().std():.4f} ref:std={ref.float().std():.4f} "
+              f"ratio={x3.float().std()/max(ref.float().std(),1e-9):.3f}")
     x4 = rt(mc_c3, sc_c3, x3, fuse_bn(model_elan.conv3), H, W, proc, t3, t3, o3, 1, 3, 1)
-    return rt(mc_c4, sc_c4, torch.cat([x1, x2, x3, x4], dim=2),
-              fuse_bn(model_elan.conv4), H, W, oc, t4, t4, o4, 1, 1, 0)
+    if os.environ.get("DEBUG_ELAN2_SUB"):
+        with torch.no_grad():
+            ref = model_elan.conv3(x3.float().permute(2,0,1).unsqueeze(0).to(torch.bfloat16)).squeeze(0).permute(1,2,0).bfloat16()
+        print(f"      [c3 3x3] npu:std={x4.float().std():.4f} ref:std={ref.float().std():.4f} "
+              f"ratio={x4.float().std()/max(ref.float().std(),1e-9):.3f}")
+    concat = torch.cat([x1, x2, x3, x4], dim=2)
+    out = rt(mc_c4, sc_c4, concat, fuse_bn(model_elan.conv4), H, W, oc, t4, t4, o4, 1, 1, 0)
+    if os.environ.get("DEBUG_ELAN2_SUB"):
+        with torch.no_grad():
+            ref = model_elan.conv4(concat.float().permute(2,0,1).unsqueeze(0).to(torch.bfloat16)).squeeze(0).permute(1,2,0).bfloat16()
+        print(f"      [c4 1x1] npu:std={out.float().std():.4f} ref:std={ref.float().std():.4f} "
+              f"ratio={out.float().std()/max(ref.float().std(),1e-9):.3f}")
+    return out
 
 def run_rn_mc(repncsp, inp, H, W, ic, oc,
               mc_rn1, sc_rn1, mc_rn3, sc_rn3, mc_rnm, sc_rnm,
@@ -126,8 +157,170 @@ def main():
     with torch.no_grad(): ref = model(x)
     print(f"{time.time()-t0:.1f}s")
 
+    if os.environ.get("DEBUG_GEMM_TRAINED"):
+        # Test 1x1 GEMM with TRAINED elan2 weights + NPU-like small input
+        print("\n--- 1x1 GEMM with trained elan2 weights ---")
+        torch.manual_seed(42)
+        x_orig = torch.randn(1, 3, 640, 640, dtype=torch.bfloat16)
+        with torch.no_grad():
+            conv0_ref = model.conv0(x_orig)
+            conv1_ref = model.conv1(conv0_ref)
+        # Use PyTorch conv1 output as input (this is what NPU conv1 approximates)
+        inp = conv1_ref.squeeze(0).permute(1,2,0).contiguous()  # 160x160x64
+        print(f"  input std={inp.float().std():.4f}")
+
+        # elan2.conv1 is 1x1 64→64
+        weights_u16 = fuse_bn(model.elan2.conv1)
+        npu_out = run_gemm_conv1x1('gemm_elan_c1', 'tf_elan_conv1', inp, weights_u16, 160, 160, 64)
+        with torch.no_grad():
+            ref = model.elan2.conv1(inp.float().permute(2,0,1).unsqueeze(0).to(torch.bfloat16))
+            ref_hwc = ref.squeeze(0).permute(1,2,0).bfloat16()
+        diff = (npu_out.float() - ref_hwc.float()).abs()
+        ratio = npu_out.float().std().item() / max(ref_hwc.float().std().item(), 1e-9)
+        print(f"  [elan2.conv1 TRAINED] npu:std={npu_out.float().std():.4f} ref:std={ref_hwc.float().std():.4f} "
+              f"ratio={ratio:.3f} max_diff={diff.max():.4f}")
+
+        # Also check BN parameters
+        bn = model.elan2.conv1.bn
+        print(f"  BN params: gamma.std={bn.weight.data.float().std():.3f} beta.std={bn.bias.data.float().std():.3f} "
+              f"mean.std={bn.running_mean.data.float().std():.3f} var.max={bn.running_var.data.float().max():.3f} var.min={bn.running_var.data.float().min():.4f}")
+        inv_std = 1.0 / torch.sqrt(bn.running_var.data.float() + bn.eps)
+        bn_w_fused = bn.weight.data.float() * inv_std
+        bn_b_fused = bn.bias.data.float() - bn.weight.data.float() * bn.running_mean.data.float() * inv_std
+        print(f"  fused: bn_w mean={bn_w_fused.mean():.2f} std={bn_w_fused.std():.2f} max={bn_w_fused.max():.2f} "
+              f"| bn_b mean={bn_b_fused.mean():.2f} std={bn_b_fused.std():.2f} max={bn_b_fused.abs().max():.2f}")
+        return True
+
+    if os.environ.get("DEBUG_GEMM"):
+        # Test 1x1 GEMM path — same sub-layers as elan2
+        print("\n--- Standalone 1x1 GEMM tests (elan2 sub-layers) ---")
+        torch.manual_seed(0)
+
+        gemm_configs = [
+            # (H, W, IC, OC, label)  — all 1x1 stride=1
+            (160, 160, 64, 64, 'elan_c1 1x1 64→64'),
+            (160, 160, 128, 64, 'elan_c4 1x1 128→64'),
+            (80, 80, 128, 128, 're4_c1 1x1 128→128'),
+            (80, 80, 256, 128, 're4_c4 1x1 256→128'),
+        ]
+        any_fail = False
+        for (H, W, IC, OC, label) in gemm_configs:
+            test_in = (torch.randn(H, W, IC, dtype=torch.float32) * 0.5).to(torch.bfloat16)
+            test_w = (torch.randn(OC, IC, dtype=torch.float32) * 0.1).to(torch.bfloat16)
+            bn_w = torch.ones(OC, dtype=torch.bfloat16)
+            bn_b = torch.zeros(OC, dtype=torch.bfloat16)
+            wt_packed = np.concatenate([
+                ett.bf16_to_uint16(test_w.flatten()),
+                ett.bf16_to_uint16(bn_w),
+                ett.bf16_to_uint16(bn_b),
+            ])
+            with torch.no_grad():
+                ref = torch.nn.functional.conv2d(
+                    test_in.permute(2,0,1).unsqueeze(0).float(),
+                    test_w.reshape(OC, IC, 1, 1).float(), padding=0, stride=1)
+                ref = torch.nn.functional.silu(ref)
+                ref_hwc = ref.squeeze(0).permute(1,2,0).bfloat16()
+            npu_out = run_gemm_conv1x1('gemm_xxx', 'sc_xxx', test_in, wt_packed, H, W, OC)
+            diff = (npu_out.float() - ref_hwc.float()).abs()
+            n_nan = torch.isnan(npu_out.float()).float().mean().item()
+            ratio = npu_out.float().std().item() / max(ref_hwc.float().std().item(), 1e-9)
+            ok = (diff.max().item() < 1.0) and (n_nan == 0) and (0.5 < ratio < 2.0)
+            any_fail = any_fail or not ok
+            print(f"  [{label}] ref:std={ref_hwc.float().std():.4f} npu:std={npu_out.float().std():.4f} "
+                  f"ratio={ratio:.3f} diff:max={diff.max():.4f} mean={diff.mean():.4f} nan={n_nan:.3f}  "
+                  f"{'PASS' if ok else 'FAIL'}")
+        return not any_fail
+
+    if os.environ.get("DEBUG_KERNEL"):
+        # Standalone tests with RANDOM weights (exercise weight indexing thoroughly)
+        print("\n--- Standalone 3x3 kernel tests (random weights) ---")
+        torch.manual_seed(0)
+
+        configs = [
+            # (xclbin, sc, H, W, IC, OC, tile, ocb, stride, label)
+            # aconv3 stride=2 with real trained weights
+            ('mc_aconv3', 'tf_aconv3', 159, 159, 64, 128, 8, 16, 2, 'aconv3 stride=2 t=8'),
+            ('mc_aconv5', 'aconv5', 79, 79, 96, 192, 4, 8, 2, 'aconv5 stride=2 t=4'),
+            ('mc_aconv7', 'aconv7', 39, 39, 128, 256, 4, 8, 2, 'aconv7 stride=2 t=4'),
+        ]
+        all_pass = True
+        USE_IDENTITY = os.environ.get("IDENTITY") == "1"
+        for (mc, sc, H, W, IC, OC, tile, ocb, stride, label) in configs:
+            test_in = (torch.randn(H, W, IC, dtype=torch.float32) * 0.5).to(torch.bfloat16)
+            if USE_IDENTITY:
+                test_w = torch.zeros(OC, IC, 3, 3, dtype=torch.bfloat16)
+                for i in range(min(OC, IC)):
+                    test_w[i, i, 1, 1] = 1.0
+            else:
+                test_w = (torch.randn(OC, IC, 3, 3, dtype=torch.float32) * 0.1).to(torch.bfloat16)
+            bn_w = torch.ones(OC, dtype=torch.bfloat16)
+            bn_b = torch.zeros(OC, dtype=torch.bfloat16)
+            wt_packed = np.concatenate([
+                ett.bf16_to_uint16(test_w.flatten()),
+                ett.bf16_to_uint16(bn_w),
+                ett.bf16_to_uint16(bn_b),
+            ])
+            # Compute expected output dimensions for stride=2
+            if stride == 2:
+                out_h = (H + 2 - 3) // 2 + 1   # standard stride-2 conv with padding=1
+                out_w = (W + 2 - 3) // 2 + 1
+            else:
+                out_h, out_w = H, W
+            with torch.no_grad():
+                ref = torch.nn.functional.conv2d(
+                    test_in.permute(2,0,1).unsqueeze(0).float(),
+                    test_w.float(), padding=1, stride=stride)
+                ref = torch.nn.functional.silu(ref)
+                ref_hwc = ref.squeeze(0).permute(1,2,0).bfloat16()
+            npu_out = run_tiled_mc(mc, sc, test_in, wt_packed,
+                                    out_h, out_w, OC, tile, tile, ocb, stride, 3, 1)
+            diff = (npu_out.float() - ref_hwc.float()).abs()
+            n_nan = torch.isnan(npu_out.float()).float().mean().item()
+            ok = diff.max().item() < 1.0 and n_nan == 0
+            # Per-channel stats
+            npu_ch_std = npu_out.float().std(dim=(0,1))  # [OC]
+            nonzero_ch = (npu_ch_std > 1e-6).sum().item()
+            print(f"  [{label}] ref:std={ref_hwc.float().std():.4f} npu:std={npu_out.float().std():.4f} "
+                  f"diff:max={diff.max():.4f} mean={diff.mean():.4f} nan={n_nan:.3f} "
+                  f"nonzero_ch={nonzero_ch}/{OC}  {'PASS' if ok else 'FAIL'}")
+            if not ok and OC <= 32:
+                # Print per-channel std to spot which OCs work
+                ch_stats = ", ".join(f"{npu_ch_std[i].item():.2f}" for i in range(OC))
+                print(f"    per-OC std: [{ch_stats}]")
+            all_pass = all_pass and ok
+        return all_pass
+
     print("\n--- Forward pass (32-core) ---")
     t_start = time.time()
+
+    # Capture PyTorch intermediate activations for diagnostic comparison
+    _ref_acts = {}
+    if os.environ.get("DEBUG_LAYERS"):
+        # Use forward hooks to capture the same intermediates as NPU pipeline
+        def hook(name):
+            def fn(_m, _i, o):
+                _ref_acts[name] = o.detach() if not isinstance(o, tuple) else o[0].detach()
+            return fn
+        for n in ['conv0','conv1','elan2','aconv3','rep_elan4','aconv5','rep_elan6',
+                  'aconv7','rep_elan8','spp9','rep_elan12','rep_elan15','aconv16',
+                  'rep_elan18','aconv19','rep_elan21']:
+            m = getattr(model, n, None)
+            if m is not None:
+                m.register_forward_hook(hook(n))
+        with torch.no_grad():
+            model(x)
+
+    def _chk(tag, t):
+        if os.environ.get("DEBUG_LAYERS"):
+            tf = t.float() if hasattr(t, 'float') else torch.tensor(t).float()
+            nan = torch.isnan(tf).float().mean().item()
+            ref_str = ""
+            ref_key = tag.split("/")[0]
+            if ref_key in _ref_acts:
+                rf = _ref_acts[ref_key].squeeze(0).permute(1,2,0).float() if _ref_acts[ref_key].dim()==4 else _ref_acts[ref_key].float()
+                ref_str = f" REF: mean={rf.mean():.4f} std={rf.std():.4f}"
+            print(f"    [{tag}] mean={tf.mean():.4f} std={tf.std():.4f} "
+                  f"min={tf.min():.3f} max={tf.max():.3f} nan={nan:.3f}{ref_str}")
 
     inp = x.squeeze(0).permute(1, 2, 0).contiguous()
 
@@ -152,13 +345,25 @@ def main():
     ])
     conv0_hwc = rt('mc_ftconv0', 'ftconv0', inp_padded, conv0_wt_padded,
                     320, 320, 32, 20, 20, 32, 2, 3, 1)
-    print(f"{time.time()-t:.1f}s")
+    print(f"{time.time()-t:.1f}s"); _chk("conv0", conv0_hwc)
 
     # Conv1 (320→160, 32→64, s=2)
     print("  conv1...", end=" ", flush=True); t = time.time()
     conv1_hwc = rt('mc_ftconv1', 'ftconv1', conv0_hwc, fuse_bn(model.conv1),
                     160, 160, 64, 12, 12, 16, 2, 3, 1)
-    print(f"{time.time()-t:.1f}s")
+    print(f"{time.time()-t:.1f}s"); _chk("conv1", conv1_hwc)
+    # --- Diagnostic: check conv1 output vs PyTorch reference ---
+    if os.environ.get("DEBUG_CONV1"):
+        with torch.no_grad():
+            # Conv0 NPU output → feed into PyTorch Conv1 reference
+            conv1_ref = model.conv1(conv0_hwc.float().permute(2,0,1).unsqueeze(0).to(torch.bfloat16))
+            conv1_ref_hwc = conv1_ref.squeeze(0).permute(1,2,0).contiguous().float()
+        diff = (conv1_hwc.float() - conv1_ref_hwc).abs()
+        print(f"    conv1 NPU: mean={conv1_hwc.float().mean():.4f} std={conv1_hwc.float().std():.4f} "
+              f"nan_frac={torch.isnan(conv1_hwc.float()).float().mean():.3f}")
+        print(f"    conv1 REF: mean={conv1_ref_hwc.mean():.4f} std={conv1_ref_hwc.std():.4f}")
+        print(f"    conv1 diff: max={diff.max():.4f} mean={diff.mean():.4f}")
+        import sys; sys.stdout.flush()
 
     # ELAN2 (160×160, 64→64)
     print("  elan2...", end=" ", flush=True); t = time.time()
@@ -166,46 +371,56 @@ def main():
                          'mc_elan_c1', 'tf_elan_conv1',
                          'mc_elan_c3', 'tf_elan_conv3x3',
                          'mc_elan_c4', 'tf_elan_conv4',
-                         8, 64, 16, 32, 8, 64, 64, 32)
-    print(f"{time.time()-t:.1f}s")
+                         8, 64, 8, 32, 8, 64, 64, 32)
+    print(f"{time.time()-t:.1f}s"); _chk("elan2", elan2)
+    # --- Deep-debug elan2: feed NPU conv1 output into PyTorch elan2 ---
+    if os.environ.get("DEBUG_ELAN2"):
+        with torch.no_grad():
+            ref_elan2 = model.elan2(conv1_hwc.float().permute(2,0,1).unsqueeze(0).to(torch.bfloat16))
+            ref_elan2_hwc = ref_elan2.squeeze(0).permute(1,2,0).bfloat16()
+        diff = (elan2.float() - ref_elan2_hwc.float()).abs()
+        ratio = elan2.float().std().item() / max(ref_elan2_hwc.float().std().item(), 1e-9)
+        print(f"    ELAN2 NPU vs PT(NPU_conv1): npu:std={elan2.float().std():.4f} "
+              f"ref:std={ref_elan2_hwc.float().std():.4f} ratio={ratio:.3f} "
+              f"max_diff={diff.max():.4f} mean_diff={diff.mean():.4f}")
 
     # AConv3 + rep_elan4 [B3]
     print("  aconv3...", end=" ", flush=True); t = time.time()
     ac3 = run_aconv_mc('mc_aconv3', 'tf_aconv3', model.aconv3, to_nchw(elan2), 80, 80, 128, 8, 16)
-    print(f"{time.time()-t:.1f}s")
+    print(f"{time.time()-t:.1f}s"); _chk("aconv3", ac3)
     print("  rep_elan4...", end=" ", flush=True); t = time.time()
     b3 = run_re_mc(model.rep_elan4, ac3, 80, 80, 128, 128, 128, 64,
                     'mc_re4_c1', 're4_conv1', 'mc_re4_c3', 're4_conv3x3', 'mc_re4_c4', 're4_conv4',
                     'mc_re4_rn1', 're4_rn_conv1x1_64_32', 'mc_re4_rn3', 're4_rn_conv3x3_32_32',
                     'mc_elan_c1', 'tf_elan_conv1',
-                    10, 64, 12, 16, 8, 32, 16, 32, 16, 32, 8, 64)
-    print(f"{time.time()-t:.1f}s")
+                    10, 64, 12, 16, 8, 32, 16, 32, 8, 32, 8, 64)
+    print(f"{time.time()-t:.1f}s"); _chk("rep_elan4", b3)
 
     # AConv5 + rep_elan6 [B4]
     print("  aconv5...", end=" ", flush=True); t = time.time()
     b3n = to_nchw(b3)
     ac5 = run_aconv_mc('mc_aconv5', 'aconv5', model.aconv5, b3n, 40, 40, 192, 4, 8)
-    print(f"{time.time()-t:.1f}s")
+    print(f"{time.time()-t:.1f}s"); _chk("aconv5", ac5)
     print("  rep_elan6...", end=" ", flush=True); t = time.time()
     b4 = run_re_mc(model.rep_elan6, ac5, 40, 40, 192, 192, 192, 96,
                     'mc_re6_c1', 're6_conv1', 'mc_re6_c3', 're6_conv3x3', 'mc_re6_c4', 're6_conv4',
                     'mc_re6_rn1', 're6_rn_c1', 'mc_re6_rn3', 're6_rn_c3',
                     'mc_re6_rnm', 're6_rn_merge',
                     8, 32, 8, 16, 4, 32, 10, 48, 8, 16, 8, 48)
-    print(f"{time.time()-t:.1f}s")
+    print(f"{time.time()-t:.1f}s"); _chk("rep_elan6", b4)
 
     # AConv7 + rep_elan8 [B5]
     print("  aconv7...", end=" ", flush=True); t = time.time()
     b4n = to_nchw(b4)
-    ac7 = run_aconv_mc('mc_aconv7', 'aconv7', model.aconv7, b4n, 20, 20, 256, 4, 4)
-    print(f"{time.time()-t:.1f}s")
+    ac7 = run_aconv_mc('mc_aconv7', 'aconv7', model.aconv7, b4n, 20, 20, 256, 4, 8)
+    print(f"{time.time()-t:.1f}s"); _chk("aconv7", ac7)
     print("  rep_elan8...", end=" ", flush=True); t = time.time()
     b5 = run_re_mc(model.rep_elan8, ac7, 20, 20, 256, 256, 256, 128,
                     'mc_re8_c1', 're8_conv1', 'mc_re8_c3', 're8_conv3x3', 'mc_re8_c4', 're8_conv4',
                     'mc_re8_rn1', 're8_rn_c1', 'mc_re8_rn3', 're8_rn_c3',
                     'mc_re8_c1', 're8_rn_merge',
                     4, 32, 4, 16, 4, 16, 8, 64, 8, 16, 4, 32)
-    print(f"{time.time()-t:.1f}s")
+    print(f"{time.time()-t:.1f}s"); _chk("rep_elan8", b5)
 
     # SPP9
     print("  spp9...", end=" ", flush=True); t = time.time()
@@ -217,7 +432,7 @@ def main():
         feats.append(cur.squeeze(0).permute(1,2,0).contiguous())
     n3 = rt('mc_re8_c4', 're8_conv4', torch.cat(feats, dim=2), fuse_bn(model.spp9.conv5),
             20, 20, 256, 4, 4, 16, 1, 1, 0)
-    print(f"{time.time()-t:.1f}s")
+    print(f"{time.time()-t:.1f}s"); _chk("spp9/n3", n3)
 
     # Neck
     print("  rep_elan12...", end=" ", flush=True); t = time.time()
@@ -229,7 +444,7 @@ def main():
                     'mc_re6_rn1', 're6_rn_c1', 'mc_re6_rn3', 're6_rn_c3',
                     'mc_re6_rnm', 're6_rn_merge',
                     4, 32, 8, 16, 4, 32, 10, 48, 8, 16, 8, 48)
-    print(f"{time.time()-t:.1f}s")
+    print(f"{time.time()-t:.1f}s"); _chk("rep_elan12/n4", n4)
 
     print("  rep_elan15...", end=" ", flush=True); t = time.time()
     n4n = to_nchw(n4)
@@ -239,8 +454,8 @@ def main():
                     'mc_re15_c1', 're15_conv1', 'mc_re4_c3', 're4_conv3x3', 'mc_re4_c4', 're15_conv4',
                     'mc_re4_rn1', 're4_rn_conv1x1_64_32', 'mc_re4_rn3', 're4_rn_conv3x3_32_32',
                     'mc_elan_c4', 're15_rn_merge',
-                    6, 32, 12, 16, 8, 32, 16, 32, 16, 32, 8, 64)
-    print(f"{time.time()-t:.1f}s")
+                    6, 32, 12, 16, 8, 32, 16, 32, 8, 32, 8, 64)
+    print(f"{time.time()-t:.1f}s"); _chk("rep_elan15/p3", p3)
 
     # Head P4
     print("  head P4...", end=" ", flush=True); t = time.time()
@@ -252,19 +467,19 @@ def main():
                     'mc_re6_rn1', 're6_rn_c1', 'mc_re6_rn3', 're6_rn_c3',
                     'mc_re6_rnm', 're6_rn_merge',
                     4, 32, 8, 16, 4, 32, 10, 48, 8, 16, 8, 48)
-    print(f"{time.time()-t:.1f}s")
+    print(f"{time.time()-t:.1f}s"); _chk("head_p4", p4)
 
     # Head P5
     print("  head P5...", end=" ", flush=True); t = time.time()
     p4n = to_nchw(p4)
-    ac19 = run_aconv_mc('mc_aconv19', 'aconv19', model.aconv19, p4n, 20, 20, 128, 4, 4)
+    ac19 = run_aconv_mc('mc_aconv19', 'aconv19', model.aconv19, p4n, 20, 20, 128, 4, 8)
     cat21 = torch.cat([to_nchw(ac19), n3n], dim=1).squeeze(0).permute(1,2,0).contiguous()
     p5 = run_re_mc(model.rep_elan21, cat21, 20, 20, 384, 256, 256, 128,
                     'mc_re6_c4', 're21_conv1', 'mc_re8_c3', 're8_conv3x3', 'mc_re8_c4', 're8_conv4',
                     'mc_re8_rn1', 're8_rn_c1', 'mc_re8_rn3', 're8_rn_c3',
                     'mc_re8_c1', 're8_rn_merge',
                     4, 32, 4, 16, 4, 16, 8, 64, 8, 16, 4, 32)
-    print(f"{time.time()-t:.1f}s")
+    print(f"{time.time()-t:.1f}s"); _chk("head_p5", p5)
 
     # Detection (CPU)
     print("  detect...", end=" ", flush=True)
