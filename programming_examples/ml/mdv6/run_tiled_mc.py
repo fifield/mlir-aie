@@ -25,6 +25,24 @@ N_CORES = 32
 _bd = os.path.join(_base, "conv", "build")
 _mc_cache = {}
 
+# Start conservatively: enable batched spatial processing only for selected
+# hot stride-1 3x3 multicore layers that have matching _p2 xclbins.
+_MC_PPC = {
+    "mc_re4_c3": 2,
+    "mc_re4_rn3": 2,
+    "mc_re6_c3": 2,
+    "mc_re6_rn3": 2,
+    "mc_re8_c3": 2,
+    "mc_re8_rn3": 2,
+}
+
+# Pack caches — bead mlir-aie-d6f. Keyed by (id(weights_uint16), params).
+# fuse_bn in elan/test_tiled.py holds strong refs to its outputs, so the
+# buffers passed in here have stable ids across calls.
+_WTBLOCK_CACHE_3x3 = {}   # (id(wts_u16), ocb, oc_block, out_ch, C, ks) -> np.ndarray
+_GEMM_OCB_CACHE = {}      # (id(wts_u16), ic, oc, oc_block) -> list[np.ndarray]
+_GEMM_KB_CACHE = {}       # (id(wts_u16), ic, oc, k_block) -> np.ndarray
+
 
 def _load_handle(name):
     """Load an xclbin, returning handle or None."""
@@ -40,6 +58,15 @@ def _get_mc_handle(name):
     if name not in _mc_cache:
         _mc_cache[name] = _load_handle(name)
     return _mc_cache[name]
+
+
+def _get_mc_variant(name):
+    """Prefer a batched multicore variant when available."""
+    ppc = _MC_PPC.get(name, 1)
+    variant = f"{name}_p{ppc}" if ppc > 1 else name
+    if ppc > 1 and _load_handle(variant) is None:
+        return name, 1
+    return variant, ppc
 
 
 def _get_sc_handle(name):
@@ -64,25 +91,26 @@ def run_tiled_fused_conv_mc(mc_name, sc_name, input_hwc, weights_uint16,
         mc_name: multicore xclbin name (e.g., 'mc_re4_c1')
         sc_name: single-core xclbin name for fallback (e.g., 're4_conv1')
     """
-    mc_kh = _get_mc_handle(mc_name)
+    actual_name, ppc = _get_mc_variant(mc_name)
+    mc_kh = _get_mc_handle(actual_name)
     if mc_kh is not None:
         try:
             return _run_tiled_mc_inner(mc_kh, input_hwc, weights_uint16,
                                         out_h, out_w, out_ch, tile_h, tile_w, oc_block,
-                                        stride, kernel_size, padding)
+                                        stride, kernel_size, padding, ppc)
         except (RuntimeError, AttributeError) as e:
             # Handle stale/evicted XRT handles — reload and retry once
-            _mc_cache[mc_name] = _load_handle(mc_name)
-            mc_kh = _mc_cache[mc_name]
+            _mc_cache[actual_name] = _load_handle(actual_name)
+            mc_kh = _mc_cache[actual_name]
             if mc_kh is not None:
                 try:
                     return _run_tiled_mc_inner(mc_kh, input_hwc, weights_uint16,
                                                 out_h, out_w, out_ch, tile_h, tile_w, oc_block,
-                                                stride, kernel_size, padding)
+                                                stride, kernel_size, padding, ppc)
                 except Exception:
                     pass
             print(f"\n    [MC fail: {e}]", end="", flush=True)
-            _mc_cache[mc_name] = None
+            _mc_cache[actual_name] = None
 
     # Fallback: lazy-load single-core
     if isinstance(sc_name, str):
@@ -112,7 +140,7 @@ def _pack_3x3_weights(conv_block_u16, oc_block, ic):
 
 def _run_tiled_mc_inner(mc_kh, input_hwc, weights_uint16,
                          out_h, out_w, out_ch, tile_h, tile_w, oc_block,
-                         stride=1, kernel_size=3, padding=1):
+                         stride=1, kernel_size=3, padding=1, patches_per_core=1):
 
     H, W, C = input_hwc.shape
     tiles_h = (out_h + tile_h - 1) // tile_h
@@ -132,29 +160,36 @@ def _run_tiled_mc_inner(mc_kh, input_hwc, weights_uint16,
     all_conv_wts = weights_uint16[:total_conv_wts]
     all_bn_w = weights_uint16[total_conv_wts:total_conv_wts + out_ch]
     all_bn_b = weights_uint16[total_conv_wts + out_ch:total_conv_wts + 2 * out_ch]
+    wts_id = id(weights_uint16)
 
     for ocb in range(n_oc_blocks):
         oc_start = ocb * oc_block
         oc_end = min(oc_start + oc_block, out_ch)
         actual_oc = oc_end - oc_start
 
-        # Extract per-block weights (flat OIHW)
-        cw_per_oc = C * kernel_size * kernel_size
-        conv_block = all_conv_wts[oc_start * cw_per_oc:oc_end * cw_per_oc]
-        # Pad conv_block to full oc_block (zero-fill if actual_oc < oc_block)
-        if actual_oc < oc_block:
-            conv_block = np.pad(conv_block, (0, (oc_block - actual_oc) * cw_per_oc))
+        # Pack-cache the assembled [packed_conv | bn_w | bn_b] per ocb.
+        # See bead mlir-aie-d6f.
+        wt_key = (wts_id, ocb, oc_block, out_ch, C, kernel_size)
+        wt_block = _WTBLOCK_CACHE_3x3.get(wt_key)
+        if wt_block is None:
+            # Extract per-block weights (flat OIHW)
+            cw_per_oc = C * kernel_size * kernel_size
+            conv_block = all_conv_wts[oc_start * cw_per_oc:oc_end * cw_per_oc]
+            # Pad conv_block to full oc_block (zero-fill if actual_oc < oc_block)
+            if actual_oc < oc_block:
+                conv_block = np.pad(conv_block, (0, (oc_block - actual_oc) * cw_per_oc))
 
-        # For 3x3, repack OIHW → [oc_block/8, ic/8, 9, 8ic, 8oc] vectorized layout
-        if kernel_size == 3:
-            conv_block = _pack_3x3_weights(conv_block, oc_block, C)
+            # For 3x3, repack OIHW → [oc_block/8, ic/8, 9, 8ic, 8oc] vectorized layout
+            if kernel_size == 3:
+                conv_block = _pack_3x3_weights(conv_block, oc_block, C)
 
-        bn_w_block = all_bn_w[oc_start:oc_end]
-        bn_b_block = all_bn_b[oc_start:oc_end]
-        wt_block = np.concatenate([conv_block, bn_w_block, bn_b_block])
-        expected = conv_wt_size + 2 * oc_block
-        if len(wt_block) < expected:
-            wt_block = np.pad(wt_block, (0, expected - len(wt_block)))
+            bn_w_block = all_bn_w[oc_start:oc_end]
+            bn_b_block = all_bn_b[oc_start:oc_end]
+            wt_block = np.concatenate([conv_block, bn_w_block, bn_b_block])
+            expected = conv_wt_size + 2 * oc_block
+            if len(wt_block) < expected:
+                wt_block = np.pad(wt_block, (0, expected - len(wt_block)))
+            _WTBLOCK_CACHE_3x3[wt_key] = wt_block
 
         # Collect all spatial patches for this oc_block
         all_patches = []
@@ -169,21 +204,31 @@ def _run_tiled_mc_inner(mc_kh, input_hwc, weights_uint16,
                 all_patches.append(patch_u16)
                 all_coords.append((tr, tc))
 
-        # Process in batches of N_CORES
-        wt_buf = iron.tensor(wt_block, dtype=np.uint16)
-        for batch_start in range(0, len(all_patches), N_CORES):
-            batch_end = min(batch_start + N_CORES, len(all_patches))
+        # Process in batches of N_CORES * patches_per_core
+        # .copy() guards against XRT buffer aliasing now that wt_block is
+        # cached across calls (bead mlir-aie-d6f); matches the GEMM paths.
+        wt_buf = iron.tensor(wt_block.copy(), dtype=np.uint16)
+        patches_per_call = N_CORES * patches_per_core
+        for batch_start in range(0, len(all_patches), patches_per_call):
+            batch_end = min(batch_start + patches_per_call, len(all_patches))
             batch_size = batch_end - batch_start
 
-            # Pack input: concatenate patches, pad to N_CORES with slot-0 data
-            # (zero-padded slots cause NPU to produce all-zero output on real slots too)
+            # Pack input: group patches by core, with each core receiving
+            # `patches_per_core` consecutive tiles in one invocation. Pad
+            # incomplete calls with slot-0 data because fully zero slots can
+            # perturb real slots on current hardware/runtime.
             batch_patches = list(all_patches[batch_start:batch_end])
-            while len(batch_patches) < N_CORES:
+            while len(batch_patches) < patches_per_call:
                 batch_patches.append(batch_patches[0])
-            input_concat = np.concatenate(batch_patches)
+            per_core_batches = []
+            for core in range(N_CORES):
+                core_start = core * patches_per_core
+                core_end = core_start + patches_per_core
+                per_core_batches.append(np.concatenate(batch_patches[core_start:core_end]))
+            input_concat = np.concatenate(per_core_batches)
 
             in_buf = iron.tensor(input_concat, dtype=np.uint16)
-            out_buf = iron.zeros(N_CORES * output_tile_size, dtype=np.uint16)
+            out_buf = iron.zeros(N_CORES * patches_per_core * output_tile_size, dtype=np.uint16)
 
             DefaultNPURuntime.run(mc_kh, [in_buf, wt_buf, out_buf])
 
@@ -194,7 +239,9 @@ def _run_tiled_mc_inner(mc_kh, input_hwc, weights_uint16,
                 oh_s = tr * tile_h; ow_s = tc * tile_w
                 oh_e = min(oh_s + tile_h, out_h)
                 ow_e = min(ow_s + tile_w, out_w)
-                start = i * output_tile_size
+                core = i // patches_per_core
+                slot = i % patches_per_core
+                start = (core * patches_per_core + slot) * output_tile_size
                 tile_out = uint16_to_bf16(out_data[start:start + output_tile_size])
                 tile_out = tile_out.reshape(tile_h, tile_w, oc_block)
                 output[oh_s:oh_e, ow_s:ow_e, oc_start:oc_end] = \
@@ -324,6 +371,12 @@ def _repack_weights_for_gemm(weights_uint16, ic, oc, oc_block):
     Input:  weights_uint16 = [conv_wts(OC*IC), bn_w(OC), bn_b(OC)] (flat OIHW)
     Output: per oc_block: [blocked_wts(ic*oc_block), bn_w(oc_block), bn_b(oc_block)]
     """
+    # Bead mlir-aie-d6f: cache by id(weights_uint16) + shape params.
+    cache_key = (id(weights_uint16), ic, oc, oc_block)
+    cached = _GEMM_OCB_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
     total_conv = oc * ic
     all_conv = weights_uint16[:total_conv]
     all_bn_w = weights_uint16[total_conv:total_conv + oc]
@@ -358,6 +411,7 @@ def _repack_weights_for_gemm(weights_uint16, ic, oc, oc_block):
 
         blocks.append(np.concatenate([blocked_u16, bn_w_block, bn_b_block]))
 
+    _GEMM_OCB_CACHE[cache_key] = blocks
     return blocks
 
 
@@ -368,6 +422,12 @@ def _repack_weights_kblocked(weights_uint16, ic, oc, k_block):
     Output: single buffer [chunk_0, chunk_1, ..., chunk_{n_k_blocks-1}]
     Each chunk: [k_block/8, oc/8, 8ic, 8oc, bn_w(oc), bn_b(oc)]
     """
+    # Bead mlir-aie-d6f: cache by id(weights_uint16) + shape params.
+    cache_key = (id(weights_uint16), ic, oc, k_block)
+    cached = _GEMM_KB_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
     total_conv = oc * ic
     all_conv = weights_uint16[:total_conv]
     all_bn_w = weights_uint16[total_conv:total_conv + oc]
@@ -397,7 +457,9 @@ def _repack_weights_kblocked(weights_uint16, ic, oc, k_block):
         # Append BN params to every chunk (kernel only reads on last K-block)
         chunks.append(np.concatenate([blocked_u16, all_bn_w.copy(), all_bn_b.copy()]))
 
-    return np.concatenate(chunks)
+    out = np.concatenate(chunks)
+    _GEMM_KB_CACHE[cache_key] = out
+    return out
 
 
 def run_gemm_conv1x1_mc(gemm_name, sc_name, input_hwc, weights_uint16,
