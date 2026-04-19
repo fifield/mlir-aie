@@ -4,57 +4,63 @@ Generates MLIR and compiles for each unique (tile, ic, oc, ks, stride) config.""
 import os, sys, subprocess, time
 
 # All unique configs from test_full_model.py:
-# (name, n_cores, tile_h, tile_w, ic, oc_block, kernel_size, stride)
+# (name, n_cores, tile_h, tile_w, ic, oc_block, kernel_size, stride, patches_per_core)
 CONFIGS = [
     # Conv0/Conv1 (stride-2 stem)
-    ("mc_ftconv0",     32, 20, 20,   8, 32, 3, 2),  # IC padded 3→8 (Peano vectorization)
-    ("mc_ftconv1",     32, 12, 12,  32, 16, 3, 2),
+    ("mc_ftconv0",     32, 20, 20,   8, 32, 3, 2, 1),  # IC padded 3→8 (Peano vectorization)
+    ("mc_ftconv1",     32, 12, 12,  32, 16, 3, 2, 1),
     # ELAN2 sub-layers
-    ("mc_elan_c1",     32,  8,  8,  64, 64, 1, 1),  # 1x1 64→64
-    ("mc_elan_c3",     32,  8,  8,  32, 32, 3, 1),  # 3x3 32→32 (tile=8 for L1 fit)
-    ("mc_elan_c4",     32,  8,  8, 128, 64, 1, 1),  # 1x1 128→64
+    ("mc_elan_c1",     32,  8,  8,  64, 64, 1, 1, 1),  # 1x1 64→64
+    ("mc_elan_c3",     32,  8,  8,  32, 32, 3, 1, 1),  # 3x3 32→32 (tile=8 for L1 fit)
+    ("mc_elan_c4",     32,  8,  8, 128, 64, 1, 1, 1),  # 1x1 128→64
     # AConv layers (stride-2)
-    ("mc_aconv3",      32,  8,  8,  64, 16, 3, 2),  # 64→128 (oc_block=16)
-    ("mc_aconv5",      32,  4,  4,  96,  8, 3, 2),  # 96→192 (oc_block=8)
-    ("mc_aconv7",      32,  4,  4, 128,  8, 3, 2),  # 128→256 (oc_block=8 for vectorized mmul<4,8,8>)
-    ("mc_aconv16",     32,  4,  4,  64,  8, 3, 2),  # 64→96 (oc_block=8)
-    ("mc_aconv19",     32,  4,  4,  96,  8, 3, 2),  # 96→128 (oc_block=8 for vectorized mmul<4,8,8>)
+    ("mc_aconv3",      32,  8,  8,  64, 16, 3, 2, 1),  # 64→128 (oc_block=16)
+    ("mc_aconv5",      32,  4,  4,  96,  8, 3, 2, 1),  # 96→192 (oc_block=8)
+    ("mc_aconv7",      32,  4,  4, 128,  8, 3, 2, 1),  # 128→256 (oc_block=8 for vectorized mmul<4,8,8>)
+    ("mc_aconv16",     32,  4,  4,  64,  8, 3, 2, 1),  # 64→96 (oc_block=8)
+    ("mc_aconv19",     32,  4,  4,  96,  8, 3, 2, 1),  # 96→128 (oc_block=8 for vectorized mmul<4,8,8>)
     # RepNCSPELAN4 (80x80, 128ch)
-    ("mc_re4_c1",      32, 10, 10, 128, 64, 1, 1),  # conv1: 128→128
-    ("mc_re4_c3",      32, 12, 12,  64, 16, 3, 1),  # conv3x3: 64→64
-    ("mc_re4_c4",      32,  8,  8, 256, 32, 1, 1),  # conv4: 256→128
-    ("mc_re4_rn1",     32, 16, 16,  64, 32, 1, 1),  # rn 1x1: 64→32
-    ("mc_re4_rn3",     32,  8,  8,  32, 32, 3, 1),  # rn 3x3: 32→32 (tile=8 for L1 fit)
+    ("mc_re4_c1",      32, 10, 10, 128, 64, 1, 1, 1),  # conv1: 128→128
+    ("mc_re4_c3",      32, 12, 12,  64, 16, 3, 1, 1),  # conv3x3: 64→64
+    ("mc_re4_c3_p2",   32, 12, 12,  64, 16, 3, 1, 2),
+    ("mc_re4_c4",      32,  8,  8, 256, 32, 1, 1, 1),  # conv4: 256→128
+    ("mc_re4_rn1",     32, 16, 16,  64, 32, 1, 1, 1),  # rn 1x1: 64→32
+    ("mc_re4_rn3",     32,  8,  8,  32, 32, 3, 1, 1),  # rn 3x3: 32→32 (tile=8 for L1 fit)
+    ("mc_re4_rn3_p2",  32,  8,  8,  32, 32, 3, 1, 2),
     # RepNCSPELAN6 (40x40, 192ch)
-    ("mc_re6_c1",      32,  8,  8, 192, 32, 1, 1),
-    ("mc_re6_c3",      32,  8,  8,  96, 16, 3, 1),
-    ("mc_re6_c4",      32,  4,  4, 384, 32, 1, 1),
-    ("mc_re6_rn1",     32, 10, 10,  96, 48, 1, 1),
-    ("mc_re6_rn3",     32,  8,  8,  48, 16, 3, 1),
-    ("mc_re6_rnm",     32,  8,  8,  96, 48, 1, 1),  # RepNCSP merge: 2*neck=96→oc=96
+    ("mc_re6_c1",      32,  8,  8, 192, 32, 1, 1, 1),
+    ("mc_re6_c3",      32,  8,  8,  96, 16, 3, 1, 1),
+    ("mc_re6_c3_p2",   32,  8,  8,  96, 16, 3, 1, 2),
+    ("mc_re6_c4",      32,  4,  4, 384, 32, 1, 1, 1),
+    ("mc_re6_rn1",     32, 10, 10,  96, 48, 1, 1, 1),
+    ("mc_re6_rn3",     32,  8,  8,  48, 16, 3, 1, 1),
+    ("mc_re6_rn3_p2",  32,  8,  8,  48, 16, 3, 1, 2),
+    ("mc_re6_rnm",     32,  8,  8,  96, 48, 1, 1, 1),  # RepNCSP merge: 2*neck=96→oc=96
     # RepNCSPELAN8 (20x20, 256ch)
-    ("mc_re8_c1",      32,  4,  4, 256, 32, 1, 1),
-    ("mc_re8_c3",      32,  4,  4, 128, 16, 3, 1),
-    ("mc_re8_c4",      32,  4,  4, 512, 16, 1, 1),
-    ("mc_re8_rn1",     32,  8,  8, 128, 64, 1, 1),
-    ("mc_re8_rn3",     32,  8,  8,  64, 16, 3, 1),
-    ("mc_re8_rnm",     32,  4,  4, 256, 32, 1, 1),
+    ("mc_re8_c1",      32,  4,  4, 256, 32, 1, 1, 1),
+    ("mc_re8_c3",      32,  4,  4, 128, 16, 3, 1, 1),
+    ("mc_re8_c3_p2",   32,  4,  4, 128, 16, 3, 1, 2),
+    ("mc_re8_c4",      32,  4,  4, 512, 16, 1, 1, 1),
+    ("mc_re8_rn1",     32,  8,  8, 128, 64, 1, 1, 1),
+    ("mc_re8_rn3",     32,  8,  8,  64, 16, 3, 1, 1),
+    ("mc_re8_rn3_p2",  32,  8,  8,  64, 16, 3, 1, 2),
+    ("mc_re8_rnm",     32,  4,  4, 256, 32, 1, 1, 1),
     # SPP9
-    ("mc_spp_c1",      32,  4,  4, 256, 32, 1, 1),
+    ("mc_spp_c1",      32,  4,  4, 256, 32, 1, 1, 1),
     # Neck: re12 (uses re6 configs mostly, plus:)
-    ("mc_re12_c1",     32,  4,  4, 448, 32, 1, 1),
+    ("mc_re12_c1",     32,  4,  4, 448, 32, 1, 1, 1),
     # Neck: re15 (uses re4 configs mostly, plus:)
-    ("mc_re15_c1",     32,  6,  6, 320, 32, 1, 1),
-    ("mc_re15_c4",     32,  8,  8, 256, 32, 1, 1),
-    ("mc_re15_rnm",    32,  8,  8, 128, 64, 1, 1),
+    ("mc_re15_c1",     32,  6,  6, 320, 32, 1, 1, 1),
+    ("mc_re15_c4",     32,  8,  8, 256, 32, 1, 1, 1),
+    ("mc_re15_rnm",    32,  8,  8, 128, 64, 1, 1, 1),
     # Head P4: re18 (uses re6 configs mostly, plus:)
-    ("mc_re18_c1",     32,  4,  4, 288, 32, 1, 1),
+    ("mc_re18_c1",     32,  4,  4, 288, 32, 1, 1, 1),
     # Head P5: re21 (uses re8 configs mostly, plus:)
-    ("mc_re21_c1",     32,  4,  4, 384, 32, 1, 1),
+    ("mc_re21_c1",     32,  4,  4, 384, 32, 1, 1, 1),
 ]
 
 
-def build_one(name, n_cores, tile_h, tile_w, ic, oc, ks, stride, build_dir):
+def build_one(name, n_cores, tile_h, tile_w, ic, oc, ks, stride, ppc, build_dir):
     """Generate MLIR and compile one multicore xclbin."""
     mlir_path = os.path.join(build_dir, f"{name}.mlir")
     xclbin_path = os.path.join(build_dir, f"{name}.xclbin")
@@ -65,7 +71,7 @@ def build_one(name, n_cores, tile_h, tile_w, ic, oc, ks, stride, build_dir):
         return True
 
     script = os.path.join(os.path.dirname(__file__), "aie2_multicore.py")
-    cmd_mlir = f"python3 {script} {n_cores} {tile_h} {tile_w} {ic} {oc} {ks} {stride} 1"
+    cmd_mlir = f"python3 {script} {n_cores} {tile_h} {tile_w} {ic} {oc} {ks} {stride} {ppc}"
     print(f"  {name}: generating MLIR...", end=" ", flush=True)
     result = subprocess.run(cmd_mlir, shell=True, capture_output=True, text=True)
     if result.returncode != 0:
