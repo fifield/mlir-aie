@@ -22,8 +22,14 @@ from aie.helpers.taplib import TensorAccessPattern
 
 def multicore_conv(dev, tile_h=8, tile_w=8, ic=16, oc=16,
                    kernel_size=1, stride_val=1, padding_val=0,
-                   n_cores=32, patches_per_core=1):
-    """N-core tiled fused Conv+BN+SiLU."""
+                   n_cores=32, patches_per_core=1, input_depth=1):
+    """N-core tiled fused Conv+BN+SiLU.
+
+    input_depth: L1 sub-FIFO depth for the input patch (1 = single-buffered;
+    2 = ping-pong — memtile pre-fetches patch N+1 while core computes patch N,
+    hides per-patch DMA under compute for compute-bound layers. Doubles the
+    input portion of per-core L1 footprint.
+    """
 
     if kernel_size == 1:
         padding_val = 0
@@ -108,7 +114,7 @@ def multicore_conv(dev, tile_h=8, tile_w=8, ic=16, oc=16,
         in_splits = col_in_fifo.cons().split(
             offsets=[core_input_size * i for i in range(cores_this_col)],
             obj_types=[patch_ty] * cores_this_col,
-            depths=[1] * cores_this_col,
+            depths=[input_depth] * cores_this_col,
             names=[f"input_{col}_{i}" for i in range(cores_this_col)],
         )
 
@@ -178,6 +184,7 @@ if __name__ == "__main__":
     ks = int(sys.argv[6]) if len(sys.argv) > 6 else 1
     stride = int(sys.argv[7]) if len(sys.argv) > 7 else 1
     ppc = int(sys.argv[8]) if len(sys.argv) > 8 else 1
+    input_depth = int(sys.argv[9]) if len(sys.argv) > 9 else 1
     module = multicore_conv(dev, tile_h, tile_w, ic, oc, ks, stride,
-                            1 if ks == 3 else 0, n_cores, ppc)
+                            1 if ks == 3 else 0, n_cores, ppc, input_depth)
     print(module)
