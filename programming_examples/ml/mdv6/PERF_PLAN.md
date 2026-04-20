@@ -4,19 +4,50 @@
 
 Full MDV6-mit-yolov9-c forward pass on Strix Halo NPU.
 
-### 32-core multicore (2026-03-28)
-- **6.0s** total, 32 cores, scalar kernels — **24× over single-core baseline**
-- Correctness: NaN in output (bug in MC weight/patch packing, see `mlir-aie-mi7.1`)
-- 28 unique MC xclbins, hierarchical split/join + per-column weight broadcast
-- `test_full_model_mc.py` runs all 14 layers end-to-end
+### Post-Phase-A + sub-task B1 (2026-04-18)
 
-### Single-core baseline (2026-03-17)
-- **145.5s** total (single-core scalar kernels, host-orchestrated tiling)
+Warm-frame profile (`test_full_model_mc.py --profile 7`):
+
+```
+wall             1869 ms  (0.54 fps — video-stream target throughput)
+  npu_run        1103 ms  (59%)   — NPU active in DefaultNPURuntime.run
+  launch_gap      393 ms  (21%)   — per-call pyxrt plumbing (867 µs × 453 launches)
+  pre_post        293 ms  (16%)   — model setup + Detection (CPU) pre/post
+  cpu_layers       52 ms  ( 3%)   — RepConv 33 + Detection 11 + AvgPool 7 + Upsample 1
+  numpy            34 ms  ( 2%)   — np.concatenate (host weight assembly)
+  iron_alloc        0 ms  ( 0%)   — eliminated by buffer pool (0pf-A)
+  pack/fuse         0 ms  ( 0%)   — essentially free after warmup
+launches         453 (down from 607 pre-optimization)
+```
+
+Correctness: `max_class_diff=0.2264, max_vector_diff=0.0312, PASS`.
+
+Multi-frame verified: 5 consecutive `main()` calls all PASS with identical
+class diff — video-stream inference safe (see bead `mlir-aie-woi`).
+
+### Cumulative progress (0pf beads)
+
+| stage | wall | npu_run | iron_alloc | launch_gap | launches | fps | bead |
+|---|---:|---:|---:|---:|---:|---:|---|
+| before 0pf | 2248 | 1275 | 183 | 381 | 567 | 0.44 | — |
+| after 0pf-A (buffer pool) | 2081 | 1269 | **0** | 392 | 567 | 0.48 | mlir-aie-0pf |
+| after 0pf-B1 (tile-count ppc) | **1869** | **1103** | 0 | 393 | **453** | **0.54** | mlir-aie-0pf |
+| Δ cumulative | **-379 ms** | **-172** | **-183** | +12 | **-114** | **+23%** | |
+
+### 32-core multicore (2026-03-28, earlier)
+- **6.0s** total, 32 cores, scalar kernels — **24× over single-core baseline**
+- Correctness bug (zeros in output) **fixed** 2026-04-17 — root causes were:
+  1. `mlir-aie-9dl` — ppc>1 ObjectFifo split in `aie2_gemm_conv1x1.py`
+  2. `mlir-aie-woi` — multi-frame id-recycle collisions in `fuse_bn` cache
+  3. L1-budget overflow in vectorized 3×3 at large tile dims
+- After those fixes: 3.2s single-pass, then 1.87s after host-pipeline work
+
+### Single-core baseline (2026-03-17, historical)
+- **145.5s** total
 - **0.25 GFLOP/s** effective (0.005% of per-tile peak)
 - 34 GFLOP total model compute
-- ~10,000 host→NPU round-trips (1 per spatial tile)
 
-### 32-core per-layer timing
+### 32-core per-layer timing (pre-optimization, 2026-03-28)
 | Layer | SC time | MC time | Speedup |
 |-------|---------|---------|---------|
 | conv0 | 3.3s | 0.3s | 11× |
@@ -34,26 +65,6 @@ Full MDV6-mit-yolov9-c forward pass on Strix Halo NPU.
 | head P4 | 9.5s | 0.6s | 16× |
 | head P5 | 4.9s | 0.4s | 12× |
 | **Total** | **145.5s** | **6.0s** | **24×** |
-
-### Time Breakdown
-
-| Layer | Spatial | Time | % | FLOPs | Tiles |
-|-------|---------|------|---|-------|-------|
-| re15 (RepNCSPELAN) | 80×80 | 26.5s | 18% | 6.0G | ~1000 |
-| re4 (RepNCSPELAN) | 80×80 | 24.0s | 16% | 5.2G | ~700 |
-| re12 (RepNCSPELAN) | 40×40 | 16.6s | 11% | 4.5G | ~1000 |
-| elan2 (ELAN) | 160×160 | 15.1s | 10% | 1.1G | ~1000 |
-| re6 (RepNCSPELAN) | 40×40 | 15.0s | 10% | 3.8G | ~1000 |
-| head_p4 | 40×40 | 9.5s | 7% | 4.8G | ~1000 |
-| re8 (RepNCSPELAN) | 20×20 | 7.9s | 5% | 2.2G | ~600 |
-| conv1 | 320×320 | 6.8s | 5% | 0.9G | 784 |
-| aconv3 | 80×80 | 5.8s | 4% | 0.9G | 800 |
-| head_p5 | 20×20 | 4.9s | 3% | 2.8G | ~600 |
-| conv0 | 640×640 | 3.3s | 2% | 0.2G | 196 |
-| aconv5 | 40×40 | 5.3s | 4% | 0.7G | 2400 |
-| aconv7 | 20×20 | 2.8s | 2% | 0.4G | 1600 |
-| spp9 | 20×20 | 2.1s | 1% | 0.4G | ~100 |
-| detect | multi | <0.1s | 0% | 0.05G | CPU |
 
 ### Operator-level Profiling
 
@@ -108,12 +119,101 @@ Row 0  │  Shim  │  Shim  │  Shim  │  Shim  │  Shim  │  Shim  │  Sh
 
 | | GFLOP/s | % of peak | Time for 34 GFLOP |
 |---|---------|-----------|-------------------|
-| 1 tile, scalar | 0.25 | 0.16% | 145s (current) |
+| 1 tile, scalar | 0.25 | 0.16% | 145s (historical) |
 | 1 tile, vectorized (mmul+BN) | 4-16 | 2.5-10% | 2-9s |
 | 1 tile, vectorized (mmul+BN+SiLU) | 2-4 | 1.3-2.5% | 9-17s |
 | 1 tile, peak | 160 | 100% | 0.2s |
 | 32 tiles, vectorized | 64-512 | 1.3-10% | 0.07-0.5s |
 | Array peak | 5,120 | 100% | 6.6ms |
+
+Current wall is dominated by `npu_run` (1103 ms) + `launch_gap` (393 ms).
+At ~30 GFLOP useful compute / 1103 ms ≈ **27 GFLOP/s sustained on the array**
+(vs 5120 peak) — the NPU is still ~190× under array peak, so Phase A
+kernel gains remain plausible.
+
+---
+
+## Host Pipeline Characterization (bead `mlir-aie-0pf`)
+
+### Sub-task A: XRT buffer pool — ✅ DONE (commit 73d8925d4)
+
+Previously the full model allocated 1491 `iron.tensor`/`iron.zeros` per warm
+frame (924 inputs + 567 weights + 567 outputs) at 130-150 µs each — **~183 ms
+of pyxrt buffer construction per frame, eliminated to 0 ms**.
+
+Key gotchas in `run_tiled_mc.py`:
+- **Role-separated pools** (`_INPUT_POOL`, `_WEIGHT_POOL`, `_OUTPUT_POOL`):
+  A 1×1 conv with `ic == oc` (e.g., elan_c1) would otherwise alias input
+  and output to the same XRT buffer → kernel hangs.
+- **Direct writes to `.data` + explicit `_sync_to_device()`**: going through
+  `buf.numpy()` would unconditionally sync_from_device first (clobbering the
+  pending write with stale device data) and never sync back — silent
+  corruption that looks like a bug in the kernel.
+
+### Sub-task B1: ppc tile-count rule — ✅ DONE (commit cc511011d)
+
+The only ppc bumps that help are ones where `calls_per_ocb` actually drops:
+
+```
+Rule: bump ppc on a layer only when
+    n_tiles > N_CORES × prior_ppc
+
+Otherwise calls_per_ocb = ceil(n_tiles / (N_CORES × ppc)) is unchanged
+and the core just runs `ppc` padded iterations per call — pure regression.
+```
+
+Applied bumps (validated by deterministic launch-count delta under `--profile 7`):
+
+| layer | n_tiles | ppc | calls@ppc=1 → after |
+|---|---:|---:|---:|
+| mc_ftconv1 | 196 | **2** | 7 → 4 per ocb |
+| mc_elan_c3 | 400 | **4** | 13 → 4 |
+| mc_aconv5 | 100 | **4** | 4 → 1 |
+| mc_re4_c3 | 49 | **2** | 2 → 1 |
+| mc_re4_rn3 | 100 | **4** | 4 → 1 |
+
+Layers NOT bumped (n_tiles ≤ 32, would be regression):
+mc_aconv7/16/19, mc_re6_c3/rn3, mc_re8_c3/rn3, mc_re4_c4, mc_re6_c1/c4/rn1/rnm,
+mc_re8_c1/c4/rn1/rnm, mc_spp_c1, mc_re12_c1, mc_re15_*.
+
+**Implication for other N_CORES**: the 32 in the rule is `N_CORES`. At
+fewer cores (e.g., single-column 4-tile runs), the threshold drops
+proportionally and more layers become bumpable — see the inline table in
+`run_tiled_mc.py::_MC_PPC` for the full per-layer analysis.
+
+### Sub-tasks NOT pursued (bead revisions 2026-04-18)
+
+- **mlir-aie-d6f (cache packed weights)** — downgraded **P1 → P3**. Original
+  "~500 ms savings" estimate was based on cold-frame measurements. Actual
+  warm-frame `pack` bucket is ~0 ms; prewarm + WeakKeyDict cache already
+  addresses it.
+- **mlir-aie-cup (RepConv to NPU)** — downgraded **P1 → P3**. Original
+  "~600 ms" estimate was wrong by an order of magnitude. Measured
+  `cpu.RepConv = 33 ms` in the warm baseline. Not worth the kernel
+  complexity at current spatial resolutions.
+- **0pf-B sub-task B (launch batching, host-side plumbing tricks)** —
+  the `launch_gap = 393 ms` bucket is dominated by per-call
+  `_sync_to_device` + `_sync_from_device` (scales linearly with buffer
+  size × launch count). Total bytes moved is invariant; only the fixed
+  ~200 µs pyxrt overhead per launch is reducible. With B1's launch-count
+  reduction, the remaining fixed-overhead surface is small. Further
+  savings require **on-chip layer chaining** (Phase C) to eliminate the
+  round-trip entirely.
+
+### Profile harness
+
+`profile_harness.py` + `--profile N` on `test_full_model_mc.py` run N
+forward passes (first warm-up, rest measured). Monkey-patches
+`DefaultNPURuntime.load/.run`, `iron.tensor/zeros`, repacking helpers,
+fuse_bn variants, `np.concatenate`, and CPU-layer classes. Emits an
+8-bucket breakdown with sub-bucket detail. `--save-baseline` writes a
+JSON reference; `--baseline baseline.json` fails on >10% category
+regression.
+
+Any host-pipeline change should run `--profile` and either update
+`profile_baseline.json` or prove no regression. Without this we made
+order-of-magnitude wrong estimates (see bead history for d6f/cup
+downgrades and 0pf-B1 wall-time bisect that was initially noise-blinded).
 
 ---
 
@@ -220,36 +320,26 @@ Strategy: Write skip data to external via DMA during next layer's compute (overl
 
 ## Optimization Tiers
 
-### Tier 1: Vectorize + reduce invocations → ~15s (10×)
+### Tier 1: Vectorize + reduce invocations — Phase A/B, partially shipped
 
-Single core, but faster kernels and fewer host round-trips.
+Single-core kernel work + host-pipeline invocation reduction.
 
 | Action | Speedup | Status |
 |--------|---------|--------|
-| mmul<4,8,8> for matmul core | 10-15× on matmul | Done (conv1x1) |
-| Vector BN (aie::mul + aie::add) | 2× on BN portion | Done |
-| Scalar SiLU (blocked: no bf16→float vec) | 1× (unchanged) | Blocked |
-| Larger tiles (12-16 vs 8) | 2-4× fewer invocations | Partially done |
-| n_patches batching | 2-4× fewer invocations | Not started |
-| Pre-transposed weights (contiguous loads) | 2-3× on weight load | Done (conv1x1) |
-| **Combined** | **~10×** | |
+| mmul<4,8,8> for matmul core | 10-15× on matmul | ✅ (conv1x1 + conv3x3) |
+| Vector BN (aie::mul + aie::add) | 2× on BN portion | ✅ |
+| Scalar SiLU (blocked: no bf16→float vec) | 1× (unchanged) | bead `mlir-aie-4zz` |
+| Larger tiles (12-16 vs 8) | 2-4× fewer invocations | ✅ partial (per-layer L1 cap) |
+| ppc batching (tile-count rule) | 1-4× fewer calls per layer | ✅ (bead `mlir-aie-0pf` B1) |
+| Pre-transposed weights (contiguous loads) | 2-3× on weight load | ✅ (conv1x1) |
+| **Combined (today)** | **host+kernel wins: 77× from baseline** | 145.5s → 1.87s |
 
-### Tier 2: Multi-core spatial parallel → ~0.5-2s (100×)
+### Tier 2: Multi-core spatial parallel — ✅ DONE
 
 32 tiles (8 cols × 4 tiles) process same layer in parallel.
+Current measured: **1.87s warm-frame** (0.54 fps).
 
-| Layer group | Current | 32-core est. | Speedup |
-|------------|---------|-------------|---------|
-| 80×80 layers | 50.5s | ~0.3s | 170× |
-| 160×160 layers | 15.1s | ~0.12s | 126× |
-| 40×40 layers | 41.1s | ~0.4s | 103× |
-| 20×20 layers | 12.1s | ~0.14s | 86× |
-| Stride-2 convs | 17.1s | ~0.2s | 86× |
-| **Total** | **145.5s** | **~1.5s** | **97×** |
-
-With vectorized kernels on top: **~0.5s** (290×).
-
-### Tier 3: On-chip pipeline → <100ms (1000×+)
+### Tier 3: On-chip pipeline — Phase C, not started
 
 Layers mapped to different columns, data flows tile-to-tile.
 
@@ -264,6 +354,14 @@ Col 6-7 (8 tiles):  neck + head (re12, re15, re18, re21, detect)
 - Pipeline throughput: ~12ms/frame (~80 FPS) for streaming
 - 8 columns allows more balanced pipeline stages
 
+Beads `mlir-aie-2vb` (epic), `mlir-aie-9oz` (Flavor 1: L2 memtile chains),
+`mlir-aie-k82` (Flavor 2: cross-column spatial pipeline).
+
+This is the only remaining lever to meaningfully reduce the 393 ms
+`launch_gap` bucket: current host-pipeline work has amortised the fixed
+per-launch overhead as far as measurement resolution allows; the ~400 µs
+DMA sync per call is a hard floor unless the round-trip is eliminated.
+
 ---
 
 ## Test Plan
@@ -272,7 +370,7 @@ Bottom-up validation, each level proves a capability before scaling.
 
 ### Level 0: Single tile, scalar ✅ DONE
 - All 10 layer types pass on NPU at 8×8 test dims
-- Full model end-to-end pass at model dims (145.5s)
+- Full model end-to-end pass at model dims (145.5s historical)
 
 ### Level 1: Single tile, vectorized ✅ DONE
 - conv1x1 vec: mmul<4,8,8> + pre-transposed weights + vector BN
@@ -284,57 +382,97 @@ Bottom-up validation, each level proves a capability before scaling.
 - 2 Workers on same column, per-core ObjectFifos + TensorAccessPattern
 - 1 weight ObjectFifo → 2 consumers (broadcast)
 - Conv1x1 16→16, tile 8×8: max_diff=0.125, 1.8ms
-- **Architecture**: per-core FIFOs with TAP (not split/join) for multi-column support
 
 ### Level 3: 4-tile full column ✅ DONE (`mlir-aie-03i`)
 - 4 Workers, full column utilization (rows 2-5)
 - Per-column: bulk input FIFO → split at memtile → 4 cores, join output
 - Per-column weight FIFO → broadcast to 4 consumers
-- Conv1x1 16→16, tile 8×8: max_diff=0.125, 1.6ms
-- Shim DMA: 3/4 channels (1 weight + 1 input + 1 output)
 
 ### Level 4: Operator chain L1→L2→L1 ✅ DONE (`mlir-aie-0m4`)
 - 2 conv1x1 Workers chained: Worker1 output → Worker2 input (same column)
 - Intermediate ObjectFifo stays on-chip (no external round-trip)
-- Conv1x1 16→16 × 2, tile 8×8: max_diff=0.5 (cumulative error), 12.1ms
 
 ### Level 5: 8-column 32-tile spatial ✅ DONE (`mlir-aie-646`)
 - Full array (`npu2`), all 8 columns active, 32 cores total
 - Hierarchical: per-column split/join at memtile + per-column weight broadcast
-- Conv1x1 16→16, tile 8×8: max_diff=0.125, 4.1ms (32 patches)
-- Conv1x1 16→16, tile 10×10, 80×80 layer: 7.5ms (64 tiles in 2 invocations)
-- **Key pattern**: `aie2_multicore_broadcast.py` scales 1-32 cores automatically
+- `aie2_multicore_broadcast.py` scales 1-32 cores automatically
 
-### Level 6: Full model 32-core ✅ TIMING DONE, CORRECTNESS WIP (`mlir-aie-zuq`)
-- All 14 layers complete in **6.0s** (24× over 145.5s baseline)
-- 28 unique MC xclbins (deduplicated from 34 to fit 32-slot XRT cache)
-- Architecture: per-column split/join + per-column weight broadcast + TensorAccessPattern
-- RepNCSP sub-layers also use MC (RepConv still on CPU)
-- Bug: MC path returns zeros for some layers → NaN in detection output
-  - SC path produces correct non-zero output for same inputs
-  - Root cause: likely weight packing or patch extraction in `_run_tiled_mc_inner`
-- Fixed: mc_re4_rn3 buffer mismatch (tile=12→16, oc=16→32) that was crashing NPU
-- Fixed: mc_re6_rnm buffer mismatch (ic=192→96)
+### Level 6: Full model 32-core ✅ DONE (timing AND correctness)
+- All 14 layers complete; correctness passes after `mlir-aie-9dl` and
+  `mlir-aie-woi` fixes (2026-04-17/18)
+- Currently 1.87s warm-frame wall, 0.54 fps
 
 ### Level 5b: Skip connections + DMA overlap (`mlir-aie-xdg`)
 - B3/B4/N3/N4 write to external during compute
-- Concurrent DMA + compute validation
-- Not yet started (lower priority than L6 correctness)
+- Not yet started (lower priority than Phase A kernel work)
 
 ---
 
 ## Beads Tracking
 
+### Epic & top-level
 | Bead | Title | Status |
 |------|-------|--------|
-| mlir-aie-mi7 | Perf optimization epic | Open |
-| mlir-aie-326 | Phase A: Vectorized kernels | In progress |
-| mlir-aie-1wy | Phase B: Multi-core spatial | In progress |
-| mlir-aie-9xq | Phase D: RepConv/AvgPool/Upsample to NPU | Open |
-| mlir-aie-kot | Level 2: 2-tile broadcast | ✅ Done |
-| mlir-aie-03i | Level 3: 4-tile column | ✅ Done |
-| mlir-aie-0m4 | Level 4: L1→L2→L1 chain | ✅ Done |
-| mlir-aie-646 | Level 5: 32-tile spatial | ✅ Done |
-| mlir-aie-zuq | Level 6: Full model 32-core | ⚠️ 6.0s timing done, correctness WIP |
-| mlir-aie-mi7.1 | MC correctness bug (zeros) | Open P1 |
-| mlir-aie-xdg | Level 5b: Skip connections | Ready |
+| `mlir-aie-mi7` | Perf optimization epic | Open |
+| `mlir-aie-326` | Phase A: Vectorized kernels | In progress |
+| `mlir-aie-1wy` | Phase B: Multi-core spatial | Done (timing+correctness) |
+| `mlir-aie-2vb` | Phase C: On-chip pipelining (epic) | P3, not started |
+| `mlir-aie-9oz` | Phase C Flavor 1: L2 memtile chains | P3, not started |
+| `mlir-aie-k82` | Phase C Flavor 2: cross-column pipeline | P3, not started |
+| `mlir-aie-9xq` | Phase D: RepConv/AvgPool/Upsample to NPU | P2, not started |
+
+### Test-plan levels
+| Bead | Title | Status |
+|------|-------|--------|
+| `mlir-aie-kot` | Level 2: 2-tile broadcast | ✅ Done |
+| `mlir-aie-03i` | Level 3: 4-tile column | ✅ Done |
+| `mlir-aie-0m4` | Level 4: L1→L2→L1 chain | ✅ Done |
+| `mlir-aie-646` | Level 5: 32-tile spatial | ✅ Done |
+| `mlir-aie-zuq` | Level 6: Full model 32-core | ✅ Done (timing + correctness) |
+| `mlir-aie-xdg` | Level 5b: Skip connections + DMA overlap | P2, ready |
+
+### Correctness + stability (closed)
+| Bead | Title | Status |
+|------|-------|--------|
+| `mlir-aie-9dl` | Fix ppc>1 ObjectFifo split in aie2_gemm_conv1x1.py | ✅ Closed 2026-04-17 |
+| `mlir-aie-woi` | Multi-frame inference fails: stale cached weights from re-used Python id | ✅ Closed 2026-04-18 |
+
+### Host pipeline (0pf family)
+| Bead | Title | Status |
+|------|-------|--------|
+| `mlir-aie-0pf` | Batch Bottleneck calls + reduce per-call Python dispatch | P2, sub-task A+B1 done |
+| `mlir-aie-d6f` | Cache packed GEMM/conv weights across NPU calls | P3, already mostly addressed |
+| `mlir-aie-cup` | Move RepConv fused dual-path to NPU | P3, ROI too small at current spatial dims |
+
+### Known bugs / open items
+| Bead | Title | Status |
+|------|-------|--------|
+| `mlir-aie-mi7.1` | MC correctness bug (zeros) | **Resolved** by 9dl + woi + L1 fixes |
+| `mlir-aie-mi7.1.1` | Minimal reproducer: DMA buffer overflow crashes NPU | P1, open |
+| `mlir-aie-mi7.2` | aiecc.py: ObjectFifo naming affects compiled ELF correctness | P1, open |
+| `mlir-aie-4zz` | Vectorize bf16 SiLU | P2, open (the last kernel op not vectorized) |
+
+---
+
+## Open Questions / Next-Step Options
+
+Ordered by expected wall-time impact at current 1.87s wall:
+
+1. **Phase A completion** (`mlir-aie-4zz`) — vectorise bf16 SiLU. Blocked on
+   a bf16→float vector conversion in the kernel toolchain. Potentially
+   significant if SiLU is a measurable chunk of `npu_run`. Needs per-layer
+   NPU-time profiling to size the prize (profile harness does not break
+   down NPU time internally).
+
+2. **Phase C Flavor 1** (`mlir-aie-9oz`) — L2 memtile dataflow chains for
+   20×20 sequences (aconv7→re8→spp9→re21). Removes external round-trips,
+   directly shrinks `launch_gap`. Medium complexity; clear spec in docs.
+
+3. **Phase D** (`mlir-aie-9xq`) — Detection on NPU would save ~11 ms; other
+   CPU layers (RepConv 33, AvgPool 7, Upsample 1) total <60 ms. Low ROI
+   relative to Phase C.
+
+4. **Regression guard** — extend `test_full_model_mc.py --baseline` to CI.
+   Without an automated regression check, subtle host-pipeline edits can
+   silently undo the 0pf wins (see B1 sweep analysis notes in the
+   `_MC_PPC` comment).
