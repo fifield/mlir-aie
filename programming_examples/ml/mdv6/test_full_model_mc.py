@@ -519,5 +519,42 @@ def main():
     return ok
 
 
+def _profile_main(n_frames: int, baseline: str | None, out_json: str | None) -> int:
+    """Run main() N times under the Profiler; report breakdown."""
+    import gc
+    from profile_harness import Profiler
+
+    n_warmup = 1 if n_frames > 1 else 0
+    n_measure = n_frames - n_warmup
+
+    with Profiler(n_warmup=n_warmup, n_measure=n_measure) as prof:
+        all_ok = True
+        for i in range(n_frames):
+            ok = main()
+            all_ok = all_ok and bool(ok)
+            if i < n_frames - 1:
+                prof.next_frame()
+            gc.collect()
+
+    rc = prof.report(baseline_path=baseline, out_json=out_json)
+    return 0 if (all_ok and rc == 0) else 1
+
+
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="MDV6 full-model NPU test")
+    parser.add_argument("--profile", type=int, metavar="N", default=0,
+                        help="Run N forward passes under the profiler "
+                             "(first is warmup; remaining are measured). "
+                             "Reports a per-category breakdown.")
+    parser.add_argument("--baseline", type=str, default=None,
+                        help="Compare profile against this baseline JSON "
+                             "(emitted by --save-baseline). Exits 1 on >10%% "
+                             "regression on any category.")
+    parser.add_argument("--save-baseline", type=str, default=None,
+                        help="Write warm-frame profile to this JSON file.")
+    args = parser.parse_args()
+
+    if args.profile > 0:
+        sys.exit(_profile_main(args.profile, args.baseline, args.save_baseline))
     sys.exit(0 if main() else 1)

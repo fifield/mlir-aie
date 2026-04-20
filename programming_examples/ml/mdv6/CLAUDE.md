@@ -31,7 +31,39 @@ make run
 
 # Run all layers
 for dir in */; do (cd "$dir" && make clean && make run 2>&1); done
+
+# Full model NPU test (single forward pass)
+python3 test_full_model_mc.py
+
+# Performance profile (1 cold warmup + N-1 measured warm frames)
+python3 test_full_model_mc.py --profile 3
+python3 test_full_model_mc.py --profile 3 --save-baseline profile_baseline.json
+python3 test_full_model_mc.py --profile 3 --baseline profile_baseline.json   # exits 1 on >10% regression
 ```
+
+## Profiling harness (`profile_harness.py`)
+
+`--profile N` runs `main()` N times under a Profiler that monkey-patches
+`DefaultNPURuntime.run`, `iron.tensor`/`zeros`, repacking helpers, fuse_bn
+variants, `np.concatenate`, and the CPU layer classes (RepConv, Detection,
+AvgPool2d, Upsample). It reports a per-frame timeline plus a warm-frame
+average broken down into 8 categories:
+- `npu_run` — time inside `DefaultNPURuntime.run` (NPU active)
+- `iron_alloc` — `iron.tensor` + `iron.zeros` (XRT buffer creation)
+- `pack` — weight repacking (mostly cache hits after warmup)
+- `fuse` — `fuse_bn*` (Module-keyed WeakKeyDict cache)
+- `numpy` — `np.concatenate` (host-side weight assembly)
+- `cpu_layers` — CPU-resident model layers (`cpu.RepConv`, `cpu.Detection`, etc.)
+- `launch_gap` — inter-launch interval not attributable to the above
+  (the per-launch Python/pyxrt plumbing floor — currently ~671 µs/call)
+- `pre_post` — pre-first-launch + post-last-launch outside the launch loop
+
+`profile_baseline.json` (committed) is the reference baseline. Pass it via
+`--baseline` to fail with exit 1 on any category regressing > 10%.
+
+**Use this any time you change the host pipeline.** Without numbers we made
+order-of-magnitude wrong estimates of where time goes (e.g., assumed CPU
+RepConv was ~600 ms when it's actually ~36 ms).
 
 ## Per-Layer Structure
 Each subdirectory contains:
