@@ -149,6 +149,18 @@ def main():
         model.load_state_dict(torch.load(_weights_path, map_location='cpu', weights_only=True))
         print("  (loaded trained bf16 weights)")
     model = model.to(torch.bfloat16)
+
+    # Bead mlir-aie-d6f: pre-fuse every Conv+BN at model load so id-keyed
+    # packer caches in run_tiled_mc.py hit from the first rt() call.
+    print("  prewarming weight fusion...", end=" ", flush=True)
+    _tpw = time.time()
+    _n_fused = 0
+    for _m in model.modules():
+        if hasattr(_m, "conv") and hasattr(_m, "bn"):
+            fuse_bn(_m)
+            _n_fused += 1
+    print(f"{_n_fused} layers in {time.time()-_tpw:.2f}s")
+
     torch.manual_seed(42)
     x = torch.randn(1, 3, 640, 640, dtype=torch.bfloat16)
 
