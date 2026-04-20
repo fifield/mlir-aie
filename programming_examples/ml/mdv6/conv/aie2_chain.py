@@ -28,7 +28,7 @@ def chain_conv1x1(dev, tile_h=8, tile_w=8, ch=16):
     wt_ty = np.ndarray[(wt_size,), np.dtype[np.uint16]]
 
     # Kernel
-    kernel = Kernel("conv1x1_fused_packed_bf16", "conv_bf16.o", [
+    kernel = Kernel("conv1x1_fused_packed_bf16", "rep_elan_bf16.o", [
         data_ty, wt_ty, data_ty,
         np.int32, np.int32, np.int32, np.int32, np.int32, np.int32,
     ])
