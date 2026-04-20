@@ -25,12 +25,22 @@ N_CORES = 32
 _bd = os.path.join(_base, "conv", "build")
 _mc_cache = {}
 
-# Start conservatively: enable batched spatial processing only for selected
-# hot stride-1 3x3 multicore layers that have matching _p2 xclbins.
-# (mlir-aie-0pf-B1 experiment 2026-04-18: bumping ppc on aconv/ftconv/elan_c3
-# was wall-neutral — per-call launch_gap grew from 691→905 µs because sync_to/
-# from_device scales linearly with buffer size, cancelling the launch savings.
-# Keeping only the original set. Re-derive with per-layer profiling if reopened.)
+# Per-layer ppc from mlir-aie-0pf-B1 isolation sweep (2026-04-18, --profile 7).
+# Theory says higher ppc amortises fixed per-launch overhead. Measurement says
+# it depends: layers with tiny per-call compute (aconv5) win; layers with
+# heavier kernels (re6/re8 at ppc=2→4) regress because extra core iterations
+# cost more than the launch savings.
+#
+# Isolation deltas vs 2081 ms baseline (single layer bumped, others at default):
+#   aconv5 → 4:   -34 ms (WIN; kept)
+#   re4_rn3 → 4:   +6 ms  (noise)
+#   aconv19 → 4:  +39 ms
+#   aconv7 → 4:   +55 ms
+#   re4_c3 → 4:   +74 ms
+#   re6_c3 → 4:  +106 ms
+#   re6_rn3 → 4: +112 ms
+#   re8_rn3 → 4: +147 ms
+# Keep the six re* at ppc=2 (previously validated) and aconv5 at ppc=4.
 _MC_PPC = {
     "mc_re4_c3": 2,
     "mc_re4_rn3": 2,
@@ -38,6 +48,7 @@ _MC_PPC = {
     "mc_re6_rn3": 2,
     "mc_re8_c3": 2,
     "mc_re8_rn3": 2,
+    "mc_aconv5": 4,
 }
 
 # Pack caches — bead mlir-aie-d6f. Keyed by (id(weights_uint16), params).
