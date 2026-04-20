@@ -47,24 +47,43 @@ class diff — video-stream inference safe (see bead `mlir-aie-woi`).
 - **0.25 GFLOP/s** effective (0.005% of per-tile peak)
 - 34 GFLOP total model compute
 
-### 32-core per-layer timing (pre-optimization, 2026-03-28)
-| Layer | SC time | MC time | Speedup |
-|-------|---------|---------|---------|
-| conv0 | 3.3s | 0.3s | 11× |
-| conv1 | 6.8s | 0.2s | 34× |
-| elan2 | 15.1s | 0.5s | 30× |
-| aconv3 | 5.8s | 0.2s | 29× |
-| rep_elan4 | 24.0s | 0.8s | 30× |
-| aconv5 | 5.3s | 0.2s | 27× |
-| rep_elan6 | 15.0s | 0.6s | 25× |
-| aconv7 | 2.8s | 0.2s | 14× |
-| rep_elan8 | 7.9s | 0.5s | 16× |
-| spp9 | 2.1s | 0.1s | 21× |
-| rep_elan12 | 16.6s | 0.5s | 33× |
-| rep_elan15 | 26.5s | 0.8s | 33× |
-| head P4 | 9.5s | 0.6s | 16× |
-| head P5 | 4.9s | 0.4s | 12× |
-| **Total** | **145.5s** | **6.0s** | **24×** |
+### Per-layer timing — current vs historical
+
+Current "Warm ms" is the mean of 3 warm frames (printed per-layer wall at
+3-decimal precision in `test_full_model_mc.py`). Includes CPU-resident
+sub-ops (RepConv inside rep_elan*, AvgPool inside aconv*) and host
+orchestration between NPU launches. Does not include Detection head
+(CPU, ~11 ms) or model-setup pre/post (~300 ms total).
+
+| Layer | SC 2026-03-17 | MC 2026-03-28 | Warm 2026-04-18 | ms vs SC | vs MC |
+|-------|---------:|---------:|---------:|---------:|---------:|
+| conv0 | 3300 ms | 300 ms | **53 ms** | 62× | 5.7× |
+| conv1 | 6800 | 200 | **79** | 86× | 2.5× |
+| elan2 | 15100 | 500 | **125** | 121× | 4.0× |
+| aconv3 | 5800 | 200 | **65** | 89× | 3.1× |
+| rep_elan4 | 24000 | 800 | **207** | 116× | 3.9× |
+| aconv5 | 5300 | 200 | **80** | 66× | 2.5× |
+| rep_elan6 | 15000 | 600 | **130** | 115× | 4.6× |
+| aconv7 | 2800 | 200 | **35** | 80× | 5.7× |
+| rep_elan8 | 7900 | 500 | **114** | 69× | 4.4× |
+| spp9 | 2100 | 100 | **15** | 140× | 6.7× |
+| rep_elan12 | 16600 | 500 | **134** | 124× | 3.7× |
+| rep_elan15 | 26500 | 800 | **204** | 130× | 3.9× |
+| head P4 | 9500 | 600 | **175** | 54× | 3.4× |
+| head P5 | 4900 | 400 | **138** | 36× | 2.9× |
+| **Layer sum** | **145500** | **5900** | **1552** | **94×** | **3.8×** |
+| Total forward pass | 145500 | 6000 | 1558 warm / 1869 profile† | 93× | 3.2× |
+
+† "profile" number is the profile harness warm-frame average (`--profile 7`)
+which includes pre/post (~300 ms) that the layer timing doesn't.
+
+**Biggest movers from MC 2026-03-28 → now**: spp9 (6.7×), conv0 (5.7×),
+aconv7 (5.7×), rep_elan6 (4.6×). Smallest movers: conv1 (2.5×), aconv5
+(2.5×), head P5 (2.9×). Most of the improvement comes from the
+ppc-tile-count rule (mlir-aie-0pf-B1): previously every re* layer was at
+ppc=2 which did 2× padded iterations per call with no launch reduction
+(25 tiles < 32 cores). Removing those useless bumps halved NPU time on
+those layers.
 
 ### Operator-level Profiling
 
