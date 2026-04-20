@@ -18,9 +18,15 @@ CONFIGS = [
     ("mc_ftconv1_p2",  32, 12, 12,  32, 16, 3, 2, 2),  # p4 overflows L2
     # ELAN2 sub-layers
     ("mc_elan_c1",     32,  8,  8,  64, 64, 1, 1, 1),  # 1x1 64→64
-    ("mc_elan_c3",     32,  8,  8,  32, 32, 3, 1, 1),  # 3x3 32→32 (tile=8 for L1 fit)
-    ("mc_elan_c3_p2",  32,  8,  8,  32, 32, 3, 1, 2),
-    ("mc_elan_c3_p4",  32,  8,  8,  32, 32, 3, 1, 4),
+    ("mc_elan_c3",       32,  8,  8,  32, 32, 3, 1, 1),  # 3x3 32→32 (tile=8 for L1 fit)
+    ("mc_elan_c3_p2",    32,  8,  8,  32, 32, 3, 1, 2),
+    ("mc_elan_c3_p4",    32,  8,  8,  32, 32, 3, 1, 4),
+    # To experiment with input double-buffering, add a 10th tuple field
+    # (input_depth) — e.g., ("mc_elan_c3_p4_d2", 32, 8, 8, 32, 32, 3, 1, 4, 2).
+    # aie2_multicore.py + build_one + _get_mc_variant all support the _d{N}
+    # suffix. Tested on elan_c3 (2026-04-18): no measurable win on compute-
+    # bound conv3x3 (AI 140-340); DMA already hidden by compute. The
+    # mechanism is retained; see _MC_INPUT_DEPTH in run_tiled_mc.py.
     ("mc_elan_c4",     32,  8,  8, 128, 64, 1, 1, 1),  # 1x1 128→64
     # AConv layers (stride-2)
     ("mc_aconv3",      32,  8,  8,  64, 16, 3, 2, 1),  # 64→128 (oc_block=16)
@@ -73,7 +79,8 @@ CONFIGS = [
 ]
 
 
-def build_one(name, n_cores, tile_h, tile_w, ic, oc, ks, stride, ppc, build_dir):
+def build_one(name, n_cores, tile_h, tile_w, ic, oc, ks, stride, ppc,
+              input_depth=1, build_dir=None):
     """Generate MLIR and compile one multicore xclbin."""
     mlir_path = os.path.join(build_dir, f"{name}.mlir")
     xclbin_path = os.path.join(build_dir, f"{name}.xclbin")
@@ -84,7 +91,8 @@ def build_one(name, n_cores, tile_h, tile_w, ic, oc, ks, stride, ppc, build_dir)
         return True
 
     script = os.path.join(os.path.dirname(__file__), "aie2_multicore.py")
-    cmd_mlir = f"python3 {script} {n_cores} {tile_h} {tile_w} {ic} {oc} {ks} {stride} {ppc}"
+    cmd_mlir = (f"python3 {script} {n_cores} {tile_h} {tile_w} {ic} {oc} "
+                f"{ks} {stride} {ppc} {input_depth}")
     print(f"  {name}: generating MLIR...", end=" ", flush=True)
     result = subprocess.run(cmd_mlir, shell=True, capture_output=True, text=True)
     if result.returncode != 0:
@@ -124,7 +132,9 @@ def main():
     fail = 0
     for cfg in configs:
         name = cfg[0]
-        if build_one(*cfg, build_dir):
+        # cfg is either (name, n_cores, tile_h, tile_w, ic, oc, ks, stride, ppc)
+        # or (name, ..., ppc, input_depth).
+        if build_one(*cfg, build_dir=build_dir):
             ok += 1
         else:
             fail += 1
