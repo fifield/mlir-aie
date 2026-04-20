@@ -192,19 +192,22 @@ def derive_configs():
 
 
 def build_kernel(build_dir):
-    """Compile gemm_conv1x1_bf16.cc with Peano (once)."""
-    obj_path = os.path.join(build_dir, "gemm_conv1x1_bf16.o")
-    if os.path.exists(obj_path):
-        return True
-    src_dir = os.path.dirname(os.path.abspath(__file__))
-    makefile_dir = src_dir
-    result = subprocess.run(
-        f"make -C {makefile_dir} build/gemm_conv1x1_bf16.o",
-        shell=True, capture_output=True, text=True,
+    """Build rep_elan_bf16.o from unified kernels/ dir and copy into build_dir."""
+    kernels_dir = os.path.normpath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "kernels")
     )
-    if result.returncode != 0:
-        print(f"Kernel compile FAIL:\n{result.stderr[-500:]}", file=sys.stderr)
-        return False
+    obj_src = os.path.join(kernels_dir, "rep_elan_bf16.o")
+    obj_dst = os.path.join(build_dir, "rep_elan_bf16.o")
+    if not os.path.exists(obj_src):
+        print(f"Building unified kernel in {kernels_dir}...", file=sys.stderr)
+        result = subprocess.run(f"make -C {kernels_dir}", shell=True)
+        if result.returncode != 0:
+            print("FAIL: could not build rep_elan_bf16.o", file=sys.stderr)
+            return False
+    if (not os.path.exists(obj_dst)
+            or os.path.getmtime(obj_src) > os.path.getmtime(obj_dst)):
+        import shutil
+        shutil.copy2(obj_src, obj_dst)
     return True
 
 
@@ -212,8 +215,10 @@ def build_one(name, n_cores, tile_m, ic, oc, k_block, ppc, build_dir):
     """Generate MLIR and compile one GEMM conv1x1 xclbin."""
     xclbin_path = os.path.join(build_dir, f"{name}.xclbin")
     if os.path.exists(xclbin_path):
-        print(f"  {name}: already built, skipping")
-        return True
+        obj_path = os.path.join(build_dir, "rep_elan_bf16.o")
+        if not os.path.exists(obj_path) or os.path.getmtime(xclbin_path) > os.path.getmtime(obj_path):
+            print(f"  {name}: already built, skipping")
+            return True
 
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "aie2_gemm_conv1x1.py")
     mlir_path = os.path.join(build_dir, f"{name}.mlir")

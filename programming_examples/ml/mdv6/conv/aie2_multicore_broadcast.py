@@ -42,7 +42,7 @@ def multicore_broadcast_conv1x1(dev, tile_h=8, tile_w=8, ic=16, oc=16, n_cores=2
     host_input_ty = np.ndarray[(host_input_size,), np.dtype[np.uint16]]
     host_output_ty = np.ndarray[(host_output_size,), np.dtype[np.uint16]]
 
-    kernel = Kernel("conv1x1_fused_packed_bf16", "conv_bf16.o", [
+    kernel = Kernel("conv1x1_fused_packed_bf16", "rep_elan_bf16.o", [
         patch_ty, weight_ty, output_tile_ty,
         np.int32, np.int32, np.int32, np.int32, np.int32, np.int32,
     ])

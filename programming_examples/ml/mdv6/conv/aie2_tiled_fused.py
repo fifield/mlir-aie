@@ -54,7 +54,7 @@ def conv_tiled_fused_bf16(dev, input_height, input_width, input_channels,
         kern_name = "conv1x1_fused_packed_bf16"
 
     # The fused packed kernel: (input, packed_weights, output, h, w, ic, oc, stride, padding)
-    kernel = Kernel(kern_name, "conv_bf16.o", [
+    kernel = Kernel(kern_name, "rep_elan_bf16.o", [
         patch_ty, weight_ty, output_tile_ty,
         np.int32, np.int32, np.int32, np.int32, np.int32, np.int32,
     ])

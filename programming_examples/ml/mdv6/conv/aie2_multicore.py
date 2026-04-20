@@ -75,7 +75,7 @@ def multicore_conv(dev, tile_h=8, tile_w=8, ic=16, oc=16,
 
     # Kernel
     kern_name = "conv1x1_fused_packed_bf16" if kernel_size == 1 else "conv3x3_fused_packed_bf16"
-    kernel = Kernel(kern_name, "conv_bf16.o", [
+    kernel = Kernel(kern_name, "rep_elan_bf16.o", [
         patch_ty, weight_ty, output_tile_ty,
         np.int32, np.int32, np.int32, np.int32, np.int32, np.int32,
     ])

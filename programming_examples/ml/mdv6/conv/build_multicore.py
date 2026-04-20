@@ -87,8 +87,10 @@ def build_one(name, n_cores, tile_h, tile_w, ic, oc, ks, stride, ppc,
     insts_path = os.path.join(build_dir, f"{name}.bin")
 
     if os.path.exists(xclbin_path):
-        print(f"  {name}: already built, skipping")
-        return True
+        obj_path = os.path.join(build_dir, "rep_elan_bf16.o")
+        if not os.path.exists(obj_path) or os.path.getmtime(xclbin_path) > os.path.getmtime(obj_path):
+            print(f"  {name}: already built, skipping")
+            return True
 
     script = os.path.join(os.path.dirname(__file__), "aie2_multicore.py")
     cmd_mlir = (f"python3 {script} {n_cores} {tile_h} {tile_w} {ic} {oc} "
@@ -119,6 +121,23 @@ def build_one(name, n_cores, tile_h, tile_w, ic, oc, ks, stride, ppc,
 def main():
     build_dir = os.path.join(os.path.dirname(__file__), "build")
     os.makedirs(build_dir, exist_ok=True)
+
+    # Ensure unified kernel .o is built and present in build_dir
+    kernels_dir = os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "kernels")
+    )
+    obj_src = os.path.join(kernels_dir, "rep_elan_bf16.o")
+    obj_dst = os.path.join(build_dir, "rep_elan_bf16.o")
+    if not os.path.exists(obj_src):
+        print(f"Building unified kernel in {kernels_dir}...")
+        r = subprocess.run(f"make -C {kernels_dir}", shell=True)
+        if r.returncode != 0:
+            print("FAIL: could not build rep_elan_bf16.o")
+            return False
+    if (not os.path.exists(obj_dst)
+            or os.path.getmtime(obj_src) > os.path.getmtime(obj_dst)):
+        import shutil
+        shutil.copy2(obj_src, obj_dst)
 
     # Filter by command line args if provided
     configs = CONFIGS

@@ -42,7 +42,7 @@ def conv_fused_bf16(dev, height, width, in_ch, out_ch, kernel_size, stride=1, pa
         kernel_args = [input_ty, conv_weight_ty, bn_ty, bn_ty, output_ty,
                        np.int32, np.int32, np.int32, np.int32]
 
-    conv_kernel = Kernel(kern_name, "conv_bf16.o", kernel_args)
+    conv_kernel = Kernel(kern_name, "rep_elan_bf16.o", kernel_args)
 
     of_input = ObjectFifo(input_ty, depth=1, name="input")
     of_weights = ObjectFifo(weight_ty, depth=1, name="weights")
@@ -111,7 +111,7 @@ def conv_fused_packed_bf16(dev, height, width, in_ch, out_ch, kernel_size, strid
         kern_name = "conv1x1_fused_packed_bf16"
 
     conv_kernel = Kernel(
-        kern_name, "conv_bf16.o",
+        kern_name, "rep_elan_bf16.o",
         [input_ty, weight_ty, output_ty,
          np.int32, np.int32, np.int32, np.int32, np.int32, np.int32],
     )
