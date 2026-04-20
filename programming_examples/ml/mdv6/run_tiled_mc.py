@@ -61,6 +61,65 @@ def _gemm_cache_evict_dead_ids(cache):
         cache.pop(next(iter(cache)))
 
 
+# XRT buffer pool — bead mlir-aie-0pf sub-task A. The full model fires ~1500
+# iron.tensor/iron.zeros allocations per warm frame (130–150 µs each = ~180 ms
+# total). Buffer dimensions repeat across calls, so we keep one pinned buffer
+# per (role, size, dtype) and overwrite it in place. DefaultNPURuntime.run is
+# synchronous — buffers can be safely reused once it returns.
+#
+# Separate pools per role: a single run() call may pass different buffers of
+# the same size as input + weight + output (e.g., 1×1 conv with ic == oc).
+# Aliasing input and output to the same XRT buffer hangs the kernel.
+_INPUT_POOL = {}    # (size, dtype.kind, itemsize) -> iron.Tensor
+_WEIGHT_POOL = {}
+_OUTPUT_POOL = {}
+
+
+def _pool_key(size, dtype):
+    dt = np.dtype(dtype)
+    return (size, dt.kind, dt.itemsize)
+
+
+def _pooled_buf(pool, size, dtype):
+    key = _pool_key(size, dtype)
+    buf = pool.get(key)
+    if buf is None:
+        buf = iron.zeros(size, dtype=dtype)
+        pool[key] = buf
+    return buf
+
+
+def _fill_and_sync(buf, arr):
+    """Write arr into buf's host-mapped memory and sync to device.
+
+    Bypasses XRTTensor.numpy() because it would unconditionally
+    sync_from_device first (overwriting our pending write with stale device
+    data) and never sync back. We write to .data directly and call
+    _sync_to_device() ourselves.
+    """
+    buf.data.reshape(-1)[:] = arr.ravel()
+    buf._sync_to_device()
+
+
+def get_in_buf(arr):
+    """Return the pooled XRT input buffer initialised with arr's contents."""
+    buf = _pooled_buf(_INPUT_POOL, arr.size, arr.dtype)
+    _fill_and_sync(buf, arr)
+    return buf
+
+
+def get_wt_buf(arr):
+    """Return the pooled XRT weight buffer initialised with arr's contents."""
+    buf = _pooled_buf(_WEIGHT_POOL, arr.size, arr.dtype)
+    _fill_and_sync(buf, arr)
+    return buf
+
+
+def get_out_buf(size, dtype=np.uint16):
+    """Return the pooled XRT output buffer (contents undefined; kernel overwrites)."""
+    return _pooled_buf(_OUTPUT_POOL, size, dtype)
+
+
 def _load_handle(name):
     """Load an xclbin, returning handle or None."""
     xclbin = os.path.join(_bd, f"{name}.xclbin")
@@ -231,10 +290,10 @@ def _run_tiled_mc_inner(mc_kh, input_hwc, weights_uint16,
                 all_patches.append(patch_u16)
                 all_coords.append((tr, tc))
 
-        # Process in batches of N_CORES * patches_per_core
-        # .copy() guards against XRT buffer aliasing now that wt_block is
-        # cached across calls (bead mlir-aie-d6f); matches the GEMM paths.
-        wt_buf = iron.tensor(wt_block.copy(), dtype=np.uint16)
+        # Process in batches of N_CORES * patches_per_core. Buffer pool
+        # (bead mlir-aie-0pf-A): get_in_buf copies into a pinned buffer;
+        # avoids per-call iron.tensor allocation.
+        wt_buf = get_wt_buf(wt_block)
         patches_per_call = N_CORES * patches_per_core
         for batch_start in range(0, len(all_patches), patches_per_call):
             batch_end = min(batch_start + patches_per_call, len(all_patches))
@@ -254,8 +313,8 @@ def _run_tiled_mc_inner(mc_kh, input_hwc, weights_uint16,
                 per_core_batches.append(np.concatenate(batch_patches[core_start:core_end]))
             input_concat = np.concatenate(per_core_batches)
 
-            in_buf = iron.tensor(input_concat, dtype=np.uint16)
-            out_buf = iron.zeros(N_CORES * patches_per_core * output_tile_size, dtype=np.uint16)
+            in_buf = get_in_buf(input_concat)
+            out_buf = get_out_buf(N_CORES * patches_per_core * output_tile_size)
 
             DefaultNPURuntime.run(mc_kh, [in_buf, wt_buf, out_buf])
 
@@ -570,7 +629,7 @@ def _run_gemm_kblocked(gemm_kh, actual_name, input_hwc, weights_uint16,
 
     # Repack weights into K-blocked layout
     wt_kblocked = _repack_weights_kblocked(weights_uint16, IC, out_ch, k_block)
-    wt_buf = iron.tensor(wt_kblocked.copy(), dtype=np.uint16)
+    wt_buf = get_wt_buf(wt_kblocked)
 
     input_size = tile_m * IC       # per core per patch
     output_size = tile_m * out_ch  # per core per patch
@@ -598,8 +657,8 @@ def _run_gemm_kblocked(gemm_kh, actual_name, input_hwc, weights_uint16,
         for s in range(n_active_slots, total_slots):
             host_in[s * input_size:(s + 1) * input_size] = slot0
 
-        in_buf = iron.tensor(host_in, dtype=np.uint16)
-        out_buf = iron.zeros(total_slots * output_size, dtype=np.uint16)
+        in_buf = get_in_buf(host_in)
+        out_buf = get_out_buf(total_slots * output_size)
 
         try:
             DefaultNPURuntime.run(gemm_kh, [in_buf, wt_buf, out_buf])
@@ -647,7 +706,7 @@ def _run_gemm_oc_blocked(gemm_kh, actual_name, input_hwc, weights_uint16,
         oc_start = ocb * oc_block
         oc_end = min(oc_start + oc_block, out_ch)
         actual_oc = oc_end - oc_start
-        wt_buf = iron.tensor(wt_blocks[ocb].copy(), dtype=np.uint16)
+        wt_buf = get_wt_buf(wt_blocks[ocb])
 
         for batch_start in range(0, M, pixels_per_call):
             batch_end = min(batch_start + pixels_per_call, M)
@@ -666,8 +725,8 @@ def _run_gemm_oc_blocked(gemm_kh, actual_name, input_hwc, weights_uint16,
             for s in range(n_active_slots, total_slots):
                 host_in[s * input_size:(s + 1) * input_size] = slot0
 
-            in_buf = iron.tensor(host_in, dtype=np.uint16)
-            out_buf = iron.zeros(total_slots * output_size, dtype=np.uint16)
+            in_buf = get_in_buf(host_in)
+            out_buf = get_out_buf(total_slots * output_size)
 
             try:
                 DefaultNPURuntime.run(gemm_kh, [in_buf, wt_buf, out_buf])
