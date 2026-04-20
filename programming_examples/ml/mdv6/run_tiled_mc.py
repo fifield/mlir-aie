@@ -25,30 +25,40 @@ N_CORES = 32
 _bd = os.path.join(_base, "conv", "build")
 _mc_cache = {}
 
-# Per-layer ppc from mlir-aie-0pf-B1 isolation sweep (2026-04-18, --profile 7).
-# Theory says higher ppc amortises fixed per-launch overhead. Measurement says
-# it depends: layers with tiny per-call compute (aconv5) win; layers with
-# heavier kernels (re6/re8 at ppc=2→4) regress because extra core iterations
-# cost more than the launch savings.
+# Per-layer ppc bumps from mlir-aie-0pf-B1 (2026-04-18).
 #
-# Isolation deltas vs 2081 ms baseline (single layer bumped, others at default):
-#   aconv5 → 4:   -34 ms (WIN; kept)
-#   re4_rn3 → 4:   +6 ms  (noise)
-#   aconv19 → 4:  +39 ms
-#   aconv7 → 4:   +55 ms
-#   re4_c3 → 4:   +74 ms
-#   re6_c3 → 4:  +106 ms
-#   re6_rn3 → 4: +112 ms
-#   re8_rn3 → 4: +147 ms
-# Keep the six re* at ppc=2 (previously validated) and aconv5 at ppc=4.
+# The rule that makes ppc>1 worthwhile: bump only when
+#     n_tiles > N_CORES × prior_ppc
+# so that `calls_per_ocb = ceil(n_tiles / (N_CORES * ppc))` actually drops.
+# Otherwise the core runs `ppc` padded iterations per call with the same
+# number of calls — a strict regression.
+#
+# Table (n_tiles = tiles_h × tiles_w; calls_per_ocb at ppc=1/2/4):
+#   mc_ftconv0    256 tiles   8/4/2     (ppc=4 build overflows L2; keeping p2 option)
+#   mc_ftconv1    196 tiles   7/4/2  →  bumped to p2 (p4 overflows L2)
+#   mc_elan_c3    400 tiles  13/7/4  →  bumped to p4
+#   mc_aconv3     100 tiles   4/2/1     (p4 overflows L2; p2 option exists)
+#   mc_aconv5     100 tiles   4/2/1  →  bumped to p4
+#   mc_aconv7      25 tiles   1/1/1     (no benefit — tiles fit in one call at any ppc)
+#   mc_aconv16     25 tiles   1/1/1     (no benefit)
+#   mc_aconv19      9 tiles   1/1/1     (no benefit)
+#   mc_re4_c3      49 tiles   2/1/1  →  bumped to p2
+#   mc_re4_rn3    100 tiles   4/2/1  →  bumped to p4
+#   mc_re6_c3      25 tiles   1/1/1     (no benefit)
+#   mc_re6_rn3     25 tiles   1/1/1     (no benefit; earlier p2 was neutral-at-best)
+#   mc_re8_c3      25 tiles   1/1/1     (no benefit)
+#   mc_re8_rn3      9 tiles   1/1/1     (no benefit)
+#
+# Verified via launch-count reduction in --profile sweep (deterministic, unlike
+# wall time which is noisy on this machine). Each bump drops launches as the
+# table predicts; no-benefit layers were previously whitelisted at ppc=2 and
+# have been removed from _MC_PPC (they made every call do 2× padded work).
 _MC_PPC = {
-    "mc_re4_c3": 2,
-    "mc_re4_rn3": 2,
-    "mc_re6_c3": 2,
-    "mc_re6_rn3": 2,
-    "mc_re8_c3": 2,
-    "mc_re8_rn3": 2,
-    "mc_aconv5": 4,
+    "mc_ftconv1":  2,   # 196 tiles: 7 → 4 calls per ocb
+    "mc_elan_c3":  4,   # 400 tiles: 13 → 4
+    "mc_aconv5":   4,   # 100 tiles: 4 → 1
+    "mc_re4_c3":   2,   # 49 tiles: 2 → 1
+    "mc_re4_rn3":  4,   # 100 tiles: 4 → 1
 }
 
 # Pack caches — bead mlir-aie-d6f. Keyed by (id(weights_uint16), params).

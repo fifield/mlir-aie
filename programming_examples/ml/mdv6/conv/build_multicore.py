@@ -6,22 +6,31 @@ import os, sys, subprocess, time
 # All unique configs from test_full_model.py:
 # (name, n_cores, tile_h, tile_w, ic, oc_block, kernel_size, stride, patches_per_core)
 CONFIGS = [
+    # _pN variants bumped by mlir-aie-0pf-B1 where n_tiles > N_CORES × prior_ppc
+    # (otherwise ppc>1 adds padded kernel iterations with no launch reduction).
+    # See the n_tiles table in run_tiled_mc.py _MC_PPC comment.
+    #
     # Conv0/Conv1 (stride-2 stem)
     ("mc_ftconv0",     32, 20, 20,   8, 32, 3, 2, 1),  # IC padded 3→8 (Peano vectorization)
+    ("mc_ftconv0_p2",  32, 20, 20,   8, 32, 3, 2, 2),
+    ("mc_ftconv0_p4",  32, 20, 20,   8, 32, 3, 2, 4),
     ("mc_ftconv1",     32, 12, 12,  32, 16, 3, 2, 1),
+    ("mc_ftconv1_p2",  32, 12, 12,  32, 16, 3, 2, 2),  # p4 overflows L2
     # ELAN2 sub-layers
     ("mc_elan_c1",     32,  8,  8,  64, 64, 1, 1, 1),  # 1x1 64→64
     ("mc_elan_c3",     32,  8,  8,  32, 32, 3, 1, 1),  # 3x3 32→32 (tile=8 for L1 fit)
+    ("mc_elan_c3_p2",  32,  8,  8,  32, 32, 3, 1, 2),
+    ("mc_elan_c3_p4",  32,  8,  8,  32, 32, 3, 1, 4),
     ("mc_elan_c4",     32,  8,  8, 128, 64, 1, 1, 1),  # 1x1 128→64
-    # AConv layers (stride-2). aconv5_p4 from mlir-aie-0pf-B1 (isolation sweep
-    # showed -34 ms wall; other aconv/re* ppc=4 variants regressed and are
-    # not built — see run_tiled_mc.py _MC_PPC comment for the full table).
+    # AConv layers (stride-2)
     ("mc_aconv3",      32,  8,  8,  64, 16, 3, 2, 1),  # 64→128 (oc_block=16)
+    ("mc_aconv3_p2",   32,  8,  8,  64, 16, 3, 2, 2),  # p4 overflows L2
     ("mc_aconv5",      32,  4,  4,  96,  8, 3, 2, 1),  # 96→192 (oc_block=8)
+    ("mc_aconv5_p2",   32,  4,  4,  96,  8, 3, 2, 2),
     ("mc_aconv5_p4",   32,  4,  4,  96,  8, 3, 2, 4),
-    ("mc_aconv7",      32,  4,  4, 128,  8, 3, 2, 1),  # 128→256 (oc_block=8 for vectorized mmul<4,8,8>)
-    ("mc_aconv16",     32,  4,  4,  64,  8, 3, 2, 1),  # 64→96 (oc_block=8)
-    ("mc_aconv19",     32,  4,  4,  96,  8, 3, 2, 1),  # 96→128 (oc_block=8 for vectorized mmul<4,8,8>)
+    ("mc_aconv7",      32,  4,  4, 128,  8, 3, 2, 1),  # 128→256 — no bump (25 tiles < 32)
+    ("mc_aconv16",     32,  4,  4,  64,  8, 3, 2, 1),  # 64→96 — no bump (25 tiles)
+    ("mc_aconv19",     32,  4,  4,  96,  8, 3, 2, 1),  # 96→128 — no bump (9 tiles)
     # RepNCSPELAN4 (80x80, 128ch)
     ("mc_re4_c1",      32, 10, 10, 128, 64, 1, 1, 1),  # conv1: 128→128
     ("mc_re4_c3",      32, 12, 12,  64, 16, 3, 1, 1),  # conv3x3: 64→64
@@ -30,6 +39,7 @@ CONFIGS = [
     ("mc_re4_rn1",     32, 16, 16,  64, 32, 1, 1, 1),  # rn 1x1: 64→32
     ("mc_re4_rn3",     32,  8,  8,  32, 32, 3, 1, 1),  # rn 3x3: 32→32 (tile=8 for L1 fit)
     ("mc_re4_rn3_p2",  32,  8,  8,  32, 32, 3, 1, 2),
+    ("mc_re4_rn3_p4",  32,  8,  8,  32, 32, 3, 1, 4),
     # RepNCSPELAN6 (40x40, 192ch)
     ("mc_re6_c1",      32,  8,  8, 192, 32, 1, 1, 1),
     ("mc_re6_c3",      32,  8,  8,  96, 16, 3, 1, 1),
