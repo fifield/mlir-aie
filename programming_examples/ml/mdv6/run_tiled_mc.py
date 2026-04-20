@@ -394,8 +394,9 @@ _gemm_bd = os.path.join(_base, "gemm_conv1x1", "build")
 # Import fuse_bn_transposed for weight repacking
 fuse_bn_transposed = ett.fuse_bn_transposed
 
-# L1 budget for GEMM conv1x1 (depth=1, stack=8KB)
-_GEMM_L1 = 65536 - 8192
+# L1 budget for GEMM conv1x1 (depth=1, stack=8KB, RTP=32B reserved).
+# Must stay in sync with AVAIL in gemm_conv1x1/build_gemm_conv1x1.py.
+_GEMM_L1 = 65536 - 8192 - 32
 
 
 def _gemm_tile_m(ic, oc_block):

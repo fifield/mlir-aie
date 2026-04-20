@@ -13,7 +13,15 @@ Usage:
 import numpy as np
 import sys
 
-from aie.iron import Kernel, ObjectFifo, Program, Runtime, Worker
+from aie.iron import (
+    Buffer,
+    Kernel,
+    ObjectFifo,
+    Program,
+    Runtime,
+    Worker,
+    WorkerRuntimeBarrier,
+)
 from aie.iron.placers import SequentialPlacer
 from aie.iron.device import NPU2
 from aie.iron.controlflow import range_
@@ -83,16 +91,39 @@ def multicore_conv(dev, tile_h=8, tile_w=8, ic=16, oc=16,
     stride = stride_val
     padding = padding_val
 
-    def core_fn(of_in, of_wt, of_out, kern):
+    # Runtime parameters (Tier 2 prereq): six int32 scalars per core, written by
+    # host via rt.inline_ops each invocation and read by the kernel. For this
+    # first wiring the values are still compile-time constants, baked into the
+    # set_rtps lambda below — so the xclbin behaves identically to the baked
+    # version while exercising the RTP machinery for overhead measurement.
+    # Tier 2 swaps the lambda for a host-buffer copy.
+    RTP_LEN = 6  # (tile_h, tile_w, ic, oc, stride, padding)
+    rtp_ty = np.ndarray[(RTP_LEN,), np.dtype[np.int32]]
+    init_rtp = np.array([tile_h, tile_w, ic, oc, stride, padding], dtype=np.int32)
+    rtps = [
+        Buffer(rtp_ty, name=f"rtp_{i}", initial_value=init_rtp, use_write_rtp=True)
+        for i in range(n_cores)
+    ]
+    barriers = [WorkerRuntimeBarrier() for _ in range(n_cores)]
+
+    def core_fn(of_in, of_wt, of_out, kern, my_rtp, barrier):
+        barrier.wait_for_value(1)
+        t_h = my_rtp[0]
+        t_w = my_rtp[1]
+        ic_v = my_rtp[2]
+        oc_v = my_rtp[3]
+        str_v = my_rtp[4]
+        pad_v = my_rtp[5]
         elem_wt = of_wt.acquire(1)
         for _ in range_(patches_per_core):
             elem_in = of_in.acquire(1)
             elem_out = of_out.acquire(1)
             kern(elem_in, elem_wt, elem_out,
-                 tile_h, tile_w, ic, oc, stride, padding)
+                 t_h, t_w, ic_v, oc_v, str_v, pad_v)
             of_in.release(1)
             of_out.release(1)
         of_wt.release(1)
+        barrier.release_with_value(1)
 
     # Build per-column infrastructure
     col_in_fifos = []
@@ -135,8 +166,10 @@ def multicore_conv(dev, tile_h=8, tile_w=8, ic=16, oc=16,
         wt_fifos.append(wt_fifo)
 
         for i in range(cores_this_col):
+            global_core_idx = col * cores_per_col + i
             w = Worker(core_fn, [
                 in_splits[i].cons(), wt_fifo.cons(), out_joins[i].prod(), kernel,
+                rtps[global_core_idx], barriers[global_core_idx],
             ], stack_size=4096)
             workers.append(w)
 
@@ -144,6 +177,19 @@ def multicore_conv(dev, tile_h=8, tile_w=8, ic=16, oc=16,
     rt = Runtime()
     with rt.sequence(host_input_ty, weight_ty, host_output_ty) as (I, W, O):
         rt.start(*workers)
+
+        # Runtime parameter write — Tier 1.5 prototype: same values every call.
+        # Tier 2 will source these from a small int32 buffer passed as a sequence
+        # arg so one loaded xclbin can serve multiple layer shapes.
+        t_h, t_w, ic_c, oc_c, s_c, p_c = tile_h, tile_w, ic, oc, stride, padding
+        def set_rtps(*rtp_bufs):
+            for rb in rtp_bufs:
+                rb[0] = t_h; rb[1] = t_w
+                rb[2] = ic_c; rb[3] = oc_c
+                rb[4] = s_c;  rb[5] = p_c
+        rt.inline_ops(set_rtps, rtps)
+        for b in barriers:
+            rt.set_barrier(b, 1)
 
         for wf in wt_fifos:
             rt.fill(wf.prod(), W)

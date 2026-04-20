@@ -16,7 +16,10 @@ import time
 
 L1_BYTES = 65536
 STACK_BYTES = 8192
-AVAIL = L1_BYTES - STACK_BYTES
+# 32 bytes reserved for the RTP buffer (6 int32 + alignment pad) introduced
+# in the Tier 2 prereq. Must stay in sync with _GEMM_L1 in run_tiled_mc.py.
+RTP_BYTES = 32
+AVAIL = L1_BYTES - STACK_BYTES - RTP_BYTES
 
 
 def compute_tile_m_kblocked(ic, oc, k_block):

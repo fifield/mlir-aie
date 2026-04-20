@@ -27,7 +27,15 @@ Examples:
 import numpy as np
 import sys
 
-from aie.iron import Kernel, ObjectFifo, Program, Runtime, Worker
+from aie.iron import (
+    Buffer,
+    Kernel,
+    ObjectFifo,
+    Program,
+    Runtime,
+    Worker,
+    WorkerRuntimeBarrier,
+)
 from aie.iron.placers import SequentialPlacer
 from aie.iron.device import NPU2
 from aie.iron.controlflow import range_
@@ -127,10 +135,36 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
         np.int32, np.int32, np.int32, np.int32, np.int32, np.int32,
     ])
 
+    # Runtime parameters (Tier 2 prereq): six int32 scalars per core.
+    #
+    # K-blocked: [tile_m, full_ic, oc, k_block, n_k_blocks, unused].
+    #   k_start is still Python-unrolled (kb*k_block) because the kernel call
+    #   sits inside a Python `for kb in range(...)` loop, so each iteration's
+    #   k_start is a compile-time immediate — safe and fast. k_block and
+    #   n_k_blocks are in RTP anyway so the kernel body can trust them.
+    # Non-K-blocked: [tile_m, 1, ic, oc, 1, 0]  (tile_w/stride/padding fixed).
+    RTP_LEN = 6
+    rtp_ty = np.ndarray[(RTP_LEN,), np.dtype[np.int32]]
+    if use_kblocking:
+        init_rtp = np.array([tile_m, ic, oc, k_block, n_k_blocks, 0], dtype=np.int32)
+    else:
+        init_rtp = np.array([tile_m, 1, ic, oc, 1, 0], dtype=np.int32)
+    rtps = [
+        Buffer(rtp_ty, name=f"rtp_{i}", initial_value=init_rtp, use_write_rtp=True)
+        for i in range(n_cores)
+    ]
+    barriers = [WorkerRuntimeBarrier() for _ in range(n_cores)]
+
     if use_kblocking:
         # K-blocked kernel args: tile_m, full_ic, oc, k_start, k_block, n_k_blocks
         # k_start varies per K-block (Python-unrolled)
-        def core_fn(of_in, of_wt, of_out, kern):
+        def core_fn(of_in, of_wt, of_out, kern, my_rtp, barrier):
+            barrier.wait_for_value(1)
+            tm_v = my_rtp[0]
+            fic_v = my_rtp[1]
+            oc_v = my_rtp[2]
+            kb_v = my_rtp[3]
+            nkb_v = my_rtp[4]
             for _ in range_(patches_per_core):
                 elem_in = of_in.acquire(1)
                 elem_out = of_out.acquire(1)
@@ -138,10 +172,11 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
                 for kb in range(n_k_blocks):
                     elem_wt = of_wt.acquire(1)
                     kern(elem_in, elem_wt, elem_out,
-                         tile_m, ic, oc, kb * k_block, k_block, n_k_blocks)
+                         tm_v, fic_v, oc_v, kb * k_block, kb_v, nkb_v)
                     of_wt.release(1)
                 of_in.release(1)
                 of_out.release(1)
+            barrier.release_with_value(1)
     else:
         # Original non-K-blocked path
         kern_tile_h = tile_m
@@ -149,16 +184,24 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
         stride = 1
         padding = 0
 
-        def core_fn(of_in, of_wt, of_out, kern):
+        def core_fn(of_in, of_wt, of_out, kern, my_rtp, barrier):
+            barrier.wait_for_value(1)
+            t_h = my_rtp[0]
+            t_w = my_rtp[1]
+            ic_v = my_rtp[2]
+            oc_v = my_rtp[3]
+            s_v = my_rtp[4]
+            p_v = my_rtp[5]
             elem_wt = of_wt.acquire(1)
             for _ in range_(patches_per_core):
                 elem_in = of_in.acquire(1)
                 elem_out = of_out.acquire(1)
                 kern(elem_in, elem_wt, elem_out,
-                     kern_tile_h, kern_tile_w, ic, oc, stride, padding)
+                     t_h, t_w, ic_v, oc_v, s_v, p_v)
                 of_in.release(1)
                 of_out.release(1)
             of_wt.release(1)
+            barrier.release_with_value(1)
 
     # Build per-column infrastructure.
     #
@@ -205,8 +248,10 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
         wt_fifos.append(wt_fifo)
 
         for i in range(cores_this_col):
+            global_core_idx = col * cores_per_col + i
             w = Worker(core_fn, [
                 in_splits[i].cons(), wt_fifo.cons(), out_joins[i].prod(), kernel,
+                rtps[global_core_idx], barriers[global_core_idx],
             ], stack_size=8192)
             workers.append(w)
 
@@ -214,6 +259,19 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
     rt = Runtime()
     with rt.sequence(host_in_ty, host_wt_ty, host_out_ty) as (I, W, O):
         rt.start(*workers)
+
+        # Runtime parameter write — same values every call for now. Tier 2
+        # will source these from a host buffer arg so one xclbin serves many
+        # (tile_m, ic, oc, k_block) tuples.
+        _rtp_vals = [int(v) for v in init_rtp]
+        def set_rtps(*rtp_bufs):
+            for rb in rtp_bufs:
+                rb[0] = _rtp_vals[0]; rb[1] = _rtp_vals[1]
+                rb[2] = _rtp_vals[2]; rb[3] = _rtp_vals[3]
+                rb[4] = _rtp_vals[4]; rb[5] = _rtp_vals[5]
+        rt.inline_ops(set_rtps, rtps)
+        for b in barriers:
+            rt.set_barrier(b, 1)
 
         if use_kblocking:
             # K-blocked: send weight chunks repeatedly for each patch.
