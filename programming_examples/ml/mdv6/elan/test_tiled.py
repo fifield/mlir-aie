@@ -15,19 +15,32 @@ def bf16_to_uint16(t):
 def uint16_to_bf16(a):
     return torch.from_numpy(a.copy()).view(torch.bfloat16)
 
+# Per-Module cache of packed uint16 buffers, one entry per (module, variant).
+# WeakKeyDictionary so entries die with their Module — prevents stale hits when
+# Python recycles object ids across forward passes (mlir-aie-woi: video stream
+# inference re-instantiates the model each frame; id-keyed dicts return wrong
+# weights from prior frame's freed modules).
+import weakref
+_FUSE_CACHE = weakref.WeakKeyDictionary()  # module -> {variant: uint16 array}
+
 def fuse_bn(conv_module):
     """Return [conv_weights, fused_bn_w, fused_bn_b] as packed uint16."""
+    variants = _FUSE_CACHE.setdefault(conv_module, {})
+    if "plain" in variants:
+        return variants["plain"]
     eps = conv_module.bn.eps
     gamma = conv_module.bn.weight.data
     beta = conv_module.bn.bias.data
     mean = conv_module.bn.running_mean.data
     var = conv_module.bn.running_var.data
     inv_std = 1.0 / torch.sqrt(var + eps)
-    return bf16_to_uint16(torch.cat([
+    out = bf16_to_uint16(torch.cat([
         conv_module.conv.weight.data.flatten(),
         gamma * inv_std,
         beta - gamma * mean * inv_std,
     ]))
+    variants["plain"] = out
+    return out
 
 
 def fuse_bn_transposed(conv_module):
@@ -37,6 +50,9 @@ def fuse_bn_transposed(conv_module):
     [ic/8][oc/8][8ic][8oc] for contiguous vector loads in the AIE kernel.
     Only supports 1x1 convolutions.
     """
+    variants = _FUSE_CACHE.setdefault(conv_module, {})
+    if "transposed" in variants:
+        return variants["transposed"]
     eps = conv_module.bn.eps
     gamma = conv_module.bn.weight.data
     beta = conv_module.bn.bias.data
@@ -53,11 +69,13 @@ def fuse_bn_transposed(conv_module):
     w_blocks = w_blocks.permute(2, 0, 3, 1)        # [ic_blk, oc_blk, 8ic, 8oc]
     w_transposed = w_blocks.contiguous().flatten()
 
-    return bf16_to_uint16(torch.cat([
+    out = bf16_to_uint16(torch.cat([
         w_transposed,
         gamma * inv_std,
         beta - gamma * mean * inv_std,
     ]))
+    variants["transposed"] = out
+    return out
 
 def fuse_bn_transposed_3x3(conv_module):
     """Return [packed_conv_weights, fused_bn_w, fused_bn_b] as packed uint16.
@@ -66,6 +84,9 @@ def fuse_bn_transposed_3x3(conv_module):
     for contiguous vector loads in the AIE 3x3 conv kernel.
     Each (oc_blk, ic_blk, kpos) has a contiguous 64-element block.
     """
+    variants = _FUSE_CACHE.setdefault(conv_module, {})
+    if "transposed_3x3" in variants:
+        return variants["transposed_3x3"]
     eps = conv_module.bn.eps
     gamma = conv_module.bn.weight.data
     beta = conv_module.bn.bias.data
@@ -82,11 +103,13 @@ def fuse_bn_transposed_3x3(conv_module):
     # Permute to [oc/8, ic/8, 9, 8ic, 8oc]
     w = w.permute(0, 2, 4, 3, 1).contiguous()  # [oc_blk, ic_blk, 9, 8ic, 8oc]
 
-    return bf16_to_uint16(torch.cat([
+    out = bf16_to_uint16(torch.cat([
         w.flatten(),
         gamma * inv_std,
         beta - gamma * mean * inv_std,
     ]))
+    variants["transposed_3x3"] = out
+    return out
 
 
 def extract_patch(image_hwc, tile_row, tile_col, tile_h, tile_w, stride=1, ks=3, pad=1):

@@ -37,11 +37,28 @@ _MC_PPC = {
 }
 
 # Pack caches — bead mlir-aie-d6f. Keyed by (id(weights_uint16), params).
-# fuse_bn in elan/test_tiled.py holds strong refs to its outputs, so the
-# buffers passed in here have stable ids across calls.
-_WTBLOCK_CACHE_3x3 = {}   # (id(wts_u16), ocb, oc_block, out_ch, C, ks) -> np.ndarray
-_GEMM_OCB_CACHE = {}      # (id(wts_u16), ic, oc, oc_block) -> list[np.ndarray]
-_GEMM_KB_CACHE = {}       # (id(wts_u16), ic, oc, k_block) -> np.ndarray
+# fuse_bn in elan/test_tiled.py uses a WeakKeyDictionary on Module so its uint16
+# arrays live and die with their Module — keeping ids stable while modules are
+# alive, but allowing cross-frame model recreation. We additionally include
+# expected_len in the key and verify on hit (mlir-aie-woi guard) so a recycled
+# id cannot silently return blocks for a different layer's weights.
+_WTBLOCK_CACHE_3x3 = {}   # (id(wts_u16), ocb, oc_block, out_ch, C, ks, expected_len) -> np.ndarray
+_GEMM_OCB_CACHE = {}      # (id(wts_u16), ic, oc, oc_block, expected_len) -> list[np.ndarray]
+_GEMM_KB_CACHE = {}       # (id(wts_u16), ic, oc, k_block, expected_len) -> np.ndarray
+
+
+_GEMM_CACHE_MAX = 256  # Bound to avoid unbounded growth across long video streams.
+
+
+def _gemm_cache_evict_dead_ids(cache):
+    """Bound cache size by dropping the oldest entry on overflow.
+
+    The expected_len field in the key + on-hit length verification catches
+    stale-id collisions from recycled Python ids; this just keeps the dict
+    from growing without bound across many frames.
+    """
+    while len(cache) > _GEMM_CACHE_MAX:
+        cache.pop(next(iter(cache)))
 
 
 def _load_handle(name):
@@ -161,6 +178,13 @@ def _run_tiled_mc_inner(mc_kh, input_hwc, weights_uint16,
     all_bn_w = weights_uint16[total_conv_wts:total_conv_wts + out_ch]
     all_bn_b = weights_uint16[total_conv_wts + out_ch:total_conv_wts + 2 * out_ch]
     wts_id = id(weights_uint16)
+    expected_wts_len = total_conv_wts + 2 * out_ch
+    if len(weights_uint16) < expected_wts_len:
+        raise ValueError(
+            f"_run_tiled_mc_inner: weights_uint16 len={len(weights_uint16)} "
+            f"too small for out_ch={out_ch} C={C} ks={kernel_size} "
+            f"(need {expected_wts_len})"
+        )
 
     for ocb in range(n_oc_blocks):
         oc_start = ocb * oc_block
@@ -168,9 +192,11 @@ def _run_tiled_mc_inner(mc_kh, input_hwc, weights_uint16,
         actual_oc = oc_end - oc_start
 
         # Pack-cache the assembled [packed_conv | bn_w | bn_b] per ocb.
-        # See bead mlir-aie-d6f.
-        wt_key = (wts_id, ocb, oc_block, out_ch, C, kernel_size)
-        wt_block = _WTBLOCK_CACHE_3x3.get(wt_key)
+        # mlir-aie-d6f cache + mlir-aie-woi guard (expected_wts_len in key,
+        # length verified on hit so a recycled id with different shape misses).
+        wt_key = (wts_id, ocb, oc_block, out_ch, C, kernel_size, expected_wts_len)
+        wt_block = (_WTBLOCK_CACHE_3x3.get(wt_key)
+                    if len(weights_uint16) == expected_wts_len else None)
         if wt_block is None:
             # Extract per-block weights (flat OIHW)
             cw_per_oc = C * kernel_size * kernel_size
@@ -190,6 +216,7 @@ def _run_tiled_mc_inner(mc_kh, input_hwc, weights_uint16,
             if len(wt_block) < expected:
                 wt_block = np.pad(wt_block, (0, expected - len(wt_block)))
             _WTBLOCK_CACHE_3x3[wt_key] = wt_block
+            _gemm_cache_evict_dead_ids(_WTBLOCK_CACHE_3x3)
 
         # Collect all spatial patches for this oc_block
         all_patches = []
@@ -371,13 +398,21 @@ def _repack_weights_for_gemm(weights_uint16, ic, oc, oc_block):
     Input:  weights_uint16 = [conv_wts(OC*IC), bn_w(OC), bn_b(OC)] (flat OIHW)
     Output: per oc_block: [blocked_wts(ic*oc_block), bn_w(oc_block), bn_b(oc_block)]
     """
-    # Bead mlir-aie-d6f: cache by id(weights_uint16) + shape params.
-    cache_key = (id(weights_uint16), ic, oc, oc_block)
+    # mlir-aie-d6f cache + mlir-aie-woi guard: id() may be reused across frames
+    # after the source array is freed. Verify size on hit so a stale id never
+    # silently returns blocks for a different layer.
+    expected_len = oc * ic + 2 * oc
+    cache_key = (id(weights_uint16), ic, oc, oc_block, expected_len)
     cached = _GEMM_OCB_CACHE.get(cache_key)
-    if cached is not None:
+    if cached is not None and len(weights_uint16) == expected_len:
         return cached
 
     total_conv = oc * ic
+    if len(weights_uint16) < total_conv + 2 * oc:
+        raise ValueError(
+            f"_repack_weights_for_gemm: weights_uint16 len={len(weights_uint16)} "
+            f"too small for ic={ic} oc={oc} (need {total_conv + 2 * oc})"
+        )
     all_conv = weights_uint16[:total_conv]
     all_bn_w = weights_uint16[total_conv:total_conv + oc]
     all_bn_b = weights_uint16[total_conv + oc:total_conv + 2 * oc]
@@ -412,6 +447,7 @@ def _repack_weights_for_gemm(weights_uint16, ic, oc, oc_block):
         blocks.append(np.concatenate([blocked_u16, bn_w_block, bn_b_block]))
 
     _GEMM_OCB_CACHE[cache_key] = blocks
+    _gemm_cache_evict_dead_ids(_GEMM_OCB_CACHE)
     return blocks
 
 
@@ -422,11 +458,17 @@ def _repack_weights_kblocked(weights_uint16, ic, oc, k_block):
     Output: single buffer [chunk_0, chunk_1, ..., chunk_{n_k_blocks-1}]
     Each chunk: [k_block/8, oc/8, 8ic, 8oc, bn_w(oc), bn_b(oc)]
     """
-    # Bead mlir-aie-d6f: cache by id(weights_uint16) + shape params.
-    cache_key = (id(weights_uint16), ic, oc, k_block)
+    # mlir-aie-d6f cache + mlir-aie-woi guard.
+    expected_len = oc * ic + 2 * oc
+    cache_key = (id(weights_uint16), ic, oc, k_block, expected_len)
     cached = _GEMM_KB_CACHE.get(cache_key)
-    if cached is not None:
+    if cached is not None and len(weights_uint16) == expected_len:
         return cached
+    if len(weights_uint16) < expected_len:
+        raise ValueError(
+            f"_repack_weights_kblocked: weights_uint16 len={len(weights_uint16)} "
+            f"too small for ic={ic} oc={oc} (need {expected_len})"
+        )
 
     total_conv = oc * ic
     all_conv = weights_uint16[:total_conv]
@@ -459,6 +501,7 @@ def _repack_weights_kblocked(weights_uint16, ic, oc, k_block):
 
     out = np.concatenate(chunks)
     _GEMM_KB_CACHE[cache_key] = out
+    _gemm_cache_evict_dead_ids(_GEMM_KB_CACHE)
     return out
 
 
