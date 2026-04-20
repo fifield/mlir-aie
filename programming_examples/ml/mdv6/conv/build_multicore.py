@@ -13,9 +13,12 @@ CONFIGS = [
     ("mc_elan_c1",     32,  8,  8,  64, 64, 1, 1, 1),  # 1x1 64→64
     ("mc_elan_c3",     32,  8,  8,  32, 32, 3, 1, 1),  # 3x3 32→32 (tile=8 for L1 fit)
     ("mc_elan_c4",     32,  8,  8, 128, 64, 1, 1, 1),  # 1x1 128→64
-    # AConv layers (stride-2)
+    # AConv layers (stride-2). aconv5_p4 from mlir-aie-0pf-B1 (isolation sweep
+    # showed -34 ms wall; other aconv/re* ppc=4 variants regressed and are
+    # not built — see run_tiled_mc.py _MC_PPC comment for the full table).
     ("mc_aconv3",      32,  8,  8,  64, 16, 3, 2, 1),  # 64→128 (oc_block=16)
     ("mc_aconv5",      32,  4,  4,  96,  8, 3, 2, 1),  # 96→192 (oc_block=8)
+    ("mc_aconv5_p4",   32,  4,  4,  96,  8, 3, 2, 4),
     ("mc_aconv7",      32,  4,  4, 128,  8, 3, 2, 1),  # 128→256 (oc_block=8 for vectorized mmul<4,8,8>)
     ("mc_aconv16",     32,  4,  4,  64,  8, 3, 2, 1),  # 64→96 (oc_block=8)
     ("mc_aconv19",     32,  4,  4,  96,  8, 3, 2, 1),  # 96→128 (oc_block=8 for vectorized mmul<4,8,8>)
