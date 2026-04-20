@@ -214,41 +214,37 @@ def _get_sc_handle(name):
 def run_tiled_fused_conv_mc(mc_name, sc_name, input_hwc, weights_uint16,
                              out_h, out_w, out_ch, tile_h, tile_w, oc_block,
                              stride=1, kernel_size=3, padding=1):
-    """Multicore tiled fused conv. SC handle loaded lazily only on fallback.
+    """Multicore tiled fused conv.
+
+    Fails hard if the MC xclbin is missing from disk — silent SC fallback
+    would hide build-graph bugs by running on a different weight layout.
+    Retries once on transient XRT execution errors (stale/evicted handle).
 
     Args:
         mc_name: multicore xclbin name (e.g., 'mc_re4_c1')
-        sc_name: single-core xclbin name for fallback (e.g., 're4_conv1')
+        sc_name: unused in current flow; retained for signature compatibility.
     """
     actual_name, ppc = _get_mc_variant(mc_name)
     mc_kh = _get_mc_handle(actual_name)
-    if mc_kh is not None:
-        try:
-            return _run_tiled_mc_inner(mc_kh, input_hwc, weights_uint16,
-                                        out_h, out_w, out_ch, tile_h, tile_w, oc_block,
-                                        stride, kernel_size, padding, ppc)
-        except (RuntimeError, AttributeError) as e:
-            # Handle stale/evicted XRT handles — reload and retry once
-            _mc_cache[actual_name] = _load_handle(actual_name)
-            mc_kh = _mc_cache[actual_name]
-            if mc_kh is not None:
-                try:
-                    return _run_tiled_mc_inner(mc_kh, input_hwc, weights_uint16,
-                                                out_h, out_w, out_ch, tile_h, tile_w, oc_block,
-                                                stride, kernel_size, padding, ppc)
-                except Exception:
-                    pass
-            print(f"\n    [MC fail: {e}]", end="", flush=True)
-            _mc_cache[actual_name] = None
-
-    # Fallback: lazy-load single-core
-    if isinstance(sc_name, str):
-        sc_kh = _get_sc_handle(sc_name)
-    else:
-        sc_kh = sc_name
-    return _run_tiled_sc(sc_kh, input_hwc, weights_uint16,
-                          out_h, out_w, out_ch, tile_h, tile_w, oc_block,
-                          stride, kernel_size, padding)
+    if mc_kh is None:
+        raise RuntimeError(
+            f"MC xclbin missing: {actual_name} (requested: {mc_name})"
+        )
+    try:
+        return _run_tiled_mc_inner(mc_kh, input_hwc, weights_uint16,
+                                    out_h, out_w, out_ch, tile_h, tile_w, oc_block,
+                                    stride, kernel_size, padding, ppc)
+    except (RuntimeError, AttributeError) as e:
+        # Transient XRT error (e.g., context-cache eviction). Reload and retry once.
+        _mc_cache[actual_name] = _load_handle(actual_name)
+        mc_kh = _mc_cache[actual_name]
+        if mc_kh is None:
+            raise RuntimeError(
+                f"MC xclbin reload failed after transient error: {actual_name} ({e})"
+            )
+        return _run_tiled_mc_inner(mc_kh, input_hwc, weights_uint16,
+                                    out_h, out_w, out_ch, tile_h, tile_w, oc_block,
+                                    stride, kernel_size, padding, ppc)
 
 
 def _pack_3x3_weights(conv_block_u16, oc_block, ic):
@@ -633,41 +629,32 @@ def run_gemm_conv1x1_mc(gemm_name, sc_name, input_hwc, weights_uint16,
         ppc = _gemm_compute_ppc_kblocked(M, tile_m_kb, IC, out_ch, k_block)
         kb_name = f"gemm_t{tile_m_kb}_ic{IC}_oc{out_ch}_kb{k_block}_p{ppc}"
         gemm_kh = _get_gemm_handle(kb_name)
-        if gemm_kh is None and ppc > 1:
-            kb_name = f"gemm_t{tile_m_kb}_ic{IC}_oc{out_ch}_kb{k_block}_p1"
-            gemm_kh = _get_gemm_handle(kb_name)
-            ppc = 1
-        if gemm_kh is not None:
-            return _run_gemm_kblocked(gemm_kh, kb_name, input_hwc, weights_uint16,
-                                       out_h, out_w, out_ch, tile_m_kb, k_block, ppc)
+        if gemm_kh is None:
+            raise RuntimeError(
+                f"GEMM xclbin missing: {kb_name} "
+                f"(layer={gemm_name}, IC={IC}, OC={out_ch}, M={M}, k_block={k_block}, ppc={ppc})"
+            )
+        return _run_gemm_kblocked(gemm_kh, kb_name, input_hwc, weights_uint16,
+                                   out_h, out_w, out_ch, tile_m_kb, k_block, ppc)
 
-    # --- Fall back to OC-blocked path ---
+    # --- OC-blocked path ---
     if oc_block is None:
         oc_block = _gemm_choose_oc_block(IC, out_ch)
     if oc_block is None:
-        return run_tiled_fused_conv_mc(
-            gemm_name.replace('gemm_', 'mc_'), sc_name,
-            input_hwc, weights_uint16,
-            out_h, out_w, out_ch, 8, 8, 16, 1, 1, 0)
+        raise RuntimeError(
+            f"GEMM oc_block selection failed (layer={gemm_name}, IC={IC}, OC={out_ch}, M={M})"
+        )
 
     tile_m = min(_gemm_tile_m(IC, oc_block), 256)
     ppc = _gemm_compute_ppc(M, tile_m, IC, oc_block)
 
     actual_name = f"gemm_t{tile_m}_ic{IC}_oc{oc_block}_p{ppc}"
     gemm_kh = _get_gemm_handle(actual_name)
-    if gemm_kh is None and ppc > 1:
-        actual_name = f"gemm_t{tile_m}_ic{IC}_oc{oc_block}_p1"
-        gemm_kh = _get_gemm_handle(actual_name)
-        if gemm_kh is None:
-            actual_name = f"gemm_t{tile_m}_ic{IC}_oc{oc_block}"
-            gemm_kh = _get_gemm_handle(actual_name)
-        ppc = 1
     if gemm_kh is None:
-        mc_fallback = gemm_name.replace('gemm_', 'mc_')
-        return run_tiled_fused_conv_mc(
-            mc_fallback, sc_name,
-            input_hwc, weights_uint16,
-            out_h, out_w, out_ch, 8, 8, min(oc_block, 64), 1, 1, 0)
+        raise RuntimeError(
+            f"GEMM xclbin missing: {actual_name} "
+            f"(layer={gemm_name}, IC={IC}, OC={out_ch}, M={M}, oc_block={oc_block}, tile_m={tile_m}, ppc={ppc})"
+        )
 
     return _run_gemm_oc_blocked(gemm_kh, actual_name, input_hwc, weights_uint16,
                                  out_h, out_w, out_ch, tile_m, oc_block, ppc)
