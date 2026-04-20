@@ -61,6 +61,20 @@ _MC_PPC = {
     "mc_re4_rn3":  4,   # 100 tiles: 4 → 1
 }
 
+# Input sub-FIFO depth (L1 ping-pong). depth=2 lets the memtile pre-fetch
+# patch N+1 into the free L1 slot while the core computes patch N. Costs
+# +patch_size bytes per core in L1.
+#
+# Tested on mc_elan_c3 (2026-04-18): no measurable wall-time change
+# (wall -12 ms / -0.6% within noise). Reason: every conv path layer in
+# aie2_multicore.py is conv3x3 with AI 140-340 — compute-bound, so DMA
+# was already hidden by compute. The mechanism is retained here in case
+# a future DMA-bound conv layer lands (unlikely: all conv1x1 routes
+# through the GEMM path).
+#
+# Variant filename convention: {base}_p{ppc}_d{depth}.
+_MC_INPUT_DEPTH = {}
+
 # Pack caches — bead mlir-aie-d6f. Keyed by (id(weights_uint16), params).
 # fuse_bn in elan/test_tiled.py uses a WeakKeyDictionary on Module so its uint16
 # arrays live and die with their Module — keeping ids stable while modules are
@@ -162,10 +176,24 @@ def _get_mc_handle(name):
 
 
 def _get_mc_variant(name):
-    """Prefer a batched multicore variant when available."""
+    """Prefer a batched multicore variant when available.
+
+    Variant name: {base}[_p{ppc}][_d{depth}] where ppc>1 and/or depth>1.
+    Falls back to lower ppc / depth=1 if the chosen variant isn't built.
+    """
     ppc = _MC_PPC.get(name, 1)
-    variant = f"{name}_p{ppc}" if ppc > 1 else name
-    if ppc > 1 and _load_handle(variant) is None:
+    depth = _MC_INPUT_DEPTH.get(name, 1)
+    variant = name
+    if ppc > 1:
+        variant = f"{variant}_p{ppc}"
+    if depth > 1:
+        variant = f"{variant}_d{depth}"
+    if variant != name and _load_handle(variant) is None:
+        # Back off the depth suffix first, then the ppc suffix.
+        if depth > 1:
+            alt = f"{name}_p{ppc}" if ppc > 1 else name
+            if _load_handle(alt) is not None:
+                return alt, ppc
         return name, 1
     return variant, ppc
 
