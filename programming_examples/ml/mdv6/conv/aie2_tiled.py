@@ -111,7 +111,7 @@ def conv_layer_bf16_tiled(
     # Kernel declaration for tiled conv
     conv_tiled_kernel = Kernel(
         "conv3x3_tiled_bf16",
-        "conv_bf16.o",
+        "rep_elan_bf16.o",
         [
             patch_ty,         # input patch pointer
             weight_block_ty,  # weight block pointer

@@ -122,7 +122,7 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
     else:
         kern_name = "gemm_conv1x1_bf16"
 
-    kernel = Kernel(kern_name, "gemm_conv1x1_bf16.o", [
+    kernel = Kernel(kern_name, "rep_elan_bf16.o", [
         input_ty, weight_ty, output_ty,
         np.int32, np.int32, np.int32, np.int32, np.int32, np.int32,
     ])

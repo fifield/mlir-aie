@@ -54,7 +54,7 @@ def conv_layer_bf16(
     if kernel_size == 3:
         conv_kernel = Kernel(
             "conv3x3_bf16",
-            "conv_bf16.o",
+            "rep_elan_bf16.o",
             [
                 input_ty,   # input pointer (bf16)
                 weight_ty,  # weight pointer (bf16)
@@ -70,7 +70,7 @@ def conv_layer_bf16(
     elif kernel_size == 1:
         conv_kernel = Kernel(
             "conv1x1_bf16",
-            "conv_bf16.o",
+            "rep_elan_bf16.o",
             [
                 input_ty,   # input pointer (bf16)
                 weight_ty,  # weight pointer (bf16)
