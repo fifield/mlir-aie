@@ -1,0 +1,57 @@
+{
+  "Device": {
+    "ExternalMemory": {
+      "numa_segmentation": {
+        "enabled": true,
+        "log_warnings": true,
+        "segments": [
+          {
+            "column": 0,
+            "base_addr": "0x80000000",
+            "size": "0x2000000"
+          },
+          {
+            "column": 1,
+            "base_addr": "0x82000000",
+            "size": "0x2000000"
+          },
+          {
+            "column": 2,
+            "base_addr": "0x84000000",
+            "size": "0x2000000"
+          },
+          {
+            "column": 3,
+            "base_addr": "0x86000000",
+            "size": "0x2000000"
+          },
+          {
+            "column": 4,
+            "base_addr": "0x88000000",
+            "size": "0x2000000"
+          },
+          {
+            "column": 5,
+            "base_addr": "0x8A000000",
+            "size": "0x2000000"
+          },
+          {
+            "column": 6,
+            "base_addr": "0x8C000000",
+            "size": "0x2000000"
+          },
+          {
+            "column": 7,
+            "base_addr": "0x8E000000",
+            "size": "0x2000000"
+          },
+          {
+            "column": 8,
+            "base_addr": "0x90000000",
+            "size": "0x2000000"
+          }
+        ]
+      }
+    }
+  }
+}
