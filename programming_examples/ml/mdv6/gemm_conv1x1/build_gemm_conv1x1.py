@@ -14,6 +14,9 @@ import subprocess
 import sys
 import time
 
+sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), "..")))
+from regime_config import GEMM_REGIME_ARTIFACTS
+
 L1_BYTES = 65536
 STACK_BYTES = 8192
 # 32 bytes reserved for the RTP buffer (6 int32 + alignment pad) introduced
@@ -256,6 +259,123 @@ def build_one(name, n_cores, tile_m, ic, oc, k_block, ppc, build_dir):
     return True
 
 
+def _generate_gemm_mlir(build_dir, name, n_cores, tile_m, ic, oc, k_block, ppc,
+                        active=None):
+    mlir_path = os.path.join(build_dir, f"{name}.mlir")
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "aie2_gemm_conv1x1.py")
+    cmd = [
+        "python3", script, str(n_cores), str(tile_m), str(ic), str(oc),
+        str(ppc), str(k_block),
+    ]
+    if active is not None:
+        active_tile_m, active_ic, active_oc, active_ppc = active
+        if active_ppc != ppc:
+            raise ValueError(
+                f"{name}: active ppc={active_ppc} does not match envelope ppc={ppc}"
+            )
+        cmd.extend([
+            "--active-tile-m", str(active_tile_m),
+            "--active-ic", str(active_ic),
+            "--active-oc", str(active_oc),
+        ])
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"FAIL\n    {result.stderr.strip().split(chr(10))[-1]}")
+        return None
+    with open(mlir_path, 'w') as f:
+        f.write(result.stdout)
+    return mlir_path
+
+
+def build_regime_gemm_artifact(artifact, build_dir):
+    """Build one GEMM regime xclbin plus per-layer instruction streams."""
+    xclbin_path = os.path.join(build_dir, f"{artifact.xclbin_name}.xclbin")
+    obj_path = os.path.join(build_dir, "rep_elan_bf16.o")
+    need_xclbin = (
+        not os.path.exists(xclbin_path)
+        or (os.path.exists(obj_path) and os.path.getmtime(obj_path) > os.path.getmtime(xclbin_path))
+    )
+
+    print(f"  {artifact.xclbin_name}: regime {artifact.regime} GEMM envelope")
+    if need_xclbin:
+        print("    envelope MLIR...", end=" ", flush=True)
+        mlir_path = _generate_gemm_mlir(
+            build_dir,
+            artifact.xclbin_name,
+            32,
+            artifact.tile_m,
+            artifact.ic,
+            artifact.oc,
+            artifact.k_block,
+            artifact.patches_per_core,
+        )
+        if mlir_path is None:
+            return False
+        print("OK", end=" ", flush=True)
+
+        cmd_xclbin = (
+            f"cd {build_dir} && aiecc.py --aie-generate-xclbin --aie-generate-npu-insts "
+            f"--no-compile-host --no-xchesscc --no-xbridge "
+            f"--xclbin-name={artifact.xclbin_name}.xclbin "
+            f"--npu-insts-name={artifact.xclbin_name}.bin {artifact.xclbin_name}.mlir"
+        )
+        print("xclbin...", end=" ", flush=True)
+        result = subprocess.run(cmd_xclbin, shell=True, capture_output=True, text=True)
+        if result.returncode != 0:
+            errs = [l for l in result.stderr.split('\n') if 'error:' in l.lower()]
+            print(f"FAIL\n    {errs[-1] if errs else result.stderr.strip().split(chr(10))[-1]}")
+            return False
+        print("OK")
+    else:
+        print("    envelope already built, skipping")
+
+    ok = True
+    for layer_name, active in artifact.members.items():
+        insts_name = f"{artifact.xclbin_name}_{layer_name}"
+        insts_path = os.path.join(build_dir, f"{insts_name}.bin")
+        if os.path.exists(insts_path) and os.path.getmtime(insts_path) >= os.path.getmtime(xclbin_path):
+            print(f"    {insts_name}: already built, skipping")
+            continue
+
+        print(f"    {insts_name}: active MLIR...", end=" ", flush=True)
+        try:
+            mlir_path = _generate_gemm_mlir(
+                build_dir,
+                insts_name,
+                32,
+                artifact.tile_m,
+                artifact.ic,
+                artifact.oc,
+                artifact.k_block,
+                artifact.patches_per_core,
+                active=active,
+            )
+        except ValueError as e:
+            print(f"FAIL\n    {e}")
+            ok = False
+            continue
+        if mlir_path is None:
+            ok = False
+            continue
+        print("OK", end=" ", flush=True)
+
+        cmd_insts = (
+            f"cd {build_dir} && aiecc.py --aie-generate-npu-insts "
+            f"--no-compile-host --no-xchesscc --no-xbridge "
+            f"--npu-insts-name={insts_name}.bin {insts_name}.mlir"
+        )
+        print("insts...", end=" ", flush=True)
+        result = subprocess.run(cmd_insts, shell=True, capture_output=True, text=True)
+        if result.returncode != 0:
+            errs = [l for l in result.stderr.split('\n') if 'error:' in l.lower()]
+            print(f"FAIL\n    {errs[-1] if errs else result.stderr.strip().split(chr(10))[-1]}")
+            ok = False
+        else:
+            print("OK")
+    return ok
+
+
 def main():
     build_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "build")
     os.makedirs(build_dir, exist_ok=True)
@@ -263,12 +383,16 @@ def main():
     print("Deriving GEMM conv1x1 configs from MDV6 model...", file=sys.stderr)
     configs = derive_configs()
 
-    # Filter by command line args
+    # Filter by command line args. Regime artifacts are selected explicitly by
+    # name; current per-shape artifacts remain the default build.
+    regimes = []
     if len(sys.argv) > 1:
         names = set(sys.argv[1:])
+        regimes = [GEMM_REGIME_ARTIFACTS[n] for n in names if n in GEMM_REGIME_ARTIFACTS]
         configs = [c for c in configs if c[0] in names]
 
-    print(f"\nBuilding kernel + {len(configs)} GEMM conv1x1 xclbins...")
+    print(f"\nBuilding kernel + {len(configs)} GEMM conv1x1 xclbins"
+          f" + {len(regimes)} regime artifacts...")
     t0 = time.time()
 
     if not build_kernel(build_dir):
@@ -278,6 +402,12 @@ def main():
     ok = fail = 0
     for cfg in configs:
         if build_one(*cfg, build_dir):
+            ok += 1
+        else:
+            fail += 1
+
+    for artifact in regimes:
+        if build_regime_gemm_artifact(artifact, build_dir):
             ok += 1
         else:
             fail += 1

@@ -10,6 +10,7 @@ Supports:
 Usage:
   python3 aie2_multicore.py n_cores tile_h tile_w ic oc kernel_size [stride] [patches_per_core]
 """
+import argparse
 import numpy as np
 import sys
 
@@ -30,7 +31,10 @@ from aie.helpers.taplib import TensorAccessPattern
 
 def multicore_conv(dev, tile_h=8, tile_w=8, ic=16, oc=16,
                    kernel_size=1, stride_val=1, padding_val=0,
-                   n_cores=32, patches_per_core=1, input_depth=1):
+                   n_cores=32, patches_per_core=1, input_depth=1,
+                   active_tile_h=None, active_tile_w=None,
+                   active_ic=None, active_oc=None,
+                   active_stride=None, active_padding=None):
     """N-core tiled fused Conv+BN+SiLU.
 
     input_depth: L1 sub-FIFO depth for the input patch (1 = single-buffered;
@@ -43,6 +47,13 @@ def multicore_conv(dev, tile_h=8, tile_w=8, ic=16, oc=16,
         padding_val = 0
     elif kernel_size == 3 and padding_val < 0:
         padding_val = 1
+
+    active_tile_h = tile_h if active_tile_h is None else active_tile_h
+    active_tile_w = tile_w if active_tile_w is None else active_tile_w
+    active_ic = ic if active_ic is None else active_ic
+    active_oc = oc if active_oc is None else active_oc
+    active_stride = stride_val if active_stride is None else active_stride
+    active_padding = padding_val if active_padding is None else active_padding
 
     patch_h = (tile_h - 1) * stride_val + kernel_size
     patch_w = (tile_w - 1) * stride_val + kernel_size
@@ -63,6 +74,12 @@ def multicore_conv(dev, tile_h=8, tile_w=8, ic=16, oc=16,
           f"{total_patches} total", file=sys.stderr)
     print(f"  patch={patch_h}x{patch_w}x{ic}={patch_size}, "
           f"wt={weight_block_size}, out_tile={output_tile_size}", file=sys.stderr)
+    if (active_tile_h, active_tile_w, active_ic, active_oc,
+            active_stride, active_padding) != (tile_h, tile_w, ic, oc,
+                                                stride_val, padding_val):
+        print(f"  active RTP: tile={active_tile_h}x{active_tile_w}, "
+              f"ic={active_ic}, oc={active_oc}, stride={active_stride}, "
+              f"padding={active_padding}", file=sys.stderr)
 
     # Per-tile types
     patch_ty = np.ndarray[(patch_size,), np.dtype[np.uint16]]
@@ -88,18 +105,18 @@ def multicore_conv(dev, tile_h=8, tile_w=8, ic=16, oc=16,
         np.int32, np.int32, np.int32, np.int32, np.int32, np.int32,
     ])
 
-    stride = stride_val
-    padding = padding_val
+    stride = active_stride
+    padding = active_padding
 
     # Runtime parameters (Tier 2 prereq): six int32 scalars per core, written by
     # host via rt.inline_ops each invocation and read by the kernel. For this
-    # first wiring the values are still compile-time constants, baked into the
-    # set_rtps lambda below — so the xclbin behaves identically to the baked
-    # version while exercising the RTP machinery for overhead measurement.
-    # Tier 2 swaps the lambda for a host-buffer copy.
+    # values are compile-time constants baked into the runtime sequence. Tier 2
+    # can still collapse xclbins by keeping the regime envelope fixed and
+    # generating per-layer .bin streams with different constants.
     RTP_LEN = 6  # (tile_h, tile_w, ic, oc, stride, padding)
     rtp_ty = np.ndarray[(RTP_LEN,), np.dtype[np.int32]]
-    init_rtp = np.array([tile_h, tile_w, ic, oc, stride, padding], dtype=np.int32)
+    init_rtp = np.array([active_tile_h, active_tile_w, active_ic, active_oc,
+                         stride, padding], dtype=np.int32)
     rtps = [
         Buffer(rtp_ty, name=f"rtp_{i}", initial_value=init_rtp, use_write_rtp=True)
         for i in range(n_cores)
@@ -178,10 +195,10 @@ def multicore_conv(dev, tile_h=8, tile_w=8, ic=16, oc=16,
     with rt.sequence(host_input_ty, weight_ty, host_output_ty) as (I, W, O):
         rt.start(*workers)
 
-        # Runtime parameter write — Tier 1.5 prototype: same values every call.
-        # Tier 2 will source these from a small int32 buffer passed as a sequence
-        # arg so one loaded xclbin can serve multiple layer shapes.
-        t_h, t_w, ic_c, oc_c, s_c, p_c = tile_h, tile_w, ic, oc, stride, padding
+        # Runtime parameter write. Values may differ by generated .bin while the
+        # xclbin/ObjectFifo envelope remains shared across a regime.
+        t_h, t_w = active_tile_h, active_tile_w
+        ic_c, oc_c, s_c, p_c = active_ic, active_oc, stride, padding
         def set_rtps(*rtp_bufs):
             for rb in rtp_bufs:
                 rb[0] = t_h; rb[1] = t_w
@@ -220,17 +237,48 @@ def multicore_conv(dev, tile_h=8, tile_w=8, ic=16, oc=16,
     return Program(dev, rt).resolve_program(SequentialPlacer())
 
 
+def _parse_args(argv):
+    parser = argparse.ArgumentParser(
+        description="Generate multicore Conv+BN+SiLU MLIR."
+    )
+    parser.add_argument("n_cores", nargs="?", type=int, default=32)
+    parser.add_argument("tile_h", nargs="?", type=int, default=8)
+    parser.add_argument("tile_w", nargs="?", type=int, default=8)
+    parser.add_argument("ic", nargs="?", type=int, default=16)
+    parser.add_argument("oc", nargs="?", type=int, default=16)
+    parser.add_argument("kernel_size", nargs="?", type=int, default=1)
+    parser.add_argument("stride", nargs="?", type=int, default=1)
+    parser.add_argument("patches_per_core", nargs="?", type=int, default=1)
+    parser.add_argument("input_depth", nargs="?", type=int, default=1)
+    parser.add_argument("--active-tile-h", type=int)
+    parser.add_argument("--active-tile-w", type=int)
+    parser.add_argument("--active-ic", type=int)
+    parser.add_argument("--active-oc", type=int)
+    parser.add_argument("--active-stride", type=int)
+    parser.add_argument("--active-padding", type=int)
+    return parser.parse_args(argv)
+
+
 if __name__ == "__main__":
     dev = NPU2()
-    n_cores = int(sys.argv[1]) if len(sys.argv) > 1 else 32
-    tile_h = int(sys.argv[2]) if len(sys.argv) > 2 else 8
-    tile_w = int(sys.argv[3]) if len(sys.argv) > 3 else 8
-    ic = int(sys.argv[4]) if len(sys.argv) > 4 else 16
-    oc = int(sys.argv[5]) if len(sys.argv) > 5 else 16
-    ks = int(sys.argv[6]) if len(sys.argv) > 6 else 1
-    stride = int(sys.argv[7]) if len(sys.argv) > 7 else 1
-    ppc = int(sys.argv[8]) if len(sys.argv) > 8 else 1
-    input_depth = int(sys.argv[9]) if len(sys.argv) > 9 else 1
-    module = multicore_conv(dev, tile_h, tile_w, ic, oc, ks, stride,
-                            1 if ks == 3 else 0, n_cores, ppc, input_depth)
+    args = _parse_args(sys.argv[1:])
+    module = multicore_conv(
+        dev,
+        args.tile_h,
+        args.tile_w,
+        args.ic,
+        args.oc,
+        args.kernel_size,
+        args.stride,
+        1 if args.kernel_size == 3 else 0,
+        args.n_cores,
+        args.patches_per_core,
+        args.input_depth,
+        active_tile_h=args.active_tile_h,
+        active_tile_w=args.active_tile_w,
+        active_ic=args.active_ic,
+        active_oc=args.active_oc,
+        active_stride=args.active_stride,
+        active_padding=args.active_padding,
+    )
     print(module)
