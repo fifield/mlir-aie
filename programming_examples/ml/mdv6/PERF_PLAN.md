@@ -4,7 +4,7 @@
 
 Full MDV6-mit-yolov9-c forward pass on Strix Halo NPU.
 
-### Post-Phase-A + sub-task B1 (2026-04-18)
+### Post-Phase-A/B + 0pf host-pipeline cleanup (2026-04-18)
 
 Warm-frame profile (`test_full_model_mc.py --profile 7`):
 
@@ -200,17 +200,22 @@ fewer cores (e.g., single-column 4-tile runs), the threshold drops
 proportionally and more layers become bumpable — see the inline table in
 `run_tiled_mc.py::_MC_PPC` for the full per-layer analysis.
 
-### Sub-tasks NOT pursued (bead revisions 2026-04-18)
+### Follow-up status after implementation cross-check (2026-04-23)
 
 - **mlir-aie-d6f (cache packed weights)** — downgraded **P1 → P3**. Original
   "~500 ms savings" estimate was based on cold-frame measurements. Actual
   warm-frame `pack` bucket is ~0 ms; prewarm + WeakKeyDict cache already
   addresses it.
-- **mlir-aie-cup (RepConv to NPU)** — downgraded **P1 → P3**. Original
-  "~600 ms" estimate was wrong by an order of magnitude. Measured
-  `cpu.RepConv = 33 ms` in the warm baseline. Not worth the kernel
-  complexity at current spatial resolutions.
-- **0pf-B sub-task B (launch batching, host-side plumbing tricks)** —
+- **mlir-aie-0pf (host-pipeline cleanup)** — **closed**. The scoped wins are
+  implemented: role-separated XRT buffer pools removed `iron_alloc`, ppc is
+  restricted to layers where launch count actually drops, and pack/fuse are
+  warm-frame ~0 ms. Remaining launch-gap work is Phase C, not 0pf.
+- **mlir-aie-cup (RepConv to NPU)** — restored to **P2** after implementation
+  review. The CPU compute bucket is only ~33 ms for RepConv, but every CPU
+  RepConv hop also forces NPU→DDR→CPU and CPU→DDR→NPU traffic that is counted
+  inside `launch_gap`. Moving RepConv to NPU is also a prerequisite for the
+  cross-column Phase C pipeline.
+- **0pf-B sub-task B (extra host-side launch batching tricks)** —
   the `launch_gap = 393 ms` bucket is dominated by per-call
   `_sync_to_device` + `_sync_from_device` (scales linearly with buffer
   size × launch count). Total bytes moved is invariant; only the fixed
@@ -218,6 +223,12 @@ proportionally and more layers become bumpable — see the inline table in
   reduction, the remaining fixed-overhead surface is small. Further
   savings require **on-chip layer chaining** (Phase C) to eliminate the
   round-trip entirely.
+- **mlir-aie-1jg (Tier 2 xclbin collapse)** — now the best near-term runtime
+  stability item. The code already has unified `rep_elan_bf16.o` and
+  compile-time RTP plumbing. Host-buffer-sourced RTP is not required for this
+  tier: per-layer runtime sequences may keep baked RTP constants as long as
+  they reuse one of the 5 L1-regime xclbin contexts. This should reduce
+  xclbin/context churn before more ambitious Phase C work.
 
 ### Profile harness
 
@@ -433,12 +444,13 @@ Bottom-up validation, each level proves a capability before scaling.
 | Bead | Title | Status |
 |------|-------|--------|
 | `mlir-aie-mi7` | Perf optimization epic | Open |
-| `mlir-aie-326` | Phase A: Vectorized kernels | In progress |
+| `mlir-aie-326` | Phase A: Vectorized kernels | Done (SiLU follow-up is `mlir-aie-4zz`) |
 | `mlir-aie-1wy` | Phase B: Multi-core spatial | Done (timing+correctness) |
 | `mlir-aie-2vb` | Phase C: On-chip pipelining (epic) | P3, not started |
 | `mlir-aie-9oz` | Phase C Flavor 1: L2 memtile chains | P3, not started |
 | `mlir-aie-k82` | Phase C Flavor 2: cross-column pipeline | P3, not started |
 | `mlir-aie-9xq` | Phase D: RepConv/AvgPool/Upsample to NPU | P2, not started |
+| `mlir-aie-1jg` | Tier 2: collapse ~65 xclbins to 5 L1-regime xclbins | P2; R3 conv3x3 + non-K GEMM increments landed |
 
 ### Test-plan levels
 | Bead | Title | Status |
@@ -459,16 +471,16 @@ Bottom-up validation, each level proves a capability before scaling.
 ### Host pipeline (0pf family)
 | Bead | Title | Status |
 |------|-------|--------|
-| `mlir-aie-0pf` | Batch Bottleneck calls + reduce per-call Python dispatch | P2, sub-task A+B1 done |
+| `mlir-aie-0pf` | Batch Bottleneck calls + reduce per-call Python dispatch | Closed; scoped host-pipeline work done |
 | `mlir-aie-d6f` | Cache packed GEMM/conv weights across NPU calls | P3, already mostly addressed |
-| `mlir-aie-cup` | Move RepConv fused dual-path to NPU | P3, ROI too small at current spatial dims |
+| `mlir-aie-cup` | Move RepConv fused dual-path to NPU | P2; CPU-hop removal + Phase C prerequisite |
 
 ### Known bugs / open items
 | Bead | Title | Status |
 |------|-------|--------|
 | `mlir-aie-mi7.1` | MC correctness bug (zeros) | **Resolved** by 9dl + woi + L1 fixes |
 | `mlir-aie-mi7.1.1` | Minimal reproducer: DMA buffer overflow crashes NPU | P1, open |
-| `mlir-aie-mi7.2` | aiecc.py: ObjectFifo naming affects compiled ELF correctness | P1, open |
+| `mlir-aie-mi7.2` | NPU runtime corrupts context after timeout; reduce xclbin churn and add repro | P1, open |
 | `mlir-aie-4zz` | Vectorize bf16 SiLU | P2, open (the last kernel op not vectorized) |
 
 ---
@@ -477,21 +489,51 @@ Bottom-up validation, each level proves a capability before scaling.
 
 Ordered by expected wall-time impact at current 1.87s wall:
 
-1. **Phase A completion** (`mlir-aie-4zz`) — vectorise bf16 SiLU. Blocked on
+1. **Tier 2 xclbin collapse** (`mlir-aie-1jg`) — collapse the current
+   per-shape xclbin inventory to ~5 L1-regime xclbins.
+   This is primarily a runtime-stability step for `mlir-aie-mi7.2`, with a
+   plausible 50-200 ms secondary wall-time win from less context churn. The
+   implementation is partially prepared: unified `rep_elan_bf16.o` and
+   compile-time RTP buffers are already wired. It is OK for each layer/regime
+   runtime sequence to keep constants baked via `rt.inline_ops`; the key is
+   reusing the regime xclbin context.
+
+   2026-04-23 increment: added `regime_config.py` with R1-R5 contract data
+   and the first routed artifact, `conv/build/regime_r3_conv3x3.xclbin`.
+   With `USE_REGIME_XCLBINS=1`, `mc_re8_c3` and `mc_re8_rn3` use the shared
+   R3 conv3x3 xclbin plus per-layer `.bin` streams. The attempted 8x8/IC128
+   R3 conv3x3 envelope did not fit L1 (weight + input + output + RTP exceeded
+   per-tile memory), so the first envelope uses 4x4/IC128. `mc_re8_rn3` also
+   runs at 4x4 under the feature flag; 20x20 still fits in one call per OC
+   block, so launch count stays at 453. Benchmark:
+   `USE_REGIME_XCLBINS=1 timeout 900s python3 test_full_model_mc.py --profile 3 --baseline profile_baseline.json`
+   passed with `max_class_diff=0.2256`, `max_vector_diff=0.0312`, warm wall
+   1845 ms, `npu_run=1095.3 ms`, and 453 launches.
+
+   Next increment, same date: added `gemm_conv1x1/build/regime_r3_gemm_non_k.xclbin`.
+   With `USE_REGIME_XCLBINS=1`, `gemm_re8_rn1` and `gemm_re8_rnm` use that
+   shared non-K GEMM xclbin plus per-layer `.bin` streams. `gemm_re8_rn1`
+   runs at `tile_m=44` under the flag instead of its standalone `tile_m=104`;
+   20x20 still fits in one call, so launch count remains 453. The same
+   benchmark passed with `max_class_diff=0.2256`, `max_vector_diff=0.0312`,
+   warm wall 1889 ms, `npu_run=1084.2 ms`, and 453 launches.
+
+2. **Phase A completion** (`mlir-aie-4zz`) — vectorise bf16 SiLU. Blocked on
    a bf16→float vector conversion in the kernel toolchain. Potentially
    significant if SiLU is a measurable chunk of `npu_run`. Needs per-layer
    NPU-time profiling to size the prize (profile harness does not break
    down NPU time internally).
 
-2. **Phase C Flavor 1** (`mlir-aie-9oz`) — L2 memtile dataflow chains for
+3. **Phase D / RepConv-on-NPU** (`mlir-aie-cup`, parent `mlir-aie-9xq`) —
+   move RepConv's dual-path conv+add+SiLU to NPU. Direct CPU compute savings
+   are modest, but removing the hidden NPU↔CPU round trips matters for
+   `launch_gap`, and this is a prerequisite for cross-column Phase C.
+
+4. **Phase C Flavor 1** (`mlir-aie-9oz`) — L2 memtile dataflow chains for
    20×20 sequences (aconv7→re8→spp9→re21). Removes external round-trips,
    directly shrinks `launch_gap`. Medium complexity; clear spec in docs.
 
-3. **Phase D** (`mlir-aie-9xq`) — Detection on NPU would save ~11 ms; other
-   CPU layers (RepConv 33, AvgPool 7, Upsample 1) total <60 ms. Low ROI
-   relative to Phase C.
-
-4. **Regression guard** — extend `test_full_model_mc.py --baseline` to CI.
+5. **Regression guard** — extend `test_full_model_mc.py --baseline` to CI.
    Without an automated regression check, subtle host-pipeline edits can
    silently undo the 0pf wins (see B1 sweep analysis notes in the
    `_MC_PPC` comment).

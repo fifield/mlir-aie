@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../python"))
 import torch
 import aie.iron as iron
 from aie.utils import NPUKernel, DefaultNPURuntime
+from regime_config import conv_regime_for_layer, gemm_regime_for_layer
 
 # Import single-core helpers
 import importlib.util
@@ -24,6 +25,7 @@ uint16_to_bf16 = ett.uint16_to_bf16
 N_CORES = 32
 _bd = os.path.join(_base, "conv", "build")
 _mc_cache = {}
+USE_REGIME_XCLBINS = os.environ.get("USE_REGIME_XCLBINS", "0") == "1"
 
 # Per-layer ppc bumps from mlir-aie-0pf-B1 (2026-04-18).
 #
@@ -159,20 +161,63 @@ def get_out_buf(size, dtype=np.uint16):
     return _pooled_buf(_OUTPUT_POOL, size, dtype)
 
 
-def _load_handle(name):
+def _load_handle(name, insts_name=None):
     """Load an xclbin, returning handle or None."""
+    insts_name = name if insts_name is None else insts_name
     xclbin = os.path.join(_bd, f"{name}.xclbin")
-    insts = os.path.join(_bd, f"{name}.bin")
-    if os.path.exists(xclbin):
+    insts = os.path.join(_bd, f"{insts_name}.bin")
+    if os.path.exists(xclbin) and os.path.exists(insts):
         return DefaultNPURuntime.load(NPUKernel(xclbin, insts))
     return None
 
 
-def _get_mc_handle(name):
+def _get_mc_handle(name, insts_name=None):
     """Load a multicore xclbin (cached, with eviction recovery)."""
-    if name not in _mc_cache:
-        _mc_cache[name] = _load_handle(name)
-    return _mc_cache[name]
+    key = name if insts_name is None else (name, insts_name)
+    if key not in _mc_cache:
+        _mc_cache[key] = _load_handle(name, insts_name)
+    return _mc_cache[key]
+
+
+def _regime_conv_artifact(mc_name, actual_name, ppc):
+    if not USE_REGIME_XCLBINS or actual_name != mc_name:
+        return None
+    artifact = conv_regime_for_layer(mc_name)
+    if artifact is None:
+        return None
+    active = artifact.members[mc_name]
+    active_tile_h, active_tile_w, active_ic, active_oc, active_stride, active_padding, active_ppc = active
+    if active_ppc != ppc:
+        raise RuntimeError(
+            f"Regime artifact ppc mismatch for {mc_name}: runtime ppc={ppc}, "
+            f"artifact ppc={active_ppc}"
+        )
+    if active_ic != artifact.ic and active_ic > artifact.ic:
+        raise RuntimeError(f"Regime artifact IC envelope too small for {mc_name}")
+    if active_oc > artifact.oc_block:
+        raise RuntimeError(f"Regime artifact OC envelope too small for {mc_name}")
+    patch_h = (artifact.tile_h - 1) * artifact.stride + artifact.kernel_size
+    patch_w = (artifact.tile_w - 1) * artifact.stride + artifact.kernel_size
+    patch_size_raw = patch_h * patch_w * artifact.ic
+    patch_size = patch_size_raw + (patch_size_raw % 2)
+    return {
+        "xclbin_name": artifact.xclbin_name,
+        "insts_name": f"{artifact.xclbin_name}_{mc_name}",
+        "active_tile_h": active_tile_h,
+        "active_tile_w": active_tile_w,
+        "active_ic": active_ic,
+        "active_oc": active_oc,
+        "active_stride": active_stride,
+        "active_padding": active_padding,
+        "tile_h": artifact.tile_h,
+        "tile_w": artifact.tile_w,
+        "ic": artifact.ic,
+        "oc_block": artifact.oc_block,
+        "patch_size": patch_size,
+        "weight_size": artifact.oc_block * artifact.ic * artifact.kernel_size * artifact.kernel_size
+                       + 2 * artifact.oc_block,
+        "output_tile_size": artifact.tile_h * artifact.tile_w * artifact.oc_block,
+    }
 
 
 def _get_mc_variant(name):
@@ -225,26 +270,42 @@ def run_tiled_fused_conv_mc(mc_name, sc_name, input_hwc, weights_uint16,
         sc_name: unused in current flow; retained for signature compatibility.
     """
     actual_name, ppc = _get_mc_variant(mc_name)
-    mc_kh = _get_mc_handle(actual_name)
+    regime = _regime_conv_artifact(mc_name, actual_name, ppc)
+    if regime is not None:
+        handle_name = regime["xclbin_name"]
+        insts_name = regime["insts_name"]
+        mc_kh = _get_mc_handle(handle_name, insts_name)
+        tile_h = regime["active_tile_h"]
+        tile_w = regime["active_tile_w"]
+        oc_block = regime["active_oc"]
+        stride = regime["active_stride"]
+        padding = regime["active_padding"]
+    else:
+        handle_name = actual_name
+        insts_name = actual_name
+        mc_kh = _get_mc_handle(actual_name)
     if mc_kh is None:
         raise RuntimeError(
-            f"MC xclbin missing: {actual_name} (requested: {mc_name})"
+            f"MC xclbin missing: {handle_name}/{insts_name}.bin "
+            f"(requested: {mc_name})"
         )
     try:
         return _run_tiled_mc_inner(mc_kh, input_hwc, weights_uint16,
                                     out_h, out_w, out_ch, tile_h, tile_w, oc_block,
-                                    stride, kernel_size, padding, ppc)
+                                    stride, kernel_size, padding, ppc, regime)
     except (RuntimeError, AttributeError) as e:
         # Transient XRT error (e.g., context-cache eviction). Reload and retry once.
-        _mc_cache[actual_name] = _load_handle(actual_name)
-        mc_kh = _mc_cache[actual_name]
+        cache_key = handle_name if regime is None else (handle_name, insts_name)
+        _mc_cache[cache_key] = _load_handle(handle_name, insts_name)
+        mc_kh = _mc_cache[cache_key]
         if mc_kh is None:
             raise RuntimeError(
-                f"MC xclbin reload failed after transient error: {actual_name} ({e})"
+                f"MC xclbin reload failed after transient error: "
+                f"{handle_name}/{insts_name}.bin ({e})"
             )
         return _run_tiled_mc_inner(mc_kh, input_hwc, weights_uint16,
                                     out_h, out_w, out_ch, tile_h, tile_w, oc_block,
-                                    stride, kernel_size, padding, ppc)
+                                    stride, kernel_size, padding, ppc, regime)
 
 
 def _pack_3x3_weights(conv_block_u16, oc_block, ic):
@@ -265,7 +326,8 @@ def _pack_3x3_weights(conv_block_u16, oc_block, ic):
 
 def _run_tiled_mc_inner(mc_kh, input_hwc, weights_uint16,
                          out_h, out_w, out_ch, tile_h, tile_w, oc_block,
-                         stride=1, kernel_size=3, padding=1, patches_per_core=1):
+                         stride=1, kernel_size=3, padding=1, patches_per_core=1,
+                         regime=None):
 
     H, W, C = input_hwc.shape
     tiles_h = (out_h + tile_h - 1) // tile_h
@@ -276,9 +338,17 @@ def _run_tiled_mc_inner(mc_kh, input_hwc, weights_uint16,
     patch_h = (tile_h - 1) * stride + kernel_size
     patch_w = (tile_w - 1) * stride + kernel_size
     patch_size_raw = patch_h * patch_w * C
-    patch_size = patch_size_raw + (patch_size_raw % 2)
-    output_tile_size = tile_h * tile_w * oc_block
-    conv_wt_size = oc_block * C * kernel_size * kernel_size
+    active_patch_size = patch_size_raw + (patch_size_raw % 2)
+    active_output_tile_size = tile_h * tile_w * oc_block
+    active_conv_wt_size = oc_block * C * kernel_size * kernel_size
+    if regime is None:
+        patch_size = active_patch_size
+        output_tile_size = active_output_tile_size
+        weight_slot_size = active_conv_wt_size + 2 * oc_block
+    else:
+        patch_size = regime["patch_size"]
+        output_tile_size = regime["output_tile_size"]
+        weight_slot_size = regime["weight_size"]
 
     # Unpack full weight array
     total_conv_wts = out_ch * C * kernel_size * kernel_size
@@ -302,7 +372,8 @@ def _run_tiled_mc_inner(mc_kh, input_hwc, weights_uint16,
         # Pack-cache the assembled [packed_conv | bn_w | bn_b] per ocb.
         # mlir-aie-d6f cache + mlir-aie-woi guard (expected_wts_len in key,
         # length verified on hit so a recycled id with different shape misses).
-        wt_key = (wts_id, ocb, oc_block, out_ch, C, kernel_size, expected_wts_len)
+        wt_key = (wts_id, ocb, oc_block, out_ch, C, kernel_size,
+                  expected_wts_len, weight_slot_size)
         wt_block = (_WTBLOCK_CACHE_3x3.get(wt_key)
                     if len(weights_uint16) == expected_wts_len else None)
         if wt_block is None:
@@ -320,9 +391,11 @@ def _run_tiled_mc_inner(mc_kh, input_hwc, weights_uint16,
             bn_w_block = all_bn_w[oc_start:oc_end]
             bn_b_block = all_bn_b[oc_start:oc_end]
             wt_block = np.concatenate([conv_block, bn_w_block, bn_b_block])
-            expected = conv_wt_size + 2 * oc_block
+            expected = active_conv_wt_size + 2 * oc_block
             if len(wt_block) < expected:
                 wt_block = np.pad(wt_block, (0, expected - len(wt_block)))
+            if len(wt_block) < weight_slot_size:
+                wt_block = np.pad(wt_block, (0, weight_slot_size - len(wt_block)))
             _WTBLOCK_CACHE_3x3[wt_key] = wt_block
             _gemm_cache_evict_dead_ids(_WTBLOCK_CACHE_3x3)
 
@@ -377,7 +450,7 @@ def _run_tiled_mc_inner(mc_kh, input_hwc, weights_uint16,
                 core = i // patches_per_core
                 slot = i % patches_per_core
                 start = (core * patches_per_core + slot) * output_tile_size
-                tile_out = uint16_to_bf16(out_data[start:start + output_tile_size])
+                tile_out = uint16_to_bf16(out_data[start:start + active_output_tile_size])
                 tile_out = tile_out.reshape(tile_h, tile_w, oc_block)
                 output[oh_s:oh_e, ow_s:ow_e, oc_start:oc_end] = \
                     tile_out[:oh_e - oh_s, :ow_e - ow_s, :actual_oc]
@@ -484,21 +557,56 @@ def _gemm_compute_ppc_kblocked(M, tile_m, ic, oc, k_block):
     return max(1, min(ideal, max_xrt_in, max_xrt_out, max_l2, 32))
 
 
-def _load_gemm_handle(name):
+def _load_gemm_handle(name, insts_name=None):
     """Load a GEMM conv1x1 xclbin."""
+    insts_name = name if insts_name is None else insts_name
     xclbin = os.path.join(_gemm_bd, f"{name}.xclbin")
-    insts = os.path.join(_gemm_bd, f"{name}.bin")
-    if os.path.exists(xclbin):
+    insts = os.path.join(_gemm_bd, f"{insts_name}.bin")
+    if os.path.exists(xclbin) and os.path.exists(insts):
         return DefaultNPURuntime.load(NPUKernel(xclbin, insts))
     return None
 
 
-def _get_gemm_handle(name):
+def _get_gemm_handle(name, insts_name=None):
     """Cached GEMM xclbin handle."""
-    key = f"gemm_{name}"
+    key = f"gemm_{name}" if insts_name is None else ("gemm", name, insts_name)
     if key not in _mc_cache:
-        _mc_cache[key] = _load_gemm_handle(name)
+        _mc_cache[key] = _load_gemm_handle(name, insts_name)
     return _mc_cache[key]
+
+
+def _regime_gemm_artifact(gemm_name, tile_m, ic, oc_block, ppc):
+    if not USE_REGIME_XCLBINS:
+        return None
+    artifact = gemm_regime_for_layer(gemm_name)
+    if artifact is None or artifact.k_block > 0:
+        return None
+    active_tile_m, active_ic, active_oc, active_ppc = artifact.members[gemm_name]
+    if (active_tile_m, active_ic, active_oc, active_ppc) != (tile_m, ic, oc_block, ppc):
+        # The regime may intentionally reduce tile_m while preserving launch
+        # count. Other mismatches are build/runtime contract errors.
+        if (active_ic, active_oc, active_ppc) != (ic, oc_block, ppc):
+            raise RuntimeError(
+                f"GEMM regime contract mismatch for {gemm_name}: "
+                f"runtime={(tile_m, ic, oc_block, ppc)} "
+                f"contract={(active_tile_m, active_ic, active_oc, active_ppc)}"
+            )
+    if active_ic > artifact.ic or active_oc > artifact.oc:
+        raise RuntimeError(f"GEMM regime envelope too small for {gemm_name}")
+    return {
+        "xclbin_name": artifact.xclbin_name,
+        "insts_name": f"{artifact.xclbin_name}_{gemm_name}",
+        "tile_m": artifact.tile_m,
+        "ic": artifact.ic,
+        "oc": artifact.oc,
+        "ppc": artifact.patches_per_core,
+        "active_tile_m": active_tile_m,
+        "active_ic": active_ic,
+        "active_oc": active_oc,
+        "input_size": artifact.tile_m * artifact.ic,
+        "output_size": artifact.tile_m * artifact.oc,
+        "weight_size": artifact.ic * artifact.oc + 2 * artifact.oc,
+    }
 
 
 def _repack_weights_for_gemm(weights_uint16, ic, oc, oc_block):
@@ -650,15 +758,25 @@ def run_gemm_conv1x1_mc(gemm_name, sc_name, input_hwc, weights_uint16,
     ppc = _gemm_compute_ppc(M, tile_m, IC, oc_block)
 
     actual_name = f"gemm_t{tile_m}_ic{IC}_oc{oc_block}_p{ppc}"
-    gemm_kh = _get_gemm_handle(actual_name)
+    regime = _regime_gemm_artifact(gemm_name, tile_m, IC, oc_block, ppc)
+    if regime is not None:
+        handle_name = regime["xclbin_name"]
+        insts_name = regime["insts_name"]
+        gemm_kh = _get_gemm_handle(handle_name, insts_name)
+        tile_m = regime["active_tile_m"]
+    else:
+        handle_name = actual_name
+        insts_name = actual_name
+        gemm_kh = _get_gemm_handle(actual_name)
     if gemm_kh is None:
         raise RuntimeError(
-            f"GEMM xclbin missing: {actual_name} "
+            f"GEMM xclbin missing: {handle_name}/{insts_name}.bin "
             f"(layer={gemm_name}, IC={IC}, OC={out_ch}, M={M}, oc_block={oc_block}, tile_m={tile_m}, ppc={ppc})"
         )
 
-    return _run_gemm_oc_blocked(gemm_kh, actual_name, input_hwc, weights_uint16,
-                                 out_h, out_w, out_ch, tile_m, oc_block, ppc)
+    return _run_gemm_oc_blocked(gemm_kh, handle_name, insts_name, input_hwc,
+                                 weights_uint16, out_h, out_w, out_ch, tile_m,
+                                 oc_block, ppc, regime)
 
 
 def _run_gemm_kblocked(gemm_kh, actual_name, input_hwc, weights_uint16,
@@ -726,8 +844,9 @@ def _run_gemm_kblocked(gemm_kh, actual_name, input_hwc, weights_uint16,
     return output
 
 
-def _run_gemm_oc_blocked(gemm_kh, actual_name, input_hwc, weights_uint16,
-                          out_h, out_w, out_ch, tile_m, oc_block, ppc):
+def _run_gemm_oc_blocked(gemm_kh, handle_name, insts_name, input_hwc, weights_uint16,
+                          out_h, out_w, out_ch, tile_m, oc_block, ppc,
+                          regime=None):
     """OC-blocked GEMM: legacy path with OC blocking loop."""
     H, W, IC = input_hwc.shape
     M = H * W
@@ -735,8 +854,16 @@ def _run_gemm_oc_blocked(gemm_kh, actual_name, input_hwc, weights_uint16,
     n_oc_blocks = out_ch // oc_block
     wt_blocks = _repack_weights_for_gemm(weights_uint16, IC, out_ch, oc_block)
 
-    input_size = tile_m * IC
-    output_size = tile_m * oc_block
+    active_input_size = tile_m * IC
+    active_output_size = tile_m * oc_block
+    if regime is None:
+        input_size = active_input_size
+        output_size = active_output_size
+        weight_size = None
+    else:
+        input_size = regime["input_size"]
+        output_size = regime["output_size"]
+        weight_size = regime["weight_size"]
     pixels_per_call = N_CORES * tile_m * ppc
 
     input_flat = input_hwc.reshape(M, IC)
@@ -747,7 +874,10 @@ def _run_gemm_oc_blocked(gemm_kh, actual_name, input_hwc, weights_uint16,
         oc_start = ocb * oc_block
         oc_end = min(oc_start + oc_block, out_ch)
         actual_oc = oc_end - oc_start
-        wt_buf = get_wt_buf(wt_blocks[ocb])
+        wt_block = wt_blocks[ocb]
+        if weight_size is not None and len(wt_block) < weight_size:
+            wt_block = np.pad(wt_block, (0, weight_size - len(wt_block)))
+        wt_buf = get_wt_buf(wt_block)
 
         for batch_start in range(0, M, pixels_per_call):
             batch_end = min(batch_start + pixels_per_call, M)
@@ -758,9 +888,12 @@ def _run_gemm_oc_blocked(gemm_kh, actual_name, input_hwc, weights_uint16,
             host_in = np.zeros(host_in_size, dtype=np.uint16)
 
             n_active_slots = (batch_pixels + tile_m - 1) // tile_m
-            active_end = min(batch_start + n_active_slots * tile_m, batch_end)
-            active_u16 = bf16_to_uint16(input_flat[batch_start:active_end].flatten())
-            host_in[:len(active_u16)] = active_u16
+            for s in range(n_active_slots):
+                pix_start = batch_start + s * tile_m
+                pix_end = min(pix_start + tile_m, batch_end)
+                active_u16 = bf16_to_uint16(input_flat[pix_start:pix_end].flatten())
+                dst = s * input_size
+                host_in[dst:dst + len(active_u16)] = active_u16
 
             slot0 = host_in[:input_size]
             for s in range(n_active_slots, total_slots):
@@ -772,8 +905,9 @@ def _run_gemm_oc_blocked(gemm_kh, actual_name, input_hwc, weights_uint16,
             try:
                 DefaultNPURuntime.run(gemm_kh, [in_buf, wt_buf, out_buf])
             except Exception:
-                _mc_cache[f"gemm_{actual_name}"] = _load_gemm_handle(actual_name)
-                gemm_kh = _mc_cache[f"gemm_{actual_name}"]
+                cache_key = f"gemm_{handle_name}" if insts_name == handle_name else ("gemm", handle_name, insts_name)
+                _mc_cache[cache_key] = _load_gemm_handle(handle_name, insts_name)
+                gemm_kh = _mc_cache[cache_key]
                 if gemm_kh is None:
                     raise
                 DefaultNPURuntime.run(gemm_kh, [in_buf, wt_buf, out_buf])

@@ -3,6 +3,9 @@
 Generates MLIR and compiles for each unique (tile, ic, oc, ks, stride) config."""
 import os, sys, subprocess, time
 
+sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), "..")))
+from regime_config import CONV_REGIME_ARTIFACTS
+
 # All unique configs from test_full_model.py:
 # (name, n_cores, tile_h, tile_w, ic, oc_block, kernel_size, stride, patches_per_core)
 CONFIGS = [
@@ -118,6 +121,120 @@ def build_one(name, n_cores, tile_h, tile_w, ic, oc, ks, stride, ppc,
     return True
 
 
+def _generate_conv_mlir(build_dir, name, n_cores, tile_h, tile_w, ic, oc, ks,
+                        stride, ppc, input_depth, active=None):
+    mlir_path = os.path.join(build_dir, f"{name}.mlir")
+    script = os.path.join(os.path.dirname(__file__), "aie2_multicore.py")
+    cmd = [
+        "python3", script, str(n_cores), str(tile_h), str(tile_w), str(ic),
+        str(oc), str(ks), str(stride), str(ppc), str(input_depth),
+    ]
+    if active is not None:
+        a_tile_h, a_tile_w, a_ic, a_oc, a_stride, a_padding, _a_ppc = active
+        cmd.extend([
+            "--active-tile-h", str(a_tile_h),
+            "--active-tile-w", str(a_tile_w),
+            "--active-ic", str(a_ic),
+            "--active-oc", str(a_oc),
+            "--active-stride", str(a_stride),
+            "--active-padding", str(a_padding),
+        ])
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"FAIL\n    {result.stderr.strip().split(chr(10))[-1]}")
+        return None
+    with open(mlir_path, 'w') as f:
+        f.write(result.stdout)
+    return mlir_path
+
+
+def build_regime_conv_artifact(artifact, build_dir):
+    """Build one regime xclbin plus per-layer runtime instruction streams."""
+    xclbin_path = os.path.join(build_dir, f"{artifact.xclbin_name}.xclbin")
+    obj_path = os.path.join(build_dir, "rep_elan_bf16.o")
+    need_xclbin = (
+        not os.path.exists(xclbin_path)
+        or (os.path.exists(obj_path) and os.path.getmtime(obj_path) > os.path.getmtime(xclbin_path))
+    )
+
+    print(f"  {artifact.xclbin_name}: regime {artifact.regime} conv3x3 envelope")
+    if need_xclbin:
+        print("    envelope MLIR...", end=" ", flush=True)
+        mlir_path = _generate_conv_mlir(
+            build_dir,
+            artifact.xclbin_name,
+            32,
+            artifact.tile_h,
+            artifact.tile_w,
+            artifact.ic,
+            artifact.oc_block,
+            artifact.kernel_size,
+            artifact.stride,
+            artifact.patches_per_core,
+            artifact.input_depth,
+        )
+        if mlir_path is None:
+            return False
+        print("OK", end=" ", flush=True)
+
+        cmd_xclbin = (
+            f"cd {build_dir} && aiecc.py --aie-generate-xclbin --aie-generate-npu-insts "
+            f"--no-compile-host --no-xchesscc --no-xbridge "
+            f"--xclbin-name={artifact.xclbin_name}.xclbin "
+            f"--npu-insts-name={artifact.xclbin_name}.bin {artifact.xclbin_name}.mlir"
+        )
+        print("xclbin...", end=" ", flush=True)
+        result = subprocess.run(cmd_xclbin, shell=True, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"FAIL\n    {result.stderr.strip().split(chr(10))[-1]}")
+            return False
+        print("OK")
+    else:
+        print("    envelope already built, skipping")
+
+    ok = True
+    for layer_name, active in artifact.members.items():
+        insts_name = f"{artifact.xclbin_name}_{layer_name}"
+        insts_path = os.path.join(build_dir, f"{insts_name}.bin")
+        if os.path.exists(insts_path) and os.path.getmtime(insts_path) >= os.path.getmtime(xclbin_path):
+            print(f"    {insts_name}: already built, skipping")
+            continue
+
+        print(f"    {insts_name}: active MLIR...", end=" ", flush=True)
+        mlir_path = _generate_conv_mlir(
+            build_dir,
+            insts_name,
+            32,
+            artifact.tile_h,
+            artifact.tile_w,
+            artifact.ic,
+            artifact.oc_block,
+            artifact.kernel_size,
+            artifact.stride,
+            artifact.patches_per_core,
+            artifact.input_depth,
+            active=active,
+        )
+        if mlir_path is None:
+            ok = False
+            continue
+        print("OK", end=" ", flush=True)
+
+        cmd_insts = (
+            f"cd {build_dir} && aiecc.py --aie-generate-npu-insts "
+            f"--no-compile-host --no-xchesscc --no-xbridge "
+            f"--npu-insts-name={insts_name}.bin {insts_name}.mlir"
+        )
+        print("insts...", end=" ", flush=True)
+        result = subprocess.run(cmd_insts, shell=True, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"FAIL\n    {result.stderr.strip().split(chr(10))[-1]}")
+            ok = False
+        else:
+            print("OK")
+    return ok
+
+
 def main():
     build_dir = os.path.join(os.path.dirname(__file__), "build")
     os.makedirs(build_dir, exist_ok=True)
@@ -139,13 +256,17 @@ def main():
         import shutil
         shutil.copy2(obj_src, obj_dst)
 
-    # Filter by command line args if provided
+    # Filter by command line args if provided. Regime artifacts are selected
+    # explicitly by name; current per-shape artifacts remain the default build.
     configs = CONFIGS
+    regimes = []
     if len(sys.argv) > 1:
         names = set(sys.argv[1:])
+        regimes = [CONV_REGIME_ARTIFACTS[n] for n in names if n in CONV_REGIME_ARTIFACTS]
         configs = [c for c in CONFIGS if c[0] in names]
 
-    print(f"Building {len(configs)} multicore xclbins...")
+    print(f"Building {len(configs)} multicore xclbins"
+          f" + {len(regimes)} regime artifacts...")
     t0 = time.time()
     ok = 0
     fail = 0
@@ -154,6 +275,12 @@ def main():
         # cfg is either (name, n_cores, tile_h, tile_w, ic, oc, ks, stride, ppc)
         # or (name, ..., ppc, input_depth).
         if build_one(*cfg, build_dir=build_dir):
+            ok += 1
+        else:
+            fail += 1
+
+    for artifact in regimes:
+        if build_regime_conv_artifact(artifact, build_dir):
             ok += 1
         else:
             fail += 1

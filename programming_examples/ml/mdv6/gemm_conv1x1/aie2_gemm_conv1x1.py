@@ -24,6 +24,7 @@ Examples:
   # 32-core, 24 pixels/core, 512->256, k_block=32 (16 K-blocks)
   python3 aie2_gemm_conv1x1.py 32 24 512 256 1 32
 """
+import argparse
 import numpy as np
 import sys
 
@@ -43,7 +44,9 @@ from aie.helpers.taplib import TensorAccessPattern
 
 
 def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
-                 patches_per_core=1, k_block=0, fused=True):
+                 patches_per_core=1, k_block=0, fused=True,
+                 active_tile_m=None, active_ic=None, active_oc=None,
+                 active_k_block=None):
     """N-core GEMM-based Conv1x1 [+ BN + SiLU] with optional K-blocking.
 
     Args:
@@ -58,6 +61,9 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
     assert tile_m % 4 == 0, f"tile_m={tile_m} must be divisible by 4 (mmul<4,8,8>)"
     assert ic % 8 == 0, f"ic={ic} must be divisible by 8"
     assert oc % 8 == 0, f"oc={oc} must be divisible by 8"
+    active_tile_m = tile_m if active_tile_m is None else active_tile_m
+    active_ic = ic if active_ic is None else active_ic
+    active_oc = oc if active_oc is None else active_oc
 
     # K-blocking setup
     if k_block <= 0 or k_block >= ic:
@@ -66,6 +72,9 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
     assert ic % k_block == 0, f"ic={ic} must be divisible by k_block={k_block}"
     n_k_blocks = ic // k_block
     use_kblocking = n_k_blocks > 1
+    if active_k_block is None:
+        active_k_block = active_ic if not use_kblocking else k_block
+    active_n_k_blocks = active_ic // active_k_block if use_kblocking else 1
 
     # Buffer sizes (in bf16 elements, passed as uint16)
     input_tile_size = tile_m * ic
@@ -96,6 +105,10 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
           file=sys.stderr)
     print(f"  input={input_tile_size} wt_chunk={weight_size} out={output_tile_size} "
           f"mem/core={mem_per_core/1024:.1f}KB", file=sys.stderr)
+    if (active_tile_m, active_ic, active_oc, active_k_block) != (
+            tile_m, ic, oc, k_block):
+        print(f"  active RTP: tile_m={active_tile_m}, {active_ic}->{active_oc}, "
+              f"k_block={active_k_block}", file=sys.stderr)
 
     # Per-tile types
     input_ty = np.ndarray[(input_tile_size,), np.dtype[np.uint16]]
@@ -146,9 +159,12 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
     RTP_LEN = 6
     rtp_ty = np.ndarray[(RTP_LEN,), np.dtype[np.int32]]
     if use_kblocking:
-        init_rtp = np.array([tile_m, ic, oc, k_block, n_k_blocks, 0], dtype=np.int32)
+        init_rtp = np.array([active_tile_m, active_ic, active_oc,
+                             active_k_block, active_n_k_blocks, 0],
+                            dtype=np.int32)
     else:
-        init_rtp = np.array([tile_m, 1, ic, oc, 1, 0], dtype=np.int32)
+        init_rtp = np.array([active_tile_m, 1, active_ic, active_oc, 1, 0],
+                            dtype=np.int32)
     rtps = [
         Buffer(rtp_ty, name=f"rtp_{i}", initial_value=init_rtp, use_write_rtp=True)
         for i in range(n_cores)
@@ -260,9 +276,8 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
     with rt.sequence(host_in_ty, host_wt_ty, host_out_ty) as (I, W, O):
         rt.start(*workers)
 
-        # Runtime parameter write — same values every call for now. Tier 2
-        # will source these from a host buffer arg so one xclbin serves many
-        # (tile_m, ic, oc, k_block) tuples.
+        # Runtime parameter write. Values may differ by generated .bin while the
+        # xclbin/ObjectFifo envelope remains shared across a regime.
         _rtp_vals = [int(v) for v in init_rtp]
         def set_rtps(*rtp_bufs):
             for rb in rtp_bufs:
@@ -344,15 +359,39 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
     return Program(dev, rt).resolve_program(SequentialPlacer())
 
 
+def _parse_args(argv):
+    parser = argparse.ArgumentParser(
+        description="Generate multicore GEMM Conv1x1 MLIR."
+    )
+    parser.add_argument("n_cores", nargs="?", type=int, default=32)
+    parser.add_argument("tile_m", nargs="?", type=int, default=64)
+    parser.add_argument("ic", nargs="?", type=int, default=128)
+    parser.add_argument("oc", nargs="?", type=int, default=64)
+    parser.add_argument("patches_per_core", nargs="?", type=int, default=1)
+    parser.add_argument("k_block", nargs="?", type=int, default=0)
+    parser.add_argument("--active-tile-m", type=int)
+    parser.add_argument("--active-ic", type=int)
+    parser.add_argument("--active-oc", type=int)
+    parser.add_argument("--active-k-block", type=int)
+    parser.add_argument("--no-fuse", action="store_true")
+    return parser.parse_args(argv)
+
+
 if __name__ == "__main__":
     dev = NPU2()
-    n_cores = int(sys.argv[1]) if len(sys.argv) > 1 else 32
-    tile_m = int(sys.argv[2]) if len(sys.argv) > 2 else 64
-    ic = int(sys.argv[3]) if len(sys.argv) > 3 else 128
-    oc = int(sys.argv[4]) if len(sys.argv) > 4 else 64
-    ppc = int(sys.argv[5]) if len(sys.argv) > 5 else 1
-    kb = int(sys.argv[6]) if len(sys.argv) > 6 else 0
-    fused = "--no-fuse" not in sys.argv
-
-    module = gemm_conv1x1(dev, tile_m, ic, oc, n_cores, ppc, kb, fused)
+    args = _parse_args(sys.argv[1:])
+    module = gemm_conv1x1(
+        dev,
+        args.tile_m,
+        args.ic,
+        args.oc,
+        args.n_cores,
+        args.patches_per_core,
+        args.k_block,
+        not args.no_fuse,
+        active_tile_m=args.active_tile_m,
+        active_ic=args.active_ic,
+        active_oc=args.active_oc,
+        active_k_block=args.active_k_block,
+    )
     print(module)
