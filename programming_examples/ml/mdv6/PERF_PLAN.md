@@ -616,6 +616,18 @@ Ordered by expected wall-time impact at current 1.87s wall:
    contexts, but the smaller shared tile increases R1 K-blocked launch count
    and NPU time. `health_check.py` passed immediately afterward.
 
+   Next increment: added and built `conv/build/regime_shared_conv3x3.xclbin`
+   for the shared R1-R3 stride-1 conv3x3 path. The envelope is
+   4x4/IC128/OC16 with ppc=4 and covers `mc_elan_c3`, `mc_re4_c3`,
+   `mc_re4_rn3`, `mc_re6_c3`, `mc_re6_rn3`, `mc_re8_c3`, and `mc_re8_rn3`
+   through per-layer `.bin` streams. Validation with both regime flags enabled
+   passed correctness: `max_class_diff=0.2262`, `max_vector_diff=0.0312`,
+   warm wall 3917 ms, `npu_run=1449.1 ms`, and 933 launches. This is another
+   context-collapse proof, not a performance candidate; the small shared tile
+   badly hurts R1 80x80 conv geometry. A health check immediately afterward
+   initially hit `DRM_IOCTL_AMDXDNA_CREATE_HWCTX` err=-2, then later passed,
+   so treat the post-run device state as noisy.
+
 2. **Phase A completion** (`mlir-aie-4zz`) — vectorise bf16 SiLU. Blocked on
    a bf16→float vector conversion in the kernel toolchain. Potentially
    significant if SiLU is a measurable chunk of `npu_run`. Needs per-layer
