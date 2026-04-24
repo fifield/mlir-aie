@@ -33,8 +33,8 @@
 #define XAIE_128BIT_ALIGN_MASK 0xFF
 
 // Allocate memory for the AIE device
-uint32_t *mlir_aie_mem_alloc(struct aie_libxaie_ctx_t *ctx, ext_mem_model_t &handle,
-                        int size) {
+uint32_t *mlir_aie_mem_alloc(struct aie_libxaie_ctx_t *ctx,
+                             ext_mem_model_t &handle, int size) {
   int RC;
   int Fd, Ret;
   uint32_t HeapNum;

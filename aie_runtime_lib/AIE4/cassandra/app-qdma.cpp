@@ -7,10 +7,10 @@
 
 #include <cassert>
 #include <cstring>
+#include <fcntl.h>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <fcntl.h>
 
 #include <stdint.h>
 #include <unistd.h>
@@ -38,7 +38,7 @@ void qdma_Write32(uint64_t addr, uint32_t Data);
 void mesim_ReadGM(uint64_t address, void *data, uint64_t size);
 void mesim_WriteGM(uint64_t address, void *data, uint64_t size);
 
-void acquire_cassandra_handle(char* cassandra_path);
+void acquire_cassandra_handle(char *cassandra_path);
 void release_cassandra_handle();
 }
 
@@ -91,7 +91,7 @@ void mesim_WriteGM(uint64_t address, void *data, uint64_t size) {
   off_t rc = lseek(cassandra_fd, offset, SEEK_SET);
   assert(rc == offset && "Failed QDMA Seek");
   write(cassandra_fd, data, size);
-  // size_t dat_offset = 
+  // size_t dat_offset =
   // while(size) {
   //   uint64_t tx_size = size > 1024 ? 1024 : size;
 
@@ -106,11 +106,11 @@ void mesim_ReadGM(uint64_t address, void *data, uint64_t size) {
   read(cassandra_fd, data, size);
   // while(size) {
   //   uint64_t tx_size = size > 1024 ? 1024 : size;
-    
+
   // }
 }
 
-void acquire_cassandra_handle(char* cassandra_path) {
+void acquire_cassandra_handle(char *cassandra_path) {
   printf("Acquiring FPGA %s\n", cassandra_path);
   cassandra_fd = open(cassandra_path, O_RDWR);
 }

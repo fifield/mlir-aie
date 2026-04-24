@@ -11,9 +11,9 @@
 
 extern "C" {
 void setWrite32Ptr(void (*func)(uint64_t, unsigned int));
-void setRead32Ptr(unsigned int (*func)(uint64_t)) ;
-void setWriteGMPtr(void (*func)(uint64_t, const void*, uint64_t));
-void setReadGMPtr(void (*func)(uint64_t,  void*, uint64_t));
+void setRead32Ptr(unsigned int (*func)(uint64_t));
+void setWriteGMPtr(void (*func)(uint64_t, const void *, uint64_t));
+void setReadGMPtr(void (*func)(uint64_t, void *, uint64_t));
 }
 
 extern int main(int argc, char *argv[]);

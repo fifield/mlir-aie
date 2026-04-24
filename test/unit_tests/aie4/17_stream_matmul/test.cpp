@@ -19,7 +19,8 @@ using namespace std;
 
 using matrix_utils::InitType;
 
-template <typename T> struct InitTestCase {
+template <typename T>
+struct InitTestCase {
   T min;
   T max;
   InitType type;

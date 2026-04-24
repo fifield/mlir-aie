@@ -23,7 +23,7 @@ inline void get_ss_v128_weight_staging(int stream_id, uint5_t reg_idx,
 inline __attribute__((always_inline)) void matrix_stream_load(int mul_mode) {
 
   constexpr unsigned stream_id = 1; // using stream 1 for weights and 0 for acts
-  #pragma unroll
+#pragma unroll
   for (size_t reg_idx = 0; reg_idx < 32; reg_idx++) {
     get_ss_v128_weight_staging(stream_id, reg_idx, mul_mode);
   }
@@ -39,7 +39,7 @@ void matmul() {
   constexpr unsigned int M = 4;
 
   v64acc32 acc[M];
-  #pragma unroll
+#pragma unroll
   for (unsigned l = 0; l < M; l++) {
     acc[l] = undef_v64acc32();
   }
@@ -53,7 +53,7 @@ void matmul() {
       matrix_stream_load(mul_mode);
       staging_to_matrix_m64x64int8();
 
-      #pragma unroll
+#pragma unroll
       for (unsigned int i = 0; i < M; i++) {
         v64int8 input_vector = get_ss_v64int8(0);
         acc[i] = mac_conf(input_vector, 1, 1, acc[i], zero_acc);
@@ -62,12 +62,12 @@ void matmul() {
       zero_acc = 0; // Accumulation mode set after first iteration
     }
 
-  #pragma unroll
+#pragma unroll
   for (unsigned i = 0; i < M; i++) {
-    #pragma unroll
+#pragma unroll
     for (unsigned j = 0; j < 2; j++) {
       v32acc32 acc1024b = extract_v32acc32(acc[i], j);
-      #pragma unroll
+#pragma unroll
       for (unsigned k = 0; k < 2; k++) {
         v16acc32 acc512b = extract_v16acc32(acc1024b, k);
         v16int32 out512b = v16int32(acc512b);

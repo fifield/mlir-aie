@@ -596,8 +596,7 @@ public:
   /// Architectures with non-trivial address layouts (e.g. AIE4, where each
   /// memtile row expands to 5 address rows) override this.
   virtual uint32_t getTileAddress(int col, int row) const {
-    return ((col & 0xff) << getColumnShift()) |
-           ((row & 0xff) << getRowShift());
+    return ((col & 0xff) << getColumnShift()) | ((row & 0xff) << getRowShift());
   }
 
   /// Return the size (in bytes) of a MemTile.

@@ -905,8 +905,8 @@ xilinx::AIE::AIETranslateToXAIEV2(ModuleOp module, raw_ostream &output,
         auto srcTile = dyn_cast<TileOp>(pktSource.getTile().getDefiningOp());
         int col = srcTile.getCol();
         int row = srcTile.getRow();
-        output << "// 32-bit trace port config for tile (" << col << ", "
-               << row << ")\n";
+        output << "// 32-bit trace port config for tile (" << col << ", " << row
+               << ")\n";
         output << "x = " << col << ";\ny = " << row << ";\n";
         // Enable the 32-bit switch trace subordinate port
         output << "__mlir_aie_try(XAie_StrmPktSwSlavePortEnable("
@@ -922,8 +922,7 @@ xilinx::AIE::AIETranslateToXAIEV2(ModuleOp module, raw_ostream &output,
         // Only configure once per bridge port.
         int bridgePort = 0;
         for (auto switchboxOp : targetOp.getOps<SwitchboxOp>()) {
-          if (switchboxOp.colIndex() != col ||
-              switchboxOp.rowIndex() != row)
+          if (switchboxOp.colIndex() != col || switchboxOp.rowIndex() != row)
             continue;
           Block &sb = switchboxOp.getConnections().front();
           for (auto pktRulesOp : sb.getOps<PacketRulesOp>()) {

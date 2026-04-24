@@ -151,13 +151,11 @@ int main(int argc, char **argv) {
   free(C);
   free(C_ref);
 
-  if (passed == total_tests){
+  if (passed == total_tests) {
     cout << "PASS \n";
     return 0;
-  }
-  else{
+  } else {
     cout << "NOTE: FAIL \n";
     return -1;
   }
-
 }

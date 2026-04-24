@@ -298,14 +298,16 @@ void matmulCPU(T *inputMatrix, T *weightsMatrix, int32_t *outputArray,
   }
 }
 
-template <typename T> void init_matrix_to_zeros(T *matrix, size_t num_elems) {
+template <typename T>
+void init_matrix_to_zeros(T *matrix, size_t num_elems) {
 
   for (size_t i = 0; i < num_elems; i++) {
     matrix[i] = static_cast<T>(0);
   }
 }
 
-template <typename T> void init_matrix_to_ones(T *matrix, size_t num_elems) {
+template <typename T>
+void init_matrix_to_ones(T *matrix, size_t num_elems) {
 
   for (size_t i = 0; i < num_elems; i++) {
     matrix[i] = static_cast<T>(1);

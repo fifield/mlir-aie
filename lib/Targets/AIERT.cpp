@@ -892,10 +892,8 @@ xilinx::AIE::AIERTControl::configureSwitches(DeviceOp &targetOp,
         if (srcBundle != WireBundle::Trace32)
           continue;
         int srcChannel = pktSource.channelIndex();
-        TileOp srcTile =
-            dyn_cast<TileOp>(pktSource.getTile().getDefiningOp());
-        XAie_LocType tileLoc =
-            XAie_TileLoc(srcTile.getCol(), srcTile.getRow());
+        TileOp srcTile = dyn_cast<TileOp>(pktSource.getTile().getDefiningOp());
+        XAie_LocType tileLoc = XAie_TileLoc(srcTile.getCol(), srcTile.getRow());
         // Enable the 32-bit switch trace subordinate port.
         TRY_XAIE_API_EMIT_ERROR(pktFlowOp, XAie_StrmPktSwSlavePortEnable,
                                 &aiert->devInst, tileLoc,
@@ -930,12 +928,11 @@ xilinx::AIE::AIERTControl::configureSwitches(DeviceOp &targetOp,
         auto bridgeKey = std::make_tuple((int)srcTile.getCol(),
                                          (int)srcTile.getRow(), bridgePort);
         if (configuredBridgePorts.insert(bridgeKey).second) {
-          TRY_XAIE_API_EMIT_ERROR(pktFlowOp, XAie_StrmPktSwMstrPortEnable,
-                                  &aiert->devInst, tileLoc,
-                                  StrmSwPortType::_32B_SWITCH_512b,
-                                  /*MstrPortNum*/ bridgePort,
-                                  XAIE_SS_PKT_DONOT_DROP_HEADER,
-                                  /*arbiter*/ 0, /*MSelEn*/ 0x1);
+          TRY_XAIE_API_EMIT_ERROR(
+              pktFlowOp, XAie_StrmPktSwMstrPortEnable, &aiert->devInst, tileLoc,
+              StrmSwPortType::_32B_SWITCH_512b,
+              /*MstrPortNum*/ bridgePort, XAIE_SS_PKT_DONOT_DROP_HEADER,
+              /*arbiter*/ 0, /*MSelEn*/ 0x1);
         }
       }
     }
@@ -1451,8 +1448,7 @@ LogicalResult xilinx::AIE::AIERTControl::addAieElfs(DeviceOp &targetOp,
         fullPath = fileName;
       } else {
         auto ps = std::filesystem::path::preferred_separator;
-        fullPath =
-            (llvm::Twine(elfPath) + std::string(1, ps) + fileName).str();
+        fullPath = (llvm::Twine(elfPath) + std::string(1, ps) + fileName).str();
       }
       if (failed(addCoreElf(col, row, fullPath, aieSim)))
         return failure();

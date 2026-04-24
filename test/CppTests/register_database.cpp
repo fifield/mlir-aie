@@ -334,11 +334,9 @@ void test_aie4_lookup_register() {
   }
 
   // Trace0_Control0 in core module, offset 0xA00D0
-  auto traceCtrl =
-      db->lookupRegister("Trace0_Control0", "core");
+  auto traceCtrl = db->lookupRegister("Trace0_Control0", "core");
   if (!traceCtrl) {
-    throw std::runtime_error(
-        "Failed to find Trace0_Control0 in core");
+    throw std::runtime_error("Failed to find Trace0_Control0 in core");
   }
   std::cout << "  ✓ Trace0_Control0 found\n";
   std::cout << "    - offset: 0x" << std::hex << traceCtrl->offset << std::dec
@@ -358,8 +356,7 @@ void test_aie4_bitfield_parsing() {
     throw std::runtime_error("Failed to load database");
   }
 
-  auto traceCtrl =
-      db->lookupRegister("Trace0_Control0", "core");
+  auto traceCtrl = db->lookupRegister("Trace0_Control0", "core");
   if (!traceCtrl) {
     throw std::runtime_error("Failed to find Trace0_Control0");
   }
@@ -405,8 +402,8 @@ void test_aie4_encode_field_value() {
   }
 
   // Use Performance_Start_Stop_0_1 from memory_tile module
-  auto perfCtrl = db->lookupRegister("Performance_Start_Stop_0_1",
-                                     "memory_tile");
+  auto perfCtrl =
+      db->lookupRegister("Performance_Start_Stop_0_1", "memory_tile");
   if (!perfCtrl) {
     throw std::runtime_error(
         "Failed to find Performance_Start_Stop_0_1 in memory_tile");
@@ -450,8 +447,8 @@ void test_aie4_encode_field_value() {
 
   uint32_t encoded2 = db->encodeFieldValue(*cnt1Start, 0x10).value();
   if (encoded2 != 0x100000) {
-    std::cerr << "Expected 0x100000, got 0x" << std::hex << encoded2
-              << std::dec << "\n";
+    std::cerr << "Expected 0x100000, got 0x" << std::hex << encoded2 << std::dec
+              << "\n";
     throw std::runtime_error("Cnt1_Start_Event encoding failed");
   }
   std::cout << "  ✓ Cnt1_Start_Event(0x10) = 0x" << std::hex << encoded2
@@ -468,10 +465,9 @@ void test_aie4_cross_module() {
 
   // Performance_Start_Stop_0_1 exists in both memory_tile and shim modules
   // with different offsets
-  auto memTileReg = db->lookupRegister("Performance_Start_Stop_0_1",
-                                       "memory_tile");
-  auto plReg =
-      db->lookupRegister("Performance_Start_Stop_0_1", "shim");
+  auto memTileReg =
+      db->lookupRegister("Performance_Start_Stop_0_1", "memory_tile");
+  auto plReg = db->lookupRegister("Performance_Start_Stop_0_1", "shim");
 
   if (!memTileReg) {
     throw std::runtime_error(
@@ -489,9 +485,8 @@ void test_aie4_cross_module() {
   if (plReg->offset != 0x4000) {
     throw std::runtime_error("shim offset mismatch");
   }
-  std::cout << "  ✓ memory_tile offset=0x" << std::hex
-            << memTileReg->offset << ", shim offset=0x" << plReg->offset
-            << std::dec << "\n";
+  std::cout << "  ✓ memory_tile offset=0x" << std::hex << memTileReg->offset
+            << ", shim offset=0x" << plReg->offset << std::dec << "\n";
 }
 
 void test_aie4_wrong_module() {

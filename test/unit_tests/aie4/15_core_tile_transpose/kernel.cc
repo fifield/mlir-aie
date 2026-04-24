@@ -38,13 +38,12 @@ using namespace aie;
   \ 
 }
 
-extern "C"{
-  void transpose_pim(uint8_t *restrict inIter, uint8_t *restrict outIter); 
+extern "C" {
+void transpose_pim(uint8_t *restrict inIter, uint8_t *restrict outIter);
 }
 
 void transpose_pim(uint8_t *restrict inIter, uint8_t *restrict outIter) {
 
-    
   aie::vector<uint8_t, 64> iv1, iv2, iv3, iv4, tk_16_4_v1, tk_16_4_v2,
       tk_16_4_v3, tk_16_4_v4, tk_8_8_v1_lo, tk_8_8_v1_hi, tk_8_8_v2_lo,
       tk_8_8_v2_hi, tk_4_16_v1_lo, tk_4_16_v1_hi, tk_4_16_v2_lo, tk_4_16_v2_hi;
@@ -71,5 +70,3 @@ void transpose_pim(uint8_t *restrict inIter, uint8_t *restrict outIter) {
   long long time = time2 - time1;
   printf("\n\n*** transpose cycles=%lld \n\n\n", time);
 }
-
-

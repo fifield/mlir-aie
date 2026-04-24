@@ -7,22 +7,22 @@
 
 #include <cassert>
 #include <cstring>
+#include <fcntl.h>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <fcntl.h>
 
 #include <stdint.h>
 #include <unistd.h>
 
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
-#include <arpa/inet.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
-#include <netdb.h>
-#include <stdint.h>
+#include <unistd.h>
 
 #define XAIE_BASE_ADDR 0x30000000000
 #define CASSANDRA_RAM_BASE 0x800000000
@@ -53,14 +53,14 @@ void mesim_WriteGM(uint64_t address, void *data, uint64_t size);
 
 void cold_reset_npu();
 
-void acquire_cassandra_handle(char* server_path, int port);
+void acquire_cassandra_handle(char *server_path, int port);
 void release_cassandra_handle();
 }
 
 // Write 32bits to aie array
 void mesim_Write32(uint64_t addr, uint32_t data) {
   // printf("MESIM Write32 at %lu, %u\n", addr, data);
-  uint8_t msg[13];  // 1 + 8 + 4 bytes
+  uint8_t msg[13]; // 1 + 8 + 4 bytes
   uint8_t ret_code;
 
   addr += XAIE_BASE_ADDR;
@@ -78,7 +78,7 @@ void mesim_Write32(uint64_t addr, uint32_t data) {
 uint32_t mesim_Read32(uint64_t addr) {
   // printf("MESIM Read32 at %lu\n", addr);
   uint32_t val;
-  uint8_t msg[9];  // 1 + 8 bytes
+  uint8_t msg[9]; // 1 + 8 bytes
   uint8_t ret_code;
 
   addr += XAIE_BASE_ADDR;
@@ -87,7 +87,7 @@ uint32_t mesim_Read32(uint64_t addr) {
   memcpy(&msg[1], &addr, 8);
 
   // Send message
-  assert (send(socket_fd, msg, sizeof(msg), 0) >= 0 && "Error Reading Value");
+  assert(send(socket_fd, msg, sizeof(msg), 0) >= 0 && "Error Reading Value");
   recv(socket_fd, &ret_code, 1, 0);
   recv(socket_fd, &val, 8, 0);
   return val;
@@ -96,7 +96,7 @@ uint32_t mesim_Read32(uint64_t addr) {
 // Write 32bits to qdma without offsets
 void qdma_Write32(uint64_t addr, uint32_t data) {
 
-  uint8_t msg[13];  // 1 + 8 + 4 bytes
+  uint8_t msg[13]; // 1 + 8 + 4 bytes
   uint8_t ret_code;
 
   // Pack message: cmd=1, addr (8 bytes), data (4 bytes)
@@ -107,12 +107,12 @@ void qdma_Write32(uint64_t addr, uint32_t data) {
   // Send message
   assert(send(socket_fd, msg, sizeof(msg), 0) >= 0 && "Failed to Write");
   recv(socket_fd, &ret_code, 1, 0);
- }
+}
 
 // Read 32bits from without offsets
 uint32_t qdma_Read32(uint64_t addr) {
   uint32_t val;
-  uint8_t msg[9];  // 1 + 8 bytes
+  uint8_t msg[9]; // 1 + 8 bytes
   uint8_t ret_code;
 
   // Pack message: cmd=0, addr (8 bytes)
@@ -120,7 +120,7 @@ uint32_t qdma_Read32(uint64_t addr) {
   memcpy(&msg[1], &addr, 8);
 
   // Send message
-  assert (send(socket_fd, msg, sizeof(msg), 0) >= 0 && "Error Reading Value");
+  assert(send(socket_fd, msg, sizeof(msg), 0) >= 0 && "Error Reading Value");
   recv(socket_fd, &ret_code, 1, 0);
   recv(socket_fd, &val, 8, 0);
   return val;
@@ -130,7 +130,7 @@ void mesim_WriteGM(uint64_t address, void *data, uint64_t size) {
   address += 0x800000000; // + CASSANDRA_RAM_BASE;
   printf("Writing to %lx\n", address);
 
-  uint8_t header[13];  // 1 + 8 + 4 bytes
+  uint8_t header[13]; // 1 + 8 + 4 bytes
   uint8_t reply;
 
   // Pack header: cmd=3, addr (8 bytes), size (4 bytes)
@@ -143,7 +143,7 @@ void mesim_WriteGM(uint64_t address, void *data, uint64_t size) {
 }
 
 void mesim_ReadGM(uint64_t address, void *data, uint64_t size) {
-  uint8_t msg[13];  // 1 + 8 + 4 bytes
+  uint8_t msg[13]; // 1 + 8 + 4 bytes
   uint8_t reply;
   uint32_t recieved_bytes = 0;
   int n;
@@ -161,7 +161,8 @@ void mesim_ReadGM(uint64_t address, void *data, uint64_t size) {
   recv(socket_fd, &reply, 1, 0);
 
   while (recieved_bytes < size) {
-    recieved_bytes += recv(socket_fd, (uint8_t*) data+recieved_bytes, size-recieved_bytes, 0);
+    recieved_bytes += recv(socket_fd, (uint8_t *)data + recieved_bytes,
+                           size - recieved_bytes, 0);
   }
 }
 
@@ -172,7 +173,7 @@ void cold_reset_npu() {
   recv(socket_fd, &reply, 1, 0);
 }
 
-void acquire_cassandra_handle(char* server_path, int port) {
+void acquire_cassandra_handle(char *server_path, int port) {
   struct sockaddr_in server_addr;
   struct hostent *server;
 
@@ -184,7 +185,8 @@ void acquire_cassandra_handle(char* server_path, int port) {
   server_addr.sin_family = AF_INET;
   memcpy(&server_addr.sin_addr.s_addr, server->h_addr, server->h_length);
   server_addr.sin_port = htons(port);
-  if (connect(socket_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+  if (connect(socket_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) <
+      0) {
     printf("Error connecting to server!");
     close(socket_fd);
     assert(0 && "Failed to connect to server, aborting");

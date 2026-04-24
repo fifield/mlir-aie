@@ -27,8 +27,9 @@
 
 int main(int argc, char *argv[]) {
 
-  test_utils::print_test_banner("18_numa_cross_column",
-                                "Testing NUMA cross-column memory access (9 columns)");
+  test_utils::print_test_banner(
+      "18_numa_cross_column",
+      "Testing NUMA cross-column memory access (9 columns)");
 
   aie_libxaie_ctx_t xaie;
 
@@ -128,28 +129,31 @@ int main(int argc, char *argv[]) {
       if (in_data[i] != expected) {
         errs++;
         if (errs <= 10)
-          printf("Col%d IN error @ %d : expected 0x%x, got 0x%x\n",
-                 c, i, expected, in_data[i]);
+          printf("Col%d IN error @ %d : expected 0x%x, got 0x%x\n", c, i,
+                 expected, in_data[i]);
       }
     }
 
     // Validate output buffer (cross-column write from column (c+8)%9)
     int src_col = (c + NUM_COLS - 1) % NUM_COLS;
-    uint32_t *out_data = mlir_aie_sync_mem_cpu(handle_out[(src_col + 1) % NUM_COLS]);
+    uint32_t *out_data =
+        mlir_aie_sync_mem_cpu(handle_out[(src_col + 1) % NUM_COLS]);
     for (int i = 0; i < BUF_SIZE; i++) {
       uint32_t expected = 0xC0000000 | (src_col << 16) | i;
       if (out_data[i] != expected) {
         errs++;
         if (errs <= 10)
-          printf("Col%d OUT error @ %d : expected 0x%x (from col%d), got 0x%x\n",
-                 (src_col + 1) % NUM_COLS, i, expected, src_col, out_data[i]);
+          printf(
+              "Col%d OUT error @ %d : expected 0x%x (from col%d), got 0x%x\n",
+              (src_col + 1) % NUM_COLS, i, expected, src_col, out_data[i]);
       }
     }
   }
 
   if (!errs) {
     printf("PASS!\n");
-    printf("Check simulator output above for NUMA cross-column access statistics\n");
+    printf("Check simulator output above for NUMA cross-column access "
+           "statistics\n");
     return 0;
   } else {
     printf("FAIL (%d errors)\n", errs);

@@ -93,7 +93,7 @@ private:
   RegisterDatabase() = default;
 
   bool loadFromJSON(llvm::StringRef registerPath, llvm::StringRef eventPath,
-                   llvm::StringRef archKey = "");
+                    llvm::StringRef archKey = "");
 
   // Build the offset-keyed reverse index from `registers_`. Called once at
   // load time after `loadFromJSON` finishes populating `registers_`.

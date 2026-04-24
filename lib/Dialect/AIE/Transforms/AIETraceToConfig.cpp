@@ -34,7 +34,8 @@ static bool isAIE4(const AIETargetModel &tm) {
 /// Returns the trace register name prefix for the given tile and packet type.
 /// For AIE4:
 ///   - Core tile, isMem=false  -> "Trace0_"  (trace unit 0)
-///   - Core tile, isMem=true   -> "Trace1_"  (trace unit 1, captures DMA events)
+///   - Core tile, isMem=true   -> "Trace1_"  (trace unit 1, captures DMA
+///   events)
 ///   - Shim / MemTile          -> "Trace_A_"
 /// For AIE1/AIE2/AIE2P:
 ///   - All tile types          -> "Trace_"
@@ -65,11 +66,9 @@ static std::string getPortSelRegName(const AIETargetModel &tm, TileID tileID,
 /// AIE4 renames "Master_Slave" to "Manager_Subordinate".
 static std::string getMasterSlaveFieldName(const AIETargetModel &tm,
                                            uint32_t slot) {
-  const char *suffix =
-      isAIE4(tm) ? "_Manager_Subordinate" : "_Master_Slave";
+  const char *suffix = isAIE4(tm) ? "_Manager_Subordinate" : "_Master_Slave";
   return "Port_" + std::to_string(slot) + suffix;
 }
-
 
 struct AIETraceToConfigPass
     : xilinx::AIE::impl::AIETraceToConfigBase<AIETraceToConfigPass> {

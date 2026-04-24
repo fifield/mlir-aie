@@ -48,8 +48,8 @@ int main(int argc, const char *argv[]) {
   std::string elfFile = (argc > 1) ? argv[1] : "event_trace.elf";
   bool enableTrace = (elfFile.find("base") == std::string::npos);
 
-  std::cout << "ELF: " << elfFile
-            << " (trace " << (enableTrace ? "enabled" : "disabled") << ")\n";
+  std::cout << "ELF: " << elfFile << " (trace "
+            << (enableTrace ? "enabled" : "disabled") << ")\n";
 
   // Initialize input data
   std::vector<int32_t> vec_in(IN_ELEMS);

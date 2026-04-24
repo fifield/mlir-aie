@@ -2588,7 +2588,8 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
     // Switch512 subordinate (port on 32-bit switch to main switch)
     case (WireBundle::Switch512):
       return dstBundle == WireBundle::Switch32;
-    // Switch32 subordinate (port on main switch; can route back to 32-bit switch)
+    // Switch32 subordinate (port on main switch; can route back to 32-bit
+    // switch)
     case (WireBundle::Switch32):
       return (isBundleInList(
           dstBundle, {WireBundle::Core, WireBundle::DMA, WireBundle::South,

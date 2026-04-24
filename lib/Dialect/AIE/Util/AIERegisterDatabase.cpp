@@ -128,8 +128,7 @@ std::unique_ptr<RegisterDatabase> RegisterDatabase::loadAIE4Z() {
   return db;
 }
 
-bool RegisterDatabase::loadFromJSON(StringRef registerPath,
-                                    StringRef eventPath,
+bool RegisterDatabase::loadFromJSON(StringRef registerPath, StringRef eventPath,
                                     StringRef archKey) {
   // Load register database
   auto registerBuf = MemoryBuffer::getFile(registerPath);

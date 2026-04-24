@@ -340,7 +340,8 @@ void Pathfinder::initialize(int maxCol, int maxRow,
 
   // Create an inter-tile edge with all bundle pairs at once.
   auto interconnect = [&](int col, int row, int targetCol, int targetRow,
-                          ArrayRef<std::pair<WireBundle, WireBundle>> bundlePairs) {
+                          ArrayRef<std::pair<WireBundle, WireBundle>>
+                              bundlePairs) {
     TileID src = {col, row}, dst = {targetCol, targetRow};
     SwitchboxConnect &sb =
         graph.try_emplace(std::make_pair(src, dst), src, dst).first->second;
