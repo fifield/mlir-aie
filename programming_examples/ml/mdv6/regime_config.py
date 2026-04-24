@@ -229,6 +229,20 @@ GEMM_REGIME_ARTIFACTS = {
             GemmRegimeMember("gemm_elan_c4", 44, 64, 64, 2),
         ),
     ),
+    "regime_r1_gemm_kblocked": GemmRegimeArtifact(
+        regime="R1",
+        xclbin_name="regime_r1_gemm_kblocked",
+        tile_m=52,
+        ic=320,
+        oc=128,
+        patches_per_core=2,
+        k_block=32,
+        members=(
+            # gemm_re4_c4 is also used by re15_conv4 in test_full_model_mc.py.
+            GemmRegimeMember("gemm_re4_c4", 68, 256, 128, 1, 16),
+            GemmRegimeMember("gemm_re15_c1", 52, 320, 128, 2, 32),
+        ),
+    ),
     "regime_r2_gemm_non_k": GemmRegimeArtifact(
         regime="R2",
         xclbin_name="regime_r2_gemm_non_k",
