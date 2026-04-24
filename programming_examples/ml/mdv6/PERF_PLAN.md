@@ -596,6 +596,16 @@ Ordered by expected wall-time impact at current 1.87s wall:
    deterministic launch-count growth from retiled `conv0`/`conv1`.
    `health_check.py` passed immediately afterward.
 
+   Next increment: collapsed R2/R3 non-K GEMMs onto the existing
+   `gemm_conv1x1/build/regime_r1_gemm_non_k.xclbin` envelope by adding
+   per-layer streams for `gemm_re6_rn1`, `gemm_re6_rnm`, `gemm_re8_rn1`, and
+   the `gemm_re8_c1` RepNCSP merge shape. This removes the need for separate
+   R2/R3 non-K GEMM xclbin contexts while keeping their `.bin` streams.
+   Validation with both regime flags enabled passed correctness:
+   `max_class_diff=0.2262`, `max_vector_diff=0.0312`, warm wall 3078 ms,
+   `npu_run=1190.3 ms`, and 742 launches; launch count is unchanged from
+   the R5-heavy route. `health_check.py` passed immediately afterward.
+
 2. **Phase A completion** (`mlir-aie-4zz`) — vectorise bf16 SiLU. Blocked on
    a bf16→float vector conversion in the kernel toolchain. Potentially
    significant if SiLU is a measurable chunk of `npu_run`. Needs per-layer
