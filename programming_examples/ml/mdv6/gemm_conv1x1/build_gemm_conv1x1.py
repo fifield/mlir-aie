@@ -331,8 +331,8 @@ def build_regime_gemm_artifact(artifact, build_dir):
         print("    envelope already built, skipping")
 
     ok = True
-    for layer_name, active in artifact.members.items():
-        insts_name = f"{artifact.xclbin_name}_{layer_name}"
+    for member in artifact.members:
+        insts_name = f"{artifact.xclbin_name}_{member.runtime_name}_ic{member.ic}_oc{member.oc}"
         insts_path = os.path.join(build_dir, f"{insts_name}.bin")
         if os.path.exists(insts_path) and os.path.getmtime(insts_path) >= os.path.getmtime(xclbin_path):
             print(f"    {insts_name}: already built, skipping")
@@ -340,6 +340,9 @@ def build_regime_gemm_artifact(artifact, build_dir):
 
         print(f"    {insts_name}: active MLIR...", end=" ", flush=True)
         try:
+            active = None
+            if artifact.k_block == 0:
+                active = (member.tile_m, member.ic, member.oc, member.ppc)
             mlir_path = _generate_gemm_mlir(
                 build_dir,
                 insts_name,
