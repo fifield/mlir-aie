@@ -250,6 +250,12 @@ GEMM_REGIME_ARTIFACTS = {
             GemmRegimeMember("gemm_re4_rn1", 44, 64, 32, 1),
             # re15_rnm is dispatched through mc_elan_c4 in test_full_model_mc.py.
             GemmRegimeMember("gemm_elan_c4", 44, 64, 64, 2),
+            # R2/R3 non-K GEMMs also fit this shared 44x128x128 ppc=4 envelope.
+            GemmRegimeMember("gemm_re6_rn1", 44, 96, 48, 1),
+            GemmRegimeMember("gemm_re6_rnm", 44, 96, 96, 1),
+            GemmRegimeMember("gemm_re8_rn1", 44, 128, 64, 1),
+            # run_re_mc reuses mc_re8_c1 for the RepNCSP merge path.
+            GemmRegimeMember("gemm_re8_c1", 44, 128, 128, 1),
         ),
     ),
     "regime_r1_gemm_kblocked": GemmRegimeArtifact(
