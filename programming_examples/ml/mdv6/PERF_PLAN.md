@@ -584,6 +584,18 @@ Ordered by expected wall-time impact at current 1.87s wall:
    `pre_post`; the NPU bucket improved and `health_check.py` passed
    immediately afterward.
 
+   Next increment: added `conv/build/regime_r5_stride2_conv3x3.xclbin` for
+   the stride-2 stem/AConv path. A literal `20x20/IC128/OC32` max envelope
+   does not fit L1, so this first single-xclbin R5 envelope uses
+   4x4/IC128/OC8 with ppc=4 and retile/reblocks `mc_ftconv0`, `mc_ftconv1`,
+   `mc_aconv3`, `mc_aconv5`, `mc_aconv7`, `mc_aconv16`, and `mc_aconv19`.
+   Validation with both regime flags enabled passed correctness:
+   `max_class_diff=0.2262`, `max_vector_diff=0.0312`, warm wall 2941 ms,
+   `npu_run=1158.4 ms`, and 742 launches. This is useful context-collapse
+   evidence but not a performance-neutral route; most of the regression is
+   deterministic launch-count growth from retiled `conv0`/`conv1`.
+   `health_check.py` passed immediately afterward.
+
 2. **Phase A completion** (`mlir-aie-4zz`) — vectorise bf16 SiLU. Blocked on
    a bf16→float vector conversion in the kernel toolchain. Potentially
    significant if SiLU is a measurable chunk of `npu_run`. Needs per-layer
