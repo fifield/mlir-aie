@@ -941,6 +941,12 @@ public:
           op.getD2ZeroBefore() || op.getD0ZeroAfter() || op.getD1ZeroAfter() ||
           op.getD2ZeroAfter())
         return op->emitOpError("Zero padding is only available on MemTile");
+      if (op.getD0Size() > 0xfff)
+        return op->emitError("D0 Size exceeds 12-bit AIE4 shim BD field");
+      if (op.getD1Size() > 0xfff)
+        return op->emitError("D1 Size exceeds 12-bit AIE4 shim BD field");
+      if (op.getD2Size() > 0xfff)
+        return op->emitError("D2 Size exceeds 12-bit AIE4 shim BD field");
       words.assign(9, 0);
 
       // DMA_BDX_0

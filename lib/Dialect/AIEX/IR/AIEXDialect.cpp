@@ -906,6 +906,7 @@ LogicalResult AIEX::NpuWriteBdOp::verify() {
   // Every value on this op is already the hardware-encoded field value (wrap
   // fields unbiased, stepsize/iteration fields biased actual-1), so the
   // legal encoded range for a B-bit field is simply [0, 2^B - 1].
+  bool isAIE4 = isa<AIE::AIE4TargetModel>(targetModel);
   AIE::AIETileType tileType = targetModel.getTileType(getColumn(), getRow());
   uint32_t wrapBits = targetModel.getDmaBdWrapBits(tileType);
   uint32_t stepBits = targetModel.getDmaBdStepBits(tileType);
@@ -939,7 +940,8 @@ LogicalResult AIEX::NpuWriteBdOp::verify() {
   if (getBufferLength() > maxLen)
     return emitOpError() << "Buffer length exceeds the [0:" << maxLen
                          << "] range.";
-  if (targetModel.isShimNOCTile(getColumn(), getRow()) && getD2Size() != 0)
+  if (targetModel.isShimNOCTile(getColumn(), getRow()) && !isAIE4 &&
+      getD2Size() != 0)
     return emitOpError("ShimTile only supports 3 dimensions of sizes.");
   if (targetModel.isShimNOCTile(getColumn(), getRow()) &&
       (getD0ZeroBefore() != 0 || getD0ZeroAfter() != 0 ||

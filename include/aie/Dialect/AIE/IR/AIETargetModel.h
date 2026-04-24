@@ -1376,6 +1376,17 @@ public:
 
   uint32_t getAddressGenGranularity() const override { return 32; }
 
+  // AIE4 DMA BD field widths: core tiles have 9-bit wrap / 15-bit step
+  // fields, mem and shim tiles 12-bit wrap / 22-bit step. Iteration_Wrap is
+  // 6-bit everywhere, as on AIE1/AIE2.
+  uint32_t getDmaBdWrapBits(AIETileType tileType) const override {
+    return tileType == AIETileType::CoreTile ? 9 : 12;
+  }
+  uint32_t getDmaBdStepBits(AIETileType tileType) const override {
+    return tileType == AIETileType::CoreTile ? 15 : 22;
+  }
+  uint32_t getDmaBdIterBits(AIETileType tileType) const override { return 6; }
+
   std::optional<TileID> getMemWest(TileID src) const override;
   std::optional<TileID> getMemEast(TileID src) const override;
   std::optional<TileID> getMemNorth(TileID src) const override;
