@@ -181,7 +181,7 @@ def _get_mc_handle(name, insts_name=None):
 
 
 def _regime_conv_artifact(mc_name, actual_name, ppc):
-    if not USE_REGIME_XCLBINS or actual_name != mc_name:
+    if not USE_REGIME_XCLBINS:
         return None
     artifact = conv_regime_for_layer(mc_name)
     if artifact is None:
@@ -192,6 +192,11 @@ def _regime_conv_artifact(mc_name, actual_name, ppc):
         raise RuntimeError(
             f"Regime artifact ppc mismatch for {mc_name}: runtime ppc={ppc}, "
             f"artifact ppc={active_ppc}"
+        )
+    if artifact.patches_per_core < ppc:
+        raise RuntimeError(
+            f"Regime artifact ppc envelope too small for {mc_name}: "
+            f"runtime ppc={ppc}, envelope ppc={artifact.patches_per_core}"
         )
     if active_ic != artifact.ic and active_ic > artifact.ic:
         raise RuntimeError(f"Regime artifact IC envelope too small for {mc_name}")
@@ -210,6 +215,7 @@ def _regime_conv_artifact(mc_name, actual_name, ppc):
         "active_oc": active_oc,
         "active_stride": active_stride,
         "active_padding": active_padding,
+        "ppc": artifact.patches_per_core,
         "tile_h": artifact.tile_h,
         "tile_w": artifact.tile_w,
         "ic": artifact.ic,
@@ -281,6 +287,7 @@ def run_tiled_fused_conv_mc(mc_name, sc_name, input_hwc, weights_uint16,
         oc_block = regime["active_oc"]
         stride = regime["active_stride"]
         padding = regime["active_padding"]
+        ppc = regime["ppc"]
     else:
         handle_name = actual_name
         insts_name = actual_name

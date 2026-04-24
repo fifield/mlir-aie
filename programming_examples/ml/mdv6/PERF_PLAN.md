@@ -450,7 +450,7 @@ Bottom-up validation, each level proves a capability before scaling.
 | `mlir-aie-9oz` | Phase C Flavor 1: L2 memtile chains | P3, not started |
 | `mlir-aie-k82` | Phase C Flavor 2: cross-column pipeline | P3, not started |
 | `mlir-aie-9xq` | Phase D: RepConv/AvgPool/Upsample to NPU | P2, not started |
-| `mlir-aie-1jg` | Tier 2: collapse ~65 xclbins to 5 L1-regime xclbins | P2; R3 complete, R2 complete |
+| `mlir-aie-1jg` | Tier 2: collapse ~65 xclbins to 5 L1-regime xclbins | P2; R3 complete, R2 complete, R1 conv3x3 landed |
 
 ### Test-plan levels
 | Bead | Title | Status |
@@ -554,6 +554,15 @@ Ordered by expected wall-time impact at current 1.87s wall:
    `max_class_diff=0.2256`, `max_vector_diff=0.0312`, warm wall 1812 ms,
    `npu_run=1049.8 ms`, and 453 launches; all baseline buckets were within
    the 10% guard. `health_check.py` passed immediately afterward.
+
+   Next increment: added `conv/build/regime_r1_conv3x3.xclbin` for the 80x80
+   conv3x3 path. The shared envelope is 8x8/IC64/OC32/ppc4, covering
+   `mc_elan_c3`, `mc_re4_c3`, and `mc_re4_rn3`; `mc_re4_c3` runs at 8x8
+   under the flag instead of standalone 12x12, but 80x80 still keeps the same
+   one-call-per-OC-block behavior. Validation with both regime flags enabled
+   passed cleanly: `max_class_diff=0.2256`, `max_vector_diff=0.0312`, warm
+   wall 1826 ms, `npu_run=1039.0 ms`, and 453 launches; all baseline buckets
+   were within the 10% guard. `health_check.py` passed immediately afterward.
 
 2. **Phase A completion** (`mlir-aie-4zz`) — vectorise bf16 SiLU. Blocked on
    a bf16→float vector conversion in the kernel toolchain. Potentially
