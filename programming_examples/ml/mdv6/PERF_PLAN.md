@@ -518,6 +518,19 @@ Ordered by expected wall-time impact at current 1.87s wall:
    benchmark passed with `max_class_diff=0.2256`, `max_vector_diff=0.0312`,
    warm wall 1889 ms, `npu_run=1084.2 ms`, and 453 launches.
 
+   Follow-up: R3 K-blocked GEMM generation and routing is implemented.
+   `gemm_conv1x1/build/regime_r3_gemm_kblocked.xclbin` uses a padded
+   24x512x256/kb32 envelope for the remaining 20x20 K-blocked GEMMs
+   (`gemm_re8_c1` 256->256, `gemm_re8_c4`, SPP9 via `gemm_re8_c1` 256->128,
+   and re21 via `gemm_re6_c4` 384->256). It is enabled with
+   `USE_REGIME_KBLOCKED=1` in addition to `USE_REGIME_XCLBINS=1`. Post-reboot
+   validation with both flags completed all three frames and passed
+   correctness (`max_class_diff=0.2256`, `max_vector_diff=0.0312`), with warm
+   wall 1864 ms, `npu_run=1053.0 ms`, and 453 launches. The benchmark process
+   returned nonzero only because the profile guard flagged `pre_post` as +12.2%
+   while total wall and NPU time were not regressed; `health_check.py` passed
+   immediately afterward.
+
 2. **Phase A completion** (`mlir-aie-4zz`) — vectorise bf16 SiLU. Blocked on
    a bf16→float vector conversion in the kernel toolchain. Potentially
    significant if SiLU is a measurable chunk of `npu_run`. Needs per-layer

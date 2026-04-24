@@ -49,7 +49,17 @@ class GemmRegimeArtifact:
     oc: int
     patches_per_core: int
     k_block: int
-    members: dict[str, tuple[int, int, int, int]]
+    members: tuple["GemmRegimeMember", ...]
+
+
+@dataclass(frozen=True)
+class GemmRegimeMember:
+    runtime_name: str
+    tile_m: int
+    ic: int
+    oc: int
+    ppc: int
+    k_block: int = 0
 
 
 # Current target grouping. Some spatial regimes contain multiple kernel
@@ -174,11 +184,31 @@ GEMM_REGIME_ARTIFACTS = {
         oc=128,
         patches_per_core=1,
         k_block=0,
-        members={
-            # name: active tile_m, ic, oc, ppc
-            "gemm_re8_rn1": (44, 128, 64, 1),
-            "gemm_re8_rnm": (44, 128, 128, 1),
-        },
+        members=(
+            # runtime name, active tile_m, ic, oc, ppc
+            GemmRegimeMember("gemm_re8_rn1", 44, 128, 64, 1),
+            # run_re_mc reuses mc_re8_c1 for the RepNCSP merge path.
+            GemmRegimeMember("gemm_re8_c1", 44, 128, 128, 1),
+        ),
+    ),
+    "regime_r3_gemm_kblocked": GemmRegimeArtifact(
+        regime="R3",
+        xclbin_name="regime_r3_gemm_kblocked",
+        tile_m=24,
+        ic=512,
+        oc=256,
+        patches_per_core=1,
+        k_block=32,
+        members=(
+            # Current standalone choices are shown for selection only. The
+            # regime kernel sees the 24x512x256/kb32 padded envelope.
+            GemmRegimeMember("gemm_re8_c1", 24, 256, 256, 1, 64),
+            GemmRegimeMember("gemm_re8_c4", 24, 512, 256, 1, 32),
+            # SPP9 conv1 is dispatched through mc_re8_c1 in test_full_model_mc.py.
+            GemmRegimeMember("gemm_re8_c1", 24, 256, 128, 1, 128),
+            # re21 conv1 is dispatched through mc_re6_c4 in test_full_model_mc.py.
+            GemmRegimeMember("gemm_re6_c4", 24, 384, 256, 1, 64),
+        ),
     ),
 }
 
@@ -190,8 +220,16 @@ def conv_regime_for_layer(layer_name: str):
     return None
 
 
-def gemm_regime_for_layer(layer_name: str):
+def gemm_regime_for_layer(layer_name: str, ic=None, oc=None, k_block=None):
     for artifact in GEMM_REGIME_ARTIFACTS.values():
-        if layer_name in artifact.members:
-            return artifact
-    return None
+        for member in artifact.members:
+            if member.runtime_name != layer_name:
+                continue
+            if ic is not None and member.ic != ic:
+                continue
+            if oc is not None and member.oc != oc:
+                continue
+            if k_block is not None and member.k_block != k_block:
+                continue
+            return artifact, member
+    return None, None

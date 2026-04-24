@@ -26,6 +26,7 @@ N_CORES = 32
 _bd = os.path.join(_base, "conv", "build")
 _mc_cache = {}
 USE_REGIME_XCLBINS = os.environ.get("USE_REGIME_XCLBINS", "0") == "1"
+USE_REGIME_KBLOCKED = os.environ.get("USE_REGIME_KBLOCKED", "0") == "1"
 
 # Per-layer ppc bumps from mlir-aie-0pf-B1 (2026-04-18).
 #
@@ -578,10 +579,13 @@ def _get_gemm_handle(name, insts_name=None):
 def _regime_gemm_artifact(gemm_name, tile_m, ic, oc_block, ppc):
     if not USE_REGIME_XCLBINS:
         return None
-    artifact = gemm_regime_for_layer(gemm_name)
+    artifact, member = gemm_regime_for_layer(gemm_name, ic, oc_block, 0)
     if artifact is None or artifact.k_block > 0:
         return None
-    active_tile_m, active_ic, active_oc, active_ppc = artifact.members[gemm_name]
+    active_tile_m = member.tile_m
+    active_ic = member.ic
+    active_oc = member.oc
+    active_ppc = member.ppc
     if (active_tile_m, active_ic, active_oc, active_ppc) != (tile_m, ic, oc_block, ppc):
         # The regime may intentionally reduce tile_m while preserving launch
         # count. Other mismatches are build/runtime contract errors.
@@ -595,7 +599,7 @@ def _regime_gemm_artifact(gemm_name, tile_m, ic, oc_block, ppc):
         raise RuntimeError(f"GEMM regime envelope too small for {gemm_name}")
     return {
         "xclbin_name": artifact.xclbin_name,
-        "insts_name": f"{artifact.xclbin_name}_{gemm_name}",
+        "insts_name": f"{artifact.xclbin_name}_{member.runtime_name}_ic{member.ic}_oc{member.oc}",
         "tile_m": artifact.tile_m,
         "ic": artifact.ic,
         "oc": artifact.oc,
@@ -606,6 +610,36 @@ def _regime_gemm_artifact(gemm_name, tile_m, ic, oc_block, ppc):
         "input_size": artifact.tile_m * artifact.ic,
         "output_size": artifact.tile_m * artifact.oc,
         "weight_size": artifact.ic * artifact.oc + 2 * artifact.oc,
+    }
+
+
+def _regime_gemm_kblocked_artifact(gemm_name, tile_m, ic, oc, k_block, ppc):
+    if not USE_REGIME_XCLBINS or not USE_REGIME_KBLOCKED:
+        return None
+    artifact, member = gemm_regime_for_layer(gemm_name, ic, oc, k_block)
+    if artifact is None or artifact.k_block <= 0:
+        return None
+    if member.ppc != ppc:
+        raise RuntimeError(
+            f"K-blocked GEMM regime ppc mismatch for {gemm_name}: "
+            f"runtime={ppc}, contract={member.ppc}"
+        )
+    if ic > artifact.ic or oc > artifact.oc:
+        raise RuntimeError(f"K-blocked GEMM regime envelope too small for {gemm_name}")
+    return {
+        "xclbin_name": artifact.xclbin_name,
+        "insts_name": f"{artifact.xclbin_name}_{member.runtime_name}_ic{member.ic}_oc{member.oc}",
+        "tile_m": artifact.tile_m,
+        "ic": artifact.ic,
+        "oc": artifact.oc,
+        "k_block": artifact.k_block,
+        "ppc": artifact.patches_per_core,
+        "logical_ic": member.ic,
+        "logical_oc": member.oc,
+        "logical_k_block": member.k_block,
+        "input_size": artifact.tile_m * artifact.ic,
+        "output_size": artifact.tile_m * artifact.oc,
+        "weight_chunk_size": artifact.k_block * artifact.oc + 2 * artifact.oc,
     }
 
 
@@ -722,6 +756,62 @@ def _repack_weights_kblocked(weights_uint16, ic, oc, k_block):
     return out
 
 
+def _repack_weights_kblocked_regime(weights_uint16, ic, oc, env_ic, env_oc, env_k_block):
+    """Repack K-blocked weights into a padded regime envelope.
+
+    The regime kernel sees full_ic=env_ic, oc=env_oc, k_block=env_k_block.
+    Logical weights outside ic/oc are zero, and BN params are appended to every
+    chunk so the envelope's final chunk can apply the active layer's BN.
+    """
+    expected_len = oc * ic + 2 * oc
+    cache_key = (id(weights_uint16), ic, oc, env_ic, env_oc, env_k_block, expected_len)
+    cached = _GEMM_KB_CACHE.get(cache_key)
+    if cached is not None and len(weights_uint16) == expected_len:
+        return cached
+    if len(weights_uint16) < expected_len:
+        raise ValueError(
+            f"_repack_weights_kblocked_regime: weights_uint16 len={len(weights_uint16)} "
+            f"too small for ic={ic} oc={oc} (need {expected_len})"
+        )
+
+    total_conv = oc * ic
+    all_conv = weights_uint16[:total_conv]
+    all_bn_w = weights_uint16[total_conv:total_conv + oc]
+    all_bn_b = weights_uint16[total_conv + oc:total_conv + 2 * oc]
+
+    n_k_blocks = env_ic // env_k_block
+    oc_blks = env_oc // 8
+    chunks = []
+
+    for kb_idx in range(n_k_blocks):
+        k_start = kb_idx * env_k_block
+        kb_blks = env_k_block // 8
+        w_slice = np.zeros(env_oc * env_k_block, dtype=np.uint16)
+
+        active_k = max(0, min(env_k_block, ic - k_start))
+        if active_k > 0:
+            for o in range(oc):
+                src = all_conv[o * ic + k_start:o * ic + k_start + active_k]
+                dst = o * env_k_block
+                w_slice[dst:dst + active_k] = src
+
+        w_f = uint16_to_bf16(w_slice).reshape(env_oc, env_k_block)
+        w_blocked = w_f.reshape(oc_blks, 8, kb_blks, 8)
+        w_blocked = w_blocked.permute(2, 0, 3, 1).contiguous()
+        blocked_u16 = bf16_to_uint16(w_blocked.flatten())
+
+        bn_w_block = np.zeros(env_oc, dtype=np.uint16)
+        bn_b_block = np.zeros(env_oc, dtype=np.uint16)
+        bn_w_block[:oc] = all_bn_w
+        bn_b_block[:oc] = all_bn_b
+        chunks.append(np.concatenate([blocked_u16, bn_w_block, bn_b_block]))
+
+    out = np.concatenate(chunks)
+    _GEMM_KB_CACHE[cache_key] = out
+    _gemm_cache_evict_dead_ids(_GEMM_KB_CACHE)
+    return out
+
+
 def run_gemm_conv1x1_mc(gemm_name, sc_name, input_hwc, weights_uint16,
                          out_h, out_w, out_ch, oc_block=None):
     """GEMM-based 1×1 conv with 32-core multicore.
@@ -737,14 +827,30 @@ def run_gemm_conv1x1_mc(gemm_name, sc_name, input_hwc, weights_uint16,
     if k_block > 0 and tile_m_kb >= 4:
         ppc = _gemm_compute_ppc_kblocked(M, tile_m_kb, IC, out_ch, k_block)
         kb_name = f"gemm_t{tile_m_kb}_ic{IC}_oc{out_ch}_kb{k_block}_p{ppc}"
-        gemm_kh = _get_gemm_handle(kb_name)
+        regime = _regime_gemm_kblocked_artifact(
+            gemm_name, tile_m_kb, IC, out_ch, k_block, ppc
+        )
+        if regime is not None:
+            handle_name = regime["xclbin_name"]
+            insts_name = regime["insts_name"]
+            gemm_kh = _get_gemm_handle(handle_name, insts_name)
+            run_tile_m = regime["tile_m"]
+            run_k_block = regime["k_block"]
+        else:
+            handle_name = kb_name
+            insts_name = kb_name
+            gemm_kh = _get_gemm_handle(kb_name)
+            run_tile_m = tile_m_kb
+            run_k_block = k_block
         if gemm_kh is None:
             raise RuntimeError(
-                f"GEMM xclbin missing: {kb_name} "
+                f"GEMM xclbin missing: {handle_name}/{insts_name}.bin "
                 f"(layer={gemm_name}, IC={IC}, OC={out_ch}, M={M}, k_block={k_block}, ppc={ppc})"
             )
-        return _run_gemm_kblocked(gemm_kh, kb_name, input_hwc, weights_uint16,
-                                   out_h, out_w, out_ch, tile_m_kb, k_block, ppc)
+        return _run_gemm_kblocked(
+            gemm_kh, handle_name, insts_name, input_hwc, weights_uint16,
+            out_h, out_w, out_ch, run_tile_m, run_k_block, ppc, regime
+        )
 
     # --- OC-blocked path ---
     if oc_block is None:
@@ -779,19 +885,28 @@ def run_gemm_conv1x1_mc(gemm_name, sc_name, input_hwc, weights_uint16,
                                  oc_block, ppc, regime)
 
 
-def _run_gemm_kblocked(gemm_kh, actual_name, input_hwc, weights_uint16,
-                        out_h, out_w, out_ch, tile_m, k_block, ppc):
+def _run_gemm_kblocked(gemm_kh, handle_name, insts_name, input_hwc, weights_uint16,
+                        out_h, out_w, out_ch, tile_m, k_block, ppc, regime=None):
     """K-blocked GEMM: full OC in one pass, K-blocked weight streaming."""
     H, W, IC = input_hwc.shape
     M = H * W
-    n_k_blocks = IC // k_block
+    if regime is None:
+        env_ic = IC
+        env_oc = out_ch
+        input_size = tile_m * IC
+        output_size = tile_m * out_ch
+        wt_kblocked = _repack_weights_kblocked(weights_uint16, IC, out_ch, k_block)
+    else:
+        env_ic = regime["ic"]
+        env_oc = regime["oc"]
+        input_size = regime["input_size"]
+        output_size = regime["output_size"]
+        wt_kblocked = _repack_weights_kblocked_regime(
+            weights_uint16, IC, out_ch, env_ic, env_oc, k_block
+        )
 
-    # Repack weights into K-blocked layout
-    wt_kblocked = _repack_weights_kblocked(weights_uint16, IC, out_ch, k_block)
     wt_buf = get_wt_buf(wt_kblocked)
 
-    input_size = tile_m * IC       # per core per patch
-    output_size = tile_m * out_ch  # per core per patch
     pixels_per_call = N_CORES * tile_m * ppc
 
     input_flat = input_hwc.reshape(M, IC)
@@ -807,9 +922,19 @@ def _run_gemm_kblocked(gemm_kh, actual_name, input_hwc, weights_uint16,
         host_in = np.zeros(host_in_size, dtype=np.uint16)
 
         n_active_slots = (batch_pixels + tile_m - 1) // tile_m
-        active_end = min(batch_start + n_active_slots * tile_m, batch_end)
-        active_u16 = bf16_to_uint16(input_flat[batch_start:active_end].flatten())
-        host_in[:len(active_u16)] = active_u16
+        for s in range(n_active_slots):
+            pix_start = batch_start + s * tile_m
+            pix_end = min(pix_start + tile_m, batch_end)
+            active_u16 = bf16_to_uint16(input_flat[pix_start:pix_end].flatten())
+            if env_ic == IC:
+                dst = s * input_size
+                host_in[dst:dst + len(active_u16)] = active_u16
+            else:
+                rows = pix_end - pix_start
+                active_rows = active_u16.reshape(rows, IC)
+                dst = s * input_size
+                slot = host_in[dst:dst + input_size].reshape(tile_m, env_ic)
+                slot[:rows, :IC] = active_rows
 
         # Fill unused slots with slot 0's data to avoid hangs
         slot0 = host_in[:input_size]
@@ -822,8 +947,9 @@ def _run_gemm_kblocked(gemm_kh, actual_name, input_hwc, weights_uint16,
         try:
             DefaultNPURuntime.run(gemm_kh, [in_buf, wt_buf, out_buf])
         except Exception:
-            _mc_cache[f"gemm_{actual_name}"] = _load_gemm_handle(actual_name)
-            gemm_kh = _mc_cache[f"gemm_{actual_name}"]
+            cache_key = f"gemm_{handle_name}" if insts_name == handle_name else ("gemm", handle_name, insts_name)
+            _mc_cache[cache_key] = _load_gemm_handle(handle_name, insts_name)
+            gemm_kh = _mc_cache[cache_key]
             if gemm_kh is None:
                 raise
             DefaultNPURuntime.run(gemm_kh, [in_buf, wt_buf, out_buf])
@@ -837,9 +963,9 @@ def _run_gemm_kblocked(gemm_kh, actual_name, input_hwc, weights_uint16,
                 break
             n_pix = pix_end - pix_start
             start = s * output_size
-            tile_out = uint16_to_bf16(out_data[start:start + n_pix * out_ch])
-            tile_out = tile_out.reshape(n_pix, out_ch)
-            output_flat[pix_start:pix_end, :] = tile_out.to(torch.bfloat16)
+            tile_out = uint16_to_bf16(out_data[start:start + n_pix * env_oc])
+            tile_out = tile_out.reshape(n_pix, env_oc)
+            output_flat[pix_start:pix_end, :] = tile_out[:, :out_ch].to(torch.bfloat16)
 
     return output
 
