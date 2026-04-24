@@ -207,6 +207,29 @@ CONV_REGIME_ARTIFACTS = {
             "mc_re8_rn3": (4, 4, 64, 16, 1, 1, 1),
         },
     ),
+    "regime_r5_stride2_conv3x3": ConvRegimeArtifact(
+        regime="R5",
+        xclbin_name="regime_r5_stride2_conv3x3",
+        kernel_size=3,
+        stride=2,
+        tile_h=4,
+        tile_w=4,
+        ic=128,
+        oc_block=8,
+        patches_per_core=4,
+        input_depth=1,
+        members={
+            # The original large stem tiles do not fit one IC128/OC32 L1
+            # envelope, so R5 intentionally retile/reblocks to 4x4/OC8.
+            "mc_ftconv0": (4, 4, 8, 8, 2, 1, 1),
+            "mc_ftconv1": (4, 4, 32, 8, 2, 1, 2),
+            "mc_aconv3": (4, 4, 64, 8, 2, 1, 1),
+            "mc_aconv5": (4, 4, 96, 8, 2, 1, 4),
+            "mc_aconv7": (4, 4, 128, 8, 2, 1, 1),
+            "mc_aconv16": (4, 4, 64, 8, 2, 1, 1),
+            "mc_aconv19": (4, 4, 96, 8, 2, 1, 1),
+        },
+    ),
 }
 
 
