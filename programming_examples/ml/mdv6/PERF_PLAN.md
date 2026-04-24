@@ -450,7 +450,7 @@ Bottom-up validation, each level proves a capability before scaling.
 | `mlir-aie-9oz` | Phase C Flavor 1: L2 memtile chains | P3, not started |
 | `mlir-aie-k82` | Phase C Flavor 2: cross-column pipeline | P3, not started |
 | `mlir-aie-9xq` | Phase D: RepConv/AvgPool/Upsample to NPU | P2, not started |
-| `mlir-aie-1jg` | Tier 2: collapse ~65 xclbins to 5 L1-regime xclbins | P2; R3 complete, R2 conv3x3 landed |
+| `mlir-aie-1jg` | Tier 2: collapse ~65 xclbins to 5 L1-regime xclbins | P2; R3 complete, R2 conv3x3 + non-K GEMM landed |
 
 ### Test-plan levels
 | Bead | Title | Status |
@@ -538,6 +538,13 @@ Ordered by expected wall-time impact at current 1.87s wall:
    run and one clean rerun: `max_class_diff=0.2256`, `max_vector_diff=0.0312`,
    warm wall 1846 ms, `npu_run=1051.6 ms`, and 453 launches; all baseline
    buckets were within the 10% guard on the clean rerun.
+
+   Next increment: added `gemm_conv1x1/build/regime_r2_gemm_non_k.xclbin` for
+   the 40x40 non-K GEMM path. With both regime flags enabled, `gemm_re6_rn1`
+   and `gemm_re6_rnm` use the shared 100x96x96 non-K GEMM xclbin plus
+   per-layer `.bin` streams. Validation passed cleanly: `max_class_diff=0.2256`,
+   `max_vector_diff=0.0312`, warm wall 1815 ms, `npu_run=1027.5 ms`, and
+   453 launches; all baseline buckets were within the 10% guard.
 
 2. **Phase A completion** (`mlir-aie-4zz`) — vectorise bf16 SiLU. Blocked on
    a bf16→float vector conversion in the kernel toolchain. Potentially
