@@ -606,6 +606,16 @@ Ordered by expected wall-time impact at current 1.87s wall:
    `npu_run=1190.3 ms`, and 742 launches; launch count is unchanged from
    the R5-heavy route. `health_check.py` passed immediately afterward.
 
+   Next increment: collapsed R1/R2/R3 K-blocked GEMMs onto a new
+   `gemm_conv1x1/build/regime_shared_gemm_kblocked.xclbin` envelope. The
+   shared envelope is 24x512x256/kb32 with ppc=2 and covers the existing R1,
+   R2, and R3 K-blocked members via per-layer `.bin` streams. Validation with
+   both regime flags enabled passed correctness: `max_class_diff=0.2262`,
+   `max_vector_diff=0.0312`, warm wall 3140 ms, `npu_run=1356.1 ms`, and
+   757 launches. This removes the separate R1/R2/R3 K-blocked xclbin
+   contexts, but the smaller shared tile increases R1 K-blocked launch count
+   and NPU time. `health_check.py` passed immediately afterward.
+
 2. **Phase A completion** (`mlir-aie-4zz`) — vectorise bf16 SiLU. Blocked on
    a bf16→float vector conversion in the kernel toolchain. Potentially
    significant if SiLU is a measurable chunk of `npu_run`. Needs per-layer
