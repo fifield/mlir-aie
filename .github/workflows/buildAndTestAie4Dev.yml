@@ -71,6 +71,10 @@ jobs:
           # for mesimulator
           pip install bitstring toml cffi
 
+          # Install peano
+          pip install https://xcoartifactory.xilinx.com/artifactory/scc-peano-wheel/llvm_aie-1.8.0.dev20260415152325+g5b858460-py3-none-manylinux_2_34_x86_64.whl
+          export PEANO_INSTALL_DIR="$(pip show llvm-aie | grep ^Location: | awk '{print $2}')/lnx64.o/tools/peano/"
+
           VERSION=$(utils/clone-llvm.sh --get-wheel-version)
           pip -q download mlir==$VERSION \
             -f https://github.com/Xilinx/mlir-aie/releases/expanded_assets/mlir-distro

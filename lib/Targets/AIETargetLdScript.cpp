@@ -252,6 +252,15 @@ SECTIONS
   .stack_sizes : {
      *(.stack_sizes)
   }
+   .tctmemstrtab : {
+      *(.tctmemstrtab)
+  }
+  .tctmemtabl : {
+     *(.tctmemtabl)
+  }
+  .tctmemtab : {
+     *(.tctmemtab)
+  }
   /* Bitcode an object carries for aiecc's own analysis. It describes the core
      rather than running on it, and --orphan-handling=error rejects any section
      with no home, so name it here to drop it. */
