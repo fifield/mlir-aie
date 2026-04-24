@@ -450,7 +450,7 @@ Bottom-up validation, each level proves a capability before scaling.
 | `mlir-aie-9oz` | Phase C Flavor 1: L2 memtile chains | P3, not started |
 | `mlir-aie-k82` | Phase C Flavor 2: cross-column pipeline | P3, not started |
 | `mlir-aie-9xq` | Phase D: RepConv/AvgPool/Upsample to NPU | P2, not started |
-| `mlir-aie-1jg` | Tier 2: collapse ~65 xclbins to 5 L1-regime xclbins | P2; R3 conv3x3 + non-K GEMM increments landed |
+| `mlir-aie-1jg` | Tier 2: collapse ~65 xclbins to 5 L1-regime xclbins | P2; R3 complete, R2 conv3x3 landed |
 
 ### Test-plan levels
 | Bead | Title | Status |
@@ -530,6 +530,14 @@ Ordered by expected wall-time impact at current 1.87s wall:
    returned nonzero only because the profile guard flagged `pre_post` as +12.2%
    while total wall and NPU time were not regressed; `health_check.py` passed
    immediately afterward.
+
+   Next increment: added `conv/build/regime_r2_conv3x3.xclbin` for the 40x40
+   conv3x3 path. With `USE_REGIME_XCLBINS=1 USE_REGIME_KBLOCKED=1`,
+   `mc_re6_c3` and `mc_re6_rn3` use the shared R2 conv3x3 xclbin plus
+   per-layer `.bin` streams. Validation passed after one noisy host-bucket
+   run and one clean rerun: `max_class_diff=0.2256`, `max_vector_diff=0.0312`,
+   warm wall 1846 ms, `npu_run=1051.6 ms`, and 453 launches; all baseline
+   buckets were within the 10% guard on the clean rerun.
 
 2. **Phase A completion** (`mlir-aie-4zz`) — vectorise bf16 SiLU. Blocked on
    a bf16→float vector conversion in the kernel toolchain. Potentially

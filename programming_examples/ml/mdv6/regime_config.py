@@ -155,6 +155,23 @@ REGIME_CONTRACTS = {
 # mc_re8_rn3 previously used an 8x8 tile, but 8x8/IC128 does not fit L1 with
 # the current full-weight broadcast. 4x4 keeps calls_per_ocb at one for 20x20.
 CONV_REGIME_ARTIFACTS = {
+    "regime_r2_conv3x3": ConvRegimeArtifact(
+        regime="R2",
+        xclbin_name="regime_r2_conv3x3",
+        kernel_size=3,
+        stride=1,
+        tile_h=8,
+        tile_w=8,
+        ic=96,
+        oc_block=16,
+        patches_per_core=1,
+        input_depth=1,
+        members={
+            # name: active tile_h, tile_w, ic, oc_block, stride, padding, ppc
+            "mc_re6_c3": (8, 8, 96, 16, 1, 1, 1),
+            "mc_re6_rn3": (8, 8, 48, 16, 1, 1, 1),
+        },
+    ),
     "regime_r3_conv3x3": ConvRegimeArtifact(
         regime="R3",
         xclbin_name="regime_r3_conv3x3",
