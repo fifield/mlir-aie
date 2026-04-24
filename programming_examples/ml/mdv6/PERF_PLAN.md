@@ -450,7 +450,7 @@ Bottom-up validation, each level proves a capability before scaling.
 | `mlir-aie-9oz` | Phase C Flavor 1: L2 memtile chains | P3, not started |
 | `mlir-aie-k82` | Phase C Flavor 2: cross-column pipeline | P3, not started |
 | `mlir-aie-9xq` | Phase D: RepConv/AvgPool/Upsample to NPU | P2, not started |
-| `mlir-aie-1jg` | Tier 2: collapse ~65 xclbins to 5 L1-regime xclbins | P2; R3 complete, R2 conv3x3 + non-K GEMM landed |
+| `mlir-aie-1jg` | Tier 2: collapse ~65 xclbins to 5 L1-regime xclbins | P2; R3 complete, R2 complete |
 
 ### Test-plan levels
 | Bead | Title | Status |
@@ -545,6 +545,15 @@ Ordered by expected wall-time impact at current 1.87s wall:
    per-layer `.bin` streams. Validation passed cleanly: `max_class_diff=0.2256`,
    `max_vector_diff=0.0312`, warm wall 1815 ms, `npu_run=1027.5 ms`, and
    453 launches; all baseline buckets were within the 10% guard.
+
+   Next increment: added `gemm_conv1x1/build/regime_r2_gemm_kblocked.xclbin`
+   for the 40x40 K-blocked GEMM path. The shared envelope is 32x448x192/kb32
+   with ppc=2, covering `gemm_re6_c1`, `gemm_re6_c4`, `gemm_re12_c1`, and
+   `gemm_re18_c1`; `gemm_re6_c1` underfills the ppc=2 envelope to keep a
+   single R2 K-blocked xclbin. Validation passed cleanly:
+   `max_class_diff=0.2256`, `max_vector_diff=0.0312`, warm wall 1812 ms,
+   `npu_run=1049.8 ms`, and 453 launches; all baseline buckets were within
+   the 10% guard. `health_check.py` passed immediately afterward.
 
 2. **Phase A completion** (`mlir-aie-4zz`) — vectorise bf16 SiLU. Blocked on
    a bf16→float vector conversion in the kernel toolchain. Potentially

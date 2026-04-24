@@ -619,10 +619,10 @@ def _regime_gemm_kblocked_artifact(gemm_name, tile_m, ic, oc, k_block, ppc):
     artifact, member = gemm_regime_for_layer(gemm_name, ic, oc, k_block)
     if artifact is None or artifact.k_block <= 0:
         return None
-    if member.ppc != ppc:
+    if artifact.patches_per_core < ppc:
         raise RuntimeError(
-            f"K-blocked GEMM regime ppc mismatch for {gemm_name}: "
-            f"runtime={ppc}, contract={member.ppc}"
+            f"K-blocked GEMM regime ppc envelope too small for {gemm_name}: "
+            f"runtime={ppc}, envelope={artifact.patches_per_core}"
         )
     if ic > artifact.ic or oc > artifact.oc:
         raise RuntimeError(f"K-blocked GEMM regime envelope too small for {gemm_name}")
@@ -836,12 +836,14 @@ def run_gemm_conv1x1_mc(gemm_name, sc_name, input_hwc, weights_uint16,
             gemm_kh = _get_gemm_handle(handle_name, insts_name)
             run_tile_m = regime["tile_m"]
             run_k_block = regime["k_block"]
+            run_ppc = regime["ppc"]
         else:
             handle_name = kb_name
             insts_name = kb_name
             gemm_kh = _get_gemm_handle(kb_name)
             run_tile_m = tile_m_kb
             run_k_block = k_block
+            run_ppc = ppc
         if gemm_kh is None:
             raise RuntimeError(
                 f"GEMM xclbin missing: {handle_name}/{insts_name}.bin "
@@ -849,7 +851,7 @@ def run_gemm_conv1x1_mc(gemm_name, sc_name, input_hwc, weights_uint16,
             )
         return _run_gemm_kblocked(
             gemm_kh, handle_name, insts_name, input_hwc, weights_uint16,
-            out_h, out_w, out_ch, run_tile_m, run_k_block, ppc, regime
+            out_h, out_w, out_ch, run_tile_m, run_k_block, run_ppc, regime
         )
 
     # --- OC-blocked path ---
