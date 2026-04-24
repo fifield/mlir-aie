@@ -207,6 +207,22 @@ GEMM_REGIME_ARTIFACTS = {
             GemmRegimeMember("gemm_re6_rnm", 100, 96, 96, 1),
         ),
     ),
+    "regime_r2_gemm_kblocked": GemmRegimeArtifact(
+        regime="R2",
+        xclbin_name="regime_r2_gemm_kblocked",
+        tile_m=32,
+        ic=448,
+        oc=192,
+        patches_per_core=2,
+        k_block=32,
+        members=(
+            # runtime name, active tile_m, ic, oc, standalone ppc, standalone k_block
+            GemmRegimeMember("gemm_re6_c1", 32, 192, 192, 1, 32),
+            GemmRegimeMember("gemm_re6_c4", 32, 384, 192, 2, 48),
+            GemmRegimeMember("gemm_re12_c1", 32, 448, 192, 2, 32),
+            GemmRegimeMember("gemm_re18_c1", 32, 288, 192, 2, 72),
+        ),
+    ),
     "regime_r3_gemm_non_k": GemmRegimeArtifact(
         regime="R3",
         xclbin_name="regime_r3_gemm_non_k",
