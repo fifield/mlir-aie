@@ -564,6 +564,16 @@ Ordered by expected wall-time impact at current 1.87s wall:
    wall 1826 ms, `npu_run=1039.0 ms`, and 453 launches; all baseline buckets
    were within the 10% guard. `health_check.py` passed immediately afterward.
 
+   Next increment: added `gemm_conv1x1/build/regime_r1_gemm_non_k.xclbin`
+   for the 80x80 non-K GEMM path. The shared envelope is 44x128x128 with
+   ppc=4, covering `gemm_elan_c1`, `gemm_elan_c4`, `gemm_re4_c1`,
+   `gemm_re4_rn1`, and `re15_rnm` via the existing `gemm_elan_c4` dispatch
+   path. Validation with both regime flags enabled passed correctness:
+   `max_class_diff=0.2256`, `max_vector_diff=0.0312`, warm wall 1915 ms,
+   `npu_run=1051.2 ms`, and 468 launches. This reduces another GEMM xclbin
+   family, but the ppc/tile underfill increases launch count from 453 to 468;
+   keep that tradeoff visible when comparing profile guard output.
+
 2. **Phase A completion** (`mlir-aie-4zz`) — vectorise bf16 SiLU. Blocked on
    a bf16→float vector conversion in the kernel toolchain. Potentially
    significant if SiLU is a measurable chunk of `npu_run`. Needs per-layer
