@@ -193,6 +193,20 @@ CONV_REGIME_ARTIFACTS = {
 
 
 GEMM_REGIME_ARTIFACTS = {
+    "regime_r2_gemm_non_k": GemmRegimeArtifact(
+        regime="R2",
+        xclbin_name="regime_r2_gemm_non_k",
+        tile_m=100,
+        ic=96,
+        oc=96,
+        patches_per_core=1,
+        k_block=0,
+        members=(
+            # runtime name, active tile_m, ic, oc, ppc
+            GemmRegimeMember("gemm_re6_rn1", 100, 96, 48, 1),
+            GemmRegimeMember("gemm_re6_rnm", 100, 96, 96, 1),
+        ),
+    ),
     "regime_r3_gemm_non_k": GemmRegimeArtifact(
         regime="R3",
         xclbin_name="regime_r3_gemm_non_k",
