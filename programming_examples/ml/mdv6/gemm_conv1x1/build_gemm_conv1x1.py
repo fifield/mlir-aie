@@ -342,7 +342,12 @@ def build_regime_gemm_artifact(artifact, build_dir):
         try:
             active = None
             if artifact.k_block == 0:
-                active = (member.tile_m, member.ic, member.oc, member.ppc)
+                active = (
+                    member.tile_m,
+                    member.ic,
+                    member.oc,
+                    artifact.patches_per_core,
+                )
             mlir_path = _generate_gemm_mlir(
                 build_dir,
                 insts_name,

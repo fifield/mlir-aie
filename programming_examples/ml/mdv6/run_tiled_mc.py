@@ -594,14 +594,19 @@ def _regime_gemm_artifact(gemm_name, tile_m, ic, oc_block, ppc):
     active_oc = member.oc
     active_ppc = member.ppc
     if (active_tile_m, active_ic, active_oc, active_ppc) != (tile_m, ic, oc_block, ppc):
-        # The regime may intentionally reduce tile_m while preserving launch
-        # count. Other mismatches are build/runtime contract errors.
-        if (active_ic, active_oc, active_ppc) != (ic, oc_block, ppc):
+        # The regime may intentionally reduce tile_m and/or use a larger ppc
+        # envelope. IC/OC must still identify the intended logical member.
+        if (active_ic, active_oc) != (ic, oc_block):
             raise RuntimeError(
                 f"GEMM regime contract mismatch for {gemm_name}: "
                 f"runtime={(tile_m, ic, oc_block, ppc)} "
                 f"contract={(active_tile_m, active_ic, active_oc, active_ppc)}"
             )
+    if artifact.patches_per_core < ppc:
+        raise RuntimeError(
+            f"GEMM regime ppc envelope too small for {gemm_name}: "
+            f"runtime={ppc}, envelope={artifact.patches_per_core}"
+        )
     if active_ic > artifact.ic or active_oc > artifact.oc:
         raise RuntimeError(f"GEMM regime envelope too small for {gemm_name}")
     return {
@@ -879,6 +884,7 @@ def run_gemm_conv1x1_mc(gemm_name, sc_name, input_hwc, weights_uint16,
         insts_name = regime["insts_name"]
         gemm_kh = _get_gemm_handle(handle_name, insts_name)
         tile_m = regime["active_tile_m"]
+        ppc = regime["ppc"]
     else:
         handle_name = actual_name
         insts_name = actual_name

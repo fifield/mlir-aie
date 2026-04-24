@@ -211,6 +211,24 @@ CONV_REGIME_ARTIFACTS = {
 
 
 GEMM_REGIME_ARTIFACTS = {
+    "regime_r1_gemm_non_k": GemmRegimeArtifact(
+        regime="R1",
+        xclbin_name="regime_r1_gemm_non_k",
+        tile_m=44,
+        ic=128,
+        oc=128,
+        patches_per_core=4,
+        k_block=0,
+        members=(
+            # runtime name, active tile_m, ic, oc, standalone ppc
+            GemmRegimeMember("gemm_elan_c1", 44, 64, 64, 2),
+            GemmRegimeMember("gemm_elan_c4", 44, 128, 64, 2),
+            GemmRegimeMember("gemm_re4_c1", 44, 128, 128, 4),
+            GemmRegimeMember("gemm_re4_rn1", 44, 64, 32, 1),
+            # re15_rnm is dispatched through mc_elan_c4 in test_full_model_mc.py.
+            GemmRegimeMember("gemm_elan_c4", 44, 64, 64, 2),
+        ),
+    ),
     "regime_r2_gemm_non_k": GemmRegimeArtifact(
         regime="R2",
         xclbin_name="regime_r2_gemm_non_k",
