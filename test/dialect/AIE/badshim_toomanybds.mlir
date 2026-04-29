@@ -6,7 +6,7 @@
 //===----------------------------------------------------------------------===//
 
 // RUN: not aie-opt --canonicalize %s 2>&1 | FileCheck %s
-// CHECK: 'aie.shim_dma' op has more than 16 blocks
+// CHECK: 'aie.shim_dma' op BD pool for channel (MM2S, 0) exceeds limit of 16 BDs
 
 aie.device(xcvc1902) {
   %t1 = aie.tile(2, 0)

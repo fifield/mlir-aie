@@ -10,6 +10,7 @@
 
 #include "aie/Dialect/AIE/IR/AIETargetModel.h"
 
+#include <map>
 #include <optional>
 #include <set>
 
@@ -19,7 +20,7 @@ struct BdIdGenerator {
   const int col;
   const int row;
   const AIETargetModel &targetModel;
-  std::set<uint32_t> alreadyAssigned[32];
+  std::map<uint32_t, std::set<uint32_t>> alreadyAssigned;
 
   BdIdGenerator(int col, int row, const AIETargetModel &targetModel);
 

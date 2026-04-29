@@ -515,6 +515,37 @@ LogicalResult HasValidBDs<ConcreteType>::verifyTrait(Operation *op) {
 
   int bdMax = targetModel.getNumBDs(tile.getTileType());
 
+  auto col = tile.tryGetCol();
+  auto row = tile.tryGetRow();
+
+  // Build a map from BD block -> owning channel by following DMAStartOp chains.
+  DenseMap<Block *, DMAChannel> blockChannelMap;
+  if (col && row) {
+    for (auto &block : element.getBody()) {
+      for (auto dmaStart : block.template getOps<DMAStartOp>()) {
+        DMAChannel chan = {dmaStart.getChannelDir(),
+                           dmaStart.getChannelIndex()};
+        llvm::SmallPtrSet<Block *, 16> visited;
+        SmallVector<Block *, 16> worklist;
+        Block *firstBD = dmaStart.getDest();
+        if (visited.insert(firstBD).second)
+          worklist.push_back(firstBD);
+        while (!worklist.empty()) {
+          Block *bdBlock = worklist.pop_back_val();
+          blockChannelMap[bdBlock] = chan;
+          if (!bdBlock->empty()) {
+            for (auto *succ : bdBlock->getTerminator()->getSuccessors()) {
+              if (visited.insert(succ).second)
+                worklist.push_back(succ);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Count BDs consumed from each pool.
+  DenseMap<uint32_t, int> poolBdCount;
   int bdNum = 0;
   for (auto &block : element.getBody()) {
     auto bdOps = llvm::to_vector_of<DMABDOp>(block.template getOps<DMABDOp>());
@@ -523,7 +554,26 @@ LogicalResult HasValidBDs<ConcreteType>::verifyTrait(Operation *op) {
     if (bdOps.empty())
       continue;
 
-    // Check BD count limit
+    // Pool-based BD count check (requires tile coordinates and channel info).
+    if (col && row) {
+      auto it = blockChannelMap.find(&block);
+      if (it != blockChannelMap.end()) {
+        DMAChannel chan = it->second;
+        uint32_t poolId = targetModel.getBdPoolId(*col, *row, chan.channel,
+                                                  chan.direction);
+        poolBdCount[poolId]++;
+        int poolMax = targetModel.getNumBDsInPool(*col, *row, poolId);
+        if (poolBdCount[poolId] > poolMax) {
+          return (op->emitOpError("BD pool for channel (")
+                  << stringifyDMAChannelDir(chan.direction) << ", "
+                  << chan.channel << ") exceeds limit of " << poolMax << " BDs")
+              .attachNote(bdOps.front().getLoc())
+              .append("no space for this BD");
+        }
+      }
+    }
+
+    // Safety-net: total BD count check.
     if (bdNum >= bdMax) {
       return (op->emitOpError("has more than ") << bdMax << " blocks")
           .attachNote(bdOps.front().getLoc())

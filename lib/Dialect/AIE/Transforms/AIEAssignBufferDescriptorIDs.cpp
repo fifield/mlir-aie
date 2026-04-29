@@ -49,60 +49,41 @@ std::optional<uint32_t> BdIdGenerator::nextBdId(uint32_t row,
                                                 uint32_t channelIndex,
                                                 DMAChannelDir dir,
                                                 uint32_t alignment) {
-  uint32_t bdId = 0;
-  uint32_t maxBdId = targetModel.getNumBDs(col, row) - 1;
-  // Find the next free BD ID. This is not an efficient algorithm, but doesn't
-  for (; (bdIdAlreadyAssigned(row, channelIndex, dir, bdId) ||
-          !targetModel.isBdChannelAccessible(col, row, bdId, channelIndex,
-                                             dir)) &&
-         bdId <= maxBdId;
-       bdId += alignment)
-    ;
-  if (bdId > maxBdId) {
-    return std::nullopt;
-  }
-  assignBdId(row, channelIndex, dir, bdId);
-  return std::optional<uint32_t>(bdId);
-}
-
-namespace {
-
-uint32_t getChannelOffset(const AIE::AIETargetModel &tm, uint32_t row,
-                          uint32_t channelIndex, DMAChannelDir dir) {
-  if (isa<AIE::AIE4TargetModel>(tm) && tm.isMemTile(0, row)) {
-    if (dir == DMAChannelDir::S2MM) {
-      channelIndex += 16;
+  uint32_t pool = targetModel.getBdPoolId(col, row, channelIndex, dir);
+  uint32_t start = targetModel.getBdPoolStartId(col, row, pool);
+  uint32_t count = targetModel.getNumBDsInPool(col, row, pool);
+  for (uint32_t bd_id = ((start + alignment - 1) / alignment) * alignment;
+       bd_id < start + count; bd_id += alignment) {
+    if (!bdIdAlreadyAssigned(row, channelIndex, dir, bd_id)) {
+      assignBdId(row, channelIndex, dir, bd_id);
+      return bd_id;
     }
-  } else {
-    channelIndex = 0;
   }
-  return channelIndex;
+  return std::nullopt;
 }
-
-} // namespace
 
 void BdIdGenerator::assignBdId(uint32_t row, uint32_t channelIndex,
                                DMAChannelDir dir, uint32_t bdId) {
-  channelIndex = getChannelOffset(targetModel, row, channelIndex, dir);
-  alreadyAssigned[channelIndex].insert(bdId);
-  LLVM_DEBUG(llvm::dbgs() << "Assigned BD ID " << bdId << " to channel "
-                          << channelIndex << "\n");
+  uint32_t poolKey = targetModel.getBdPoolId(col, row, channelIndex, dir);
+  alreadyAssigned[poolKey].insert(bdId);
+  LLVM_DEBUG(llvm::dbgs() << "Assigned BD ID " << bdId << " to pool "
+                          << poolKey << "\n");
 }
 
 bool BdIdGenerator::bdIdAlreadyAssigned(uint32_t row, uint32_t channelIndex,
                                         DMAChannelDir dir, uint32_t bdId) {
-  channelIndex = getChannelOffset(targetModel, row, channelIndex, dir);
-  bool assigned = alreadyAssigned[channelIndex].count(bdId);
+  uint32_t poolKey = targetModel.getBdPoolId(col, row, channelIndex, dir);
+  bool assigned = alreadyAssigned[poolKey].count(bdId);
   LLVM_DEBUG(llvm::dbgs() << "Checking if BD ID " << bdId
-                          << " is already assigned to channel " << channelIndex
+                          << " is already assigned in pool " << poolKey
                           << ": " << (assigned ? "Yes" : "No") << "\n");
   return assigned;
 }
 
 void BdIdGenerator::freeBdId(uint32_t row, uint32_t channelIndex,
                              AIE::DMAChannelDir dir, uint32_t bdId) {
-  channelIndex = getChannelOffset(targetModel, row, channelIndex, dir);
-  alreadyAssigned[channelIndex].erase(bdId);
+  uint32_t poolKey = targetModel.getBdPoolId(col, row, channelIndex, dir);
+  alreadyAssigned[poolKey].erase(bdId);
 }
 
 namespace {
