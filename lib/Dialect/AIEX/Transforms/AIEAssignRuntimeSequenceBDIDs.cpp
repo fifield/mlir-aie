@@ -386,6 +386,8 @@ struct AIEAssignRuntimeSequenceBDIDsPass
   LogicalResult allocateConfigure(DMAConfigureTaskOp op) {
     AIE::TileOp tile = op.getTileOp();
     BdIdGenerator &gen = getGeneratorForTile(tile);
+    uint32_t channel = op.getChannel();
+    AIE::DMAChannelDir dir = op.getDirection();
 
     const AIETargetModel &targetModel =
         tile->getParentOfType<AIE::DeviceOp>().getTargetModel();
@@ -395,18 +397,17 @@ struct AIEAssignRuntimeSequenceBDIDsPass
       if (bd_op.getBdId().has_value()) {
         if (!targetModel.isBdChannelAccessible(tile.getCol(), tile.getRow(),
                                                bd_op.getBdId().value(),
-                                               op.getChannel())) {
+                                               channel)) {
           bd_op.emitOpError("Buffer descriptor ID ")
               << bd_op.getBdId().value() << " cannot be submitted on channel "
-              << op.getChannel() << " of tile (" << tile.getCol() << ","
+              << channel << " of tile (" << tile.getCol() << ","
               << tile.getRow()
               << "), which partitions its buffer descriptors by channel "
                  "parity: an even channel reaches only the low half of the "
                  "ids and an odd channel only the high half.";
           return WalkResult::interrupt();
         }
-        if (gen.bdIdAlreadyAssigned(tile.getRow(), op.getChannel(),
-                                    op.getDirection(),
+        if (gen.bdIdAlreadyAssigned(tile.getRow(), channel, dir,
                                     bd_op.getBdId().value())) {
           op.emitOpError("Specified buffer descriptor ID ")
               << bd_op.getBdId().value()
@@ -419,8 +420,7 @@ struct AIEAssignRuntimeSequenceBDIDsPass
           return WalkResult::interrupt();
         }
         checkReallocation(tile, bd_op.getBdId().value(), bd_op);
-        gen.assignBdId(tile.getRow(), op.getChannel(), op.getDirection(),
-                       bd_op.getBdId().value());
+        gen.assignBdId(tile.getRow(), channel, dir, bd_op.getBdId().value());
       }
       return WalkResult::advance();
     });
@@ -459,10 +459,10 @@ struct AIEAssignRuntimeSequenceBDIDsPass
       // only submit ids below 24, an odd channel only 24 and above).
       uint32_t alignment = bd_op == alignedHead ? 4 : 1;
       std::optional<int32_t> next_id = gen.nextBdId(
-          tile.getRow(), op.getChannel(), op.getDirection(), alignment);
+          tile.getRow(), channel, dir, alignment);
       while (!next_id && reclaimBds && succeeded(reclaimFor(op)))
-        next_id = gen.nextBdId(tile.getRow(), op.getChannel(),
-                               op.getDirection(), alignment);
+        next_id = gen.nextBdId(tile.getRow(), channel,
+                               dir, alignment);
       if (!next_id) {
         auto diag =
             op.emitOpError()
@@ -470,7 +470,7 @@ struct AIEAssignRuntimeSequenceBDIDsPass
             << tile.getCol() << "," << tile.getRow()
             << "), which supports up to "
             << targetModel.getNumBDsForChannel(tile.getCol(), tile.getRow(),
-                                               op.getChannel())
+                                               channel)
             << ". Emit an aiex.dma_await_task to free BDs for reuse; it "
                "waits for hardware completion, so the recycled ids are no "
                "longer in flight. aiex.dma_free_task also recycles ids but "
@@ -694,16 +694,16 @@ struct AIEAssignRuntimeSequenceBDIDsPass
       return success();
     AIE::TileOp tile = task_op.getTileOp();
     BdIdGenerator &gen = getGeneratorForTile(tile);
+    uint32_t channel = task_op.getChannel();
+    AIE::DMAChannelDir dir = task_op.getDirection();
     WalkResult result = task_op.walk<WalkOrder::PreOrder>([&](AIE::DMABDOp bd) {
       if (!bd.getBdId().has_value()) {
         bd.emitOpError("Free called on BD chain with unassigned IDs.");
         return WalkResult::interrupt();
       }
-      if (gen.bdIdAlreadyAssigned(tile.getRow(), task_op.getChannel(),
-                                  task_op.getDirection(),
+      if (gen.bdIdAlreadyAssigned(tile.getRow(), channel, dir,
                                   bd.getBdId().value())) {
-        gen.freeBdId(tile.getRow(), task_op.getChannel(),
-                     task_op.getDirection(), bd.getBdId().value());
+        gen.freeBdId(tile.getRow(), channel, dir, bd.getBdId().value());
       } else {
         freeOp->emitOpError("frees buffer descriptor ID ")
             << bd.getBdId().value()

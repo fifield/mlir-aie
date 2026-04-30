@@ -1868,23 +1868,31 @@ uint64_t AIE4TargetModel::getDmaBdAddress(int col, int row, uint32_t bd_id,
   uint64_t offset = 0;
   if (isShimNOCTile(col, row)) {
     uint32_t numBds = 16;
+    // For AIE4 (non-AIE4z), bd_id is a global ID across the two shim BD pools
+    // (lower pool: ids 0..15, upper pool: ids 16..31). Convert to bank-local
+    // index by subtracting the pool start when targeting the upper pool.
+    bool isAIE4z = getTargetArch() == AIEArch::AIE4z;
     if (direction == AIE::DMAChannelDir::MM2S) {
-      if (getTargetArch() == AIEArch::AIE4z) {
+      if (isAIE4z) {
         offset = 0x00018C40;
       } else {
-        if (channel < 2)
+        if (channel < 2) {
           offset = 0x00018000;
-        else
+        } else {
           offset = 0x00058000;
+          bd_id -= numBds;
+        }
         channel = 0;
       }
     } else {
       if (channel == 0) {
         offset = 0x00018000;
       } else if (channel == 1) {
+        if (!isAIE4z)
+          bd_id -= numBds;
         offset = 0x00058000;
         channel = 0;
-      } else if (getTargetArch() == AIEArch::AIE4z) {
+      } else if (isAIE4z) {
         offset = 0x00018640;
         channel -= 2;
       } else {
