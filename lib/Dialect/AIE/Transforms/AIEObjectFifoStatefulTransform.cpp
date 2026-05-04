@@ -378,11 +378,13 @@ struct AIEObjectFifoStatefulTransformPass
   createObjectFifo(OpBuilder &builder, AIEObjectFifoType datatype,
                    std::string name, Value prodTile, Value consTile,
                    Attribute depth, BDDimLayoutArrayAttr dimensionsToStream,
-                   BDDimLayoutArrayArrayAttr dimensionsFromStreamPerConsumer) {
+                   BDDimLayoutArrayArrayAttr dimensionsFromStreamPerConsumer,
+                   Location loc = {}) {
     auto ofName = builder.getStringAttr(name);
     auto fifo = ObjectFifoCreateOp::create(
-        builder, builder.getUnknownLoc(), ofName, prodTile, consTile, depth,
-        datatype, dimensionsToStream, dimensionsFromStreamPerConsumer);
+        builder, loc ? loc : builder.getUnknownLoc(), ofName, prodTile,
+        consTile, depth, datatype, dimensionsToStream,
+        dimensionsFromStreamPerConsumer);
     return fifo;
   }
 
@@ -405,13 +407,14 @@ struct AIEObjectFifoStatefulTransformPass
       if (!state.externalBuffersPerFifo[op].empty())
         numElem = state.externalBuffersPerFifo[op].size();
     }
+    Location ofLoc = op.getLoc();
     if (target.getTargetArch() == AIEArch::AIE1) {
       for (int i = 0; i < numElem; i++) {
         // create corresponding aie1 locks
         int initValue = op.getInitValues().has_value() ? 1 : 0;
         int lockID = lockAnalysis.getLockID(creation_tile);
         assert(lockID >= 0 && "No more locks to allocate!");
-        auto lock = LockOp::create(builder, builder.getUnknownLoc(),
+        auto lock = LockOp::create(builder, ofLoc,
                                    creation_tile, lockID, initValue);
         lock.getOperation()->setAttr(SymbolTable::getSymbolAttrName(),
                                      builder.getStringAttr(op.name().str() +
@@ -429,7 +432,7 @@ struct AIEObjectFifoStatefulTransformPass
         assert(prodLockID >= 0 && "No more locks to allocate!");
         int prodLockValue = (numElem - initValues) * repeatCount;
         auto prodLock =
-            LockOp::create(builder, builder.getUnknownLoc(), creation_tile,
+            LockOp::create(builder, ofLoc, creation_tile,
                            prodLockID, prodLockValue);
         prodLock.getOperation()->setAttr(
             SymbolTable::getSymbolAttrName(),
@@ -441,7 +444,7 @@ struct AIEObjectFifoStatefulTransformPass
         assert(consLockID >= 0 && "No more locks to allocate!");
         int consLockValue = initValues * repeatCount;
         auto consLock =
-            LockOp::create(builder, builder.getUnknownLoc(), creation_tile,
+            LockOp::create(builder, ofLoc, creation_tile,
                            consLockID, consLockValue);
         consLock.getOperation()->setAttr(
             SymbolTable::getSymbolAttrName(),
@@ -768,7 +771,7 @@ struct AIEObjectFifoStatefulTransformPass
           }
         }
         auto buff = BufferOp::create(
-            builder, builder.getUnknownLoc(), elemType,
+            builder, op.getLoc(), elemType,
             current_buf_allocation_tile,
             builder.getStringAttr(op.name().str() + "_buff_" +
                                   std::to_string(of_elem_index)),

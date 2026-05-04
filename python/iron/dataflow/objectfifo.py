@@ -23,6 +23,7 @@ from ...util import single_elem_or_list_to_list
 from ..resolvable import Resolvable, NotResolvedError
 from .endpoint import ObjectFifoEndpoint
 from ..device import Device, Tile, AnyMemTile
+from .._loc import capture_user_loc, loc_or_unknown
 
 
 class ObjectFifo(Resolvable):
@@ -79,6 +80,7 @@ class ObjectFifo(Resolvable):
         self._cons: list[ObjectFifoHandle] = []
         self._resolving = False
         self._iter_count: int | None = None
+        self._user_loc = capture_user_loc(name=self.name)
 
     @classmethod
     def __get_index(cls) -> int:
@@ -287,24 +289,25 @@ class ObjectFifo(Resolvable):
                 for con in self._cons
             ]
 
-            self._op = object_fifo(
-                self.name,
-                self._prod_tile_op(),
-                self._cons_tiles_ops(),
-                self._get_depths(),
-                np_ndarray_type_to_memref_type(self._obj_type),
-                dimensionsToStream=self._dims_to_stream,
-                dimensionsFromStreamPerConsumer=dims_from_stream_per_cons,
-                plio=self._plio,
-                padDimensions=self._pad_dimensions,
-                iter_count=self._iter_count,
-            )
+            with loc_or_unknown(self._user_loc):
+                self._op = object_fifo(
+                    self.name,
+                    self._prod_tile_op(),
+                    self._cons_tiles_ops(),
+                    self._get_depths(),
+                    np_ndarray_type_to_memref_type(self._obj_type),
+                    dimensionsToStream=self._dims_to_stream,
+                    dimensionsFromStreamPerConsumer=dims_from_stream_per_cons,
+                    plio=self._plio,
+                    padDimensions=self._pad_dimensions,
+                    iter_count=self._iter_count,
+                )
 
-            if isinstance(self._prod.endpoint, ObjectFifoLink):
-                self._prod.endpoint.resolve()
-            for con in self._cons:
-                if isinstance(con.endpoint, ObjectFifoLink):
-                    con.endpoint.resolve()
+                if isinstance(self._prod.endpoint, ObjectFifoLink):
+                    self._prod.endpoint.resolve()
+                for con in self._cons:
+                    if isinstance(con.endpoint, ObjectFifoLink):
+                        con.endpoint.resolve()
 
     def _acquire(
         self,

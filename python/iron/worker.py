@@ -20,6 +20,7 @@ from .dataflow.objectfifo import ObjectFifoHandle, ObjectFifo
 from .dataflow.endpoint import ObjectFifoEndpoint
 from .buffer import Buffer
 from .resolvable import Resolvable
+from ._loc import capture_user_loc, loc_or_unknown
 
 
 class Worker(ObjectFifoEndpoint):
@@ -115,6 +116,9 @@ class Worker(ObjectFifoEndpoint):
             # func.func declaration. Other unrecognized args are assumed to be
             # metaprogramming values (Python scalars, etc.).
 
+        fn_name = getattr(self.core_fn, "__name__", None)
+        self._user_loc = capture_user_loc(name=fn_name)
+
     @property
     def fifos(self) -> list[ObjectFifoHandle]:
         """Returns a list of ObjectFifoHandles given to the Worker via fn_args.
@@ -142,16 +146,17 @@ class Worker(ObjectFifoEndpoint):
             raise ValueError("Must place Worker before it can be resolved.")
         my_tile = self._tile.op
 
-        # Create the necessary locks for the core operation to synchronize with the runtime sequence
-        # and register them in the corresponding barriers.
-        for barrier in self._barriers:
-            l = lock(my_tile)
-            barrier._add_worker_lock(l)
+        with loc_or_unknown(self._user_loc):
+            # Create the necessary locks for the core operation to synchronize with the runtime sequence
+            # and register them in the corresponding barriers.
+            for barrier in self._barriers:
+                l = lock(my_tile)
+                barrier._add_worker_lock(l)
 
-        @core(my_tile, stack_size=self.stack_size)
-        def core_body():
-            for _ in range_(sys.maxsize) if self._while_true else range(1):
-                self.core_fn(*self.fn_args)
+            @core(my_tile, stack_size=self.stack_size)
+            def core_body():
+                for _ in range_(sys.maxsize) if self._while_true else range(1):
+                    self.core_fn(*self.fn_args)
 
 
 class WorkerRuntimeBarrier:
