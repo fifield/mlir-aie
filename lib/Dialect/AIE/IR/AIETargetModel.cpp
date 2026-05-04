@@ -2687,26 +2687,29 @@ std::optional<uint32_t>
 AIE4TargetModel::getLocalLockAddress(uint32_t lockId, TileID tile) const {
   uint32_t lockAddrOffset = 0x10;
 
-  if (lockId < AIETargetModel::getNumLocks(tile.col, tile.row))
+  if (lockId >= AIETargetModel::getNumLocks(tile.col, tile.row))
     return std::nullopt;
 
   if (isCoreTile(tile.col, tile.row)) {
-    uint32_t computeTileBaseAddress = 0x00010000;
+    // Compute-tile locks live in the tile's memory module at 0xAE000.
+    uint32_t computeTileBaseAddress = 0x000AE000;
     return computeTileBaseAddress + lockAddrOffset * lockId;
   }
 
   if (isMemTile(tile.col, tile.row)) {
-    uint32_t memTileBaseAddress = 0x00010000;
-    if (lockId > 31)
-      memTileBaseAddress = 0x00050000;
-    return memTileBaseAddress + lockAddrOffset * lockId;
+    // Memtile has two 32-lock banks (Lock_Request_A/B) at 0x10000 / 0x50000;
+    // upper-bank offsets restart at 0.
+    if (lockId < 32)
+      return 0x00010000 + lockAddrOffset * lockId;
+    return 0x00050000 + lockAddrOffset * (lockId - 32);
   }
 
   if (isShimNOCTile(tile.col, tile.row)) {
-    uint32_t shimTileBaseAddress = 0x00010000;
-    if (lockId > 15)
-      shimTileBaseAddress = 0x00050000;
-    return shimTileBaseAddress + lockAddrOffset * lockId;
+    // Shim has two 16-lock banks (Lock_Request_A/B) at 0x10000 / 0x50000;
+    // upper-bank offsets restart at 0.
+    if (lockId < 16)
+      return 0x00010000 + lockAddrOffset * lockId;
+    return 0x00050000 + lockAddrOffset * (lockId - 16);
   }
 
   return std::nullopt;
