@@ -304,7 +304,7 @@ void Pathfinder::initialize(int maxCol, int maxRow,
       // get all ports into current switchbox
       int channels =
           targetModel.getNumSourceSwitchboxConnections(col, row, bundle);
-      if (!isAIE4 && channels == 0 && targetModel.isShimNOCorPLTile(col, row)) {
+      if (channels == 0 && targetModel.isShimNOCorPLTile(col, row)) {
         // wordaround for shimMux
         channels = targetModel.getNumSourceShimMuxConnections(col, row, bundle);
       }
@@ -313,7 +313,7 @@ void Pathfinder::initialize(int maxCol, int maxRow,
       }
       // get all ports out of current switchbox
       channels = targetModel.getNumDestSwitchboxConnections(col, row, bundle);
-      if (!isAIE4 && channels == 0 && targetModel.isShimNOCorPLTile(col, row)) {
+      if (channels == 0 && targetModel.isShimNOCorPLTile(col, row)) {
         // wordaround for shimMux
         channels = targetModel.getNumDestShimMuxConnections(col, row, bundle);
       }

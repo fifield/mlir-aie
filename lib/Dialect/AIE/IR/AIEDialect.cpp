@@ -3558,7 +3558,7 @@ size_t TileOp::getNumDestConnections(WireBundle bundle) {
   {
     // Note source is correct here, since direction is reversed.
     if (isShimNOCorPLTile())
-      return targetModel.getNumDestShimMuxConnections(getCol(), getRow(),
+      return targetModel.getNumSourceShimMuxConnections(getCol(), getRow(),
                                                       bundle);
     return targetModel.getNumSourceSwitchboxConnections(getCol(), getRow(),
                                                         bundle);
