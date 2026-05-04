@@ -28,6 +28,7 @@ from .dataflow.endpoint import ObjectFifoEndpoint
 from .buffer import Buffer
 from .scratchpad_parameter import ScratchpadParameter
 from .resolvable import Resolvable
+from ._loc import capture_user_loc, loc_or_unknown
 
 
 class Worker(ObjectFifoEndpoint):
@@ -172,6 +173,9 @@ class Worker(ObjectFifoEndpoint):
             # func.func declaration. Other unrecognized args are assumed to be
             # metaprogramming values (Python scalars, etc.).
 
+        fn_name = getattr(self.core_fn, "__name__", None)
+        self._user_loc = capture_user_loc(name=fn_name)
+
     @staticmethod
     def grid(
         rows: int,
@@ -233,25 +237,26 @@ class Worker(ObjectFifoEndpoint):
             raise ValueError("Must place Worker before it can be resolved.")
         my_tile = self._tile.op
 
-        # Create the necessary locks for the core operation to synchronize with the runtime sequence
-        # and register them in the corresponding barriers.
-        for barrier in self._barriers:
-            l = lock(my_tile)
-            barrier._add_worker_lock(l)
+        with loc_or_unknown(self._user_loc):
+            # Create the necessary locks for the core operation to synchronize with the runtime sequence
+            # and register them in the corresponding barriers.
+            for barrier in self._barriers:
+                l = lock(my_tile)
+                barrier._add_worker_lock(l)
 
-        @core(
-            my_tile,
-            stack_size=self.stack_size,
-            dynamic_objfifo_lowering=self._dynamic_objfifo_lowering,
-        )
-        def core_body():
-            # Always wrap in an scf.for so the lowered MLIR matches expectations
-            # downstream (the lower-level aie dialect uses the same pattern with
-            # bound=1 for single-shot workers). Using Python range(1) here would
-            # emit the body inline with no scf.for wrapper, which the dataflow
-            # lowerer treats differently and can cause runtime hangs.
-            for _ in range_(sys.maxsize if self._while_true else 1):
-                self.core_fn(*self.fn_args)
+            @core(
+                my_tile,
+                stack_size=self.stack_size,
+                dynamic_objfifo_lowering=self._dynamic_objfifo_lowering,
+            )
+            def core_body():
+                # Always wrap in an scf.for so the lowered MLIR matches expectations
+                # downstream (the lower-level aie dialect uses the same pattern with
+                # bound=1 for single-shot workers). Using Python range(1) here would
+                # emit the body inline with no scf.for wrapper, which the dataflow
+                # lowerer treats differently and can cause runtime hangs.
+                for _ in range_(sys.maxsize if self._while_true else 1):
+                    self.core_fn(*self.fn_args)
 
 
 class WorkerRuntimeBarrier:

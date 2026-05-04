@@ -36,6 +36,7 @@ from ...helpers.util import (
 from ..resolvable import Resolvable, NotResolvedError
 from .endpoint import ObjectFifoEndpoint
 from ..device import Tile, AnyMemTile
+from .._loc import capture_user_loc, loc_or_unknown
 
 
 class ObjectFifo(Resolvable):
@@ -124,6 +125,7 @@ class ObjectFifo(Resolvable):
         self._init_values: list[np.ndarray] | None = init_values
         self._consumer_obj_type: type[np.ndarray] | None = consumer_obj_type
         self._aie_stream: tuple[int, int] | None = aie_stream
+        self._user_loc = capture_user_loc(name=self.name)
 
     @property
     def depth(self) -> int | None:
@@ -355,58 +357,59 @@ class ObjectFifo(Resolvable):
                 for con in self._cons
             ]
 
-            consumer_datatype = (
-                np_ndarray_type_to_memref_type(self._consumer_obj_type)
-                if self._consumer_obj_type is not None
-                else None
-            )
-            op = object_fifo(
-                self.name,
-                self._prod_tile_op(),
-                self._cons_tiles_ops(),
-                self._get_depths(),
-                np_ndarray_type_to_memref_type(self._obj_type),
-                dimensionsToStream=self._dims_to_stream,
-                dimensionsFromStreamPerConsumer=dims_from_stream_per_cons,
-                plio=self._plio,
-                padDimensions=self._pad_dimensions,
-                iter_count=self._iter_count,
-                disable_synchronization=self._disable_synchronization or None,
-                via_DMA=self._via_DMA or None,
-                initValues=self._init_values,
-                consumer_datatype=consumer_datatype,
-            )
-            self._op = op
-
-            if self._repeat_count is not None:
-                op.set_repeat_count(self._repeat_count)
-
-            if self._aie_stream is not None:
-                op.set_aie_stream(*self._aie_stream)
-
-            # Pin DMA channels requested on the handles. The producer channel
-            # and one channel per consumer (-1 = auto-assign that consumer) are
-            # stamped onto the op for the stateful-transform pass to honor.
-            if self._prod is not None and self._prod.channel is not None:
-                op.set_prod_dma_channel(self._prod.channel)
-            cons_channels = [con.channel for con in self._cons]
-            if any(ch is not None for ch in cons_channels):
-                op.set_cons_dma_channels(
-                    [-1 if ch is None else ch for ch in cons_channels]
+            with loc_or_unknown(self._user_loc):
+                consumer_datatype = (
+                    np_ndarray_type_to_memref_type(self._consumer_obj_type)
+                    if self._consumer_obj_type is not None
+                    else None
                 )
+                op = object_fifo(
+                    self.name,
+                    self._prod_tile_op(),
+                    self._cons_tiles_ops(),
+                    self._get_depths(),
+                    np_ndarray_type_to_memref_type(self._obj_type),
+                    dimensionsToStream=self._dims_to_stream,
+                    dimensionsFromStreamPerConsumer=dims_from_stream_per_cons,
+                    plio=self._plio,
+                    padDimensions=self._pad_dimensions,
+                    iter_count=self._iter_count,
+                    disable_synchronization=self._disable_synchronization or None,
+                    via_DMA=self._via_DMA or None,
+                    initValues=self._init_values,
+                    consumer_datatype=consumer_datatype,
+                )
+                self._op = op
 
-            # Shared-memory delegate: redirect the fifo's buffer pool to a tile
-            # whose memory module is shared with both prod and cons. See the
-            # delegate_tile docstring on ObjectFifo for the constraint.
-            if self._delegate_tile is not None:
-                op.allocate(self._delegate_tile.op)
+                if self._repeat_count is not None:
+                    op.set_repeat_count(self._repeat_count)
 
-            assert self._prod is not None
-            if isinstance(self._prod.endpoint, ObjectFifoLink):
-                self._prod.endpoint.resolve()
-            for con in self._cons:
-                if isinstance(con.endpoint, ObjectFifoLink):
-                    con.endpoint.resolve()
+                if self._aie_stream is not None:
+                    op.set_aie_stream(*self._aie_stream)
+
+                # Pin DMA channels requested on the handles. The producer channel
+                # and one channel per consumer (-1 = auto-assign that consumer) are
+                # stamped onto the op for the stateful-transform pass to honor.
+                if self._prod is not None and self._prod.channel is not None:
+                    op.set_prod_dma_channel(self._prod.channel)
+                cons_channels = [con.channel for con in self._cons]
+                if any(ch is not None for ch in cons_channels):
+                    op.set_cons_dma_channels(
+                        [-1 if ch is None else ch for ch in cons_channels]
+                    )
+
+                # Shared-memory delegate: redirect the fifo's buffer pool to a tile
+                # whose memory module is shared with both prod and cons. See the
+                # delegate_tile docstring on ObjectFifo for the constraint.
+                if self._delegate_tile is not None:
+                    op.allocate(self._delegate_tile.op)
+
+                assert self._prod is not None
+                if isinstance(self._prod.endpoint, ObjectFifoLink):
+                    self._prod.endpoint.resolve()
+                for con in self._cons:
+                    if isinstance(con.endpoint, ObjectFifoLink):
+                        con.endpoint.resolve()
 
     def _acquire(
         self,

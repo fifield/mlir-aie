@@ -43,6 +43,7 @@ from .task import (
     InlineOpRuntimeTask,
     FinishTaskGroupTask,
 )
+from .._loc import capture_user_loc
 
 
 def _iter_flat(obj):
@@ -261,6 +262,7 @@ class Runtime(Resolvable):
                 wait,
                 offset_param_name,
                 packet=packet,
+                user_loc=capture_user_loc(name=f"fill({in_fifo.name})"),
             )
         )
 
@@ -325,6 +327,7 @@ class Runtime(Resolvable):
                 wait,
                 offset_param_name,
                 packet=packet,
+                user_loc=capture_user_loc(name=f"drain({out_fifo.name})"),
             )
         )
 
