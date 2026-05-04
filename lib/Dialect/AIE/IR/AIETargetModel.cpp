@@ -1847,17 +1847,16 @@ bool AIE4TargetModel::isMemSouth(int srcCol, int srcRow, int dstCol,
 bool AIE4TargetModel::isLegalMemAffinity(int coreCol, int coreRow, int memCol,
                                          int memRow) const {
 
-  bool IsMemWest = isMemWest(coreCol, coreRow, memCol, memRow);
-  bool IsMemEast = isMemEast(coreCol, coreRow, memCol, memRow);
-  bool IsMemNorth = isMemNorth(coreCol, coreRow, memCol, memRow);
-  bool IsMemSouth = isMemSouth(coreCol, coreRow, memCol, memRow);
-
   if (isMemTile(coreCol, coreRow))
     return isEast(coreCol, coreRow, memCol, memRow) ||
            isInternal(coreCol, coreRow, memCol, memRow) ||
            isWest(coreCol, coreRow, memCol, memRow);
-  return (IsMemSouth && !isMemTile(memCol, memRow)) || IsMemNorth ||
-         IsMemWest || IsMemEast;
+
+  // AIE4 compute tiles have no load/store interface to neighboring tile data
+  // memory. Only the tile's own data memory is reachable (mapped via the
+  // East/Internal direction by isMemEast). Cross-tile data movement must go
+  // through the tile DMAs and stream switches.
+  return isMemEast(coreCol, coreRow, memCol, memRow);
 }
 
 uint64_t AIE4TargetModel::getDmaBdAddress(int col, int row, uint32_t bd_id,
