@@ -26,7 +26,7 @@ mlir-aie currently makes essentially no use of any of this.
 
 ## Current state
 
-A survey of the source tree (mlir-aie commit on branch `mdv6`):
+A survey of the source tree (mlir-aie commit `9796296`):
 
 - **C++ passes**: 136+ call sites of `builder.getUnknownLoc()` /
   `UnknownLoc::get(...)` across 20 files. The hotspots are
