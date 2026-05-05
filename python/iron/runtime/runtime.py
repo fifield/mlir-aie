@@ -365,7 +365,14 @@ class Runtime(Resolvable):
                 if arg.endpoint is None:
                     arg.endpoint = RuntimeEndpoint(AnyShimTile)
                 self._fifos.add(arg)
-        self._tasks.append(InlineOpRuntimeTask(inline_func, inline_args))
+        fn_name = getattr(inline_func, "__name__", "inline_ops")
+        self._tasks.append(
+            InlineOpRuntimeTask(
+                inline_func,
+                inline_args,
+                user_loc=capture_user_loc(name=f"inline_ops({fn_name})"),
+            )
+        )
 
     def enable_trace(
         self,
@@ -423,7 +430,11 @@ class Runtime(Resolvable):
             barrier (WorkerRuntimeBarrier): The WorkerRuntimeBarrier to set.
             value (int): The value to set the barrier to.
         """
-        self._tasks.append(_BarrierSetOp(barrier, value))
+        self._tasks.append(
+            _BarrierSetOp(
+                barrier, value, user_loc=capture_user_loc(name="set_barrier")
+            )
+        )
 
     def sync_parameters(self):
         """Emit `aiex.sync_scratchpad_parameters_from_host` in the runtime sequence.

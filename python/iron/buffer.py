@@ -18,6 +18,7 @@ from ..helpers.util import (
 )
 from .device import Tile
 from .resolvable import Resolvable, NotResolvedError
+from ._loc import capture_user_loc, loc_or_unknown
 
 if TYPE_CHECKING:
     from .worker import Worker
@@ -75,6 +76,7 @@ class Buffer(Resolvable):
         # shared (read) across Workers — see Worker.
         self._explicit_tile = tile is not None
         self._owner_worker: "Worker | None" = None
+        self._user_loc = capture_user_loc(name=self._name)
 
     @property
     def tile(self) -> Tile | None:
@@ -133,11 +135,12 @@ class Buffer(Resolvable):
         if not self._op:
             if not self._tile:
                 raise ValueError("Cannot resolve buffer until it has been placed.")
-            self._op = buffer(
-                tile=self._tile.op,
-                datatype=self._arr_type,
-                name=self._name,
-                address=self._address,
-                initial_value=self._initial_value,
-                use_write_rtp=self._use_write_rtp,
-            )
+            with loc_or_unknown(self._user_loc):
+                self._op = buffer(
+                    tile=self._tile.op,
+                    datatype=self._arr_type,
+                    name=self._name,
+                    address=self._address,
+                    initial_value=self._initial_value,
+                    use_write_rtp=self._use_write_rtp,
+                )

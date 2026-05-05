@@ -54,20 +54,17 @@ class CapturedLoc:
         return ir.Location.name(self.name, file_loc)
 
     def __enter__(self):
-        # Materialize on entry so callers can write
-        # `with self._user_loc:` even though this is not a real Location.
-        self._active = self.materialize()
-        self._active.__enter__()
-        return self._active
+        # Frozen dataclass forbids ordinary attribute assignment, so go
+        # through object.__setattr__ to stash the materialized Location.
+        active = self.materialize()
+        object.__setattr__(self, "_active", active)
+        active.__enter__()
+        return active
 
     def __exit__(self, *args):
-        self._active.__exit__(*args)
-        # frozen dataclass: we set _active via object.__setattr__ above? no,
-        # __enter__ above set it via normal attribute assignment which
-        # works because frozen=True only forbids assignment via __init__-
-        # produced attrs. Actually frozen dataclasses *do* forbid all
-        # assignment, so use object.__setattr__:
+        active = self._active
         object.__setattr__(self, "_active", None)
+        return active.__exit__(*args)
 
 
 def _is_internal_frame(filename: str) -> bool:

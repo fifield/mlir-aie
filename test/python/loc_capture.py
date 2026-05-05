@@ -54,6 +54,14 @@ def main():
             assert "loc_capture.py" in str(active)
         print("CHECK-5: loc_or_unknown context manager works")
 
+        # CapturedLoc is itself a context manager (frozen-dataclass safe).
+        with captured as direct:
+            assert "loc_capture.py" in str(direct)
+        # Re-entering after exit must work too.
+        with captured as direct2:
+            assert "loc_capture.py" in str(direct2)
+        print("CHECK-6: CapturedLoc.__enter__/__exit__ works on frozen dataclass")
+
     print("ALL OK")
 
 
@@ -62,6 +70,7 @@ def main():
 # CHECK: CHECK-3: materialized = loc("{{.*}}loc_capture.py":{{[0-9]+}}:{{[0-9]+}})
 # CHECK: CHECK-4: named materialized = loc("my_name"("{{.*}}loc_capture.py":{{[0-9]+}}:{{[0-9]+}}))
 # CHECK: CHECK-5: loc_or_unknown context manager works
+# CHECK: CHECK-6: CapturedLoc.__enter__/__exit__ works on frozen dataclass
 # CHECK: ALL OK
 
 if __name__ == "__main__":
