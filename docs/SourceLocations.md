@@ -180,3 +180,47 @@ buffers it materializes.
 - Phase 3 (backend / tooling): a few days, mostly straightforward once
   the IR carries locations end-to-end. The DWARF path on AIE-core code is
   already implemented upstream.
+
+## Status (as of branch `location`)
+
+Phase 1 fully implemented. Phase 2 partially implemented — the passes on
+the IRON → ObjectFifo → core/runtime/configuration path now thread
+locations end-to-end. Tracked in three regression-tested lit cases:
+
+- `test/python/loc_capture.py` — exercises the helper.
+- `test/python/iron_loc_emit.py` — builds an IRON program and verifies
+  (a) the emitted MLIR has `loc("of_in"(file:line))`-style NameLocs on
+  every IRON entry-point op and (b) running through
+  `--aie-place-tiles --aie-objectFifo-stateful-transform` preserves
+  those locations on the synthesized buffers / locks / dma_bd.
+- `test/objectFifo-stateful-transform/base/loc_preservation.mlir` —
+  hand-written input asserting the C++ pass preserves an explicit
+  `loc(#user_loc)`.
+
+`getUnknownLoc()` count in `lib/`: ~136 → ~56 (60% reduction).
+
+Passes converted in this POC:
+- `lib/Dialect/AIE/Transforms/AIEObjectFifoStatefulTransform.cpp`
+  (38 → 0)
+- `lib/Dialect/AIE/Transforms/AIECoreToStandard.cpp` (13 → 1; the one
+  remaining is `declareAIEIntrinsics`, which emits LLVM-intrinsic
+  `func.func` declarations that don't correspond to user code)
+- `lib/Dialect/AIE/Transforms/AIECreatePathFindFlows.cpp` (19 → 0)
+- `lib/Dialect/AIEX/Transforms/AIEHerdRouting.cpp` (6 → 0)
+- `lib/Conversion/AIEToConfiguration/AIEToConfiguration.cpp` (5 → 0)
+
+Remaining work for full coverage (each is mechanical, mirrors the
+patterns above):
+- `AIEVecToLLVM.cpp` (vector → LLVM lowering on the AIE-core side; lets
+  DWARF carry user locs into AIE-core object code via the existing
+  upstream `DebugTranslation`).
+- `AIEPathFinder.cpp` (legacy pathfinder), `AIECreateCores.cpp`,
+  `AIELowerCascadeFlows.cpp`, `AIELowerMemcpy.cpp`,
+  `AIECreateBroadcastPacket.cpp`, `AIECtrlPacketToDma.cpp`,
+  `AIEExpandLoadPdi.cpp`, plus a handful of misc dialect-internal sites.
+
+Phase 3 (backend / tooling) is unstarted but unblocked: locations now
+flow far enough through the pipeline that wiring `aie-translate` debug
+output and adding `--mlir-print-debuginfo` to aiecc.py would surface
+them in the LLVM IR / DWARF on the AIE-core side without further
+plumbing.
