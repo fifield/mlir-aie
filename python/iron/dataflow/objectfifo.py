@@ -763,6 +763,12 @@ class ObjectFifoLink(ObjectFifoEndpoint, Resolvable):
         if tile.tile_type is None:
             tile.tile_type = AIETileType.MemTile
         ObjectFifoEndpoint.__init__(self, tile)
+        # Source loc points at the user's join/split/forward call site.
+        link_name = "link_{}_to_{}".format(
+            "_".join(s.name for s in self._srcs),
+            "_".join(d.name for d in self._dsts),
+        )
+        self._user_loc = capture_user_loc(name=link_name)
 
     def resolve(
         self,
@@ -784,6 +790,7 @@ class ObjectFifoLink(ObjectFifoEndpoint, Resolvable):
                 d.resolve()
             src_ops = [s.op for s in self._srcs]
             dst_ops = [d.op for d in self._dsts]
-            self._op = object_fifo_link(
-                src_ops, dst_ops, self._src_offsets, self._dst_offsets
-            )
+            with loc_or_unknown(self._user_loc):
+                self._op = object_fifo_link(
+                    src_ops, dst_ops, self._src_offsets, self._dst_offsets
+                )

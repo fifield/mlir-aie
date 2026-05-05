@@ -214,19 +214,23 @@ class WorkerRuntimeBarrier:
 class _BarrierSetOp(Resolvable):
     """A resolvable instance of a WorkerRuntimeBarrier. This should not be used directly."""
 
-    def __init__(self, barrier: WorkerRuntimeBarrier, value: int):
+    def __init__(self, barrier: WorkerRuntimeBarrier, value: int, user_loc=None):
         """Construct a _BarrierSetOp.
 
         Args:
             barrier (WorkerRuntimeBarrier): The barrier whose value will be set.
             value (int): The value to set.
+            user_loc (CapturedLoc | None, optional): User-source loc captured at the
+                Runtime.set_barrier call site.
         """
         self.barrier: WorkerRuntimeBarrier = barrier
         self.value: int = value
+        self._user_loc = user_loc
 
     def resolve(
         self,
         loc: ir.Location | None = None,
         ip: ir.InsertionPoint | None = None,
     ) -> None:
-        self.barrier._set_barrier_value(self.value)
+        with loc_or_unknown(self._user_loc):
+            self.barrier._set_barrier_value(self.value)

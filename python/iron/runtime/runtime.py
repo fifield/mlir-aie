@@ -256,7 +256,14 @@ class Runtime(Resolvable):
             inline_args (list): The state the function needs to execute.
         """
         # TODO: should filter args based on some criteria??
-        self._tasks.append(InlineOpRuntimeTask(inline_func, inline_args))
+        fn_name = getattr(inline_func, "__name__", "inline_ops")
+        self._tasks.append(
+            InlineOpRuntimeTask(
+                inline_func,
+                inline_args,
+                user_loc=capture_user_loc(name=f"inline_ops({fn_name})"),
+            )
+        )
 
     def enable_trace(
         self,
@@ -308,7 +315,11 @@ class Runtime(Resolvable):
             barrier (WorkerRuntimeBarrier): The WorkerRuntimeBarrier to set.
             value (int): The value to set the barrier to.
         """
-        self._tasks.append(_BarrierSetOp(barrier, value))
+        self._tasks.append(
+            _BarrierSetOp(
+                barrier, value, user_loc=capture_user_loc(name="set_barrier")
+            )
+        )
 
     @property
     def workers(self) -> list[Worker]:
