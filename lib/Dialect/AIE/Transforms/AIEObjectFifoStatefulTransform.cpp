@@ -382,9 +382,8 @@ struct AIEObjectFifoStatefulTransformPass
                    Location loc = {}) {
     auto ofName = builder.getStringAttr(name);
     auto fifo = ObjectFifoCreateOp::create(
-        builder, loc ? loc : builder.getUnknownLoc(), ofName, prodTile,
-        consTile, depth, datatype, dimensionsToStream,
-        dimensionsFromStreamPerConsumer);
+        builder, loc, ofName, prodTile, consTile, depth, datatype,
+        dimensionsToStream, dimensionsFromStreamPerConsumer);
     return fifo;
   }
 
