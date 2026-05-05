@@ -375,16 +375,15 @@ struct AIEObjectFifoStatefulTransformPass
   }
 
   ObjectFifoCreateOp
-  createObjectFifo(OpBuilder &builder, AIEObjectFifoType datatype,
-                   std::string name, Value prodTile, Value consTile,
-                   Attribute depth, BDDimLayoutArrayAttr dimensionsToStream,
-                   BDDimLayoutArrayArrayAttr dimensionsFromStreamPerConsumer,
-                   Location loc = {}) {
+  createObjectFifo(OpBuilder &builder, Location loc,
+                   AIEObjectFifoType datatype, std::string name, Value prodTile,
+                   Value consTile, Attribute depth,
+                   BDDimLayoutArrayAttr dimensionsToStream,
+                   BDDimLayoutArrayArrayAttr dimensionsFromStreamPerConsumer) {
     auto ofName = builder.getStringAttr(name);
     auto fifo = ObjectFifoCreateOp::create(
-        builder, loc ? loc : builder.getUnknownLoc(), ofName, prodTile,
-        consTile, depth, datatype, dimensionsToStream,
-        dimensionsFromStreamPerConsumer);
+        builder, loc, ofName, prodTile, consTile, depth, datatype,
+        dimensionsToStream, dimensionsFromStreamPerConsumer);
     return fifo;
   }
 
@@ -1916,8 +1915,8 @@ struct AIEObjectFifoStatefulTransformPass
                                            singletonFromStreamDims);
 
         ObjectFifoCreateOp consumerFifo = createObjectFifo(
-            builder, datatype, consumerFifoName, consumerTile, consumerTile,
-            consumerObjFifoSize, emptyDims, fromStreamDims);
+            builder, createOp.getLoc(), datatype, consumerFifoName, consumerTile,
+            consumerTile, consumerObjFifoSize, emptyDims, fromStreamDims);
         if (createOp.getDisableSynchronization())
           consumerFifo.setDisableSynchronization(true);
         // Propagate iter_count attribute from the original createOp
