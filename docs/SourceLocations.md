@@ -183,9 +183,8 @@ buffers it materializes.
 
 ## Status (as of branch `location`)
 
-Phase 1 fully implemented. Phase 2 partially implemented — the passes on
-the IRON → ObjectFifo → core/runtime/configuration path now thread
-locations end-to-end. Tracked in three regression-tested lit cases:
+Phase 1 and Phase 2 essentially complete. Tracked in three
+regression-tested lit cases:
 
 - `test/python/loc_capture.py` — exercises the helper.
 - `test/python/iron_loc_emit.py` — builds an IRON program and verifies
@@ -197,30 +196,42 @@ locations end-to-end. Tracked in three regression-tested lit cases:
   hand-written input asserting the C++ pass preserves an explicit
   `loc(#user_loc)`.
 
-`getUnknownLoc()` count in `lib/`: ~136 → ~56 (60% reduction).
+`getUnknownLoc()` count in `lib/`: **~136 → 15 (89% reduction)**.
 
-Passes converted in this POC:
-- `lib/Dialect/AIE/Transforms/AIEObjectFifoStatefulTransform.cpp`
-  (38 → 0)
-- `lib/Dialect/AIE/Transforms/AIECoreToStandard.cpp` (13 → 1; the one
-  remaining is `declareAIEIntrinsics`, which emits LLVM-intrinsic
-  `func.func` declarations that don't correspond to user code)
-- `lib/Dialect/AIE/Transforms/AIECreatePathFindFlows.cpp` (19 → 0)
-- `lib/Dialect/AIEX/Transforms/AIEHerdRouting.cpp` (6 → 0)
-- `lib/Conversion/AIEToConfiguration/AIEToConfiguration.cpp` (5 → 0)
+Passes converted in this POC (per file, before → after):
 
-Remaining work for full coverage (each is mechanical, mirrors the
-patterns above):
-- `AIEVecToLLVM.cpp` (vector → LLVM lowering on the AIE-core side; lets
-  DWARF carry user locs into AIE-core object code via the existing
-  upstream `DebugTranslation`).
-- `AIEPathFinder.cpp` (legacy pathfinder), `AIECreateCores.cpp`,
-  `AIELowerCascadeFlows.cpp`, `AIELowerMemcpy.cpp`,
-  `AIECreateBroadcastPacket.cpp`, `AIECtrlPacketToDma.cpp`,
-  `AIEExpandLoadPdi.cpp`, plus a handful of misc dialect-internal sites.
+| File | Before | After |
+|------|--------|-------|
+| `AIE/Transforms/AIEObjectFifoStatefulTransform.cpp` | 38 | 0 |
+| `AIE/Transforms/AIECreatePathFindFlows.cpp` | 19 | 0 |
+| `AIE/Transforms/AIECoreToStandard.cpp` | 13 | 1 |
+| `AIE/Transforms/AIEObjectFifoRegisterProcess.cpp` | 10 | 0 |
+| `AIEX/Transforms/AIECreateCores.cpp` | 9 | 0 |
+| `AIEX/Transforms/AIELowerMemcpy.cpp` | 6 | 0 |
+| `AIEX/Transforms/AIEHerdRouting.cpp` | 6 | 0 |
+| `Conversion/AIEToConfiguration/AIEToConfiguration.cpp` | 5 | 1 |
+| `AIE/Transforms/AIEGenerateColumnControlOverlay.cpp` | 5 | 0 |
+| `AIEX/Transforms/AIECreateBroadcastPacket.cpp` | 4 | 0 |
+| 8 single-site files | 1 each | 0 |
 
-Phase 3 (backend / tooling) is unstarted but unblocked: locations now
-flow far enough through the pipeline that wiring `aie-translate` debug
-output and adding `--mlir-print-debuginfo` to aiecc.py would surface
-them in the LLVM IR / DWARF on the AIE-core side without further
-plumbing.
+The 15 remaining sites are intentionally left, all "no source op" cases:
+- `Conversion/AIEVecToLLVM/AIEVecToLLVM.cpp` (8): LLVM-intrinsic
+  FuncOp *declarations* and helper-wrapper bodies. Equivalent to
+  `declareAIEIntrinsics` in AIECoreToStandard. The actual user-op
+  lowering still preserves location via the rewriter pattern.
+- `AIE/Transforms/AIEPathFinder.cpp` (5): `DynamicTileAnalysis`
+  synthesizing Tile/Switchbox/ShimMux infrastructure on demand. The
+  analyzer has no direct handle to a source op; threading one through
+  would require widening the analysis-pass API.
+- `AIE/Transforms/AIECoreToStandard.cpp` (1): `declareAIEIntrinsics`.
+- `Conversion/AIEToConfiguration/AIEToConfiguration.cpp` (1):
+  `convertTransactionBinaryToMLIR` creates a fresh ModuleOp from a
+  parsed binary blob — there is no source MLIR op to reference.
+
+Phase 3 (backend / tooling) is unstarted but unblocked. Next steps:
+- Verify `aie-translate` preserves debug info on the way to LLVM IR.
+- Confirm `DebugTranslation` materializes `DILocation` from the
+  threaded-through `FileLineColLoc`s.
+- Expose `--mlir-print-debuginfo` and a `--keep-loc` flag in aiecc.py.
+- Audit `lib/Targets/` (CDO, NPU runtime emitters) for opportunities
+  to attach source-line ↔ transaction maps to the runtime artifact.
