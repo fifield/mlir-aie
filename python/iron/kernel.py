@@ -19,6 +19,7 @@ from ..helpers.dialects.func import call
 from ..dialects.aie import external_func
 from .resolvable import Resolvable
 from .buffer import Buffer
+from ._loc import capture_user_loc, loc_or_unknown
 
 
 class BaseKernel(Resolvable):
@@ -40,6 +41,7 @@ class BaseKernel(Resolvable):
         self._name = name
         self._arg_types = arg_types
         self._op: FuncOp | None = None
+        self._user_loc = capture_user_loc(name=name)
 
     def tile_size(self, arg_index: int = 0) -> int:
         """Return the first dimension of the array argument at ``arg_index``.
@@ -127,9 +129,12 @@ class Kernel(BaseKernel):
         ip: ir.InsertionPoint | None = None,
     ) -> None:
         if not self._op:
-            self._op = external_func(
-                self._name, inputs=self._arg_types, link_with=self._object_file_name
-            )
+            with loc_or_unknown(self._user_loc):
+                self._op = external_func(
+                    self._name,
+                    inputs=self._arg_types,
+                    link_with=self._object_file_name,
+                )
 
 
 class ExternalFunction(Kernel):

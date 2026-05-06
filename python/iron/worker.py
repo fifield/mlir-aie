@@ -20,6 +20,7 @@ from .dataflow.objectfifo import ObjectFifoHandle, ObjectFifo
 from .dataflow.endpoint import ObjectFifoEndpoint
 from .buffer import Buffer
 from .resolvable import Resolvable
+from ._loc import capture_user_loc, loc_or_unknown
 
 
 class Worker(ObjectFifoEndpoint):
@@ -115,6 +116,9 @@ class Worker(ObjectFifoEndpoint):
             # func.func declaration. Other unrecognized args are assumed to be
             # metaprogramming values (Python scalars, etc.).
 
+        fn_name = getattr(self.core_fn, "__name__", None)
+        self._user_loc = capture_user_loc(name=fn_name)
+
     @property
     def fifos(self) -> list[ObjectFifoHandle]:
         """Returns a list of ObjectFifoHandles given to the Worker via fn_args.
@@ -142,16 +146,17 @@ class Worker(ObjectFifoEndpoint):
             raise ValueError("Must place Worker before it can be resolved.")
         my_tile = self._tile.op
 
-        # Create the necessary locks for the core operation to synchronize with the runtime sequence
-        # and register them in the corresponding barriers.
-        for barrier in self._barriers:
-            l = lock(my_tile)
-            barrier._add_worker_lock(l)
+        with loc_or_unknown(self._user_loc):
+            # Create the necessary locks for the core operation to synchronize with the runtime sequence
+            # and register them in the corresponding barriers.
+            for barrier in self._barriers:
+                l = lock(my_tile)
+                barrier._add_worker_lock(l)
 
-        @core(my_tile, stack_size=self.stack_size)
-        def core_body():
-            for _ in range_(sys.maxsize) if self._while_true else range(1):
-                self.core_fn(*self.fn_args)
+            @core(my_tile, stack_size=self.stack_size)
+            def core_body():
+                for _ in range_(sys.maxsize) if self._while_true else range(1):
+                    self.core_fn(*self.fn_args)
 
 
 class WorkerRuntimeBarrier:
@@ -209,19 +214,23 @@ class WorkerRuntimeBarrier:
 class _BarrierSetOp(Resolvable):
     """A resolvable instance of a WorkerRuntimeBarrier. This should not be used directly."""
 
-    def __init__(self, barrier: WorkerRuntimeBarrier, value: int):
+    def __init__(self, barrier: WorkerRuntimeBarrier, value: int, user_loc=None):
         """Construct a _BarrierSetOp.
 
         Args:
             barrier (WorkerRuntimeBarrier): The barrier whose value will be set.
             value (int): The value to set.
+            user_loc (CapturedLoc | None, optional): User-source loc captured at the
+                Runtime.set_barrier call site.
         """
         self.barrier: WorkerRuntimeBarrier = barrier
         self.value: int = value
+        self._user_loc = user_loc
 
     def resolve(
         self,
         loc: ir.Location | None = None,
         ip: ir.InsertionPoint | None = None,
     ) -> None:
-        self.barrier._set_barrier_value(self.value)
+        with loc_or_unknown(self._user_loc):
+            self.barrier._set_barrier_value(self.value)

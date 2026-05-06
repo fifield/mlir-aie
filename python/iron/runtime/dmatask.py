@@ -16,6 +16,7 @@ from .data import RuntimeData
 from ...helpers.taplib import TensorAccessPattern
 from .task import RuntimeTask
 from .taskgroup import RuntimeTaskGroup
+from .._loc import loc_or_unknown
 
 
 class DMATask(RuntimeTask):
@@ -26,6 +27,7 @@ class DMATask(RuntimeTask):
         tap: TensorAccessPattern,
         task_group: RuntimeTaskGroup | None = None,
         wait: bool = False,
+        user_loc: ir.Location | None = None,
     ):
         """A RuntimeTask that will resolve to a DMA Operation.
 
@@ -41,6 +43,7 @@ class DMATask(RuntimeTask):
         self._tap = tap
         self._wait = wait
         self._task = None
+        self._user_loc = user_loc
         RuntimeTask.__init__(self, task_group)
 
     def will_wait(self) -> bool:
@@ -65,10 +68,11 @@ class DMATask(RuntimeTask):
         loc: ir.Location | None = None,
         ip: ir.InsertionPoint | None = None,
     ) -> None:
-        self._task = shim_dma_single_bd_task(
-            self._object_fifo.op,
-            self._rt_data.op,
-            tap=self._tap,
-            issue_token=self._wait,
-        )
-        dma_start_task(self._task)
+        with loc_or_unknown(self._user_loc):
+            self._task = shim_dma_single_bd_task(
+                self._object_fifo.op,
+                self._rt_data.op,
+                tap=self._tap,
+                issue_token=self._wait,
+            )
+            dma_start_task(self._task)

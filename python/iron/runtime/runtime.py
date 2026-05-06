@@ -38,6 +38,7 @@ from .task import (
     InlineOpRuntimeTask,
     FinishTaskGroupTask,
 )
+from .._loc import capture_user_loc
 
 
 class Runtime(Resolvable):
@@ -173,7 +174,16 @@ class Runtime(Resolvable):
 
         in_fifo.endpoint = rt_endpoint
         self._fifos.add(in_fifo)
-        self._tasks.append(DMATask(in_fifo, source, tap, task_group, wait))
+        self._tasks.append(
+            DMATask(
+                in_fifo,
+                source,
+                tap,
+                task_group,
+                wait,
+                user_loc=capture_user_loc(name=f"fill({in_fifo.name})"),
+            )
+        )
 
     def drain(
         self,
@@ -210,7 +220,16 @@ class Runtime(Resolvable):
 
         out_fifo.endpoint = rt_endpoint
         self._fifos.add(out_fifo)
-        self._tasks.append(DMATask(out_fifo, dest, tap, task_group, wait))
+        self._tasks.append(
+            DMATask(
+                out_fifo,
+                dest,
+                tap,
+                task_group,
+                wait,
+                user_loc=capture_user_loc(name=f"drain({out_fifo.name})"),
+            )
+        )
 
     def start(self, *args: Worker):
         """A placeholder operation to indicate that one or more Worker should be started on the device.
@@ -237,7 +256,14 @@ class Runtime(Resolvable):
             inline_args (list): The state the function needs to execute.
         """
         # TODO: should filter args based on some criteria??
-        self._tasks.append(InlineOpRuntimeTask(inline_func, inline_args))
+        fn_name = getattr(inline_func, "__name__", "inline_ops")
+        self._tasks.append(
+            InlineOpRuntimeTask(
+                inline_func,
+                inline_args,
+                user_loc=capture_user_loc(name=f"inline_ops({fn_name})"),
+            )
+        )
 
     def enable_trace(
         self,
@@ -289,7 +315,11 @@ class Runtime(Resolvable):
             barrier (WorkerRuntimeBarrier): The WorkerRuntimeBarrier to set.
             value (int): The value to set the barrier to.
         """
-        self._tasks.append(_BarrierSetOp(barrier, value))
+        self._tasks.append(
+            _BarrierSetOp(
+                barrier, value, user_loc=capture_user_loc(name="set_barrier")
+            )
+        )
 
     @property
     def workers(self) -> list[Worker]:
