@@ -51,6 +51,10 @@ class DMATask(RuntimeTask):
         return self._wait
 
     @property
+    def user_loc(self):
+        return self._user_loc
+
+    @property
     def fifo(self) -> ObjectFifoHandle:
         """The ObjectFifoHandle associated with this task."""
         return self._object_fifo

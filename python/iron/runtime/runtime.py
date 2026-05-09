@@ -38,7 +38,7 @@ from .task import (
     InlineOpRuntimeTask,
     FinishTaskGroupTask,
 )
-from .._loc import capture_user_loc
+from .._loc import capture_user_loc, loc_or_unknown
 
 
 class Runtime(Resolvable):
@@ -368,25 +368,28 @@ class Runtime(Resolvable):
 
                 # We want to keep order, EXCEPT do waits before frees
                 wait_tasks = [
-                    (fn, args) for (fn, args) in actions if fn == dma_await_task
+                    action for action in actions if action[0] == dma_await_task
                 ]
                 free_tasks = [
-                    (fn, args) for (fn, args) in actions if fn == dma_free_task
+                    action for action in actions if action[0] == dma_free_task
                 ]
 
                 # Check for anything known -- this shouldn't happen, but we'll catch it gracefully anyways.
                 if len(wait_tasks) + len(free_tasks) != len(actions):
                     unknown_actions = [
-                        (fn, args)
-                        for (fn, args) in actions
-                        if fn != dma_await_task and fn != dma_free_task
+                        action
+                        for action in actions
+                        if action[0] != dma_await_task
+                        and action[0] != dma_free_task
                     ]
                     raise Exception(
-                        f"Unknown action type detected: {','.join(unknown_actions)}"
+                        "Unknown action type detected: "
+                        f"{', '.join(str(action[0]) for action in unknown_actions)}"
                     )
 
-                for fn, args in wait_tasks + free_tasks:
-                    fn(*args)
+                for fn, args, user_loc in wait_tasks + free_tasks:
+                    with loc_or_unknown(user_loc):
+                        fn(*args)
                 task_group_actions[tg] = None
 
             default_task_group = self.task_group()
@@ -404,11 +407,11 @@ class Runtime(Resolvable):
                         current_task_group = default_task_group
                     if task.will_wait():
                         task_group_actions[current_task_group].append(
-                            (dma_await_task, [task.task])
+                            (dma_await_task, [task.task], task.user_loc)
                         )
                     else:
                         task_group_actions[current_task_group].append(
-                            (dma_free_task, [task.task])
+                            (dma_free_task, [task.task], task.user_loc)
                         )
                 if isinstance(task, FinishTaskGroupTask):
                     finish_task_group(task.task_group, task_group_actions)

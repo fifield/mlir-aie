@@ -68,8 +68,12 @@ def main():
 # POST-DAG: aie.lock({{.*}}) {{.*}}sym_name = "of_out_prod_lock_0"{{.*}}loc(#[[OF_OUT]])
 # POST-DAG: aie.dma_bd(%of_in_cons_buff_0 : memref<64xi32>, 0, 64) loc(#[[OF_IN]])
 # POST-DAG: aie.dma_bd(%of_out_buff_0 : memref<64xi32>, 0, 64) loc(#[[OF_OUT]])
+# POST-DAG: aiex.dma_await_task{{.*}} loc(#[[DRAIN:loc[0-9]*]])
+# POST-DAG: aiex.dma_free_task{{.*}} loc(#[[FILL:loc[0-9]*]])
 # POST-DAG: #[[OF_IN]] = loc("of_in"(
 # POST-DAG: #[[OF_OUT]] = loc("of_out"(
+# POST-DAG: #[[FILL]] = loc("fill(of_in)"(
+# POST-DAG: #[[DRAIN]] = loc("drain(of_out)"(
 
 if __name__ == "__main__":
     main()

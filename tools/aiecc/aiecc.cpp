@@ -3980,8 +3980,10 @@ static LogicalResult generateControlPacketOutput(ModuleOp moduleOp,
   }
 
   std::vector<uint32_t> ctrlPktInstructions;
+  std::vector<xilinx::AIE::TxnLocEntry> ctrlPktLocmap;
   if (failed(xilinx::AIE::AIETranslateControlPacketsToUI32Vec(
-          *clonedModule, ctrlPktInstructions, devName, ""))) {
+          *clonedModule, ctrlPktInstructions, devName, "",
+          keepLoc ? &ctrlPktLocmap : nullptr))) {
     llvm::errs() << "Error generating control packet binary for device: "
                  << devName << "\n";
     return failure();
@@ -4004,6 +4006,24 @@ static LogicalResult generateControlPacketOutput(ModuleOp moduleOp,
     llvm::outs() << "Wrote " << ctrlPktInstructions.size()
                  << " control packet instructions to: " << ctrlPktBinPath
                  << "\n";
+  }
+
+  if (keepLoc) {
+    SmallString<128> locmapPath(ctrlPktBinPath);
+    locmapPath.append(".locmap.json");
+    std::error_code locEc;
+    raw_fd_ostream locFile(locmapPath, locEc, sys::fs::OpenFlags::OF_Text);
+    if (locEc) {
+      llvm::errs() << "Error opening locmap sidecar: " << locEc.message()
+                   << "\n";
+      return failure();
+    }
+    StringRef binBaseName = sys::path::filename(ctrlPktBinPath);
+    xilinx::AIE::emitNpuLocmapJSON(locFile, devName, binBaseName,
+                                   ctrlPktLocmap);
+    if (verbose)
+      llvm::outs() << "Wrote " << ctrlPktLocmap.size()
+                   << " locmap entries to: " << locmapPath << "\n";
   }
 
   // Step 2: Run control packet DMA lowering pipeline in-memory.
