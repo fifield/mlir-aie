@@ -375,6 +375,14 @@ static cl::opt<bool> dumpIntermediates(
     cl::desc("Dump intermediate MLIR files for debugging (default: off)"),
     cl::init(false), cl::cat(aieCompilerOptions));
 
+static cl::opt<bool> keepLoc(
+    "keep-loc",
+    cl::desc("Emit a <bin>.locmap.json sidecar next to each NPU instruction "
+             "binary, mapping each transaction word back to its IRON Python "
+             "source location. Also keeps debug-info on intermediate MLIR "
+             "dumps. Off by default."),
+    cl::init(false), cl::cat(aieCompilerOptions));
+
 static cl::opt<unsigned> numThreads(
     "j", cl::Prefix,
     cl::desc("Number of parallel threads for core compilation (0 = auto-detect "
@@ -3798,8 +3806,10 @@ static LogicalResult generateNpuInstructions(ModuleOp moduleOp,
       // Generate NPU instructions using direct C++ API call.
       // This replaces the subprocess call to aie-translate --aie-npu-to-binary.
       std::vector<uint32_t> instructions;
+      std::vector<xilinx::AIE::TxnLocEntry> locmap;
       if (failed(xilinx::AIE::AIETranslateNpuToBinary(
-              *clonedModule, instructions, devName, seqName))) {
+              *clonedModule, instructions, devName, seqName,
+              keepLoc ? &locmap : nullptr))) {
         llvm::errs() << "Error generating NPU instructions for sequence: "
                      << seqName << "\n";
         result = failure();
@@ -3822,6 +3832,27 @@ static LogicalResult generateNpuInstructions(ModuleOp moduleOp,
       if (verbose) {
         llvm::outs() << "Wrote " << instructions.size()
                      << " instructions to: " << outputPath << "\n";
+      }
+
+      // Emit the JSON sidecar when --keep-loc is on. Sidecar path is the
+      // .bin path with ".locmap.json" appended, so the .bin itself is
+      // unchanged for downstream XRT consumers.
+      if (keepLoc) {
+        SmallString<128> locmapPath(outputPath);
+        locmapPath.append(".locmap.json");
+        std::error_code locEc;
+        raw_fd_ostream locFile(locmapPath, locEc, sys::fs::OpenFlags::OF_Text);
+        if (locEc) {
+          llvm::errs() << "Error opening locmap sidecar: " << locEc.message()
+                       << "\n";
+          result = failure();
+          return;
+        }
+        StringRef binBaseName = sys::path::filename(outputPath);
+        xilinx::AIE::emitNpuLocmapJSON(locFile, devName, binBaseName, locmap);
+        if (verbose)
+          llvm::outs() << "Wrote " << locmap.size()
+                       << " locmap entries to: " << locmapPath << "\n";
       }
     });
   }
@@ -4017,9 +4048,10 @@ static LogicalResult generateControlPacketOutput(ModuleOp moduleOp,
   }
 
   std::vector<uint32_t> dmaSeqInstructions;
-  if (failed(xilinx::AIE::AIETranslateNpuToBinary(*clonedModule,
-                                                  dmaSeqInstructions, devName,
-                                                  "" /* all sequences */))) {
+  std::vector<xilinx::AIE::TxnLocEntry> dmaSeqLocmap;
+  if (failed(xilinx::AIE::AIETranslateNpuToBinary(
+          *clonedModule, dmaSeqInstructions, devName, "" /* all sequences */,
+          keepLoc ? &dmaSeqLocmap : nullptr))) {
     llvm::errs() << "Error generating control packet DMA sequence for device: "
                  << devName << "\n";
     return failure();
@@ -4041,6 +4073,25 @@ static LogicalResult generateControlPacketOutput(ModuleOp moduleOp,
   if (verbose) {
     llvm::outs() << "Wrote " << dmaSeqInstructions.size()
                  << " DMA sequence instructions to: " << dmaSeqBinPath << "\n";
+  }
+
+  if (keepLoc) {
+    SmallString<128> locmapPath(dmaSeqBinPath);
+    locmapPath.append(".locmap.json");
+    std::error_code locEc;
+    raw_fd_ostream locFile(locmapPath, locEc, sys::fs::OpenFlags::OF_Text);
+    if (!locEc) {
+      StringRef binBaseName = sys::path::filename(dmaSeqBinPath);
+      xilinx::AIE::emitNpuLocmapJSON(locFile, devName, binBaseName,
+                                     dmaSeqLocmap);
+      if (verbose)
+        llvm::outs() << "Wrote " << dmaSeqLocmap.size()
+                     << " locmap entries to: " << locmapPath << "\n";
+    } else {
+      llvm::errs() << "Error opening locmap sidecar: " << locEc.message()
+                   << "\n";
+      return failure();
+    }
   }
 
   // Step 3: Generate combined ELF using aiebu-asm (if available)
