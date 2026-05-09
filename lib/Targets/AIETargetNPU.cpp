@@ -305,7 +305,7 @@ lookupRegisterByAddress(uint64_t address, const AIETargetModel &tm,
 static void pushLocEntry(std::vector<TxnLocEntry> *locmap,
                          uint32_t byteOffsetBefore, uint32_t byteOffsetAfter,
                          StringRef opcodeName, StringRef sourceOpName,
-                         uint64_t address, mlir::Operation *op,
+                         std::optional<uint64_t> address, mlir::Operation *op,
                          const AIETargetModel &tm) {
   if (!locmap)
     return;
@@ -318,7 +318,7 @@ static void pushLocEntry(std::vector<TxnLocEntry> *locmap,
   e.loc = op->getLoc();
   if (address) {
     if (auto regName =
-            lookupRegisterByAddress(address, tm, getRegDB(), e.registerModule);
+            lookupRegisterByAddress(*address, tm, getRegDB(), e.registerModule);
         !regName.empty()) {
       e.registerName = regName.str();
     }
@@ -375,7 +375,7 @@ LogicalResult xilinx::AIE::AIETranslateNpuToBinary(
             uint32_t before = byteOffset();
             appendSync(instructions, op);
             pushLocEntry(locmap, before, byteOffset(), "TCT",
-                         op->getName().getStringRef(), 0, op, tm);
+                         op->getName().getStringRef(), std::nullopt, op, tm);
           })
           .Case<NpuWrite32Op>([&](auto op) {
             count++;
@@ -406,7 +406,7 @@ LogicalResult xilinx::AIE::AIETranslateNpuToBinary(
             uint32_t before = byteOffset();
             appendLoadPdi(instructions, op);
             pushLocEntry(locmap, before, byteOffset(), "LOAD_PDI",
-                         op->getName().getStringRef(), 0, op, tm);
+                         op->getName().getStringRef(), std::nullopt, op, tm);
           })
           .Case<NpuAddressPatchOp>([&](auto op) {
             count++;
@@ -420,21 +420,21 @@ LogicalResult xilinx::AIE::AIETranslateNpuToBinary(
             uint32_t before = byteOffset();
             appendPreempt(instructions, op);
             pushLocEntry(locmap, before, byteOffset(), "PREEMPT",
-                         op->getName().getStringRef(), 0, op, tm);
+                         op->getName().getStringRef(), std::nullopt, op, tm);
           })
           .Case<NpuCreateScratchpadOp>([&](auto op) {
             count++;
             uint32_t before = byteOffset();
             appendCreateScratchpad(instructions, op);
             pushLocEntry(locmap, before, byteOffset(), "CREATE_SCRATCHPAD",
-                         op->getName().getStringRef(), 0, op, tm);
+                         op->getName().getStringRef(), std::nullopt, op, tm);
           })
           .Case<NpuUpdateFromScratchpadOp>([&](auto op) {
             count++;
             uint32_t before = byteOffset();
             appendUpdateRegFromScratchpad(instructions, op);
             pushLocEntry(locmap, before, byteOffset(), "UPDATE_FROM_SCRATCHPAD",
-                         op->getName().getStringRef(), 0, op, tm);
+                         op->getName().getStringRef(), std::nullopt, op, tm);
           });
     }
   }
@@ -576,7 +576,7 @@ void xilinx::AIE::emitNpuLocmapJSON(llvm::raw_ostream &output,
     o["opcode"] = e.opcodeName;
     o["source_op"] = e.sourceOpName;
     if (e.address)
-      o["address"] = llvm::formatv("{0:X}", e.address).str();
+      o["address"] = llvm::formatv("{0:X}", *e.address).str();
     if (!e.registerName.empty()) {
       o["register"] = e.registerName;
       o["register_module"] = e.registerModule;

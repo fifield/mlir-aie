@@ -38,7 +38,7 @@ struct TxnLocEntry {
   uint32_t byteSize = 0;
   std::string opcodeName;     // "WRITE32", "BLOCKWRITE", etc.
   std::string sourceOpName;   // "aiex.npu.write32", etc.
-  uint64_t address = 0;       // absolute device address when applicable
+  std::optional<uint64_t> address; // absolute device address when applicable
   std::string registerName;   // regdb-resolved register name; empty if unknown
   std::string registerModule; // regdb module: "core_module", "memory_module", etc.
   std::optional<mlir::Location> loc;
