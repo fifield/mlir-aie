@@ -12,9 +12,10 @@
 
 // Preprocess with overlay (matching ctrl_packet_reconfig test flow)
 // RUN: aie-opt -aie-generate-column-control-overlay="route-shim-to-tile-ctrl=true" %s -o %t_overlay.mlir
-// RUN: aiecc --no-xchesscc --no-xbridge --aie-generate-ctrlpkt --keep-loc --verbose --ctrlpkt-name=%t_ctrlpkt.bin --ctrlpkt-dma-seq-name=%t_dma_seq.bin %t_overlay.mlir 2>&1 | FileCheck %s
+// RUN: aiecc --no-xchesscc --no-xbridge --aie-generate-ctrlpkt --keep-loc --dump-intermediates --verbose --tmpdir=%t_ctrlpkt_tmp --ctrlpkt-name=%t_ctrlpkt.bin --ctrlpkt-dma-seq-name=%t_dma_seq.bin %t_overlay.mlir 2>&1 | FileCheck %s
 // RUN: test -f %t_ctrlpkt.bin.locmap.json
 // RUN: test -f %t_dma_seq.bin.locmap.json
+// RUN: FileCheck %s --check-prefix=DUMP < %t_ctrlpkt_tmp/main_ctrlpkt.mlir
 
 // CHECK: Generating control packets for device
 // CHECK: Running control packet pipeline in-memory
@@ -24,6 +25,8 @@
 // CHECK: Wrote {{[0-9]+}} DMA sequence instructions to
 // CHECK: Wrote {{[0-9]+}} locmap entries to: {{.*}}dma_seq.bin.locmap.json
 // CHECK: Compilation completed successfully
+
+// DUMP: loc(
 
 module {
   aie.device(npu1) {

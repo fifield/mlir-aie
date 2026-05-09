@@ -28,6 +28,7 @@
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/OperationSupport.h"
 #include "mlir/InitAllDialects.h"
 #include "mlir/InitAllExtensions.h"
 #include "mlir/InitAllPasses.h"
@@ -550,7 +551,13 @@ static bool dumpModuleToFile(ModuleOp moduleOp, StringRef filePath,
                  << filePath << ": " << ec.message() << "\n";
     return false;
   }
-  moduleOp->print(file);
+  if (keepLoc) {
+    OpPrintingFlags flags;
+    flags.enableDebugInfo(/*enable=*/true);
+    moduleOp->print(file, flags);
+  } else {
+    moduleOp->print(file);
+  }
   file.close();
 
   if (verbose) {
