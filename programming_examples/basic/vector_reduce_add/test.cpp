@@ -12,6 +12,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -19,6 +20,10 @@
 #include "xrt/xrt_bo.h"
 #include "xrt/xrt_device.h"
 #include "xrt/xrt_kernel.h"
+
+#include "xrt/experimental/xrt_elf.h"
+#include "xrt/experimental/xrt_ext.h"
+#include "xrt/experimental/xrt_module.h"
 
 #include "test_utils.h"
 
@@ -40,6 +45,10 @@ int main(int argc, const char *argv[]) {
   cxxopts::Options options("Vector Reduce Add Test");
   cxxopts::ParseResult vm;
   test_utils::add_default_options(options);
+  // AIE4/medusa full-ELF flow: load a single design ELF instead of xclbin+insts.
+  options.add_options()("full-elf",
+                        "path to full design ELF (AIE4/npu3 flow)",
+                        cxxopts::value<std::string>());
 
   test_utils::parse_options(argc, argv, options, vm);
   int verbosity = vm["verbosity"].as<int>();
@@ -57,38 +66,60 @@ int main(int argc, const char *argv[]) {
   // TODO Remove trace for now?
   size_t OUT_SIZE = INOUT1_SIZE + trace_size;
 
-  // Load instruction sequence
-  std::vector<uint32_t> instr_v =
-      test_utils::load_instr_binary(vm["instr"].as<std::string>());
-  if (verbosity >= 1)
-    std::cout << "Sequence instr count: " << instr_v.size() << "\n";
+  bool use_full_elf = vm.count("full-elf") > 0;
 
   // ------------------------------------------------------
-  // Get device, load the xclbin & kernel and register them
+  // Get device, load the kernel via the appropriate flow
   // ------------------------------------------------------
-  xrt::device device;
+  unsigned int device_index = 0;
+  auto device = xrt::device(device_index);
+
+  std::string Node = vm["kernel"].as<std::string>();
+
+  // Allocate buffers up front; both flows share these.
+  xrt::bo bo_inout0 = xrt::ext::bo{device, INOUT0_SIZE};
+  xrt::bo bo_inout1 = xrt::ext::bo{device, OUT_SIZE};
+
+  // For the xclbin+insts flow we also need an instruction buffer; only load
+  // it in that path so we don't fail when only --full-elf was supplied.
+  xrt::bo bo_instr;
   xrt::kernel kernel;
+  std::unique_ptr<xrt::ext::kernel> ext_kernel;
+  std::unique_ptr<xrt::hw_context> hw_ctx_holder;
 
-  test_utils::init_xrt_load_kernel(device, kernel, verbosity,
-                                   vm["xclbin"].as<std::string>(),
-                                   vm["kernel"].as<std::string>());
+  if (use_full_elf) {
+    // AIE4/medusa: single full ELF, no xclbin.
+    std::string elf_path = vm["full-elf"].as<std::string>();
+    if (verbosity >= 1)
+      std::cout << "Loading full ELF: " << elf_path << "\n";
+    xrt::elf design_elf(elf_path);
+    hw_ctx_holder =
+        std::make_unique<xrt::hw_context>(device, design_elf);
+    if (verbosity >= 1)
+      std::cout << "Getting handle to kernel: " << Node << "\n";
+    ext_kernel =
+        std::make_unique<xrt::ext::kernel>(*hw_ctx_holder, Node);
+  } else {
+    // npu1/npu2: xclbin + insts ELF.
+    test_utils::init_xrt_load_kernel(device, kernel, verbosity,
+                                     vm["xclbin"].as<std::string>(),
+                                     vm["kernel"].as<std::string>());
 
-  // ------------------------------------------------------
-  // Initialize input/ output buffer sizes and sync them
-  // ------------------------------------------------------
-  auto bo_instr = xrt::bo(device, instr_v.size() * sizeof(int),
-                          XCL_BO_FLAGS_CACHEABLE, kernel.group_id(1));
-  auto bo_inout0 =
-      xrt::bo(device, INOUT0_SIZE, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(3));
-  auto bo_inout1 =
-      xrt::bo(device, INOUT1_SIZE, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(4));
+    // Load instruction sequence
+    std::vector<uint32_t> instr_v =
+        test_utils::load_instr_binary(vm["instr"].as<std::string>());
+    if (verbosity >= 1)
+      std::cout << "Sequence instr count: " << instr_v.size() << "\n";
+
+    bo_instr = xrt::bo(device, instr_v.size() * sizeof(int),
+                       XCL_BO_FLAGS_CACHEABLE, kernel.group_id(1));
+    void *bufInstr = bo_instr.map<void *>();
+    memcpy(bufInstr, instr_v.data(), instr_v.size() * sizeof(int));
+    bo_instr.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+  }
 
   if (verbosity >= 1)
     std::cout << "Writing data into buffer objects.\n";
-
-  // Initialize instruction buffer
-  void *bufInstr = bo_instr.map<void *>();
-  memcpy(bufInstr, instr_v.data(), instr_v.size() * sizeof(int));
 
   // Initialize Inout buffer 0
   INOUT0_DATATYPE *bufInOut0 = bo_inout0.map<INOUT0_DATATYPE *>();
@@ -100,13 +131,8 @@ int main(int argc, const char *argv[]) {
     reducedSum += next;
     bufInOut0[i] = next;
   }
-  // Initialize Inout buffer 1
-  // INOUT1_DATATYPE *bufInOut1 = bo_inout1.map<INOUT1_DATATYPE *>();
-  // memset(bufInOut1, 0xdeadbeef, OUT_SIZE); // Zeroes out INOUT2_VOLUME +
-  // trace_size
 
   // Sync buffers to update input buffer values
-  bo_instr.sync(XCL_BO_SYNC_BO_TO_DEVICE);
   bo_inout0.sync(XCL_BO_SYNC_BO_TO_DEVICE);
 
   // ------------------------------------------------------
@@ -132,9 +158,14 @@ int main(int argc, const char *argv[]) {
     if (verbosity >= 1)
       std::cout << "Running Kernel.\n";
     auto start = std::chrono::high_resolution_clock::now();
-    unsigned int opcode = 3;
-    auto run = kernel(opcode, bo_instr, instr_v.size(), bo_inout0, bo_inout1);
-    run.wait();
+    if (use_full_elf) {
+      (*ext_kernel)(bo_inout0, bo_inout1).wait2();
+    } else {
+      unsigned int opcode = 3;
+      auto run = kernel(opcode, bo_instr, bo_instr.size() / sizeof(int),
+                        bo_inout0, bo_inout1);
+      run.wait();
+    }
     auto stop = std::chrono::high_resolution_clock::now();
     bo_inout1.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
     INOUT1_DATATYPE *bufInOut1 = bo_inout1.map<INOUT1_DATATYPE *>();

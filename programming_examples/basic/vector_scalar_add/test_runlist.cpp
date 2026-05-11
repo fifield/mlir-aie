@@ -23,6 +23,10 @@
 #include "xrt/xrt_device.h"
 #include "xrt/xrt_kernel.h"
 
+#include "xrt/experimental/xrt_elf.h"
+#include "xrt/experimental/xrt_ext.h"
+#include "xrt/experimental/xrt_module.h"
+
 #include "test_utils.h"
 
 int main(int argc, const char *argv[]) {
@@ -32,33 +36,25 @@ int main(int argc, const char *argv[]) {
   cxxopts::Options options("Vector Scalar Add Runlist Test");
   cxxopts::ParseResult vm;
   test_utils::add_default_options(options);
+  // AIE4/medusa full-ELF flow: load a single design ELF instead of xclbin+insts.
+  options.add_options()("full-elf",
+                        "path to full design ELF (AIE4/npu3 flow)",
+                        cxxopts::value<std::string>());
 
   test_utils::parse_options(argc, argv, options, vm);
   int verbosity = vm["verbosity"].as<int>();
-  int do_verify = vm["verify"].as<bool>();
-  int n_iterations = vm["iters"].as<int>();
-  int n_warmup_iterations = vm["warmup"].as<int>();
-  int trace_size = vm["trace_sz"].as<int>();
 
   constexpr int IN_SIZE = 1024;
   constexpr int OUT_SIZE = 1024;
 
   // ------------------------------------------------------
-  // Get device, load the xclbin & kernel and register them
+  // Get device, load the kernel via the appropriate flow
   // ------------------------------------------------------
-  // Get a device handle
   unsigned int device_index = 0;
   auto device = xrt::device(device_index);
 
-  // Load the xclbin
-  if (verbosity >= 1)
-    std::cout << "Loading xclbin: " << vm["xclbin"].as<std::string>() << "\n";
-  auto xclbin = xrt::xclbin(vm["xclbin"].as<std::string>());
-
-  // Load the kernel
-  if (verbosity >= 1)
-    std::cout << "Kernel opcode: " << vm["kernel"].as<std::string>() << "\n";
   std::string Node = vm["kernel"].as<std::string>();
+  bool use_full_elf = vm.count("full-elf") > 0;
 
   // Get the kernel from the xclbin
   auto xkernels = xclbin.get_kernels();

@@ -30,70 +30,27 @@ int main(int argc, const char *argv[]) {
   cxxopts::Options options("Vector Scalar Add Test");
   cxxopts::ParseResult vm;
   test_utils::add_default_options(options);
+  // AIE4/medusa full-ELF flow: load a single design ELF instead of xclbin+insts.
+  options.add_options()("full-elf",
+                        "path to full design ELF (AIE4/npu3 flow)",
+                        cxxopts::value<std::string>());
 
   test_utils::parse_options(argc, argv, options, vm);
   int verbosity = vm["verbosity"].as<int>();
-  int do_verify = vm["verify"].as<bool>();
-  int n_iterations = vm["iters"].as<int>();
-  int n_warmup_iterations = vm["warmup"].as<int>();
-  int trace_size = vm["trace_sz"].as<int>();
 
   constexpr int IN_SIZE = 1024;
   constexpr int OUT_SIZE = 1024;
 
   // ------------------------------------------------------
-  // Get device, load the xclbin & kernel and register them
+  // Get device, load the kernel via the appropriate flow
   // ------------------------------------------------------
-  // Get a device handle
   unsigned int device_index = 0;
   auto device = xrt::device(device_index);
 
-  // Load the xclbin
-  if (verbosity >= 1)
-    std::cout << "Loading xclbin: " << vm["xclbin"].as<std::string>() << "\n";
-  auto xclbin = xrt::xclbin(vm["xclbin"].as<std::string>());
-
-  // Load the kernel
-  if (verbosity >= 1)
-    std::cout << "Kernel opcode: " << vm["kernel"].as<std::string>() << "\n";
   std::string Node = vm["kernel"].as<std::string>();
+  bool use_full_elf = vm.count("full-elf") > 0;
 
-  // Get the kernel from the xclbin
-  auto xkernels = xclbin.get_kernels();
-  auto xkernel = *std::find_if(xkernels.begin(), xkernels.end(),
-                               [Node, verbosity](xrt::xclbin::kernel &k) {
-                                 auto name = k.get_name();
-                                 if (verbosity >= 1) {
-                                   std::cout << "Name: " << name << std::endl;
-                                 }
-                                 return name.rfind(Node, 0) == 0;
-                               });
-  auto kernelName = xkernel.get_name();
-
-  // Register xclbin
-  if (verbosity >= 1)
-    std::cout << "Registering xclbin: " << vm["xclbin"].as<std::string>()
-              << "\n";
-  device.register_xclbin(xclbin);
-
-  // Get a hardware context
-  if (verbosity >= 1)
-    std::cout << "Getting hardware context.\n";
-  xrt::hw_context context(device, xclbin.get_uuid());
-
-  // Load instr ELF
-  xrt::elf elf(vm["instr"].as<std::string>());
-  xrt::module mod{elf};
-
-  // Get a kernel handle
-  if (verbosity >= 1)
-    std::cout << "Getting handle to kernel:" << kernelName << "\n";
-  auto kernel = xrt::ext::kernel(context, mod, kernelName);
-
-  // ------------------------------------------------------
-  // Initialize input/ output buffer sizes and sync them
-  // ------------------------------------------------------
-
+  // Allocate buffers up front; both flows share these.
   xrt::bo bo_inA = xrt::ext::bo{device, IN_SIZE * sizeof(int32_t)};
   xrt::bo bo_out = xrt::ext::bo{device, OUT_SIZE * sizeof(int32_t)};
 
@@ -110,9 +67,58 @@ int main(int argc, const char *argv[]) {
 
   if (verbosity >= 1)
     std::cout << "Running Kernel.\n";
-  unsigned int opcode = 3;
-  auto run = kernel(opcode, 0, 0, bo_inA, bo_out);
-  run.wait();
+
+  if (use_full_elf) {
+    // AIE4/medusa: single full ELF, no xclbin.
+    std::string elf_path = vm["full-elf"].as<std::string>();
+    if (verbosity >= 1)
+      std::cout << "Loading full ELF: " << elf_path << "\n";
+    xrt::elf design_elf(elf_path);
+    xrt::hw_context context(device, design_elf);
+    if (verbosity >= 1)
+      std::cout << "Getting handle to kernel: " << Node << "\n";
+    xrt::ext::kernel kernel(context, Node);
+    kernel(bo_inA, bo_out).wait2();
+  } else {
+    // npu1/npu2: xclbin + insts ELF.
+    if (verbosity >= 1)
+      std::cout << "Loading xclbin: " << vm["xclbin"].as<std::string>() << "\n";
+    auto xclbin = xrt::xclbin(vm["xclbin"].as<std::string>());
+
+    if (verbosity >= 1)
+      std::cout << "Kernel opcode: " << Node << "\n";
+
+    auto xkernels = xclbin.get_kernels();
+    auto xkernel = *std::find_if(xkernels.begin(), xkernels.end(),
+                                 [Node, verbosity](xrt::xclbin::kernel &k) {
+                                   auto name = k.get_name();
+                                   if (verbosity >= 1) {
+                                     std::cout << "Name: " << name << std::endl;
+                                   }
+                                   return name.rfind(Node, 0) == 0;
+                                 });
+    auto kernelName = xkernel.get_name();
+
+    if (verbosity >= 1)
+      std::cout << "Registering xclbin: " << vm["xclbin"].as<std::string>()
+                << "\n";
+    device.register_xclbin(xclbin);
+
+    if (verbosity >= 1)
+      std::cout << "Getting hardware context.\n";
+    xrt::hw_context context(device, xclbin.get_uuid());
+
+    xrt::elf insts_elf(vm["instr"].as<std::string>());
+    xrt::module mod{insts_elf};
+
+    if (verbosity >= 1)
+      std::cout << "Getting handle to kernel:" << kernelName << "\n";
+    xrt::ext::kernel kernel(context, mod, kernelName);
+
+    unsigned int opcode = 3;
+    auto run = kernel(opcode, 0, 0, bo_inA, bo_out);
+    run.wait();
+  }
 
   bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
 

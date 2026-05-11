@@ -6,6 +6,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "cxxopts.hpp"
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>
@@ -39,7 +40,9 @@ int main(int argc, const char *argv[]) {
       "path of file containing userspace instructions to be sent to the LX6",
       cxxopts::value<std::string>())(
       "length,l", "the length of the transfer in int32_t",
-      cxxopts::value<int>()->default_value("4096"));
+      cxxopts::value<int>()->default_value("4096"))(
+      "full-elf", "path to full design ELF (AIE4/npu3 flow)",
+      cxxopts::value<std::string>());
 
   try {
     vm = options.parse(argc, argv);
@@ -49,8 +52,11 @@ int main(int argc, const char *argv[]) {
       return 1;
     }
 
-    // Check required options
-    if (!vm.count("xclbin") || !vm.count("kernel") || !vm.count("instr")) {
+    // Check required options. Either --full-elf (AIE4/npu3) or
+    // --xclbin + --instr (npu1/npu2) must be supplied, plus --kernel.
+    bool have_full_elf = vm.count("full-elf") > 0;
+    bool have_xclbin_pair = vm.count("xclbin") && vm.count("instr");
+    if (!vm.count("kernel") || (!have_full_elf && !have_xclbin_pair)) {
       std::cerr << "Error: Required options missing\n\n";
       std::cerr << "Usage:\n" << options.help() << std::endl;
       return 1;
@@ -74,46 +80,10 @@ int main(int argc, const char *argv[]) {
   unsigned int device_index = 0;
   auto device = xrt::device(device_index);
 
-  // Load the xclbin
-  if (verbosity >= 1)
-    std::cout << "Loading xclbin: " << vm["xclbin"].as<std::string>()
-              << std::endl;
-  auto xclbin = xrt::xclbin(vm["xclbin"].as<std::string>());
-
-  if (verbosity >= 1)
-    std::cout << "Kernel opcode: " << vm["kernel"].as<std::string>()
-              << std::endl;
   std::string Node = vm["kernel"].as<std::string>();
+  bool use_full_elf = vm.count("full-elf") > 0;
 
-  // Get the kernel from the xclbin
-  auto xkernels = xclbin.get_kernels();
-  auto xkernel = *std::find_if(xkernels.begin(), xkernels.end(),
-                               [Node](xrt::xclbin::kernel &k) {
-                                 auto name = k.get_name();
-                                 std::cout << "Name: " << name << std::endl;
-                                 return name.rfind(Node, 0) == 0;
-                               });
-  auto kernelName = xkernel.get_name();
-
-  if (verbosity >= 1)
-    std::cout << "Registering xclbin: " << vm["xclbin"].as<std::string>()
-              << "\n";
-
-  device.register_xclbin(xclbin);
-
-  xrt::elf elf(vm["instr"].as<std::string>());
-  xrt::module mod{elf};
-
-  // get a hardware context
-  if (verbosity >= 1)
-    std::cout << "Getting hardware context." << std::endl;
-  xrt::hw_context context(device, xclbin.get_uuid());
-
-  // get a kernel handle
-  if (verbosity >= 1)
-    std::cout << "Getting handle to kernel:" << kernelName << std::endl;
-  auto kernel = xrt::ext::kernel(context, mod, kernelName);
-
+  // Allocate buffers up front; both flows share these.
   xrt::bo bo_inA = xrt::ext::bo{device, N * sizeof(int32_t)};
   xrt::bo bo_out = xrt::ext::bo{device, N * sizeof(int32_t)};
 
@@ -130,18 +100,68 @@ int main(int argc, const char *argv[]) {
 
   if (verbosity >= 1)
     std::cout << "Running Kernel." << std::endl;
-  unsigned int opcode = 3;
-  // Setup run to configure
-  auto cfg_run = kernel(opcode, 0, 0, bo_inA, bo_out);
-  cfg_run.wait2();
-  auto start = std::chrono::high_resolution_clock::now();
-  // Test run
-  auto run = kernel(opcode, 0, 0, bo_inA, bo_out);
-  run.wait2();
-  auto stop = std::chrono::high_resolution_clock::now();
-  const float npu_time =
-      std::chrono::duration_cast<std::chrono::microseconds>(stop - start)
-          .count();
+
+  float npu_time = 0;
+  if (use_full_elf) {
+    // AIE4/medusa: single full ELF, no xclbin.
+    std::string elf_path = vm["full-elf"].as<std::string>();
+    if (verbosity >= 1)
+      std::cout << "Loading full ELF: " << elf_path << std::endl;
+    xrt::elf design_elf(elf_path);
+    xrt::hw_context context(device, design_elf);
+    xrt::ext::kernel kernel(context, Node);
+    auto start = std::chrono::high_resolution_clock::now();
+    kernel(bo_inA, bo_out).wait2();
+    auto stop = std::chrono::high_resolution_clock::now();
+    npu_time = std::chrono::duration_cast<std::chrono::microseconds>(stop -
+                                                                    start)
+                   .count();
+  } else {
+    // npu1/npu2: xclbin + insts ELF.
+    if (verbosity >= 1)
+      std::cout << "Loading xclbin: " << vm["xclbin"].as<std::string>()
+                << std::endl;
+    auto xclbin = xrt::xclbin(vm["xclbin"].as<std::string>());
+
+    if (verbosity >= 1)
+      std::cout << "Kernel opcode: " << Node << std::endl;
+
+    auto xkernels = xclbin.get_kernels();
+    auto xkernel = *std::find_if(xkernels.begin(), xkernels.end(),
+                                 [Node](xrt::xclbin::kernel &k) {
+                                   auto name = k.get_name();
+                                   std::cout << "Name: " << name << std::endl;
+                                   return name.rfind(Node, 0) == 0;
+                                 });
+    auto kernelName = xkernel.get_name();
+
+    if (verbosity >= 1)
+      std::cout << "Registering xclbin: " << vm["xclbin"].as<std::string>()
+                << "\n";
+    device.register_xclbin(xclbin);
+
+    xrt::elf elf(vm["instr"].as<std::string>());
+    xrt::module mod{elf};
+
+    if (verbosity >= 1)
+      std::cout << "Getting hardware context." << std::endl;
+    xrt::hw_context context(device, xclbin.get_uuid());
+
+    if (verbosity >= 1)
+      std::cout << "Getting handle to kernel:" << kernelName << std::endl;
+    auto kernel = xrt::ext::kernel(context, mod, kernelName);
+
+    unsigned int opcode = 3;
+    auto cfg_run = kernel(opcode, 0, 0, bo_inA, bo_out);
+    cfg_run.wait2();
+    auto start = std::chrono::high_resolution_clock::now();
+    auto run = kernel(opcode, 0, 0, bo_inA, bo_out);
+    run.wait2();
+    auto stop = std::chrono::high_resolution_clock::now();
+    npu_time = std::chrono::duration_cast<std::chrono::microseconds>(stop -
+                                                                    start)
+                   .count();
+  }
 
   bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
   std::cout << std::endl;
