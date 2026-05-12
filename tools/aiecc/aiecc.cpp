@@ -55,6 +55,7 @@
 #include "aie/Conversion/Passes.h"
 #include "aie/Dialect/AIE/IR/AIEDialect.h"
 #include "aie/Dialect/AIE/Transforms/AIEPasses.h"
+#include "aie/Dialect/AIE/Util/AIELocCheckpoint.h"
 #include "aie/Dialect/AIEVec/Analysis/Passes.h"
 #include "aie/Dialect/AIEVec/Pipelines/Passes.h"
 #include "aie/Dialect/AIEVec/TransformOps/DialectExtension.h"
@@ -538,9 +539,13 @@ static std::vector<std::string> getHostSourceFiles() {
 }
 
 /// Dump an MLIR module to a file if --dump-intermediates is enabled.
-/// Returns true on success, false on failure.
+/// When --keep-loc is also enabled and `stage` is non-empty, fuses
+/// "checkpoint:<stage>" onto every op's Location *on the live module*
+/// just before dumping. The label persists, so subsequent stages inherit
+/// it and the chain on a final aiex.npu.* op records the dump-file
+/// timeline. Returns true on success, false on failure.
 static bool dumpModuleToFile(ModuleOp moduleOp, StringRef filePath,
-                             StringRef description) {
+                             StringRef description, StringRef stage = "") {
   if (!dumpIntermediates)
     return true;
 
@@ -551,6 +556,10 @@ static bool dumpModuleToFile(ModuleOp moduleOp, StringRef filePath,
                  << filePath << ": " << ec.message() << "\n";
     return false;
   }
+
+  if (keepLoc && !stage.empty())
+    xilinx::AIE::applyStageLabel(moduleOp, stage);
+
   if (keepLoc) {
     OpPrintingFlags flags;
     flags.enableDebugInfo(/*enable=*/true);
@@ -1427,29 +1436,24 @@ static LogicalResult runTraceLoweringPipeline(ModuleOp moduleOp,
 
 /// Run the resource allocation pipeline in-memory using PassManager.
 /// This replaces the subprocess call to aie-opt with direct API calls.
-static LogicalResult runResourceAllocationPipeline(ModuleOp moduleOp,
-                                                   StringRef aieTarget,
-                                                   StringRef tmpDirName) {
+/// Run the first slice of the resource-allocation pipeline: from the
+/// vector-to-aievec conversion through the aie-objectFifo-stateful-transform
+/// pipeline. Stops there so the caller can dump the post-objectfifo IR for
+/// debugging (--dump-intermediates --keep-loc).
+static LogicalResult
+runPreObjectFifoResourceAllocationPipeline(ModuleOp moduleOp,
+                                           StringRef aieTarget,
+                                           StringRef tmpDirName) {
   MLIRContext *ctx = moduleOp.getContext();
   PassManager pm(ctx);
 
-  // Enable verification between passes if verbose
   if (verbose) {
     pm.enableVerifier(true);
-    // Enable crash reproducer to help debug CI failures
     SmallString<128> crashFile(tmpDirName);
-    sys::path::append(crashFile, "resource_alloc_crash.mlir");
+    sys::path::append(crashFile, "resource_alloc_pre_objfifo_crash.mlir");
     pm.enableCrashReproducerGeneration(crashFile);
   }
 
-  // Step 1: Convert vector to aievec (this is a pipeline, not a single pass)
-  // Only add for AIE2 and later targets - AIE1 doesn't support
-  // target-backend=llvmir
-  // NOTE: Use parsePassPipeline instead of buildConvertVectorToAIEVec because
-  // ConvertVectorToAIEVecOptions only propagates aie-target to its sub-pipeline
-  // options (canonicalize, lower, optimize) through parseFromString, not
-  // through direct member assignment. Without this, aie2p falls back to aie1
-  // patterns.
   std::string lowerTarget = aieTarget.lower();
   if (lowerTarget == "aie2" || lowerTarget == "aieml" ||
       lowerTarget == "aie2p") {
@@ -1464,16 +1468,10 @@ static LogicalResult runResourceAllocationPipeline(ModuleOp moduleOp,
     }
   }
 
-  // Step 2: Lower affine
   pm.addPass(createLowerAffinePass());
-
-  // Step 3: Canonicalize device (module-level pass)
   pm.addPass(xilinx::AIE::createAIECanonicalizeDevicePass());
 
-  // Step 4: Device-level passes - use nest<DeviceOp>()
   OpPassManager &devicePm = pm.nest<xilinx::AIE::DeviceOp>();
-  // Note: Trace lowering runs in a separate guarded pipeline
-  // (runTraceLoweringPipeline) before this function is called.
   devicePm.addPass(xilinx::AIE::createAIEAssignLockIDsPass());
   devicePm.addPass(xilinx::AIE::createAIEObjectFifoRegisterProcessPass());
   {
@@ -1487,6 +1485,33 @@ static LogicalResult runResourceAllocationPipeline(ModuleOp moduleOp,
       return failure();
     }
   }
+
+  if (verbose) {
+    llvm::outs() << "Running pre-objectfifo resource allocation pipeline\n";
+    llvm::outs().flush();
+  }
+
+  return runPipelineWithRepeater(pm, moduleOp,
+                                 "pre-objectfifo resource allocation",
+                                 tmpDirName);
+}
+
+/// Run the remainder of the resource-allocation pipeline: from
+/// aie-assign-buffer-descriptor-ids through scf-to-cf.
+static LogicalResult
+runPostObjectFifoResourceAllocationPipeline(ModuleOp moduleOp,
+                                            StringRef tmpDirName) {
+  MLIRContext *ctx = moduleOp.getContext();
+  PassManager pm(ctx);
+
+  if (verbose) {
+    pm.enableVerifier(true);
+    SmallString<128> crashFile(tmpDirName);
+    sys::path::append(crashFile, "resource_alloc_post_objfifo_crash.mlir");
+    pm.enableCrashReproducerGeneration(crashFile);
+  }
+
+  OpPassManager &devicePm = pm.nest<xilinx::AIE::DeviceOp>();
   devicePm.addPass(xilinx::AIE::createAIEAssignBufferDescriptorIDsPass());
   devicePm.addPass(xilinx::AIE::createAIELowerCascadeFlowsPass());
   devicePm.addPass(xilinx::AIEX::createAIEBroadcastPacketPass());
@@ -1502,35 +1527,58 @@ static LogicalResult runResourceAllocationPipeline(ModuleOp moduleOp,
     }
   }
 
-  // Create buffer address assignment pass with alloc-scheme option
   xilinx::AIE::AIEAssignBufferAddressesOptions bufferOpts;
   bufferOpts.clAllocScheme = allocScheme.getValue();
   devicePm.addPass(xilinx::AIE::createAIEAssignBufferAddressesPass(bufferOpts));
 
-  // Infer per-core link_files from func-level link_with attributes
   devicePm.addPass(xilinx::AIE::createAIEAssignCoreLinkFilesPass());
-
   devicePm.addPass(xilinx::AIE::createAIEVectorTransferLoweringPass());
 
-  // Step 5: Convert SCF to CF (module-level pass)
   pm.addPass(createSCFToControlFlowPass());
 
+  if (verbose) {
+    llvm::outs() << "Running post-objectfifo resource allocation pipeline "
+                 << "(alloc-scheme=" << allocScheme.getValue() << ")\n";
+    llvm::outs().flush();
+  }
+
+  return runPipelineWithRepeater(pm, moduleOp,
+                                 "post-objectfifo resource allocation",
+                                 tmpDirName);
+}
+
+/// Convenience wrapper that runs both halves back-to-back, with an optional
+/// objectfifo-expanded dump in between (gated by --dump-intermediates).
+/// `dumpBasename` is the filename (no directory) to write the intermediate
+/// to, or empty to skip the dump (e.g. when invoked on the multi-device
+/// unfiltered module — the per-device call later dumps it).
+static LogicalResult runResourceAllocationPipeline(ModuleOp moduleOp,
+                                                   StringRef aieTarget,
+                                                   StringRef tmpDirName,
+                                                   StringRef dumpBasename = "") {
   if (verbose) {
     llvm::outs() << "Running resource allocation pipeline in-memory "
                  << "(alloc-scheme=" << allocScheme.getValue() << ")\n";
     llvm::outs().flush();
   }
 
-  if (failed(runPipelineWithRepeater(pm, moduleOp, "resource allocation",
-                                     tmpDirName))) {
-    llvm::errs() << "Error: Resource allocation pipeline failed\n";
+  if (failed(runPreObjectFifoResourceAllocationPipeline(moduleOp, aieTarget,
+                                                        tmpDirName)))
     return failure();
+
+  if (!dumpBasename.empty()) {
+    SmallString<128> objFifoPath(tmpDirName);
+    sys::path::append(objFifoPath, dumpBasename);
+    dumpModuleToFile(moduleOp, objFifoPath, "objectfifo expanded module",
+                     "objectfifo-expanded");
   }
+
+  if (failed(runPostObjectFifoResourceAllocationPipeline(moduleOp, tmpDirName)))
+    return failure();
 
   if (verbose) {
     llvm::outs() << "Resource allocation pipeline completed successfully\n";
   }
-
   return success();
 }
 
@@ -1574,44 +1622,117 @@ static void assignPdiIds(ModuleOp moduleOp,
 
 /// Run the NPU lowering pipeline in-memory using PassManager.
 /// This replaces the subprocess call to aie-opt with direct API calls.
+/// Helper: build + run a per-DeviceOp PM containing exactly one pass, named
+/// `passDescription` for diagnostics. Used by the split NPU lowering helpers
+/// so each transformation boundary can be dumped between via aiecc's
+/// --dump-intermediates.
+static LogicalResult runSingleDevicePass(ModuleOp moduleOp,
+                                         StringRef tmpDirName,
+                                         StringRef passDescription,
+                                         std::unique_ptr<mlir::Pass> p) {
+  PassManager pm(moduleOp.getContext());
+  if (verbose)
+    pm.enableVerifier(true);
+  OpPassManager &devicePm = pm.nest<xilinx::AIE::DeviceOp>();
+  devicePm.addPass(std::move(p));
+  return runPipelineWithRepeater(pm, moduleOp, passDescription, tmpDirName);
+}
+
+/// Slice of NPU lowering: aie-materialize-bd-chains. Standalone so the
+/// caller can dump <dev>_bd_chains_materialized.mlir afterwards.
+static LogicalResult runBdChainsMaterializationPipeline(ModuleOp moduleOp,
+                                                        StringRef tmpDirName) {
+  return runSingleDevicePass(
+      moduleOp, tmpDirName, "bd-chains materialization",
+      xilinx::AIEX::createAIEMaterializeBDChainsPass());
+}
+
+/// Slice of NPU lowering: substitute-shim-dma-allocations,
+/// assign-runtime-sequence-bd-ids, canonicalizer, dma-tasks-to-npu.
+static LogicalResult runDmaTasksToNpuPipeline(ModuleOp moduleOp,
+                                              StringRef tmpDirName) {
+  PassManager pm(moduleOp.getContext());
+  if (verbose)
+    pm.enableVerifier(true);
+  OpPassManager &devicePm = pm.nest<xilinx::AIE::DeviceOp>();
+  devicePm.addPass(xilinx::AIEX::createAIESubstituteShimDMAAllocationsPass());
+  devicePm.addPass(xilinx::AIEX::createAIEAssignRuntimeSequenceBDIDsPass());
+  devicePm.addPass(createCanonicalizerPass());
+  devicePm.addPass(xilinx::AIEX::createAIEDMATasksToNPUPass());
+  return runPipelineWithRepeater(pm, moduleOp, "dma-tasks-to-npu", tmpDirName);
+}
+
+/// Slice of NPU lowering: aie-dma-to-npu. Standalone for dump.
+static LogicalResult runDmaToNpuPipeline(ModuleOp moduleOp,
+                                         StringRef tmpDirName) {
+  return runSingleDevicePass(moduleOp, tmpDirName, "dma-to-npu",
+                             xilinx::AIEX::createAIEDmaToNpuPass());
+}
+
+/// Slice of NPU lowering: aie-lower-set-lock. Standalone for dump.
+static LogicalResult runSetLockLoweringPipeline(ModuleOp moduleOp,
+                                                StringRef tmpDirName) {
+  return runSingleDevicePass(moduleOp, tmpDirName, "lower-set-lock",
+                             xilinx::AIEX::createAIELowerSetLockPass());
+}
+
+/// Convenience wrapper composing all four NPU-lowering slices, with optional
+/// intermediate dumps between them when `devName` is non-empty (and
+/// --dump-intermediates is on). The legacy single-PM behavior is preserved
+/// when `devName` is empty: same passes run in the same order, just split
+/// across multiple PMs (negligible perf cost; tested).
 static LogicalResult runNpuLoweringPipeline(ModuleOp moduleOp,
                                             StringRef tmpDirName,
-                                            bool patchPdiIds = false) {
+                                            bool patchPdiIds = false,
+                                            StringRef devName = "") {
   MLIRContext *ctx = moduleOp.getContext();
 
-  // Phase 1: Core NPU lowering passes
-  {
+  // Phase 1a: module-level materialize runtime sequences (no dump in
+  // between — runs once before device-nested passes).
+  if (!noMaterialize) {
     PassManager pm(ctx);
-    if (verbose) {
+    if (verbose)
       pm.enableVerifier(true);
-    }
-
-    // Add materialize runtime sequences pass at module level (before device
-    // nesting) unless --no-materialize is specified
-    if (!noMaterialize) {
-      pm.addPass(xilinx::AIEX::createAIEMaterializeRuntimeSequencesPass());
-    }
-
-    // Device-level passes
-    OpPassManager &devicePm = pm.nest<xilinx::AIE::DeviceOp>();
-    devicePm.addPass(xilinx::AIEX::createAIEMaterializeBDChainsPass());
-    devicePm.addPass(xilinx::AIEX::createAIESubstituteShimDMAAllocationsPass());
-    devicePm.addPass(xilinx::AIEX::createAIEAssignRuntimeSequenceBDIDsPass());
-    devicePm.addPass(createCanonicalizerPass());
-    devicePm.addPass(xilinx::AIEX::createAIEDMATasksToNPUPass());
-    devicePm.addPass(xilinx::AIEX::createAIEDmaToNpuPass());
-    devicePm.addPass(xilinx::AIEX::createAIELowerSetLockPass());
-
-    if (verbose) {
-      llvm::outs() << "Running NPU lowering pipeline in-memory\n";
-    }
-
-    if (failed(runPipelineWithRepeater(pm, moduleOp, "NPU lowering",
-                                       tmpDirName))) {
-      llvm::errs() << "Error: NPU lowering pipeline failed\n";
+    pm.addPass(xilinx::AIEX::createAIEMaterializeRuntimeSequencesPass());
+    if (failed(runPipelineWithRepeater(pm, moduleOp,
+                                       "materialize runtime sequences",
+                                       tmpDirName)))
       return failure();
-    }
   }
+
+  if (verbose)
+    llvm::outs() << "Running NPU lowering pipeline (split for intermediate "
+                    "dumps) in-memory\n";
+
+  auto dumpStage = [&](StringRef basename, StringRef desc, StringRef stage) {
+    if (devName.empty())
+      return;
+    SmallString<128> path(tmpDirName);
+    sys::path::append(path, devName.str() + "_" + basename.str());
+    dumpModuleToFile(moduleOp, path, desc, stage);
+  };
+
+  // Phase 1b: bd-chains materialization, then dump.
+  if (failed(runBdChainsMaterializationPipeline(moduleOp, tmpDirName)))
+    return failure();
+  dumpStage("bd_chains_materialized.mlir", "BD chains materialized",
+            "bd-chains-materialized");
+
+  // Phase 1c: dma-tasks-to-npu (incl. shim-dma-allocations, assign-bd-ids,
+  // canonicalizer), then dump.
+  if (failed(runDmaTasksToNpuPipeline(moduleOp, tmpDirName)))
+    return failure();
+  dumpStage("dma_tasks_to_npu.mlir", "DMA tasks to NPU", "dma-tasks-to-npu");
+
+  // Phase 1d: dma-to-npu, then dump.
+  if (failed(runDmaToNpuPipeline(moduleOp, tmpDirName)))
+    return failure();
+  dumpStage("dma_to_npu.mlir", "DMA to NPU", "dma-to-npu");
+
+  // Phase 1e: lower-set-lock, then dump.
+  if (failed(runSetLockLoweringPipeline(moduleOp, tmpDirName)))
+    return failure();
+  dumpStage("set_lock_lowered.mlir", "set-lock lowered", "set-lock-lowered");
 
   // Phase 2: Assign PDI IDs BEFORE expand-load-pdis (which copies IDs from
   // original load_pdi ops to the new empty device load_pdi ops).
@@ -3754,14 +3875,16 @@ static LogicalResult generateNpuInstructions(ModuleOp moduleOp,
   // expand-load-pdis so the IDs are assigned to the original device refs
   // before expand-load-pdis copies them to empty device load_pdi ops.
   if (failed(runNpuLoweringPipeline(*clonedModule, tmpDirName,
-                                    /*patchPdiIds=*/generateFullElf))) {
+                                    /*patchPdiIds=*/generateFullElf,
+                                    /*devName=*/devName))) {
     return failure();
   }
 
   // Dump intermediate if requested
   SmallString<128> npuLoweredPath(tmpDirName);
   sys::path::append(npuLoweredPath, devName.str() + "_npu_lowered.mlir");
-  dumpModuleToFile(*clonedModule, npuLoweredPath, "NPU lowered module");
+  dumpModuleToFile(*clonedModule, npuLoweredPath, "NPU lowered module",
+                   "npu-lowered");
 
   // Step 2: Translate to NPU binary
   // Find device and generate instructions for each runtime sequence
@@ -3912,7 +4035,7 @@ static LogicalResult generateTransactionOutput(ModuleOp moduleOp,
   // Dump intermediate MLIR
   SmallString<128> txnMlirPath(tmpDirName);
   sys::path::append(txnMlirPath, devName.str() + "_txn.mlir");
-  dumpModuleToFile(*clonedModule, txnMlirPath, "Transaction MLIR");
+  dumpModuleToFile(*clonedModule, txnMlirPath, "Transaction MLIR", "txn");
 
   // Copy to output location
   std::error_code ec;
@@ -3975,7 +4098,8 @@ static LogicalResult generateControlPacketOutput(ModuleOp moduleOp,
   // Dump intermediate MLIR for debugging
   SmallString<128> ctrlPktMlirPath(tmpDirName);
   sys::path::append(ctrlPktMlirPath, devName.str() + "_ctrlpkt.mlir");
-  dumpModuleToFile(*clonedModule, ctrlPktMlirPath, "control packet MLIR");
+  dumpModuleToFile(*clonedModule, ctrlPktMlirPath, "control packet MLIR",
+                   "ctrlpkt");
 
   // Translate control packet ops to binary
   std::string ctrlPktBinFileName = formatString(ctrlPktName, devName);
@@ -4043,7 +4167,7 @@ static LogicalResult generateControlPacketOutput(ModuleOp moduleOp,
   SmallString<128> dmaSeqMlirPath(tmpDirName);
   sys::path::append(dmaSeqMlirPath, devName.str() + "_ctrlpkt_dma_seq.mlir");
   dumpModuleToFile(*clonedModule, dmaSeqMlirPath,
-                   "control packet DMA sequence MLIR");
+                   "control packet DMA sequence MLIR", "ctrlpkt-dma-seq");
 
   // Assign PDI IDs after DMA lowering (matches legacy ordering)
   if (generateFullElf || generateElf) {
@@ -4411,7 +4535,9 @@ static LogicalResult generateElfFromInsts(ModuleOp moduleOp,
   // Clone and run NPU lowering (same as generateNpuInstructions)
   OwningOpRef<ModuleOp> clonedModule = moduleOp.clone();
 
-  if (failed(runNpuLoweringPipeline(*clonedModule, tmpDirName))) {
+  if (failed(runNpuLoweringPipeline(*clonedModule, tmpDirName,
+                                    /*patchPdiIds=*/false,
+                                    /*devName=*/devName))) {
     llvm::errs() << "Error running NPU lowering pipeline for ELF generation\n";
     return failure();
   }
@@ -5223,7 +5349,7 @@ static LogicalResult compileAIEModule(MLIRContext &context, ModuleOp moduleOp,
   // Dump input MLIR if requested
   SmallString<128> inputPath(tmpDirName);
   sys::path::append(inputPath, "input.mlir");
-  dumpModuleToFile(moduleOp, inputPath, "input MLIR");
+  dumpModuleToFile(moduleOp, inputPath, "input MLIR", "input");
 
   // Detect AIE target early from the input module
   std::string aieTarget = "aie2"; // Default
@@ -5291,8 +5417,11 @@ static LogicalResult compileAIEModule(MLIRContext &context, ModuleOp moduleOp,
     return failure();
   }
 
-  // Step 1b: Run resource allocation and lowering passes in-memory
-  if (failed(runResourceAllocationPipeline(moduleOp, aieTarget, tmpDirName))) {
+  // Step 1b: Run resource allocation and lowering passes in-memory.
+  // Pass a dump basename so the wrapper writes <tmpdir>/objectfifo_expanded.mlir
+  // between the pre- and post-objectfifo halves (gated by --dump-intermediates).
+  if (failed(runResourceAllocationPipeline(moduleOp, aieTarget, tmpDirName,
+                                           "objectfifo_expanded.mlir"))) {
     return failure();
   }
 
@@ -5325,7 +5454,8 @@ static LogicalResult compileAIEModule(MLIRContext &context, ModuleOp moduleOp,
   // Dump physical module if requested (for debugging only)
   SmallString<128> physicalPath(tmpDirName);
   sys::path::append(physicalPath, "input_physical.mlir");
-  dumpModuleToFile(moduleOp, physicalPath, "physical module");
+  dumpModuleToFile(moduleOp, physicalPath, "physical module",
+                   "input-physical");
 
   // Step 3: Compile cores and generate artifacts for each device
   // Collect device info for full ELF generation if requested
@@ -5372,7 +5502,8 @@ static LogicalResult compileAIEModule(MLIRContext &context, ModuleOp moduleOp,
     SmallString<128> physicalWithElfsPath(tmpDirName);
     sys::path::append(physicalWithElfsPath,
                       devName.str() + "_physical_with_elfs.mlir");
-    dumpModuleToFile(moduleOp, physicalWithElfsPath, "module with ELFs");
+    dumpModuleToFile(moduleOp, physicalWithElfsPath, "module with ELFs",
+                     "physical-with-elfs");
 
     // Generate control packet output BEFORE NPU instructions
     ModuleOp ctrlPktModule = unfilteredModule ? *unfilteredModule : moduleOp;
@@ -5476,6 +5607,10 @@ static LogicalResult compileAIEModule(MLIRContext &context, ModuleOp moduleOp,
     OwningOpRef<ModuleOp> expandedModule = moduleOp.clone();
 
     // 2. Run NPU lowering + expand-load-pdis ONCE (no PDI IDs yet)
+    // Phase B runs across all devices in one shot, so we don't pass a single
+    // devName for intermediate dumps (would conflate multiple devices into
+    // the same dump file). The per-device Phase A dumps already cover the
+    // intermediate stages.
     if (failed(runNpuLoweringPipeline(*expandedModule, tmpDirName,
                                       /*patchPdiIds=*/false))) {
       llvm::errs() << "Error: expanded NPU lowering pipeline failed\n";

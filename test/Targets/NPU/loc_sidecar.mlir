@@ -19,11 +19,16 @@
 #name_bw  = loc("dma_task"(#user_bw))
 #name_zero = loc("zero_reg"(#user_zero))
 
+// Phase 4 — pre-fuse a couple of checkpoint stages onto one entry so we can
+// verify locToJSON's metadata surfacing.
+#stage_inner = loc(fused<"checkpoint:input">[#name_w32])
+#stage_w32 = loc(fused<"checkpoint:dma-to-npu">[#stage_inner])
+
 module {
   aie.device(npu1) {
     memref.global "private" constant @write_data : memref<4xi32> = dense<[1, 2, 3, 4]>
     aie.runtime_sequence(%arg0: memref<16xf32>) {
-      aiex.npu.write32 { address = 0xabc00def : ui32, value = 0x42 : ui32 } loc(#name_w32)
+      aiex.npu.write32 { address = 0xabc00def : ui32, value = 0x42 : ui32 } loc(#stage_w32)
       aiex.npu.write32 { address = 0x0 : ui32, value = 0x1 : ui32 } loc(#name_zero)
       %0 = memref.get_global @write_data : memref<4xi32>
       aiex.npu.blockwrite (%0) { address = 0x12345678 : ui32 } : memref<4xi32> loc(#name_bw)
@@ -37,13 +42,17 @@ module {
 // CHECK-DAG: "operations":
 
 // Per-op entries: opcode, source op name, address, source location with
-// the IRON NameLoc carrying the user file:line.
+// the IRON NameLoc carrying the user file:line. The write32 entry's loc
+// is wrapped in two checkpoint stages (Phase 4); locToJSON surfaces them
+// as "checkpoint" keys (prefix stripped).
 // CHECK-DAG: "opcode": "WRITE32"
 // CHECK-DAG: "source_op": "aiex.npu.write32"
 // CHECK-DAG: "address": "0xABC00DEF"
 // CHECK-DAG: "name": "of_in"
 // CHECK-DAG: "file": "user.py"
 // CHECK-DAG: "line": 42
+// CHECK-DAG: "checkpoint": "input"
+// CHECK-DAG: "checkpoint": "dma-to-npu"
 
 // Address zero is a real address, not the "no address" sentinel.
 // CHECK-DAG: "address": "0x0"
