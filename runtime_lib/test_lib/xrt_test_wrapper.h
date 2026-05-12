@@ -19,6 +19,8 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <memory>
+#include <optional>
 #include <sstream>
 #include <tuple>
 #include <utility>
@@ -34,6 +36,11 @@ struct args {
   std::string xclbin;
   std::string kernel;
   std::string trace_file;
+  // AIE4/medusa: when non-empty, host loads a single design ELF via
+  // xrt::elf + xrt::hw_context + xrt::ext::kernel(context, "main:sequence")
+  // instead of the xclbin + insts.bin flow. --full-elf wins over --xclbin
+  // / --instr if both are supplied.
+  std::string full_elf;
 };
 
 struct args parse_args(int argc, const char *argv[]) {
@@ -43,6 +50,9 @@ struct args parse_args(int argc, const char *argv[]) {
   cxxopts::Options options("XRT Test Wrapper");
   cxxopts::ParseResult vm;
   test_utils::add_default_options(options);
+  options.add_options()("full-elf",
+                        "path to full design ELF (AIE4/npu3 flow)",
+                        cxxopts::value<std::string>());
 
   struct args myargs;
 
@@ -52,9 +62,14 @@ struct args parse_args(int argc, const char *argv[]) {
   myargs.n_iterations = vm["iters"].as<int>();
   myargs.n_warmup_iterations = vm["warmup"].as<int>();
   myargs.trace_size = vm["trace_sz"].as<int>();
-  myargs.instr = vm["instr"].as<std::string>();
-  myargs.xclbin = vm["xclbin"].as<std::string>();
-  myargs.kernel = vm["kernel"].as<std::string>();
+  // Read flow-related options safely: --xclbin / --instr / --full-elf are
+  // all optional at the cxxopts level; one or the other group is required
+  // by setup_and_run_aie<>.
+  myargs.instr = vm.count("instr") ? vm["instr"].as<std::string>() : "";
+  myargs.xclbin = vm.count("xclbin") ? vm["xclbin"].as<std::string>() : "";
+  myargs.kernel = vm.count("kernel") ? vm["kernel"].as<std::string>() : "";
+  myargs.full_elf =
+      vm.count("full-elf") ? vm["full-elf"].as<std::string>() : "";
   myargs.trace_file = vm["trace_file"].as<std::string>();
 
   return myargs;
@@ -153,12 +168,27 @@ int setup_and_run_aie(Verify verify_results, std::tuple<InBuf<TIns>...> inputs,
   if (myargs.verbosity >= 1)
     std::cout << "Sequence instr count: " << instr_v.size() << "\n";
 
-  // Start the XRT context and load the kernel
-  xrt::device device;
-  xrt::kernel kernel;
+  // The full-ELF (AIE4) path doesn't yet wire trace or ctrl-pkts buffers
+  // into the kernel call (Iron-generated AIE4 designs declare only the
+  // runtime-sequence args). Silently allocating a trace BO that the
+  // kernel never touches would produce empty trace files and bogus
+  // ctrl-pkt status decoding, so fail loudly instead.
+  if (use_full_elf && (myargs.trace_size > 0 || enable_ctrl_pkts)) {
+    std::cerr << "[xrt_test_wrapper] --full-elf does not yet support "
+                 "trace_sz>0 or ctrl-pkts; aborting.\n";
+    return 1;
+  }
 
-  test_utils::init_xrt_load_kernel(device, kernel, myargs.verbosity,
-                                   myargs.xclbin, myargs.kernel);
+  // Validate flow inputs
+  if (!use_full_elf && (myargs.xclbin.empty() || myargs.instr.empty())) {
+    std::cerr << "[xrt_test_wrapper] need either --full-elf <path> or both "
+                 "--xclbin and --instr; aborting.\n";
+    return 1;
+  }
+  if (myargs.kernel.empty()) {
+    std::cerr << "[xrt_test_wrapper] --kernel is required; aborting.\n";
+    return 1;
+  }
 
   // The fixed scalar args occupy kernel arg slots 0..2 (opcode, instr, ninstr).
   // Data buffers start at slot 3, i.e. group_id(3 + data_index).
@@ -305,8 +335,8 @@ int setup_and_run_aie(Verify verify_results, std::tuple<InBuf<TIns>...> inputs,
 
     auto stop = std::chrono::high_resolution_clock::now();
     bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
-    if (myargs.trace_size > 0)
-      bo_trace.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    if (!use_full_elf && myargs.trace_size > 0)
+      bo_trace->sync(XCL_BO_SYNC_BO_FROM_DEVICE);
 
     if (iter < myargs.n_warmup_iterations)
       /* Warmup iterations do not count towards average runtime. */
