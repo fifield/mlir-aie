@@ -12,6 +12,7 @@
 
 #include "aie/Dialect/AIE/IR/AIEDialect.h"
 #include "aie/Dialect/AIE/IR/AIETargetModel.h"
+#include "aie/Dialect/AIE/Util/AIELocCheckpoint.h"
 #include "aie/Dialect/AIE/Util/AIERegisterDatabase.h"
 #include "aie/Dialect/AIEX/IR/AIEXDialect.h"
 
@@ -545,8 +546,20 @@ static llvm::json::Value locToJSON(mlir::Location loc) {
     json::Array children;
     for (mlir::Location c : fused.getLocations())
       children.push_back(locToJSON(c));
-    return json::Value(
-        json::Object{{"kind", "fused"}, {"children", std::move(children)}});
+    json::Object o{{"kind", "fused"}, {"children", std::move(children)}};
+    // Surface checkpoint metadata produced by AIELocCheckpoint (Phase 4):
+    // a StringAttr starting with "checkpoint:" gets unwrapped into a
+    // top-level "checkpoint" key for easy consumption by tooling.
+    if (auto md = dyn_cast_or_null<mlir::StringAttr>(fused.getMetadata())) {
+      llvm::StringRef sv = md.getValue();
+      llvm::StringRef prefix =
+          xilinx::AIE::getCheckpointMetadataPrefix(); // "checkpoint:"
+      if (sv.starts_with(prefix))
+        o["checkpoint"] = sv.drop_front(prefix.size()).str();
+      else
+        o["metadata"] = sv.str();
+    }
+    return json::Value(std::move(o));
   }
   if (auto cs = dyn_cast<mlir::CallSiteLoc>(loc))
     return json::Value(json::Object{
