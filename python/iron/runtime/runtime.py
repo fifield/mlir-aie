@@ -20,7 +20,6 @@ from ...utils import trace as trace_utils
 
 from ... import ir  # type: ignore
 
-from ...dialects.aie import tile
 from ...dialects.aiex import runtime_sequence
 from ...dialects._aiex_ops_gen import dma_await_task, dma_free_task  # type: ignore
 from ...helpers.taplib import TensorAccessPattern
