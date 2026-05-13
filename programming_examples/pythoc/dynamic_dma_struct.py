@@ -74,7 +74,7 @@ _decoder = AIEAddressDecoder()
 _reg = _decoder.get_register_offset
 
 # DMA buffer descriptor base address (BD0 start; stride 0x20 between BDs)
-DMA_BD_BASE = _reg("DMA_BD0_0", "memory")      # 0x1d000
+DMA_BD_BASE = _reg("DMA_BD0_0", "memory")  # 0x1d000
 
 # DMA channel start queue registers
 DMA_S2MM_0_START_QUEUE = _reg("DMA_S2MM_0_Start_Queue", "memory")
@@ -106,7 +106,7 @@ _REGDB_GLOBALS = {
 
 @aie_kernel
 def program_bd_and_start(
-    ch: struct[bd_base: i32, start_queue: i32, lock_addr: i32],
+    ch: struct[bd_base:i32, start_queue:i32, lock_addr:i32],
     bd_id: i32,
     base_addr_words: i32,
     num_words: i32,
@@ -134,7 +134,7 @@ def program_bd_and_start(
 
     # BD word 5: VALID_BD=1, LOCK_REL_VALUE=+1, LOCK_REL_ID
     valid_bd: i32 = 1 << 25
-    lock_rel_val: i32 = 1 << 18   # +1
+    lock_rel_val: i32 = 1 << 18  # +1
     lock_id_bits: i32 = lock_rel_id << 13
     write_tm(valid_bd | lock_rel_val | lock_id_bits, bd + 20)
 
@@ -144,7 +144,7 @@ def program_bd_and_start(
 
 @aie_kernel
 def wait_for_lock(
-    ch: struct[bd_base: i32, start_queue: i32, lock_addr: i32],
+    ch: struct[bd_base:i32, start_queue:i32, lock_addr:i32],
 ):
     """Poll until the lock associated with a DMA channel is released."""
     done: i32 = 0
@@ -167,11 +167,15 @@ def dynamic_dma_struct(
     """
     # Build channel config structs (both share the same BD base;
     # bd_id selects which BD within that base: BD0=0, BD1=1, etc.)
-    s2mm: struct[bd_base: i32, start_queue: i32, lock_addr: i32] = (
-        DMA_BD_BASE, DMA_S2MM_0_START_QUEUE, LOCK0_VALUE
+    s2mm: struct[bd_base:i32, start_queue:i32, lock_addr:i32] = (
+        DMA_BD_BASE,
+        DMA_S2MM_0_START_QUEUE,
+        LOCK0_VALUE,
     )
-    mm2s: struct[bd_base: i32, start_queue: i32, lock_addr: i32] = (
-        DMA_BD_BASE, DMA_MM2S_0_START_QUEUE, LOCK1_VALUE
+    mm2s: struct[bd_base:i32, start_queue:i32, lock_addr:i32] = (
+        DMA_BD_BASE,
+        DMA_MM2S_0_START_QUEUE,
+        LOCK1_VALUE,
     )
 
     # Receive data from stream via S2MM channel
@@ -205,9 +209,9 @@ def build_mlir_module(dev, kernel):
             t00 = tile(0, 0)
             t02 = tile(0, 2)
 
-            in_buf = buffer(t02, datatype=tensor_ty, name="in_buf", address=0)
+            in_buf = buffer(t02, datatype=tensor_ty, name="in_buf", address=4096)
             out_buf = buffer(
-                t02, datatype=tensor_ty, name="out_buf", address=N * 4
+                t02, datatype=tensor_ty, name="out_buf", address=4096 + N * 4
             )
 
             lock(t02, lock_id=0, init=0, sym_name="s2mm_done")
@@ -223,7 +227,7 @@ def build_mlir_module(dev, kernel):
 
             @core(t02)
             def core_body():
-                kernel(in_buf, out_buf, 0, N, N)
+                kernel(in_buf, out_buf, 4096 // 4, (4096 + N * 4) // 4, N)
 
             @runtime_sequence(tensor_ty, tensor_ty)
             def sequence(A, C):
@@ -235,9 +239,7 @@ def build_mlir_module(dev, kernel):
                     row=2,
                 )
 
-                in_task = shim_dma_single_bd_task(
-                    "in_alloc", A, sizes=[1, 1, 1, N]
-                )
+                in_task = shim_dma_single_bd_task("in_alloc", A, sizes=[1, 1, 1, N])
                 out_task = shim_dma_single_bd_task(
                     "out_alloc", C, sizes=[1, 1, 1, N], issue_token=True
                 )

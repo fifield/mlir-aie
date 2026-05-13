@@ -44,7 +44,6 @@ from aie.iron import ObjectFifo, Program, Runtime, Worker
 import aie.iron as iron
 from aie.iron.controlflow import range_
 from aie.iron.device import NPU2Col1
-from aie.iron.placers import SequentialPlacer
 from aie.iron.pythoc import aie_kernel, PythocKernel
 from aie.utils.compile import compile_mlir_module
 from aie.utils import DefaultNPURuntime, NPUKernel
@@ -401,7 +400,7 @@ def build_mlir_module(device, trace_size=0):
         runtime.drain(of_c.cons(), c_out, wait=True)
 
     program = Program(device, runtime)
-    module = program.resolve_program(SequentialPlacer())
+    module = program.resolve_program()
     assert module.operation.verify(), "Generated MLIR failed verification"
     return module
 

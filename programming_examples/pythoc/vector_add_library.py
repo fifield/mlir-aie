@@ -36,7 +36,6 @@ import aie.iron as iron
 from aie.utils.compile import compile_mlir_module
 from aie.iron.controlflow import range_
 from aie.iron.device import NPU1Col1, NPU2Col1
-from aie.iron.placers import SequentialPlacer
 from aie.iron.pythoc import PythocKernel
 from aie.utils import DefaultNPURuntime, NPUKernel
 
@@ -47,6 +46,7 @@ DEFAULT_BUILD_DIR = Path(__file__).resolve().parent / "vector_add_library_build"
 
 
 # ── CLI ────────────────────────────────────────────────────────────────
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -86,6 +86,7 @@ def pick_device(name: str):
 
 
 # ── MLIR / IRON construction ──────────────────────────────────────────
+
 
 def build_mlir_module(device, tensor_size: int):
     """Build IRON program using the imported PythoC add_kernel."""
@@ -131,12 +132,13 @@ def build_mlir_module(device, tensor_size: int):
         runtime.drain(of_c.cons(), c_out, wait=True)
 
     program = Program(device, runtime)
-    module = program.resolve_program(SequentialPlacer())
+    module = program.resolve_program()
     assert module.operation.verify(), "Generated MLIR failed verification"
     return module
 
 
 # ── Compile & run ─────────────────────────────────────────────────────
+
 
 def save_module(module, mlir_path: Path):
     with open(mlir_path, "w", encoding="utf-8") as fh:
@@ -158,7 +160,9 @@ def compile_design(
 def run_with_xrt(xclbin_path: Path, insts_path: Path, tensor_size: int, verbose: bool):
     """Execute on NPU and verify element-wise addition."""
     npu_kernel = NPUKernel(
-        str(xclbin_path), str(insts_path), kernel_name="MLIR_AIE",
+        str(xclbin_path),
+        str(insts_path),
+        kernel_name="MLIR_AIE",
     )
     kernel_handle = DefaultNPURuntime.load(npu_kernel)
 
@@ -177,6 +181,7 @@ def run_with_xrt(xclbin_path: Path, insts_path: Path, tensor_size: int, verbose:
 
 
 # ── main ──────────────────────────────────────────────────────────────
+
 
 def main():
     args = parse_args()
@@ -200,7 +205,10 @@ def main():
 
         print("[3/3] Running with pyxrt and validating results")
         output_vec = run_with_xrt(
-            xclbin_path, insts_path, args.tensor_size, args.verbose,
+            xclbin_path,
+            insts_path,
+            args.tensor_size,
+            args.verbose,
         )
         print(f"      First elements: {np.asarray(output_vec[:8])}")
         print("PASS!")
@@ -209,6 +217,7 @@ def main():
     except Exception as e:
         print(f"\nFAILED: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
 
