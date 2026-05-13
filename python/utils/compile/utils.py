@@ -203,6 +203,13 @@ def compile_mlir_module(
             "--no-xbridge",
             f"--peano={config.peano_install_dir()}",
         ]
+    # Keep the user-source locs captured by iron/_loc.py alive through the
+    # lowering dumps; without --keep-loc the loc(...) entries are stripped and
+    # the intermediate .mlir files point at aie.mlir instead of user Python.
+    args += [
+        "--dump-intermediates",
+        "--keep-loc",
+    ]
     if insts_path:
         args.extend(["--aie-generate-npu-insts", f"--npu-insts-name={insts_path}"])
     if pdi_path:
@@ -243,7 +250,10 @@ def compile_mlir_module(
         aiecc_bin = config.aiecc_path()
         mlir_file = os.path.join(work_dir, "aie.mlir")
         with open(mlir_file, "w") as f:
-            f.write(str(mlir_module))
+            if hasattr(mlir_module, "operation"):
+                f.write(mlir_module.operation.get_asm(enable_debug_info=True))
+            else:
+                f.write(str(mlir_module))
         cmd = [aiecc_bin, mlir_file] + args
         # Mirror compile_external_kernel's "Compiling with: <cmd>" line so
         # users at DEBUG see the full aiecc invocation, not just its output.
