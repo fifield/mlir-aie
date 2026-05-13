@@ -30,10 +30,10 @@ from pythoc.aie.operations import (
 from pythoc.aie.vector import aie_vector
 from pythoc.aie.profiling import event0, event1
 
-
 # ---------------------------------------------------------------------------
 # Integer kernels (i32, 16-wide vectors)
 # ---------------------------------------------------------------------------
+
 
 @aie_kernel
 def add_kernel(a: ptr[i32, True], b: ptr[i32, True], c: ptr[i32, True], N: i32):
@@ -93,10 +93,9 @@ def sub_kernel(a: ptr[i32, True], b: ptr[i32, True], c: ptr[i32, True], N: i32):
 # BFloat16 kernels (bf16, 16-wide vectors)
 # ---------------------------------------------------------------------------
 
+
 @aie_kernel
-def add_bf16_kernel(
-    a: ptr[bf16, True], b: ptr[bf16, True], c: ptr[bf16, True], N: i32
-):
+def add_bf16_kernel(a: ptr[bf16, True], b: ptr[bf16, True], c: ptr[bf16, True], N: i32):
     """Vectorized element-wise bf16 addition: C[i] = A[i] + B[i]."""
     event0()
 
@@ -123,9 +122,7 @@ def add_bf16_kernel(
 
 
 @aie_kernel
-def mul_bf16_kernel(
-    a: ptr[bf16, True], b: ptr[bf16, True], c: ptr[bf16, True], N: i32
-):
+def mul_bf16_kernel(a: ptr[bf16, True], b: ptr[bf16, True], c: ptr[bf16, True], N: i32):
     """Vectorized element-wise bf16 multiplication: C[i] = A[i] * B[i]."""
     event0()
 
