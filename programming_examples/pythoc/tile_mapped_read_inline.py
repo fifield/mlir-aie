@@ -81,6 +81,7 @@ PROC_BUS_REG_ADDR = 0x32038
 
 # ── PythoC kernel ────────────────────────────────────────────────────────────
 
+
 @aie_kernel
 def read_processor_bus(data: ptr[i32, True], addr: i32, size: i32, stride: i32):
     """Read values from the processor bus (tile-mapped memory).
@@ -107,6 +108,7 @@ def read_processor_bus(data: ptr[i32, True], addr: i32, size: i32, stride: i32):
 
 
 # ── Design construction ─────────────────────────────────────────────────────
+
 
 def build_mlir_module(dev):
     """Build the MLIR module using lower-level Python API + PythoC kernel."""
@@ -163,9 +165,7 @@ def build_mlir_module(dev):
                 for _ in range_(8):
                     of_in1.acquire(ObjectFifoPort.Consume, 1)
                     elem_out = of_out1.acquire(ObjectFifoPort.Produce, 1)
-                    kernel(
-                        elem_out, LOCK_REG_ADDR, NUM_LOCKS, LOCK_REG_STRIDE
-                    )
+                    kernel(elem_out, LOCK_REG_ADDR, NUM_LOCKS, LOCK_REG_STRIDE)
                     of_in1.release(ObjectFifoPort.Consume, 1)
                     of_out1.release(ObjectFifoPort.Produce, 1)
 
@@ -196,9 +196,7 @@ def build_mlir_module(dev):
                     sizes=[1, 1, 1, OUT_SIZE],
                     issue_token=True,
                 )
-                npu_sync(
-                    column=0, row=0, direction=0, channel=0
-                )
+                npu_sync(column=0, row=0, direction=0, channel=0)
 
         res = ctx.module.operation.verify()
         if not res:
@@ -207,6 +205,7 @@ def build_mlir_module(dev):
 
 
 # ── Compile & Run ────────────────────────────────────────────────────────────
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -284,9 +283,7 @@ def main():
     dev, target_arch = pick_device(args.device)
 
     try:
-        print(
-            f"[1/3] Building MLIR module with inline PythoC kernel ({target_arch})"
-        )
+        print(f"[1/3] Building MLIR module with inline PythoC kernel ({target_arch})")
         module = build_mlir_module(dev)
         mlir_path = work_dir / "design.mlir"
         with open(mlir_path, "w") as f:
