@@ -35,7 +35,6 @@ import aie.iron as iron
 from aie.utils.compile import compile_mlir_module
 from aie.iron.controlflow import range_
 from aie.iron.device import NPU1Col1, NPU2Col1
-from aie.iron.placers import SequentialPlacer
 from aie.iron.pythoc import compile_pythoc_kernel, PythocKernel
 from aie.utils import DefaultNPURuntime, NPUKernel
 
@@ -92,27 +91,27 @@ def build_mlir_module(device, target_arch: str, tensor_size: int, verbose: bool)
     # Type definitions (bf16 = bfloat16, represented as uint16 in NumPy)
     tensor_ty = np.ndarray[(tensor_size,), np.dtype[np.uint16]]
     tile_ty = np.ndarray[(tile_size,), np.dtype[np.uint16]]
-    
+
     # Step 1: Compile external PythoC kernel to LLVM IR
     if verbose:
         print(f"  Compiling PythoC kernel (eltwise_mul_vectorized, {target_arch})...")
     pythoc_kernel_path = Path("/work/npu-dev/PythoC/pythoc_kernels/mul.py")
-    
+
     ll_file = compile_pythoc_kernel(
         str(pythoc_kernel_path),
         function_name="eltwise_mul_vectorized",
         target_arch=target_arch,
-        verbose=verbose
+        verbose=verbose,
     )
-    
+
     if verbose:
         print(f"  LLVM IR: {ll_file}")
-    
+
     # Step 2: Create IRON Kernel from compiled IR
     mul_kernel = PythocKernel(
         "eltwise_mul_vectorized",
         str(ll_file),
-        [tile_ty, tile_ty, tile_ty, np.int32]  # Types: input_a, input_b, output, size
+        [tile_ty, tile_ty, tile_ty, np.int32],  # Types: input_a, input_b, output, size
     )
 
     # Define ObjectFifos for data movement
@@ -147,7 +146,7 @@ def build_mlir_module(device, target_arch: str, tensor_size: int, verbose: bool)
         runtime.drain(of_c.cons(), c_out, wait=True)
 
     program = Program(device, runtime)
-    module = program.resolve_program(SequentialPlacer())
+    module = program.resolve_program()
     assert module.operation.verify(), "Generated MLIR failed verification"
     return module
 
@@ -218,12 +217,14 @@ def main():
     device, target_arch = pick_device(args.device)
 
     try:
-        print(f"[1/3] Building IRON program with external PythoC kernel ({target_arch})")
+        print(
+            f"[1/3] Building IRON program with external PythoC kernel ({target_arch})"
+        )
         module = build_mlir_module(device, target_arch, args.tensor_size, args.verbose)
         mlir_path = work_dir / "kernel.mlir"
         save_module(module, mlir_path)
         print(f"      -> {mlir_path}")
-        
+
         print("[2/3] Compiling design with aiecc")
         insts_path = work_dir / "insts.bin"
         xclbin_path = work_dir / "final.xclbin"
@@ -237,13 +238,13 @@ def main():
             tensor_size=args.tensor_size,
             verbose=args.verbose,
         )
-        
+
         # Show first few elements (float32 values)
         preview_out = output_vec[:8]
         preview_exp = expected_vec[:8]
         print(f"      Output (f32):   {preview_out}")
         print(f"      Expected (f32): {preview_exp}")
-        
+
         # Use approximate comparison (bf16 has limited precision)
         if np.allclose(output_vec, expected_vec, rtol=1e-2, atol=1e-2):
             print("PASS!")
@@ -257,10 +258,11 @@ def main():
             for i in idxs:
                 print(f"        [{i}] got {output_vec[i]}, expected {expected_vec[i]}")
             return 1
-        
+
     except Exception as e:
         print(f"\nFAILED: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
 

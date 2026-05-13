@@ -254,10 +254,8 @@ def build_mlir_module(dev, kernel):
             # Local memory buffers on compute tile at known addresses
             # in_buf:  N words at byte address 0
             # out_buf: N words at byte address N*4
-            in_buf = buffer(t02, datatype=tensor_ty, name="in_buf", address=0)
-            out_buf = buffer(
-                t02, datatype=tensor_ty, name="out_buf", address=N * 4
-            )
+            in_buf = buffer(t02, datatype=tensor_ty, name="in_buf", address=4096)
+            out_buf = buffer(t02, datatype=tensor_ty, name="out_buf", address=4096 + N * 4)
 
             # Locks for DMA completion signaling (DMA BDs release these)
             lock(t02, lock_id=0, init=0, sym_name="s2mm_done")
@@ -278,7 +276,7 @@ def build_mlir_module(dev, kernel):
             # out_addr_words = N (byte addr N*4 / 4)
             @core(t02)
             def core_body():
-                kernel(in_buf, out_buf, 0, N, N)
+                kernel(in_buf, out_buf, 4096 // 4, (4096 + N * 4) // 4, N)
 
             # Runtime sequence (host-side DMA programming)
             @runtime_sequence(tensor_ty, tensor_ty)
@@ -293,9 +291,7 @@ def build_mlir_module(dev, kernel):
                 )
 
                 # Program shim DMA to send input and receive output
-                in_task = shim_dma_single_bd_task(
-                    "in_alloc", A, sizes=[1, 1, 1, N]
-                )
+                in_task = shim_dma_single_bd_task("in_alloc", A, sizes=[1, 1, 1, N])
                 out_task = shim_dma_single_bd_task(
                     "out_alloc", C, sizes=[1, 1, 1, N], issue_token=True
                 )

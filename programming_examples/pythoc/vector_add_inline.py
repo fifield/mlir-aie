@@ -12,8 +12,7 @@
 # RUN: %python %s --device npu2 --tensor-size 4096 --work-dir ./vector_add_inline_build | FileCheck %s
 # CHECK: PASS!
 
-"""Single-file end-to-end example: PythoC inline kernel with IRON.
-"""
+"""Single-file end-to-end example: PythoC inline kernel with IRON."""
 
 from __future__ import annotations
 
@@ -27,7 +26,6 @@ import aie.iron as iron
 from aie.utils.compile import compile_mlir_module
 from aie.iron.controlflow import range_
 from aie.iron.device import NPU1Col1, NPU2Col1
-from aie.iron.placers import SequentialPlacer
 from aie.iron.pythoc import aie_kernel, PythocKernel
 from aie.utils import DefaultNPURuntime, NPUKernel
 
@@ -173,7 +171,7 @@ def build_mlir_module(device, tensor_size: int):
         runtime.drain(of_c.cons(), c_out, wait=True)
 
     program = Program(device, runtime)
-    module = program.resolve_program(SequentialPlacer())
+    module = program.resolve_program()
     assert module.operation.verify(), "Generated MLIR failed verification"
     return module
 
@@ -240,7 +238,7 @@ def main():
         mlir_path = work_dir / "kernel.mlir"
         save_module(module, mlir_path)
         print(f"      -> {mlir_path}")
-        
+
         print("[2/3] Compiling design with aiecc")
         insts_path = work_dir / "insts.bin"
         xclbin_path = work_dir / "final.xclbin"
@@ -258,14 +256,16 @@ def main():
         print(f"      First elements: {preview}")
         print("PASS!")
         return 0
-        
+
     except Exception as e:
         print(f"\nFAILED: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
 
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(main())

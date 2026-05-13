@@ -42,7 +42,6 @@ from aie.iron import ObjectFifo, Program, Runtime, Worker
 import aie.iron as iron
 from aie.iron.controlflow import range_
 from aie.iron.device import NPU2, Tile
-from aie.iron.placers import SequentialPlacer
 from aie.iron.pythoc import aie_kernel, PythocKernel
 from aie.utils.compile import compile_mlir_module
 from aie.utils import DefaultNPURuntime, NPUKernel
@@ -383,7 +382,7 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols, trace_size=0):
                 obj_types=[A_l1_ty] * (stop_row - start_row),
                 names=[f"A_L2L1_{row}" for row in range(start_row, stop_row)],
                 dims_to_stream=dims_to_stream,
-                placement=Tile(2 * i if n_aie_cols == 8 else i, 1),
+                tile=Tile(2 * i if n_aie_cols == 8 else i, 1),
             )
         )
         for j in range(stop_row - start_row):
@@ -400,7 +399,7 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols, trace_size=0):
                 obj_type=B_l1_ty,
                 name=f"B_L2L1_{col}",
                 dims_to_stream=b_dims_to_stream,
-                placement=Tile(col, 1),
+                tile=Tile(col, 1),
             )
         )
 
@@ -420,7 +419,7 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols, trace_size=0):
                 obj_types=[C_l1_ty] * n_aie_rows,
                 names=[f"C_L1L2_{col}_{row}" for row in range(n_aie_rows)],
                 depths=[c_fifo_depth] * n_aie_rows,
-                placement=Tile(col, 1),
+                tile=Tile(col, 1),
             )
         )
         for j in range(n_aie_rows):
@@ -454,7 +453,9 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols, trace_size=0):
     for row in range(n_aie_rows):
         for col in range(n_aie_cols):
             tile_col, tile_row = core_tiles[row][col]
-            is_trace_tile = trace_size > 0 and row == n_aie_rows - 1 and col == n_aie_cols - 1
+            is_trace_tile = (
+                trace_size > 0 and row == n_aie_rows - 1 and col == n_aie_cols - 1
+            )
             workers.append(
                 Worker(
                     core_fn,
@@ -465,7 +466,7 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols, trace_size=0):
                         zero_kernel,
                         matmul_kernel,
                     ],
-                    placement=Tile(tile_col, tile_row),
+                    tile=Tile(tile_col, tile_row),
                     stack_size=0xD00,
                     trace=1 if is_trace_tile else None,
                 )
@@ -503,9 +504,10 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols, trace_size=0):
     with rt.sequence(A_ty, B_ty, C_ty) as (A, B, C):
         if trace_size > 0:
             # Trace the top-row, last-column worker (row=n_aie_rows-1 in worker list).
-            # Route to shim col=n_aie_cols (neighbour column, free of data flows).
+            # Use -aie-insert-trace-flows lateral-routing options to force
+            # trace collection through a neighbouring shim column if needed.
             trace_worker = workers[n_aie_rows * n_aie_cols - 1]
-            rt.enable_trace(trace_size, workers=[trace_worker], shim_col=n_aie_cols)
+            rt.enable_trace(trace_size, workers=[trace_worker])
         rt.start(*workers)
 
         tg = rt.task_group()
@@ -526,7 +528,7 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols, trace_size=0):
                         tap=C_tiles[c_index],
                         wait=True,
                         task_group=tg,
-                        placement=Tile(col, 0),
+                        tile=Tile(col, 0),
                     )
                     c_index += 1
 
@@ -541,7 +543,7 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols, trace_size=0):
                                 A,
                                 tap=A_tiles[tile_offset],
                                 task_group=tg,
-                                placement=Tile(2 * col if n_aie_cols == 8 else col, 0),
+                                tile=Tile(2 * col if n_aie_cols == 8 else col, 0),
                             )
 
                         rt.fill(
@@ -549,7 +551,7 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols, trace_size=0):
                             B,
                             tap=B_tiles[col],
                             task_group=tg,
-                            placement=Tile(col, 0),
+                            tile=Tile(col, 0),
                         )
 
                 if tb > 0 or (tb == 0 and pingpong > 0):
@@ -559,7 +561,7 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols, trace_size=0):
 
     # ── Build and verify ─────────────────────────────────────────────────
     my_program = Program(dev_ty, rt)
-    module = my_program.resolve_program(SequentialPlacer())
+    module = my_program.resolve_program()
     assert module.operation.verify(), "Generated MLIR failed verification"
     return module
 
@@ -676,7 +678,9 @@ def main():
             f"{N_AIE_ROWS}×{n_aie_cols} cores, tile {m}×{k}×{n}"
             + (f" [trace={args.trace_size:#x}]" if args.trace_size else "")
         )
-        module = build_mlir_module(M, K, N, m, k, n, n_aie_cols, trace_size=args.trace_size)
+        module = build_mlir_module(
+            M, K, N, m, k, n, n_aie_cols, trace_size=args.trace_size
+        )
         mlir_path = work_dir / "kernel.mlir"
         with open(mlir_path, "w") as f:
             print(module, file=f)
