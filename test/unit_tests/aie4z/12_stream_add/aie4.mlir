@@ -19,7 +19,7 @@ module {
   aie.device(npu3z) {
     %tile_0_2 = aie.tile(0, 2)
 
-    %ping_in_a_buffer  = aie.buffer(%tile_0_2) {address = 512 : i32, bank = 0 : i32, sym_name = "ping_in_a_buffer"} : memref<32xi32>
+    %ping_in_a_buffer  = aie.buffer(%tile_0_2) {address = 2048 : i32, bank = 0 : i32, sym_name = "ping_in_a_buffer"} : memref<32xi32>
     %pong_in_a_buffer  = aie.buffer(%tile_0_2) {address = 2304 : i32, bank = 0 : i32, sym_name = "pong_in_a_buffer"} : memref<32xi32>
     %ping_out_buffer = aie.buffer(%tile_0_2)   {address = 3072 : i32, bank = 0 : i32, sym_name = "ping_out_buffer"} : memref<32xi32>
     %pong_out_buffer = aie.buffer(%tile_0_2)   {address = 3328 : i32, bank = 0 : i32, sym_name = "pong_out_buffer"} : memref<32xi32>

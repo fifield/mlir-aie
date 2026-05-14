@@ -14,7 +14,6 @@ import numpy as np
 import sys
 
 from aie.iron import ObjectFifo, Program, Runtime, Worker
-from aie.iron.placers import SequentialPlacer
 from aie.iron.device import NPU3Z
 from aie.iron.controlflow import range_
 
@@ -62,7 +61,7 @@ def my_vector_mul(args):
         rt.drain(of_out.cons(), C, wait=True)
 
     # Place program components (assign them resources on the device) and generate an MLIR module
-    return Program(dev, rt).resolve_program(SequentialPlacer())
+    return Program(dev, rt).resolve_program()
 
 
 parser = argparse.ArgumentParser(description="Vector-Vector Multiplication Program")

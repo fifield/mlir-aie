@@ -805,6 +805,9 @@ struct AIEInsertTraceFlowsPass
       const RegisterInfo *timerReg = targetModel.lookupRegister(
           "Timer_Control", info.tile.getTileID(), isMemTrace);
       if (!timerReg)
+        timerReg = targetModel.lookupRegister(
+            "Timer_A_Control", info.tile.getTileID(), isMemTrace);
+      if (!timerReg)
         llvm::report_fatal_error("Failed to lookup Timer_Control register");
       const BitFieldInfo *resetField = timerReg->getField("Reset_Event");
       if (!resetField)
@@ -854,7 +857,6 @@ struct AIEInsertTraceFlowsPass
             0, // d0_size, d0_stride, d1_size, d1_stride, d2_size, d2_stride
             0, 0, 0, // iteration_current, iteration_size, iteration_stride
             0,       // next_bd
-            0,       // row
             0,       // use_next_bd
             1,       // valid_bd
             0, 0, 0, 0, 0,    // lock_rel_val, lock_rel_id, lock_acq_enable,
@@ -868,8 +870,9 @@ struct AIEInsertTraceFlowsPass
 
         // 4d. Address patch -- the channels split the buffer between them, so
         // channel i starts bufferSizeBytes past channel i-1.
-        uint32_t bdAddress = computeBDAddress(shimCol, chanDesc.bdId,
-                                              shimInfo.shimTile, targetModel);
+        uint32_t bdAddress =
+            computeBDAddress(shimCol, chanDesc.bdId, chanDesc.channel,
+                             shimInfo.shimTile, targetModel);
         int chanOffset =
             cfg.bufferOffset + static_cast<int>(chanIdx) * bufferSizeBytes;
         xilinx::AIEX::NpuAddressPatchOp::create(
@@ -960,6 +963,9 @@ struct AIEInsertTraceFlowsPass
             computeTimerCtrlAddress(shimInfo.shimTile, targetModel, false);
         const RegisterInfo *shimTimerReg = targetModel.lookupRegister(
             "Timer_Control", shimInfo.shimTile.getTileID(), false);
+        if (!shimTimerReg)
+          shimTimerReg = targetModel.lookupRegister(
+              "Timer_A_Control", shimInfo.shimTile.getTileID(), false);
         if (!shimTimerReg)
           llvm::report_fatal_error("Failed to lookup shim Timer_Control");
         const BitFieldInfo *shimResetField =

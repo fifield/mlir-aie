@@ -18,6 +18,11 @@
 # CHECK: Testing AIE2P
 # CHECK: AIE2P CoreEvent: NONE=0, TRUE=1, PERF_CNT_0=5, BROADCAST_0=107
 # CHECK: AIE2P MemEvent: NONE=0, WATCHPOINT_0=16
+# CHECK: Testing AIE4
+# CHECK: AIE4 CoreEvent: NONE=0, TRUE=1, PERF_CNT_0=5, BROADCAST_0=218
+# CHECK: AIE4 ShimEvent: NONE=0, DMA_S2MM_0_START_TASK=42
+# CHECK: AIE4 MemTileEvent: NONE=0, CONFLICT_DM_BANK_0=138
+# CHECK: AIE4 MemEvent is None (unified core/mem tile in AIE4)
 # CHECK: Edge case: Same event name, different values across archs
 # CHECK: USER_EVENT_0: AIE1.Shim=124, AIE2.Shim=126
 # CHECK: DMA_S2MM_0_FINISHED_BD: AIE1.Mem=25, AIE1.Shim=16
@@ -37,6 +42,7 @@ from aie.utils.trace.events import get_events_for_device
 aie1 = get_events_for_device("xcvc1902")
 aie2 = get_events_for_device("npu1")
 aie2p = get_events_for_device("npu2p")
+aie4 = get_events_for_device("npu3")
 
 
 def test_arch(name, core_cls, mem_cls, shim_cls, mem_tile_cls=None):
@@ -48,17 +54,18 @@ def test_arch(name, core_cls, mem_cls, shim_cls, mem_tile_cls=None):
     for m in core_cls:
         assert isinstance(m.value, int) and isinstance(m.name, str)
 
-    # Test MemEvent
-    assert mem_cls.NONE.value == 0
-    for m in mem_cls:
-        assert isinstance(m.value, int) and isinstance(m.name, str)
+    # Test MemEvent (None for AIE4 — unified core/mem tile)
+    if mem_cls is not None:
+        assert mem_cls.NONE.value == 0
+        for m in mem_cls:
+            assert isinstance(m.value, int) and isinstance(m.name, str)
 
     # Test ShimEvent
     assert shim_cls.NONE.value == 0
     for m in shim_cls:
         assert isinstance(m.value, int) and isinstance(m.name, str)
 
-    # Test MemTileEvent (AIE2/AIE2P only)
+    # Test MemTileEvent (AIE2/AIE2P/AIE4)
     if mem_tile_cls:
         assert mem_tile_cls.NONE.value == 0
         for m in mem_tile_cls:
@@ -103,6 +110,21 @@ def test_arch(name, core_cls, mem_cls, shim_cls, mem_tile_cls=None):
         print(
             f"AIE2P MemEvent: NONE={mem_cls.NONE.value}, WATCHPOINT_0={mem_cls.WATCHPOINT_0.value}"
         )
+    elif name == "AIE4":
+        print(
+            f"AIE4 CoreEvent: NONE={core_cls.NONE.value}, TRUE={core_cls.TRUE.value}, "
+            f"PERF_CNT_0={core_cls.PERF_CNT_0.value}, BROADCAST_0={core_cls.BROADCAST_0.value}"
+        )
+        print(
+            f"AIE4 ShimEvent: NONE={shim_cls.NONE.value}, "
+            f"DMA_S2MM_0_START_TASK={shim_cls.DMA_S2MM_0_START_TASK.value}"
+        )
+        print(
+            f"AIE4 MemTileEvent: NONE={mem_tile_cls.NONE.value}, "
+            f"CONFLICT_DM_BANK_0={mem_tile_cls.CONFLICT_DM_BANK_0.value}"
+        )
+        assert mem_cls is None, "AIE4 should not have separate MemEvent"
+        print("AIE4 MemEvent is None (unified core/mem tile in AIE4)")
 
 
 def test_edge_cases():
@@ -178,6 +200,13 @@ if __name__ == "__main__":
         aie2p.MemEvent,
         aie2p.ShimTileEvent,
         aie2p.MemTileEvent,
+    )
+    test_arch(
+        "AIE4",
+        aie4.CoreEvent,
+        aie4.MemEvent,
+        aie4.ShimTileEvent,
+        aie4.MemTileEvent,
     )
     test_edge_cases()
     print("All tests passed!")

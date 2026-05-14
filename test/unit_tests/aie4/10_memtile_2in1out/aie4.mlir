@@ -22,12 +22,12 @@ module @test_dma_to_txn {
   aie.device(npu3) {
     %tile_0_2 = aie.tile(0, 2)
 
-    %ping_in_a_buffer  = aie.buffer(%tile_0_2) {address = 512 : i32, bank = 0 : i32, sym_name = "ping_in_a_buffer"} : memref<32xi32>
-    %pong_in_a_buffer  = aie.buffer(%tile_0_2) {address = 2304 : i32, bank = 0 : i32, sym_name = "pong_in_a_buffer"} : memref<32xi32>
+    %ping_in_a_buffer  = aie.buffer(%tile_0_2) {address = 1024 : i32, bank = 0 : i32, sym_name = "ping_in_a_buffer"} : memref<32xi32>
+    %pong_in_a_buffer  = aie.buffer(%tile_0_2) {address = 2048 : i32, bank = 0 : i32, sym_name = "pong_in_a_buffer"} : memref<32xi32>
     %ping_in_b_buffer  = aie.buffer(%tile_0_2) {address = 2560 : i32, bank = 0 : i32, sym_name = "ping_in_b_buffer"} : memref<32xi32>
     %pong_in_b_buffer  = aie.buffer(%tile_0_2) {address = 2816 : i32, bank = 0 : i32, sym_name = "pong_in_b_buffer"} : memref<32xi32>
     %ping_out_buffer = aie.buffer(%tile_0_2)   {address = 3072 : i32, bank = 0 : i32, sym_name = "ping_out_buffer"} : memref<32xi32>
-    %pong_out_buffer = aie.buffer(%tile_0_2)   {address = 3328 : i32, bank = 0 : i32, sym_name = "pong_out_buffer"} : memref<32xi32>
+    %pong_out_buffer = aie.buffer(%tile_0_2)   {address = 4096 : i32, bank = 0 : i32, sym_name = "pong_out_buffer"} : memref<32xi32>
 
     %tile_input_a_read_lock   = aie.lock(%tile_0_2, 0) { init = 0 : i32 } 
     %tile_input_a_write_lock  = aie.lock(%tile_0_2, 1) { init = 1 : i32 } 

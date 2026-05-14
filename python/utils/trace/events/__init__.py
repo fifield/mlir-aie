@@ -77,7 +77,7 @@ def get_events_for_device(device: str):
     elif "npu3" in device:
         return SimpleNamespace(
             CoreEvent=CoreEventAIE4,
-            MemEvent=MemEventAIE4,
+            MemEvent=None,  # AIE4 has no separate MemEvent enum
             ShimTileEvent=ShimTileEventAIE4,
             MemTileEvent=MemTileEventAIE4,
         )

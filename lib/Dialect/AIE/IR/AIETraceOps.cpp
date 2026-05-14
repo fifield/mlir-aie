@@ -285,6 +285,23 @@ ParseResult xilinx::AIE::parseTraceEvent(AsmParser &parser, Attribute &result) {
          auto result = symbolizeShimTileEventAIE2P(s);
          return result.has_value();
        }},
+      // AIE4 event enums
+      {"CoreEventAIE4",
+       [](StringRef s) {
+         return symbolizeCoreEventAIE4(s).has_value();
+       }},
+      {"MemEventAIE4",
+       [](StringRef s) {
+         return symbolizeMemEventAIE4(s).has_value();
+       }},
+      {"MemTileEventAIE4",
+       [](StringRef s) {
+         return symbolizeMemTileEventAIE4(s).has_value();
+       }},
+      {"ShimTileEventAIE4",
+       [](StringRef s) {
+         return symbolizeShimTileEventAIE4(s).has_value();
+       }},
   };
 
   // Look up and validate the enum type

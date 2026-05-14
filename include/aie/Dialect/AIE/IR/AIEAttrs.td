@@ -511,5 +511,6 @@ def ObjectFifoEndPortArrayAttr
 include "AIEEventsAIE.td.inc"
 include "AIEEventsAIE2.td.inc"
 include "AIEEventsAIE2P.td.inc"
+include "AIEEventsAIE4.td.inc"
 
 #endif // AIE_ATTRS
