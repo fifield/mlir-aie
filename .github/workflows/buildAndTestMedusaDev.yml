@@ -51,6 +51,11 @@ jobs:
           pip install -r python/requirements.txt
           pip install -r python/requirements_ml.txt
           pip install -r python/requirements_dev.txt
+          pip install -r python/requirements_notebook.txt
+
+          # Install peano
+          pip install /home/github/llvm_aie-1.8.0.dev20260415152325+g5b858460-py3-none-manylinux_2_34_x86_64.whl
+          export PEANO_INSTALL_DIR="$(pip show llvm-aie | grep ^Location: | awk '{print $2}')/lnx64.o/tools/peano/"
 
           VERSION=$(utils/clone-llvm.sh --get-wheel-version)
           pip -q download mlir==$VERSION \
@@ -68,7 +73,7 @@ jobs:
           source /opt/xilinx/xrt/setup.sh
 
           export PATH=$PATH:${VITIS}/aietools/bin:${VITIS}/bin
-
+          export PEANO_INSTALL_DIR="$(pip show llvm-aie | grep ^Location: | awk '{print $2}')/lnx64.o/tools/peano/"
           sed -i 's/\t\tVITIS_DSPLIB_INCLUDE_DIR/\t\t#VITIS_DSPLIB_INCLUDE_DIR/g' cmake/modulesXilinx/FindVitis.cmake
 
           mkdir build
@@ -99,8 +104,11 @@ jobs:
           source aie-venv/bin/activate
           source /opt/xilinx/xrt/setup.sh
           export PATH=$PATH:${VITIS}/aietools/bin:${VITIS}/bin
+          export PEANO_INSTALL_DIR="$(pip show llvm-aie | grep ^Location: | awk '{print $2}')/lnx64.o/tools/peano/"
 
           pushd build
-          export LIT_OPTS="-sv --time-tests -j4 --timeout 600"
+          export LIT_OPTS="-sv --time-tests -j4 --timeout 600 --show-unsupported --order=random"
+          ninja check-aie-cpp
           ninja check-aie
+          ninja check-reference-designs
           popd
