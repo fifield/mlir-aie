@@ -6,7 +6,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-// REQUIRES: aiesimulator, peano
+// dont_run because no aie1 peano
+
+// REQUIRES: aiesimulator, peano, dont_run
 
 // RUN: %aiecc --get-aiesim --xchesscc=false --xbridge %VitisSysrootFlag% --host-target=%aieHostTargetTriplet% %link_against_hsa% %s %test_lib_flags -o test.elf -- %S/test.cpp
 // RUN: %run_on_board ./test.elf
