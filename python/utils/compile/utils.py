@@ -1137,7 +1137,7 @@ def compile_mlir_module(
     device_cache_dir: str | Path | None = None,
     build_link_files: Callable[[], None] | None = None,
 ):
-    """Compile MLIR to instruction, PDI, ELF, xclbin, or C++ files using aiecc.
+    """Compile MLIR to instruction, PDI, ELF, full-ELF, xclbin, or C++ files using aiecc.
 
     Parameters:
         mlir_module (str): MLIR module to compile.
@@ -1235,6 +1235,8 @@ def compile_mlir_module(
         args.extend(["--get-pdi", f"--pdi-name={pdi_path}"])
     if elf_path:
         args.extend(["--get-elf", f"--elf-name={elf_path}"])
+    if full_elf_path:
+        args.extend(["--generate-full-elf", f"--full-elf-name={full_elf_path}"])
     if work_dir:
         args.append(f"--tmpdir={work_dir}")
         # Emit input_with_addresses.mlir into work_dir; the JIT DMA-size
