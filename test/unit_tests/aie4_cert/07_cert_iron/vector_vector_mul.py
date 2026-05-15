@@ -39,7 +39,8 @@ def my_vector_mul(args):
     # Create a task that can run on a compute tile
     def core_body(of_in1, of_in2, of_out):
         # Number of sub-vector "tile" iterations
-        for _ in range_(N_div_n):
+        # x16 so the core doesn't reach aie.end, which caused simulation errors
+        for _ in range_(N_div_n * 16):
             elem_in1 = of_in1.acquire(1)
             elem_in2 = of_in2.acquire(1)
             elem_out = of_out.acquire(1)

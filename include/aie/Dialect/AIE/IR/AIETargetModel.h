@@ -1538,7 +1538,7 @@ public:
   uint32_t getMemTileSize() const override { return 0x00300000; }
 
   uint32_t getNumBanks(int col, int row) const override {
-    return isMemTile(col, row) ? 24 : 8;
+    return isMemTile(col, row) ? 24 : 4;
   }
 
   uint32_t getMaxChannelNumForAdjacentMemTile(int col, int row) const override {
