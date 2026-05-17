@@ -32,6 +32,7 @@ Buffer layouts in L1 (set by dims_to_stream):
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -79,6 +80,12 @@ N_AIE_ROWS = 4  # always 4 rows in NPU2
 
 WARMUP_ITERS = 10
 MEASURE_ITERS = 20
+
+
+def add_pythoc_llc_flag(flag: str):
+    flags = os.environ.get("PYTHOC_LLC_FLAGS", "").split()
+    if flag not in flags:
+        os.environ["PYTHOC_LLC_FLAGS"] = " ".join([*flags, flag])
 
 
 # ── PythoC Kernel: bf16 GEMM tile ───────────────────────────────────────────
@@ -256,6 +263,10 @@ def ceildiv(a, b):
 
 def build_mlir_module(M, K, N, m, k, n, n_aie_cols, trace_size=0):
     """Build IRON multi-core GEMM program following whole_array_iron.py topology."""
+
+    # llvm-aie's software pipeliner can currently produce an invalid BM spill for
+    # the 128x32x64 tile kernel, causing llc object emission to abort.
+    add_pythoc_llc_flag("-enable-pipeliner=false")
 
     n_aie_rows = N_AIE_ROWS
     n_aie_cores = n_aie_rows * n_aie_cols
