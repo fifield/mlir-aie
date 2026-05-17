@@ -15,6 +15,7 @@ object files that can be linked into IRON programs.
 import ast
 import os
 import re
+import shlex
 import sys
 import subprocess
 import tempfile
@@ -86,6 +87,16 @@ def _get_llc_path() -> str:
 
 def _get_opt_path() -> str:
     return _find_peano_tool("opt")
+
+
+def _get_extra_llc_flags() -> list[str]:
+    flags = os.environ.get("PYTHOC_LLC_FLAGS", "")
+    if not flags:
+        return []
+    try:
+        return shlex.split(flags)
+    except ValueError as e:
+        raise RuntimeError(f"Invalid PYTHOC_LLC_FLAGS value: {e}") from e
 
 
 def _make_helper_wrapper(name, func_info, user_globals):
@@ -533,6 +544,7 @@ def compile_pythoc_source(
         llc_cmd = [
             llc_path,
             f"-march={target_arch}",
+            *_get_extra_llc_flags(),
             "-filetype=obj",
             f"-o={obj_file}",
             str(opt_ll_file),
