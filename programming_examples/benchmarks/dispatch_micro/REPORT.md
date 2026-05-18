@@ -679,6 +679,157 @@ Until one of those lands, the honest per-dispatch ctrlpkt number is
 **first-dispatch only (787 µs at t=1, in the same band as every other
 mechanism)**.
 
+## §7. Topology sweep (v2 — branch, hop measured)
+
+> *Added in v2.*
+
+v1 only measured `linear` topology (shim → compute, per-column). The
+generator already supported two more: `branch` (one shim broadcasts to
+N compute tiles in different columns) and `hop` (shim → memtile →
+compute → memtile → shim, with mem-tile fan-out per column). v2 #7
+ran the sweep.
+
+### Build boundary
+
+`branch` is shim-channel-limited: one shim tile has only 2 MM2S + 2
+S2MM channels, so it can feed at most 2 compute tiles in different
+columns. **`branch × t > 2` fails at compile** with:
+
+```
+'aie.tile' op number of output DMA channel exceeded!
+```
+
+`linear` and `hop` scale up to t=4 (and to t=8 on `npu2` from the
+whole-array sweep) without issue.
+
+### Table: `pure_dispatch` p50 µs by topology (bds=2, rows=1)
+
+| mech                | t | linear | branch | hop |
+|---------------------|--:|-------:|-------:|----:|
+| baseline            | 1 |   64.7 |   63.9 | 63.6 |
+| baseline            | 2 |   67.9 |   69.0 | 73.5 |
+| baseline            | 4 |   72.3 |     —  | 77.3 |
+| load_pdi_fw         | 1 |   65.8 |   64.7 | 62.6 |
+| load_pdi_fw         | 2 |   66.4 |   62.6 | 65.0 |
+| load_pdi_fw         | 4 |   72.1 |     —  | 65.7 |
+| load_pdi_expanded   | 1 |   72.5 |   65.2 | 72.7 |
+| load_pdi_expanded   | 2 |   72.7 |   79.4 | 76.4 |
+| load_pdi_expanded   | 4 |   87.7 |     —  | 91.9 |
+
+### Findings
+
+1. **Topology barely moves per-dispatch cost.** All cells across all
+   three topologies sit in a ~60-92 µs band at these shapes. The
+   topology axis isn't a meaningful lever for steady-state dispatch
+   latency.
+2. **`hop` adds modest overhead under `load_pdi_expanded`** (87.7 →
+   91.9 µs at t=4, +4 µs). The extra memtile-side BD configurations
+   in the expanded txn stream are paid in band, so adding mem-tile
+   programming makes the stream longer. `baseline` and `load_pdi_fw`
+   show no such effect — neither pays per-dispatch reconfig cost.
+3. **`branch` doesn't show a routing penalty.** Where measurable
+   (t ≤ 2), branch numbers are within noise of `linear`. The
+   stream-switch routing the compiler generates for the broadcast is
+   apparently free at runtime.
+
+### Practical conclusion
+
+Pick the topology that matches your placement / routing needs;
+**latency-wise the choice is noise**. The branch shim-channel limit
+(max 2 fanouts from one shim) is a real architectural constraint;
+hop's memtile cost shows up only when the dispatch is itself doing
+real reconfig (i.e. `load_pdi_expanded`).
+
+## §8. BD count under multi-row (v2)
+
+> *Added in v2.*
+
+v1's BD-count sweep covered `rows_per_col=1` only. v1's whole-array
+sweep covered `rows_per_col ∈ {1, 2, 4}` but only at `bds=2`. The gap:
+how does BD count interact with multi-row configurations? v2 #8 fills
+the matrix at `bds ∈ {2, 4}` × `rows_per_col ∈ {2, 4}` × `tiles ∈ {1,
+2, 4}` for all three working mechanisms.
+
+### Table: `pure_dispatch` p50 µs at `b ∈ {2, 4}` × `r ∈ {2, 4}`
+
+| mech                | t | r | b=2   | b=4   | b=4/b=2 |
+|---------------------|--:|--:|------:|------:|--------:|
+| baseline            | 1 | 2 |  67.9 |  68.3 |   1.01  |
+| baseline            | 2 | 2 |  66.1 |  75.1 |   1.14  |
+| baseline            | 4 | 2 |  75.4 |  77.2 |   1.02  |
+| baseline            | 1 | 4 |  62.6 |  74.0 |   1.18  |
+| baseline            | 2 | 4 |  69.6 |  74.7 |   1.07  |
+| baseline            | 4 | 4 |  75.4 |  80.1 |   1.06  |
+| load_pdi_fw         | 1 | 2 |  66.8 |  73.9 |   1.11  |
+| load_pdi_fw         | 2 | 2 |  65.1 |  78.4 |   1.20  |
+| load_pdi_fw         | 4 | 2 |  72.8 |  71.7 |   0.99  |
+| load_pdi_fw         | 1 | 4 |  64.3 |  71.1 |   1.10  |
+| load_pdi_fw         | 2 | 4 |  73.8 |  78.8 |   1.07  |
+| load_pdi_fw         | 4 | 4 |  73.9 |  84.3 |   1.14  |
+| load_pdi_expanded   | 1 | 2 |  77.7 |  85.9 |   1.11  |
+| load_pdi_expanded   | 2 | 2 | 101.2 | 108.3 |   1.07  |
+| load_pdi_expanded   | 4 | 2 | 131.6 | 134.9 |   1.02  |
+| load_pdi_expanded   | 1 | 4 |  93.6 | 107.8 |   1.15  |
+| load_pdi_expanded   | 2 | 4 | 130.0 | 133.8 |   1.03  |
+| load_pdi_expanded   | 4 | 4 | 184.5 | 190.5 |   1.03  |
+
+### Findings
+
+1. **BD count is mostly noise within `bds ∈ {2, 4}`.** Ratios mostly
+   1.0–1.2; doubling BDs increases latency by 0–20%. The BD axis
+   isn't a major lever at these scales.
+2. **Rows matter much more than BDs for `load_pdi_expanded`.** At
+   t=4 b=4: r=2 → 134.9 µs vs r=4 → 190.5 µs (+41%). Compare to b=2
+   → b=4 at the same t=4, r=4: 184.5 → 190.5 µs (+3%). For
+   expanded, the txn stream length is dominated by per-row memtile
+   reconfig, not per-BD shim reconfig.
+3. **baseline + load_pdi_fw stay flat across all 24 multi-row cells**
+   (~62–85 µs), confirming v1+v2's general finding that those paths
+   don't pay per-dispatch reconfig cost.
+
+### New failure mode: `bds=8 × rows_per_col > 1` extends to all mechanisms
+
+v1's firmware-crash bug
+([`bugs/bd_load_pdi_crash.md`](bugs/bd_load_pdi_crash.md)) was framed
+as "`load_pdi_*` + `bds=8` hangs." v2 #8 found that **the
+load-bearing condition is `bds=8`, not the mechanism.** Under
+`rows_per_col > 1`:
+
+| mech                | t | r | b | first-dispatch result          |
+|---------------------|--:|--:|--:|--------------------------------|
+| baseline            | 1 | 1 | 8 | OK, ~100 µs                    |
+| baseline            | 1 | 2 | 8 | OK but **~6.1 *seconds* per dispatch** |
+| baseline            | 1 | 4 | 8 | OK but **~6.1 *seconds* per dispatch** |
+| load_pdi_fw         | 1 | 1 | 8 | hangs from a fresh process<sup>†</sup> |
+| load_pdi_fw         | 1 | 2 | 8 | hangs                          |
+| load_pdi_fw         | 1 | 4 | 8 | hangs                          |
+| load_pdi_expanded   | 1 | 1 | 8 | OK, ~178 µs                    |
+| load_pdi_expanded   | 1 | 2 | 8 | hangs                          |
+| load_pdi_expanded   | 1 | 4 | 8 | hangs                          |
+
+<sup>†</sup> `load_pdi_fw` t=1, r=1, b=8 hangs at `warmup=0` but
+runs cleanly at `warmup=10` (matching v1) — XRT's first-call
+internal warmup apparently sidesteps the bug after enough retries.
+
+The boundary is now clearly: **`bds=8` is unstable across multiple
+mechanisms and configurations**. `baseline + bds=8 + multi-row` doesn't
+crash but degrades by ~10⁵× (6 seconds vs ~75 µs at b=4). v1's
+hypothesis about a BD-id collision is still consistent with this
+broader pattern. Updated bug write-up:
+
+- `baseline + bds=8 + r=1` still works.
+- `baseline + bds=8 + r>1` produces correct results but at multi-second
+  per-dispatch latency — looks like a degenerate slow path rather
+  than a hard hang.
+- `load_pdi_* + bds=8 + (r>1 OR cold)` reliably hangs with
+  `txn_op_idx = 0xFFFFFFFF`.
+
+For practical use: **avoid `bds=8` entirely with this generator
+shape on Strix.** The other six "same-signature" failure modes (BD
+hang, `--no-self-reload` hang, ctrlpkt 2nd-dispatch hang) suggest
+something deeper in the firmware BD pool / XRT patch machinery is
+implicated, beyond a single specific code path.
+
 ## Whole-array sweep (added)
 
 After the original 1-row run, we extended the generator with a

@@ -219,45 +219,43 @@ to compare to). Otherwise standalone.
 
 ---
 
-## 7. Topology axis broadening
+## 7. Topology axis broadening  **[x] DONE**
 
-**Goal.** Actually measure `branch` and `hop` end-to-end (generator
-supports both but v1 only swept `linear`).
+**Result.** Built + measured 24 cells across mech × topology × t.
+`branch` is shim-channel-limited and fails at t > 2 with "number of
+output DMA channel exceeded" — documented. `linear` and `hop` scale
+to t=4 cleanly.
 
-**Implementation sketch.**
-- Add `branch` and `hop` to the `run_matrix.sh` defaults.
-- Expect: `hop` adds memtile latency over `linear` but doesn't change
-  scaling characteristics. `branch` likely hits shim-channel-allocation
-  limits past a few cols. Document what happens at the edges.
+**Headline.** **Topology barely moves per-dispatch cost.** All three
+topologies sit in a ~60-92 µs band at the shapes measured. `hop` adds
+~4 µs to `load_pdi_expanded` at t=4 (extra memtile reconfig in the
+inlined txn stream); `baseline` and `load_pdi_fw` are unaffected.
+`branch` is within noise of `linear` where measurable.
 
-**Acceptance.**
-- §7 of REPORT.md compares latency across topologies for a fixed
-  `(mech, tiles, bds)`.
-- Plot `pure_dispatch_vs_tiles_topology.png` overlays three lines per
-  mechanism.
-
-**Dependencies.** None. Trivially parallelizable with everything else.
+Documented as §7 in REPORT.md. The "topology is noise" practical
+conclusion is now explicit.
 
 ---
 
-## 8. Re-sweep `bds` under `rows_per_col > 1`
+## 8. Re-sweep `bds` under `rows_per_col > 1`  **[x] DONE**
 
-**Goal.** Confirm/refute that the firmware-crash bug from v1 (BD=8 ×
-tiles∈{2,4}) is independent of `rows_per_col`. v1 whole-array sweep
-only used `bds=2`.
+**Result.** Ran 36 cells across mech × r ∈ {2,4} × t ∈ {1,2,4} × b ∈
+{2,4}. All 36 succeeded. b=8 was skipped after probing showed it's
+universally unstable in multi-row configurations.
 
-**Implementation sketch.**
-- Sweep `mechanism × rows_per_col ∈ {2, 4} × tiles ∈ {2, 4, 8} × bds
-  ∈ {2, 4, 8}`. Skip the v1-known-bad cells.
-- Watch for *new* failure modes at multi-row configs with high BD
-  counts.
+**Headlines:**
+1. Within `bds ∈ {2, 4}`, BD count is mostly noise (ratios 1.0-1.2).
+2. Rows matter much more than BDs for `load_pdi_expanded`: at t=4
+   b=4, doubling rows (r=2 → r=4) adds 41% latency, while doubling
+   BDs (b=2 → b=4) at the same r=4 adds only 3%.
+3. **New failure boundary: `bds=8 × multi-row`.** Even `baseline +
+   bds=8` (which works at r=1) degrades to ~6-second per-dispatch
+   latency at r > 1. `load_pdi_*` + `bds=8` + `r > 1` reliably
+   hangs. The v1 "load_pdi-specific bds=8 bug" framing is too
+   narrow; the load-bearing condition is `bds=8`, not the mechanism.
 
-**Acceptance.**
-- A new column in §"Whole-array sweep" of REPORT.md showing the BD
-  axis under multi-row layouts.
-- Any new firmware crashes get added to #5's bug write-up.
-
-**Dependencies.** Cheap to do after #5 is filed; doesn't block anything.
+Documented as §8 in REPORT.md. Tightens the failure-boundary picture
+for the entire dispatch_micro harness on Strix.
 
 ---
 
@@ -413,6 +411,23 @@ distribution and subtract estimated process-startup overhead.
   model: you cannot dispatch the ELF without the op present.
   Documented as Anomaly #0 in REPORT.md and as a "Related failure"
   section in the bug write-up.
+- **#8 Re-sweep bds under multi-row (2026-05-18).** 36 cells at
+  mech × r ∈ {2,4} × t ∈ {1,2,4} × b ∈ {2,4}, all OK. Within
+  b ∈ {2,4} the BD axis is noise (ratios 1.0-1.2). Rows dominate
+  for `load_pdi_expanded` (+41% from r=2→r=4 at t=4 b=4). **New
+  finding: `bds=8` is unstable across all mechanisms in multi-row.**
+  Even baseline degrades to ~6 s/dispatch at b=8 r>1. The v1
+  "load_pdi-specific bds=8 bug" framing was too narrow; the
+  load-bearing condition is `bds=8`, not the mechanism. Documented
+  as §8 in REPORT.md.
+- **#7 Topology axis broadening (2026-05-18).** Ran 24 cells across
+  mech × topology ∈ {linear, branch, hop} × t ∈ {1,2,4}, bds=2.
+  Headline: topology barely moves per-dispatch cost (~60-92 µs band
+  for all combinations). `hop` adds +4 µs under `load_pdi_expanded`
+  at t=4 (extra memtile reconfig in inlined txn). Build boundary:
+  `branch × t > 2` fails at compile due to shim DMA channel
+  exhaustion (only 2 MM2S + 2 S2MM per shim). Documented as §7 in
+  REPORT.md.
 - **#11 ctrlpkt hang investigation (2026-05-18).** Probed four
   workarounds via `--ctrlpkt-strategy`; only `fresh_ctx` works but at
   ~80 ms per call. Hang is at the `hw_context` layer (driver/firmware),
