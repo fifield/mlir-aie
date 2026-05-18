@@ -87,12 +87,17 @@ def main():
     args = p.parse_args()
 
     bd = Path(args.build_dir)
+    # ctrlpkt's dual-aiecc build emits artifacts with `main_` prefixes
+    # (`main_ctrlpkt.bin`, `main_ctrlpkt_dma_seq.bin`); single-aiecc builds
+    # don't have this prefix. Check both names.
+    def _sz(name):
+        return file_bytes(bd / name) or file_bytes(bd / ("main_" + name))
     artifacts = {
         "xclbin_bytes": file_bytes(bd / "aie.xclbin"),
         "elf_bytes":    file_bytes(bd / "aie.elf"),
         "insts_bytes":  file_bytes(bd / "insts.bin"),
-        "ctrlpkt_bytes": file_bytes(bd / "ctrlpkt.bin"),
-        "ctrlpkt_dma_seq_bytes": file_bytes(bd / "ctrlpkt_dma_seq.bin"),
+        "ctrlpkt_bytes": _sz("ctrlpkt.bin"),
+        "ctrlpkt_dma_seq_bytes": _sz("ctrlpkt_dma_seq.bin"),
     }
 
     hist = {n: 0 for n in OPCODE_NAMES.values()}
@@ -121,6 +126,12 @@ def main():
         if artifacts["insts_bytes"] < 4:
             errors.append("insts.bin missing or empty")
     elif args.mechanism == "ctrlpkt":
+        # ctrlpkt produces a skeleton xclbin (overlay routes only) + an
+        # ELF containing the ctrlpkt bins. Check both are non-trivial.
+        if artifacts["xclbin_bytes"] < 1024:
+            errors.append("aie.xclbin missing or suspiciously small")
+        if artifacts["elf_bytes"] < 1024:
+            errors.append("aie.elf missing or suspiciously small")
         if artifacts["ctrlpkt_bytes"] < 4:
             errors.append("ctrlpkt.bin missing or empty")
         if artifacts["ctrlpkt_dma_seq_bytes"] < 4:

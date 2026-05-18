@@ -469,6 +469,116 @@ For multi-tenant or model-swapping workloads on NPU2:
 - The driver-memory ceiling on how many PDIs fit in one ELF is the
   only practical limit we've found; we haven't tested where it sits.
 
+## §6. Control packets (v2 — fourth mechanism wired)
+
+> *Added in v2.*
+
+ctrlpkt is the only mechanism that uses control-packet routing for
+device reconfiguration. v1 had the placeholder; v2 wired the build
+path end-to-end (overlay pass + dual aiecc) and added Path-C to
+`bench.cpp` (xclbin + xrt::module + `xrt::ext::kernel` three-arg variant).
+
+### Build pipeline (mirrors `test/npu-xrt/ctrl_packet_reconfig_elf/run.lit`)
+
+```
+python3 generate.py --mechanism=ctrlpkt ... > aie.mlir
+# adds the column-control-overlay routes:
+aie-opt -aie-generate-column-control-overlay="route-shim-to-tile-ctrl=true" \
+        aie.mlir -o aie_overlay.mlir
+# skeleton xclbin from the @base device (overlay routes only):
+aiecc --device-name=base --aie-generate-xclbin --xclbin-name=aie.xclbin \
+      aie_overlay.mlir
+# ctrlpkt-encoded ELF from the @main device:
+aiecc --device-name=main --aie-generate-ctrlpkt --aie-generate-elf \
+      --elf-name=aie.elf aie_overlay.mlir
+```
+
+Generator emits two devices: `@main` (the actual placed config, no
+load_pdi op) plus a skeleton `@base` that re-declares the same tiles
+with no fifos/cores. aiecc is invoked twice with different `--device-name`
+to produce each artifact. All four ctrlpkt-related files end up in
+the build dir: `aie.xclbin` (~7 KB overlay), `aie.elf` (~4 KB
+ctrlpkt-encoded), `main_ctrlpkt.bin` (~1.3 KB), `main_ctrlpkt_dma_seq.bin`
+(~2.4 KB).
+
+### Host path (Path-C)
+
+```cpp
+xrt::xclbin xb("aie.xclbin");           // skeleton overlay
+xrt::elf    el("aie.elf");              // ctrlpkt-encoded
+device.register_xclbin(xb);
+xrt::module mod(el);
+xrt::hw_context ctx(device, xb.get_uuid());
+auto kernel = xrt::ext::kernel(ctx, mod, "MLIR_AIE_*");
+// kernel signature: (opcode, instr_buf=0, instr_count=0, bo_in, bo_out)
+kernel(3, 0, 0, bo_in, bo_out).wait2();
+```
+
+### ctrlpkt dispatch is single-shot
+
+**Discovered during measurement: the first dispatch succeeds, the
+second hangs** with the same `ERT_CMD_STATE_TIMEOUT, txn_op_idx =
+0xFFFFFFFF, fatal_error_* = 0` signature as the bds=8 firmware bug
+and the `--no-self-reload` failure mode.
+
+```
+$ ./bench --mechanism=ctrlpkt --iters=1 ...   # OK
+$ ./bench --mechanism=ctrlpkt --iters=2 ...   # FAIL (second iteration hangs)
+```
+
+Reproduced across all t and bds we tried. The canonical
+`test/npu-xrt/ctrl_packet_reconfig_elf/test.cpp` only runs one
+dispatch per process — so this single-shot pattern may be by design
+for this mechanism in the current XRT/firmware combination.
+
+The most plausible reading: a ctrlpkt dispatch reconfigures device
+state via packets that are not idempotent. After one dispatch, the
+device is in a state where the same control-packet sequence cannot
+replay without first running an explicit reset routine. The overlay
+xclbin does include the reset routes; we just don't invoke them
+between dispatches.
+
+### Measurement: single-shot first-dispatch (30 fresh processes per cell)
+
+| t | n  | p10 µs | p50 µs | p90 µs | min µs | max µs |
+|--:|---:|-------:|-------:|-------:|-------:|-------:|
+| 1 | 30 |    741 |  1 043 |  1 611 |    643 |  1 821 |
+| 4 | 30 |    686 |    852 |  1 306 |    677 |  1 753 |
+
+### Comparison vs other mechanisms at t=1, bds=2, rows=1
+
+| measurement                                                  | mechanism           | p50 µs |
+|--------------------------------------------------------------|---------------------|-------:|
+| v1 `pure_dispatch` (steady-state)                            | `baseline`          |   67   |
+| v1 `pure_dispatch` (steady-state)                            | `load_pdi_fw`       |   61   |
+| v1 `pure_dispatch` (steady-state)                            | `load_pdi_expanded` |   73   |
+| **v2 ctrlpkt single-shot, fresh process**                    | **`ctrlpkt`**       | **1 043** |
+
+ctrlpkt costs roughly **15× a baseline dispatch.** This is the cost of
+full reconfiguration via control packets, including reset routes
+shipping through the column-control overlay. The variance is also
+massive (~640-1820 µs range across 30 samples) — much wider than any
+other mechanism — consistent with an operation whose duration depends
+on what other state the firmware is recovering from.
+
+### Practical conclusion (revised v2 summary)
+
+The four mechanisms, ranked by per-dispatch cost at t=1:
+
+| rank | mechanism           | p50 µs | re-usable for hot loops?         |
+|-----:|---------------------|-------:|----------------------------------|
+| 1    | `load_pdi_fw`       |  ~61   | yes; PDI swap is free            |
+| 2    | `baseline`          |  ~67   | yes                              |
+| 3    | `load_pdi_expanded` |  ~73   | yes (but scales hard with tiles) |
+| 4    | `ctrlpkt`           | ~1 043 | **no** — single-shot only        |
+
+For multi-tenant / model-swapping workloads with hot dispatch loops,
+**ctrlpkt is the wrong tool.** It's a one-shot reconfiguration
+mechanism, suited for setting up state once and then running other
+mechanisms (e.g., load_pdi or baseline) for actual dispatch. The
+canonical use case in `test/npu-xrt/ctrl_packet_reconfig_elf/` is
+exactly that: one ctrlpkt-driven configure, one dispatch, verify, exit.
+
 ## Whole-array sweep (added)
 
 After the original 1-row run, we extended the generator with a
