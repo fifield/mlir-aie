@@ -19,14 +19,19 @@
 //                        → xrt::ext::kernel(context, "main:sequence")
 //                        → run.set_arg / run.start / run.wait2
 //
+//   Path C (ctrlpkt) — mechanism = ctrlpkt
+//     xrt::xclbin{"aie.xclbin"} (skeleton with column-control overlay)
+//       + xrt::elf{"aie.elf"} (ctrlpkt-encoded)
+//       → device.register_xclbin → xrt::hw_context(device, xclbin.uuid)
+//       → xrt::ext::kernel(context, module, name) [three-arg variant]
+//       → kernel(opcode=3, 0, 0, bo_in, bo_out) — scalars for instr/size
+//
 // Metrics:
 //   cold_start       once per fresh process; per-phase breakdown
 //   warm_reconfig    pre-built context; brackets only the reconfig dispatch
 //   pure_dispatch    pre-built; identity-mapped buffers; hot loop
 //
-// ctrlpkt is not wired up in this initial cut; it has a different artifact
-// shape (separate ctrlpkt.bin + ctrlpkt_dma_seq.bin + extra kernel arg slots).
-// See README; tracked as v2.
+// v2 update: ctrlpkt is now wired via Path C above.
 //===----------------------------------------------------------------------===//
 
 #include <cstring>
@@ -357,9 +362,89 @@ struct PathE {
   }
 };
 
+// --- Path C: xclbin overlay + ctrlpkt ELF ---------------------------------
+
+struct PathC {
+  xrt::device device;
+  xrt::xclbin xclbin;
+  xrt::elf elf;
+  xrt::hw_context context;
+  // The ctrlpkt path requires xrt::module to bind the ELF (containing
+  // ctrlpkt.bin + ctrlpkt_dma_seq.bin) onto the existing skeleton xclbin's
+  // hw_context. xrt::module has a default ctor; xrt::ext::kernel doesn't.
+  xrt::module module_;
+  std::optional<xrt::ext::kernel> kernel;
+  xrt::bo bo_in, bo_out;
+  unsigned int opcode = 3;
+  size_t bytes = 0;
+
+  long long load_ns = 0, register_ns = 0, kernel_ns = 0, first_dispatch_ns = 0;
+
+  static std::string find_kernel_name(const xrt::xclbin &x) {
+    auto kernels = x.get_kernels();
+    for (auto &k : kernels) {
+      auto n = k.get_name();
+      if (n.rfind("MLIR_AIE", 0) == 0) return n;
+    }
+    if (kernels.empty()) throw std::runtime_error("no kernels in xclbin");
+    return kernels.front().get_name();
+  }
+
+  void build_warm(const Args &a, size_t total_bytes) {
+    bytes = total_bytes;
+    device = xrt::device(0);
+    xclbin = xrt::xclbin(a.build_dir + "/aie.xclbin");
+    auto name = find_kernel_name(xclbin);
+    device.register_xclbin(xclbin);
+    elf = xrt::elf(a.build_dir + "/aie.elf");
+    module_ = xrt::module(elf);
+    context = xrt::hw_context(device, xclbin.get_uuid());
+    kernel.emplace(context, module_, name);
+    bo_in = xrt::ext::bo(device, bytes);
+    bo_out = xrt::ext::bo(device, bytes);
+  }
+
+  void build_cold(const Args &a, size_t total_bytes) {
+    bytes = total_bytes;
+    device = xrt::device(0);
+    load_ns = time_once_ns([&]{
+      xclbin = xrt::xclbin(a.build_dir + "/aie.xclbin");
+      elf = xrt::elf(a.build_dir + "/aie.elf");
+      module_ = xrt::module(elf);
+    });
+    auto name = find_kernel_name(xclbin);
+    register_ns = time_once_ns([&]{
+      device.register_xclbin(xclbin);
+      context = xrt::hw_context(device, xclbin.get_uuid());
+    });
+    kernel_ns = time_once_ns([&]{
+      kernel.emplace(context, module_, name);
+    });
+    bo_in = xrt::ext::bo(device, bytes);
+    bo_out = xrt::ext::bo(device, bytes);
+    first_dispatch_ns = time_once_ns([&]{ dispatch_once(); });
+  }
+
+  void dispatch_once() {
+    // Per test/npu-xrt/ctrl_packet_reconfig_elf/test.cpp:77 — the ctrlpkt
+    // kernel signature still has the (opcode, instr, instr_count, ...) prefix
+    // but the instr buffer is unused because the ELF carries the instruction
+    // stream; pass 0 / 0 for the scalar slots.
+    auto run = xrt::run(*kernel);
+    run.set_arg(0, opcode);
+    run.set_arg(1, 0);
+    run.set_arg(2, 0);
+    run.set_arg(3, bo_in);
+    run.set_arg(4, bo_out);
+    run.start();
+    run.wait2();
+  }
+};
+
 // --- emit JSON ------------------------------------------------------------
 
-void emit_json(const Args &a, const TimingResult *warm, PathX *px, PathE *pe,
+void emit_json(const Args &a, const TimingResult *warm,
+               PathX *px, PathE *pe, PathC *pc,
                std::ostream &out, const char *direction = nullptr) {
   JsonWriter w(out);
   w.str("mechanism", a.mechanism);
@@ -388,10 +473,10 @@ void emit_json(const Args &a, const TimingResult *warm, PathX *px, PathE *pe,
   }
   if (a.metric == "cold_start") {
     std::ostringstream ph;
-    long long load = px ? px->load_ns : (pe ? pe->load_ns : 0);
-    long long reg  = px ? px->register_ns : (pe ? pe->register_ns : 0);
-    long long krn  = px ? px->kernel_ns : (pe ? pe->kernel_ns : 0);
-    long long fd   = px ? px->first_dispatch_ns : (pe ? pe->first_dispatch_ns : 0);
+    long long load = px ? px->load_ns : (pe ? pe->load_ns : (pc ? pc->load_ns : 0));
+    long long reg  = px ? px->register_ns : (pe ? pe->register_ns : (pc ? pc->register_ns : 0));
+    long long krn  = px ? px->kernel_ns : (pe ? pe->kernel_ns : (pc ? pc->kernel_ns : 0));
+    long long fd   = px ? px->first_dispatch_ns : (pe ? pe->first_dispatch_ns : (pc ? pc->first_dispatch_ns : 0));
     ph << "{\"load_ns\":" << load
        << ",\"register_ns\":" << reg
        << ",\"kernel_ns\":" << krn
@@ -418,9 +503,9 @@ int main(int argc, char **argv) {
   bool x_family = (a.mechanism == "baseline");
   bool e_family = (a.mechanism == "load_pdi_fw" ||
                    a.mechanism == "load_pdi_expanded");
-  if (!x_family && !e_family) {
-    std::cerr << "Unsupported mechanism: " << a.mechanism
-              << " (ctrlpkt not yet wired up)\n";
+  bool c_family = (a.mechanism == "ctrlpkt");
+  if (!x_family && !e_family && !c_family) {
+    std::cerr << "Unsupported mechanism: " << a.mechanism << "\n";
     return 2;
   }
 
@@ -435,11 +520,15 @@ int main(int argc, char **argv) {
     if (x_family) {
       PathX px;
       px.build_cold(a, total_bytes);
-      emit_json(a, nullptr, &px, nullptr, *out);
+      emit_json(a, nullptr, &px, nullptr, nullptr, *out);
+    } else if (c_family) {
+      PathC pc;
+      pc.build_cold(a, total_bytes);
+      emit_json(a, nullptr, nullptr, nullptr, &pc, *out);
     } else {
       PathE pe;
       pe.build_cold(a, total_bytes);
-      emit_json(a, nullptr, nullptr, &pe, *out);
+      emit_json(a, nullptr, nullptr, &pe, nullptr, *out);
     }
     return 0;
   }
@@ -495,8 +584,8 @@ int main(int argc, char **argv) {
     };
     auto tr_b = summarize(samples_to_b);
     auto tr_a = summarize(samples_to_a);
-    emit_json(a, &tr_b, nullptr, &pe, *out, "a_to_b");
-    emit_json(a, &tr_a, nullptr, &pe, *out, "b_to_a");
+    emit_json(a, &tr_b, nullptr, &pe, nullptr, *out, "a_to_b");
+    emit_json(a, &tr_a, nullptr, &pe, nullptr, *out, "b_to_a");
     return 0;
   }
 
@@ -555,7 +644,7 @@ int main(int argc, char **argv) {
     for (int k = 0; k < a.n_configs; ++k) {
       auto tr = summarize(per_slot[k]);
       std::string dir = "slot_" + std::to_string(k);
-      emit_json(a, &tr, nullptr, &pe, *out, dir.c_str());
+      emit_json(a, &tr, nullptr, &pe, nullptr, *out, dir.c_str());
     }
     return 0;
   }
@@ -573,12 +662,17 @@ int main(int argc, char **argv) {
     } else {
       tr = run_timed(a.warmup, a.iters, [&]{ px.dispatch_once(); });
     }
-    emit_json(a, &tr, &px, nullptr, *out);
+    emit_json(a, &tr, &px, nullptr, nullptr, *out);
+  } else if (c_family) {
+    PathC pc;
+    pc.build_warm(a, total_bytes);
+    tr = run_timed(a.warmup, a.iters, [&]{ pc.dispatch_once(); });
+    emit_json(a, &tr, nullptr, nullptr, &pc, *out);
   } else {
     PathE pe;
     pe.build_warm(a, total_bytes);
     tr = run_timed(a.warmup, a.iters, [&]{ pe.dispatch_once(); });
-    emit_json(a, &tr, nullptr, &pe, *out);
+    emit_json(a, &tr, nullptr, &pe, nullptr, *out);
   }
   return 0;
 }

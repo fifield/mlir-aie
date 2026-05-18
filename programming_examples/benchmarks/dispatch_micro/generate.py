@@ -33,7 +33,7 @@ LINE_LEN = 1024  # int32 elements per BD
 
 
 def _emit_device(name, dev_enum, cols, rows_per_col, bds_per_task, topology,
-                 with_load_pdi_self):
+                 with_load_pdi_self, wrap_in_configure=False):
     """Emit one @device region named `name`.
 
     `cols` is the number of shim columns used; `rows_per_col` is the number of
@@ -158,11 +158,7 @@ def _emit_device(name, dev_enum, cols, rows_per_col, bds_per_task, topology,
         # wide chunk per BD that the memtile then splits across rows.
         chunk_words = LINE_LEN * rows_per_col
 
-        @runtime_sequence(tensor_ty, tensor_ty)
-        def seq(in_buf, out_buf):
-            if with_load_pdi_self:
-                npu_load_pdi(device_ref=name)
-
+        def _emit_dma_body(in_buf, out_buf):
             # BD-count axis: `bds_per_task` independent dma_configure_task_for
             # ops per direction per column, each with one shim BD reading its
             # own slice of the shared in/out buffer. Each BD moves a chunk of
@@ -196,6 +192,23 @@ def _emit_device(name, dev_enum, cols, rows_per_col, bds_per_task, topology,
 
             for t_out in last_out_tasks:
                 dma_await_task(t_out)
+
+        @runtime_sequence(tensor_ty, tensor_ty)
+        def seq(in_buf, out_buf):
+            if with_load_pdi_self:
+                npu_load_pdi(device_ref=name)
+
+            if wrap_in_configure:
+                # ctrlpkt path: aiex.configure @<self> { dma ops... }. The
+                # configure op tells aiecc's ctrlpkt lowering to encode the
+                # contained DMA ops as a control-packet stream rather than
+                # a direct txn binary.
+                cfg_op = configure(symbol=name)
+                body = cfg_op.body.blocks.append()
+                with InsertionPoint(body):
+                    _emit_dma_body(in_buf, out_buf)
+            else:
+                _emit_dma_body(in_buf, out_buf)
 
 
 def emit(mechanism, device_name, cols, rows_per_col, bds_per_task, topology,
@@ -286,8 +299,38 @@ def emit(mechanism, device_name, cols, rows_per_col, bds_per_task, topology,
                 mechanism in ("load_pdi_fw", "load_pdi_expanded")
                 and not no_self_reload
             )
+            # ctrlpkt mechanism note: the canonical aie.mlir for ctrlpkt
+            # wraps DMA ops in `aiex.configure @main { dma_memcpy_nd... }`,
+            # but `aiex.dma_configure_task_for` (which our generator emits
+            # for the BD-count axis) has a HasParent<"RuntimeSequenceOp">
+            # verifier, so it can't be moved inside `aiex.configure`. We
+            # skip the wrapper. The build still works via overlay pass +
+            # dual aiecc; dispatch is single-shot only (see v2 #3 notes).
             _emit_device("main", dev_enum, cols, rows_per_col,
-                         bds_per_task, topology, with_self)
+                         bds_per_task, topology, with_self,
+                         wrap_in_configure=False)
+
+            # For the ctrlpkt mechanism we ALSO need a skeleton `@base`
+            # device alongside `@main`. aiecc is invoked twice: once with
+            # `--device-name=base` to produce a control-packet-overlay
+            # xclbin, and once with `--device-name=main` to produce the
+            # ctrlpkt-encoded ELF. See `test/npu-xrt/ctrl_packet_reconfig_elf/`.
+            # The FIXME in that test says @base must be emitted LAST.
+            if mechanism == "ctrlpkt":
+                @device(dev_enum, sym_name="base")
+                def _base_body():
+                    # Re-declare the same tiles as @main; no fifos, no cores,
+                    # no runtime_sequence. aiecc's --device-name=base path
+                    # uses this skeleton plus the overlay pass output to
+                    # produce a minimal xclbin containing only the
+                    # control-packet routing.
+                    for c in range(cols):
+                        shim_col = 0 if topology == "branch" else c
+                        tile(shim_col, 0)
+                        if rows_per_col > 1:
+                            tile(c, 1)
+                        for r in range(rows_per_col):
+                            tile(c, 2 + r)
 
     print(ctx.module)
 

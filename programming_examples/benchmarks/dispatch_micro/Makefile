@@ -54,10 +54,11 @@ ifeq ($(MECH),baseline)
                  --no-compile-host --xclbin-name=aie.xclbin --npu-insts-name=insts.bin
   ARTIFACTS   := $(BUILD)/aie.xclbin $(BUILD)/insts.bin
 else ifeq ($(MECH),ctrlpkt)
-  AIECC_FLAGS := $(AIECC_COMMON) --aie-generate-xclbin --aie-generate-ctrlpkt \
-                 --no-compile-host --xclbin-name=aie.xclbin \
-                 --ctrlpkt-name=ctrlpkt.bin --ctrlpkt-dma-seq-name=ctrlpkt_dma_seq.bin
-  ARTIFACTS   := $(BUILD)/aie.xclbin $(BUILD)/ctrlpkt.bin $(BUILD)/ctrlpkt_dma_seq.bin
+  # ctrlpkt is the only mechanism with two aiecc calls (one for the
+  # overlay xclbin, one for the ctrlpkt ELF). AIECC_FLAGS is unused for
+  # ctrlpkt; see the dedicated $(BUILD)/.compiled recipe below.
+  AIECC_FLAGS :=
+  ARTIFACTS   := $(BUILD)/aie.xclbin $(BUILD)/aie.elf
 else ifeq ($(MECH),load_pdi_fw)
   AIECC_FLAGS := $(AIECC_COMMON) --generate-full-elf
   ARTIFACTS   := $(BUILD)/aie.elf
@@ -90,10 +91,28 @@ $(BUILD)/passThrough.cc.o: passThrough.cc
 		-DBIT_WIDTH=8 -c $< -o $(@F)
 
 # Build the per-mechanism artifact set.
+ifeq ($(MECH),ctrlpkt)
+# ctrlpkt requires a three-step build: aie-opt overlay pass, then two
+# aiecc invocations (one for the xclbin from the @base skeleton, one
+# for the ctrlpkt ELF from @main). Mirrors test/npu-xrt/ctrl_packet_reconfig_elf/run.lit.
+$(BUILD)/.compiled: $(BUILD)/aie.mlir $(BUILD)/passThrough.cc.o
+	mkdir -p $(@D)
+	cd $(@D) && aie-opt \
+		-aie-generate-column-control-overlay="route-shim-to-tile-ctrl=true" \
+		aie.mlir -o aie_overlay.mlir
+	cd $(@D) && aiecc --tmpdir=base_prj --device-name=base \
+		--aie-generate-xclbin --xclbin-name=aie.xclbin \
+		--no-xchesscc --no-xbridge aie_overlay.mlir
+	cd $(@D) && aiecc --tmpdir=main_prj --device-name=main \
+		--aie-generate-ctrlpkt --aie-generate-elf --elf-name=aie.elf \
+		--no-xchesscc --no-xbridge aie_overlay.mlir
+	@touch $@
+else
 $(BUILD)/.compiled: $(BUILD)/aie.mlir $(BUILD)/passThrough.cc.o
 	mkdir -p $(@D)
 	cd $(@D) && aiecc $(AIECC_FLAGS) aie.mlir
 	@touch $@
+endif
 
 # Materialize the human-named artifact files as alias deps of .compiled.
 $(ARTIFACTS): $(BUILD)/.compiled

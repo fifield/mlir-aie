@@ -117,41 +117,35 @@ Documented in REPORT.md (new Anomalies entry) and cross-linked from
 
 ---
 
-## 3. ctrlpkt end-to-end
+## 3. ctrlpkt end-to-end  **[x] DONE (with caveat)**
 
-**Goal.** Get the fourth mechanism into the head-to-head matrix.
+**Result.** Built end-to-end + measured. Three changes:
+- `generate.py`: ctrlpkt mechanism now emits both `@main` (config) and
+  `@base` (skeleton) devices alongside.
+- `Makefile`: MECH=ctrlpkt recipe runs `aie-opt
+  -aie-generate-column-control-overlay`, then aiecc twice
+  (`--device-name=base` → xclbin, `--device-name=main` → ctrlpkt ELF).
+- `bench.cpp`: new Path-C using `xrt::module` + the three-arg
+  `xrt::ext::kernel(context, module, name)` plus `(opcode, 0, 0,
+  bo_in, bo_out)` dispatch signature.
 
-**Two pieces.**
-1. **Build path:** `aiecc --aie-generate-ctrlpkt` currently fails on our
-   placed-IRON output with:
-   ```
-   failed to legalize operation 'aiex.npu.dma_memcpy_nd' ...
-   metadata = @ctrlpkt_col0_mm2s_chan0 ...
-   Error: Control packet DMA pipeline failed
-   ```
-   Reference recipe (`test/npu-xrt/ctrl_packet_reconfig_elf/run.lit:11`)
-   shows the column-control-overlay pass must run first:
-   ```
-   aie-opt -aie-generate-column-control-overlay="route-shim-to-tile-ctrl=true"
-   ```
-   Add this to the Makefile's `MECH=ctrlpkt` recipe (insert between
-   `generate.py` and `aiecc`).
-2. **Host path:** ctrlpkt builds emit `ctrlpkt.bin` + `ctrlpkt_dma_seq.bin`
-   (instead of `insts.bin`). The kernel signature is different — ctrlpkt
-   DMA seq buffer goes at a specific arg slot, ctrlpkt payload at
-   another. Reference: `test/npu-xrt/add_one_ctrl_packet/test.cpp:80-148`.
-   Add a Path-C in `bench.cpp` that loads both bins, allocates the
-   right BO at `kernel.group_id(...)`, and dispatches.
+All four artifacts produced: `aie.xclbin` (overlay) + `aie.elf`
+(ctrlpkt-encoded) + `main_ctrlpkt.bin` + `main_ctrlpkt_dma_seq.bin`.
 
-**Acceptance.**
-- `make MECH=ctrlpkt DEVICE=npu2_1col TILES=1 BDS=2` compiles cleanly.
-- `./bench --mechanism=ctrlpkt --metric=pure_dispatch ...` returns a
-  JSON row with reasonable timings.
-- §1 of REPORT.md adds a `ctrlpkt` row across the same `tiles × bds`
-  grid as the other mechanisms.
+**Caveat: ctrlpkt dispatch is single-shot.** First dispatch succeeds
+(~1043 µs p50 at t=1, ~852 µs at t=4 across 30 fresh processes); the
+second dispatch hangs with the same `ERT_CMD_STATE_TIMEOUT, txn_op_idx
+= 0xFFFFFFFF` signature as the bds=8 bug and the `--no-self-reload`
+failure mode. Probable cause: a ctrlpkt reconfig isn't idempotent —
+after one dispatch the device state can't replay the same packet
+sequence without an explicit reset. The canonical test
+(`test/npu-xrt/ctrl_packet_reconfig_elf/test.cpp`) only runs one
+dispatch per process, consistent with this being the intended mode.
 
-**Dependencies.** Independent of #1, but cleaner to land #1 first so
-the comparison context is set.
+**Practical takeaway** (now in REPORT.md §6): ctrlpkt is ~15× slower
+than baseline per dispatch with huge variance, and is single-shot.
+It's a one-shot reconfiguration mechanism, not a dispatch mechanism.
+For hot loops, use baseline or load_pdi_fw.
 
 ---
 
@@ -364,3 +358,13 @@ wall sits. Today's tiny 1-tile PDIs don't pressure it.
   model: you cannot dispatch the ELF without the op present.
   Documented as Anomaly #0 in REPORT.md and as a "Related failure"
   section in the bug write-up.
+- **#3 ctrlpkt end-to-end (2026-05-18).** Build pipeline (overlay
+  pass + dual aiecc) + Path-C in bench.cpp end-to-end. **Caveat:
+  dispatch is single-shot** — first call succeeds (~1 ms), second
+  hangs with the now-familiar `txn_op_idx = 0xFFFFFFFF` timeout.
+  Captured 30 fresh-process single-shot samples at t ∈ {1,4}; p50 is
+  ~1043 µs and ~852 µs respectively, with ~640-1820 µs variance.
+  ctrlpkt costs ~15× a baseline dispatch and is single-shot — it's a
+  one-shot reconfiguration mechanism, not a hot-loop dispatch
+  mechanism. Documented as §6 in REPORT.md; "Practical conclusion"
+  table revised to rank all four mechanisms.
