@@ -195,27 +195,34 @@ baseline at any BD count.
 
 ---
 
-## 6. Profile baseline's batched-amortization floor (~22 µs)
+## 6. Profile baseline's batched-amortization floor  **[x] DONE — finding inverted**
 
-**Goal.** Explain why `xrt::kernel` plateaus at 22 µs per dispatch in a
-runlist while `xrt::ext::kernel` hits ~1 µs. v1 spotted this as the
-biggest unexplained signal in the dataset.
+**Result.** Not a profile but a **bug discovery + retraction**.
 
-**Implementation sketch.**
-- Build a stripped-down single-mechanism test (baseline, t=1, b=2,
-  batch=64).
-- Run under `strace -c` and `perf stat -e ...`.
-- Compare against the same shape with the full-ELF path
-  (`load_pdi_fw` with no self-reload after #2).
-- Goal is a paragraph-length writeup, not necessarily a fix.
+The premise (v1 §3) was that ELF runlist amortizes ~20× better than
+baseline. Probing it via `--vary-args` (allocate distinct in/out BO
+pairs per run, defeats any potential runtime dedup) revealed
+something simpler: **PathE in bench.cpp never had a `dispatch_batched`
+method**. The `--batched` flag for ELF mechanisms silently fell
+through to `dispatch_once()` and reported
+`(single_dispatch_time / batch_size)` as "per-dispatch latency."
 
-**Acceptance.**
-- A `notes/baseline_batched_amortization.md` with hypothesis,
-  measurements, and conclusion.
-- §3 of REPORT.md gets a new paragraph pointing at the root cause.
+Added PathE::dispatch_batched (real `xrt::runlist`) + a vary-args
+variant. With real runlist:
 
-**Dependencies.** Easiest after #2 (need the `load_pdi_fw_nsr` baseline
-to compare to). Otherwise standalone.
+  baseline    bs=64: 22 µs/dispatch  (identical args)
+  baseline    bs=64: 22 µs/dispatch  (distinct args — same)
+  load_pdi_fw bs=64: 114 µs/dispatch (identical args)
+  load_pdi_fw bs=64: 123 µs/dispatch (distinct args — same)
+
+The vary-args control rules out runtime dedup. The numbers are real
+per-dispatch costs. **baseline runlist amortizes well; ELF runlist
+costs *more* per dispatch than baseline.** v1's "ELF is 20× better"
+finding was completely inverted by the bug.
+
+Documented as §3 retraction in REPORT.md. tl;dr point #4 rewritten to
+state the correction. **Practical conclusion: for workloads with many
+independent dispatches, use `baseline`, not ELF runlist.**
 
 ---
 
@@ -411,6 +418,17 @@ distribution and subtract estimated process-startup overhead.
   model: you cannot dispatch the ELF without the op present.
   Documented as Anomaly #0 in REPORT.md and as a "Related failure"
   section in the bug write-up.
+- **#6 Profile baseline batched amortization (2026-05-18).** The
+  v1 §3 "ELF amortizes 20× better than baseline" finding was a
+  bench.cpp bug: PathE never had a `dispatch_batched` method.
+  `--batched` for ELF silently fell through to single
+  `dispatch_once()` and reported `(total / batch_size)` as
+  per-dispatch. Added real PathE::dispatch_batched + a vary-args
+  control to rule out runtime dedup. **Corrected numbers: baseline
+  bs=64 = 22 µs/dispatch (good amortization); load_pdi_fw bs=64 =
+  114 µs/dispatch (worse than baseline).** v1's framing was
+  completely inverted. Practical conclusion: for many-dispatch
+  workloads, baseline runlist is the right primitive.
 - **#8 Re-sweep bds under multi-row (2026-05-18).** 36 cells at
   mech × r ∈ {2,4} × t ∈ {1,2,4} × b ∈ {2,4}, all OK. Within
   b ∈ {2,4} the BD axis is noise (ratios 1.0-1.2). Rows dominate

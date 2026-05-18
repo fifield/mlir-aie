@@ -74,6 +74,7 @@ struct Args {
   bool batched = false;
   int batch_size = 16;
   std::string ctrlpkt_strategy = "reuse"; // "reuse" | "fresh_ctx"
+  bool vary_args = false;  // for batched: use distinct BOs per run
   std::string json_out;    // empty = stdout
 };
 
@@ -113,6 +114,7 @@ bool parse_args(int argc, char **argv, Args &a) {
     else if (s == "--batched") a.batched = true;
     else if (starts_with(s, "--batch-size=")) a.batch_size = std::stoi(v());
     else if (starts_with(s, "--ctrlpkt-strategy=")) a.ctrlpkt_strategy = v();
+    else if (s == "--vary-args") a.vary_args = true;
     else if (starts_with(s, "--json-out=")) a.json_out = v();
     else if (s == "-h" || s == "--help") { usage(); return false; }
     else { std::cerr << "unknown arg: " << s << "\n"; usage(); return false; }
@@ -254,6 +256,46 @@ struct PathX {
     auto t1 = std::chrono::steady_clock::now();
     return std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
   }
+
+  // v2 #6 probe: batched dispatch with *distinct* in/out BO pairs per run.
+  // Tests whether the runtime is collapsing identical runs (in which case
+  // total batch time should jump dramatically when args differ).
+  // Requires allocating `batch` distinct in/out BO pairs ahead of time —
+  // call build_warm_vary_args first.
+  std::vector<xrt::bo> vary_bo_in, vary_bo_out;
+  void build_warm_vary_args(const Args &a, size_t total_bytes, int batch) {
+    build_warm(a, total_bytes); // populates everything else
+    vary_bo_in.clear();
+    vary_bo_out.clear();
+    vary_bo_in.reserve(batch);
+    vary_bo_out.reserve(batch);
+    for (int i = 0; i < batch; ++i) {
+      vary_bo_in.emplace_back(device, total_bytes,
+                              XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(3));
+      vary_bo_out.emplace_back(device, total_bytes,
+                               XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(4));
+    }
+  }
+  long long dispatch_batched_vary(int batch) {
+    xrt::runlist rl(context);
+    std::vector<xrt::run> runs;
+    runs.reserve(batch);
+    for (int i = 0; i < batch; ++i) {
+      xrt::run run(kernel);
+      run.set_arg(0, opcode);
+      run.set_arg(1, bo_instr);
+      run.set_arg(2, (uint32_t)instr_v.size());
+      run.set_arg(3, vary_bo_in[i]);
+      run.set_arg(4, vary_bo_out[i]);
+      rl.add(run);
+      runs.push_back(std::move(run));
+    }
+    auto t0 = std::chrono::steady_clock::now();
+    rl.execute();
+    rl.wait();
+    auto t1 = std::chrono::steady_clock::now();
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+  }
 };
 
 // --- Path E: full ELF + xrt::ext::kernel ----------------------------------
@@ -321,6 +363,52 @@ struct PathE {
     run.set_arg(0, bo_inout);
     run.start();
     run.wait2();
+  }
+
+  // Runlist-batched dispatch for v2 #6 probe. Uses the same single bo_inout
+  // for every run — this is the "identical args" case that v1 §3 measured.
+  long long dispatch_batched(int batch) {
+    xrt::runlist rl(context);
+    std::vector<xrt::run> runs;
+    runs.reserve(batch);
+    for (int i = 0; i < batch; ++i) {
+      xrt::run run(*kernel);
+      run.set_arg(0, bo_inout);
+      rl.add(run);
+      runs.push_back(std::move(run));
+    }
+    auto t0 = std::chrono::steady_clock::now();
+    rl.execute();
+    rl.wait();
+    auto t1 = std::chrono::steady_clock::now();
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+  }
+
+  // Same as dispatch_batched but with distinct buffers per run. Tests
+  // whether the runtime is collapsing identical runs.
+  std::vector<xrt::bo> vary_bos;
+  void prep_vary_args(int batch) {
+    vary_bos.clear();
+    vary_bos.reserve(batch);
+    for (int i = 0; i < batch; ++i) {
+      vary_bos.emplace_back(xrt::ext::bo(device, bytes));
+    }
+  }
+  long long dispatch_batched_vary(int batch) {
+    xrt::runlist rl(context);
+    std::vector<xrt::run> runs;
+    runs.reserve(batch);
+    for (int i = 0; i < batch; ++i) {
+      xrt::run run(*kernel);
+      run.set_arg(0, vary_bos[i]);
+      rl.add(run);
+      runs.push_back(std::move(run));
+    }
+    auto t0 = std::chrono::steady_clock::now();
+    rl.execute();
+    rl.wait();
+    auto t1 = std::chrono::steady_clock::now();
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
   }
 
   void dispatch_to_a() {
@@ -708,11 +796,16 @@ int main(int argc, char **argv) {
   TimingResult tr;
   if (x_family) {
     PathX px;
-    px.build_warm(a, total_bytes);
-    if (a.batched) {
+    if (a.batched && a.vary_args) {
+      px.build_warm_vary_args(a, total_bytes, a.batch_size);
+      tr = run_timed(a.warmup, a.iters,
+                     [&]{ (void)px.dispatch_batched_vary(a.batch_size); });
+    } else if (a.batched) {
+      px.build_warm(a, total_bytes);
       tr = run_timed(a.warmup, a.iters,
                      [&]{ (void)px.dispatch_batched(a.batch_size); });
     } else {
+      px.build_warm(a, total_bytes);
       tr = run_timed(a.warmup, a.iters, [&]{ px.dispatch_once(); });
     }
     emit_json(a, &tr, &px, nullptr, nullptr, *out);
@@ -735,7 +828,16 @@ int main(int argc, char **argv) {
   } else {
     PathE pe;
     pe.build_warm(a, total_bytes);
-    tr = run_timed(a.warmup, a.iters, [&]{ pe.dispatch_once(); });
+    if (a.batched && a.vary_args) {
+      pe.prep_vary_args(a.batch_size);
+      tr = run_timed(a.warmup, a.iters,
+                     [&]{ (void)pe.dispatch_batched_vary(a.batch_size); });
+    } else if (a.batched) {
+      tr = run_timed(a.warmup, a.iters,
+                     [&]{ (void)pe.dispatch_batched(a.batch_size); });
+    } else {
+      tr = run_timed(a.warmup, a.iters, [&]{ pe.dispatch_once(); });
+    }
     emit_json(a, &tr, nullptr, &pe, nullptr, *out);
   }
   return 0;
