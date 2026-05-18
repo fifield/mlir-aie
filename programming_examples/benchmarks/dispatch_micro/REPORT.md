@@ -538,14 +538,38 @@ replay without first running an explicit reset routine. The overlay
 xclbin does include the reset routes; we just don't invoke them
 between dispatches.
 
-### Measurement: ctrlpkt single-shot first-dispatch (30 fresh processes per cell)
+### Measurement #1: ctrlpkt single-shot pure_dispatch (30 fresh processes per cell)
+
+These numbers measure **everything from fresh `xrt::device(0)` to dispatch completion** — they include the device-context setup work too:
 
 | t | n  | p10 µs | p50 µs | p90 µs | min µs | max µs |
 |--:|---:|-------:|-------:|-------:|-------:|-------:|
 | 1 | 30 |    741 |  1 043 |  1 611 |    643 |  1 821 |
 | 4 | 30 |    686 |    852 |  1 306 |    677 |  1 753 |
 
-### ⚠ We cannot measure ctrlpkt's per-dispatch cost
+### Measurement #2: ctrlpkt cold_start phase breakdown (30 fresh processes, t=1, bds=2)
+
+`cold_start` separates the setup phases from the dispatch itself:
+
+| phase                          | p50 µs | min µs | max µs |
+|--------------------------------|-------:|-------:|-------:|
+| `load` (xclbin + elf ctor)     |    165 |    114 |    322 |
+| `register` (hw_context build)  | 39 842 | 27 142 | 47 413 |
+| `kernel` (ext::kernel build)   |    210 |     99 |    290 |
+| **`first_dispatch`**           | **787**|    502 |    968 |
+
+**Apples-to-apples first-dispatch comparison** (all four mechanisms, same shape):
+
+| mechanism            | first_dispatch p50 µs |
+|----------------------|----------------------:|
+| baseline             |                   796 |
+| load_pdi_fw          |                   897 |
+| load_pdi_expanded    |                   758 |
+| **ctrlpkt**          |                **787**|
+
+**ctrlpkt's first dispatch is right in the same band as every other mechanism** (758-897 µs). There is no detectable per-dispatch difference at first-dispatch granularity.
+
+### ⚠ We still cannot measure ctrlpkt's *steady-state* per-dispatch cost
 
 This is the key honesty disclaimer. The numbers above are
 **first-dispatch from a fresh process** — they include whatever
@@ -614,6 +638,46 @@ Finding ctrlpkt's amortized cost would require either solving the
 a state-machine workaround) or running each ctrlpkt dispatch in a
 fresh process and amortizing process-creation cost out separately.
 Both are non-trivial; queued as v2 follow-ups #11 and #12.
+
+### v2 #11 follow-up: tried four workarounds, only the expensive one works
+
+To probe where the hang lives, `bench.cpp` Path-C gained a
+`--ctrlpkt-strategy` flag with four behaviors:
+
+| strategy        | what's recreated per iter         | result at t=1            |
+|-----------------|-----------------------------------|--------------------------|
+| `reuse`         | only `xrt::run` (default)         | **hang on dispatch #2**  |
+| `fresh_kernel`  | `xrt::ext::kernel`                | **hang on dispatch #2**  |
+| `fresh_module`  | `xrt::module` + `xrt::ext::kernel`| **hang on dispatch #2**  |
+| `fresh_ctx`     | `xrt::hw_context` + module + kernel | works, p50 ≈ 80 ms |
+
+The only strategy that lets us run multiple dispatches is recreating
+the `hw_context` itself — and that costs ~40 ms per recreation (plus
+implicit teardown of the previous context). So the per-iteration time
+under `fresh_ctx` is dominated by context setup, not by ctrlpkt
+dispatch work.
+
+**The hang lives at the `hw_context` layer** (driver/firmware), not
+above. Recreating just the kernel or module doesn't reset whatever
+state ctrlpkt's first dispatch mutates. XRT does not expose any
+public reset/release API for `hw_context` short of destroying it.
+
+**What this means for v2 #11.** We cannot derive a steady-state
+ctrlpkt number with the current XRT API and the current ctrlpkt build
+shape. To unstick this we'd need one of:
+
+1. A between-dispatch reset routine that the overlay xclbin supports
+   but neither the canonical test nor our bench invokes.
+2. An XRT API addition (e.g. `hw_context::reset()`) that resets
+   driver/firmware state without a teardown round-trip.
+3. A different ctrlpkt build shape — perhaps with the canonical
+   pattern's `aiex.npu.dma_memcpy_nd` ops (which our generator
+   doesn't emit) the firmware leaves state cleaner. Worth testing
+   if/when we restructure the generator.
+
+Until one of those lands, the honest per-dispatch ctrlpkt number is
+**first-dispatch only (787 µs at t=1, in the same band as every other
+mechanism)**.
 
 ## Whole-array sweep (added)
 

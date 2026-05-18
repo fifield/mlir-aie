@@ -73,6 +73,7 @@ struct Args {
   int n_configs = 0;
   bool batched = false;
   int batch_size = 16;
+  std::string ctrlpkt_strategy = "reuse"; // "reuse" | "fresh_ctx"
   std::string json_out;    // empty = stdout
 };
 
@@ -111,6 +112,7 @@ bool parse_args(int argc, char **argv, Args &a) {
     else if (starts_with(s, "--n-configs=")) a.n_configs = std::stoi(v());
     else if (s == "--batched") a.batched = true;
     else if (starts_with(s, "--batch-size=")) a.batch_size = std::stoi(v());
+    else if (starts_with(s, "--ctrlpkt-strategy=")) a.ctrlpkt_strategy = v();
     else if (starts_with(s, "--json-out=")) a.json_out = v();
     else if (s == "-h" || s == "--help") { usage(); return false; }
     else { std::cerr << "unknown arg: " << s << "\n"; usage(); return false; }
@@ -439,6 +441,57 @@ struct PathC {
     run.start();
     run.wait2();
   }
+
+  // Variant of dispatch_once that creates a fresh hw_context per call.
+  // Tries to defeat whatever state-machine leakage causes the 2nd-dispatch
+  // hang for the ctrlpkt mechanism in v2 #11. Slow per call (~80 ms,
+  // dominated by hw_context cost) but lets us get N samples without the
+  // firmware getting stuck.
+  void dispatch_fresh_context(const Args &a) {
+    xrt::hw_context fresh_ctx(device, xclbin.get_uuid());
+    xrt::module fresh_mod(elf);
+    auto name = find_kernel_name(xclbin);
+    xrt::ext::kernel fresh_kernel(fresh_ctx, fresh_mod, name);
+    auto run = xrt::run(fresh_kernel);
+    run.set_arg(0, opcode);
+    run.set_arg(1, 0);
+    run.set_arg(2, 0);
+    run.set_arg(3, bo_in);
+    run.set_arg(4, bo_out);
+    run.start();
+    run.wait2();
+  }
+
+  // Lighter-weight reset variants for v2 #11 — try cheaper state resets
+  // without recreating hw_context. If any of these work for the
+  // 2nd-dispatch hang, the per-dispatch cost would be a more meaningful
+  // number than the ~80 ms fresh_context number.
+  void dispatch_fresh_kernel() {
+    auto name = find_kernel_name(xclbin);
+    xrt::ext::kernel fresh_kernel(context, module_, name);
+    auto run = xrt::run(fresh_kernel);
+    run.set_arg(0, opcode);
+    run.set_arg(1, 0);
+    run.set_arg(2, 0);
+    run.set_arg(3, bo_in);
+    run.set_arg(4, bo_out);
+    run.start();
+    run.wait2();
+  }
+
+  void dispatch_fresh_module() {
+    auto name = find_kernel_name(xclbin);
+    xrt::module fresh_mod(elf);
+    xrt::ext::kernel fresh_kernel(context, fresh_mod, name);
+    auto run = xrt::run(fresh_kernel);
+    run.set_arg(0, opcode);
+    run.set_arg(1, 0);
+    run.set_arg(2, 0);
+    run.set_arg(3, bo_in);
+    run.set_arg(4, bo_out);
+    run.start();
+    run.wait2();
+  }
 };
 
 // --- emit JSON ------------------------------------------------------------
@@ -666,7 +719,18 @@ int main(int argc, char **argv) {
   } else if (c_family) {
     PathC pc;
     pc.build_warm(a, total_bytes);
-    tr = run_timed(a.warmup, a.iters, [&]{ pc.dispatch_once(); });
+    if (a.ctrlpkt_strategy == "fresh_ctx") {
+      tr = run_timed(a.warmup, a.iters,
+                     [&]{ pc.dispatch_fresh_context(a); });
+    } else if (a.ctrlpkt_strategy == "fresh_kernel") {
+      tr = run_timed(a.warmup, a.iters,
+                     [&]{ pc.dispatch_fresh_kernel(); });
+    } else if (a.ctrlpkt_strategy == "fresh_module") {
+      tr = run_timed(a.warmup, a.iters,
+                     [&]{ pc.dispatch_fresh_module(); });
+    } else {
+      tr = run_timed(a.warmup, a.iters, [&]{ pc.dispatch_once(); });
+    }
     emit_json(a, &tr, nullptr, nullptr, &pc, *out);
   } else {
     PathE pe;
