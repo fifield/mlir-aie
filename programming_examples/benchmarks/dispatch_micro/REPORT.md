@@ -60,10 +60,16 @@
    dispatch.
 3. **Cold start is 40 ms, dominated entirely by `register_xclbin` +
    `hw_context`.** Mechanism choice barely affects it (within noise).
-4. **`xrt::runlist` amortization is dramatic for the ELF/load_pdi paths** —
-   per-dispatch latency drops from ~65 µs to ~1 µs at batch=64. Baseline
-   amortizes much less efficiently (~22 µs at batch=64). This is the biggest
-   actionable signal in v1.
+4. **~~`xrt::runlist` amortization is dramatic for the ELF/load_pdi paths~~ —
+   ~~per-dispatch latency drops from ~65 µs to ~1 µs at batch=64.~~**
+   *Retracted in v2 #6.* The original measurement was a bench.cpp bug
+   — PathE never had a `dispatch_batched` method, so `--batched` for
+   ELF mechanisms silently fell through to a single `dispatch_once`
+   and reported `(single_dispatch / batch_size)` as "per-dispatch."
+   With real runlist now implemented (§3): baseline amortizes to
+   ~22 µs/dispatch; ELF runlist costs ~114 µs/dispatch — *higher*
+   than baseline. For workloads with many independent dispatches,
+   `baseline` is the right primitive.
 5. **`load_pdi_*` with `tiles ∈ {2, 4} × bds = 8` crashes the firmware** —
    reproducible, isolated to this corner; baseline and `tiles=8` are fine.
    Worth a separate bug.
@@ -146,21 +152,61 @@ Observations:
 
 ### 3. Runlist batching — per-dispatch p50 (µs)
 
-| mechanism             | t  |  bs=1 | bs=4 | bs=16 | bs=64 |
-|-----------------------|---:|------:|-----:|------:|------:|
-| baseline              |  1 |  68.6 | 39.5 |  26.4 |  21.7 |
-| baseline              |  4 |  68.8 | 44.6 |  30.3 |  31.6 |
-| load_pdi_fw           |  1 |  64.9 | 17.1 |   4.3 |   1.0 |
-| load_pdi_fw           |  4 |  77.9 | 17.4 |   5.0 |   1.2 |
-| load_pdi_expanded     |  1 |  81.2 | 18.1 |   4.7 |   1.2 |
-| load_pdi_expanded     |  4 | 102.1 | 23.7 |   5.5 |   1.5 |
+> **⚠ v2 #6 retraction.** The original v1 §3 numbers (showing ELF
+> runlist amortizing to ~1 µs per dispatch at bs=64) were a bench.cpp
+> bug: PathE never had a `dispatch_batched` method, so `--batched`
+> for ELF mechanisms silently fell through to a single
+> `dispatch_once()` and reported `(single_dispatch_time / batch_size)`
+> as "per-dispatch latency." The "20× better amortization" finding
+> doesn't exist. Below is the corrected v2 measurement with real
+> `xrt::runlist` dispatch in PathE.
 
-This is the most striking result in the dataset:
-- **The ELF / `xrt::ext::kernel` path amortizes batching ~20× better than baseline.** Going from batch=1 to batch=64, baseline drops 3.2×; ELF path drops 60-80×.
-- At batch=64, both `load_pdi_*` variants converge near 1 µs per dispatch — likely the limit of host-side queueing overhead.
-- Baseline plateaus at ~22 µs (1 tile) / 31 µs (4 tiles) — runlist isn't amortizing past that for the classic `xrt::kernel` path.
+#### Corrected: per-dispatch p50 µs (real runlist, identical args)
 
-The most likely explanation is that `xrt::ext::kernel` + `xrt::runlist` lets the runtime queue everything once and let firmware drain it, while the legacy `xrt::kernel` path serializes some host-side bookkeeping per run. Worth confirming with strace / perf in a follow-up.
+| mechanism             | t | bs=1 | bs=4 | bs=16 | bs=64 |
+|-----------------------|--:|-----:|-----:|------:|------:|
+| baseline              | 1 | 69.7 | 39.5 |  28.1 |  22.2 |
+| load_pdi_fw           | 1 | 95.1 |144.0 | 116.5 | 113.9 |
+
+#### Dedup probe: identical args vs distinct args (per-dispatch p50 µs)
+
+To test whether the runtime collapses identical batched runs, each
+`xrt::run` in the batch was given a distinct `xrt::bo` pair. If
+collapse were happening, batch time should jump dramatically under
+vary-args. It doesn't:
+
+| mechanism   | bs | identical | distinct | ratio |
+|-------------|---:|----------:|---------:|------:|
+| baseline    |  1 |    69.7 µs|  77.8 µs |  1.12 |
+| baseline    |  4 |    39.5 µs|  42.7 µs |  1.08 |
+| baseline    | 16 |    28.1 µs|  25.7 µs |  0.91 |
+| baseline    | 64 |    22.2 µs|  22.3 µs |  1.01 |
+| load_pdi_fw |  1 |    95.1 µs|  68.1 µs |  0.72 |
+| load_pdi_fw |  4 |   144.0 µs| 128.5 µs |  0.89 |
+| load_pdi_fw | 16 |   116.5 µs| 117.6 µs |  1.01 |
+| load_pdi_fw | 64 |   113.9 µs| 123.5 µs |  1.08 |
+
+**Ratios are ~1.0 throughout.** Neither path collapses identical runs;
+the runtime is genuinely executing N dispatches.
+
+#### Corrected findings
+
+1. **`baseline` runlist amortizes well, ~22 µs/dispatch at bs ≥ 16.**
+   That's the steady-state cost of one shim-DMA dispatch on the
+   `xrt::kernel` path.
+2. **`load_pdi_fw` runlist costs ~114 µs/dispatch at bs=64 — *higher*
+   than baseline.** The ELF path's per-dispatch runlist cost is
+   actually worse than the classic xclbin path. The v1 claim of "ELF
+   amortizes 20× better" was completely inverted by the bug.
+3. **For workloads with many independent dispatches, `baseline` is the
+   right primitive.** ELF + runlist is fine but not faster.
+4. The single-dispatch (bs=1) numbers across both mechanisms are
+   consistent with §1's steady-state results once you account for the
+   single iteration including some warmup-amortized cost.
+
+This is the **single largest correction** in the v2 pass. The original
+v1 §3 ranking was wrong because of measurement-harness bugs, not real
+mechanism behavior.
 
 ## Failures
 
