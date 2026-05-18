@@ -1,0 +1,303 @@
+===== CHANNELS=1 BYTES_PER_CHANNEL=16MiB ITERATIONS=8 SAMPLES=5 WARMUPS=1 PATTERN=linear =====
+python shim_dma_bw_placed.py --channels 1 --channel-order roundrobin --bytes-per-channel 16MiB --sink-bytes 4KiB --iterations 8 --pattern linear --stride-elements 16 --block-bytes 4KiB --gap-bytes 0 --burst-length 0 > shim_dma_bw.mlir
+aiecc.py -v --tmpdir=project --xchesscc --xbridge --no-compile-host \
+	--generate-full-elf --full-elf-name=shim_dma_bw.elf shim_dma_bw.mlir
+Successfully parsed input file: shim_dma_bw.mlir
+Using temporary directory: project
+Starting AIE compilation in directory: project
+  Device 'main' with 0 core(s)
+Found 1 AIE device(s)
+Detected target architecture for device main: AIE4
+Detected AIE target: AIE4
+Running resource allocation pipeline in-memory (alloc-scheme=)
+Resource allocation pipeline completed successfully
+Wrote module with addresses to: project/input_with_addresses.mlir
+Running routing pipeline in-memory
+Routing pipeline completed successfully
+
+Processing device: main
+No cores to compile in device main
+Generating NPU instructions for device: main
+Running NPU lowering pipeline in-memory
+NPU lowering pipeline completed successfully
+Running AIE4 cert pipeline via subprocess
+/home/labuser/aie4-dev/install/bin/aie-opt --pass-pipeline=builtin.module(aie.device(aie-trace-to-config, aie-trace-pack-reg-writes, aie-inline-trace-config, aie-dma-to-npu, convert-aie-to-transaction{elf-dir=project}), aie-npu-to-cert, aie.device(cert-legalize-pages)) project/cert_input.mlir -o project/cert.mlir
+/home/labuser/aie4-dev/install/bin/aie-translate --aie-cert-to-asm project/cert.mlir -o project/input_physical.mlir.asm
+Generated cert assembly: project/input_physical.mlir.asm
+Generating CDO artifacts for device: main
+Generated CDO files in: project
+/home/labuser/aie4-dev/install/bin/bootgen -arch versal -image project/main_design.bif -o project/main.pdi -w
+
+
+****** Bootgen v2023.2
+  **** Build date : May 15 2026-18:51:59
+    ** Copyright 1986-2022 Xilinx, Inc. All Rights Reserved.
+    ** Copyright 2022-2023 Advanced Micro Devices, Inc. All Rights Reserved.
+
+
+[INFO]   : Bootimage generated successfully
+
+Generated PDI: project/main.pdi
+Discovered aietools installation: /home/labuser/vitis-HEAD/Vitis/aietools
+Generating full ELF with 1 device(s)
+Generated config.json: project/config.json
+aiebu library call failed, falling back to subprocess
+/opt/xilinx/xrt/bin/aiebu-asm -t aie4_config -j project/config.json -o shim_dma_bw.elf
+Generated full ELF: shim_dma_bw.elf
+Compilation completed successfully
+python host.py --elf shim_dma_bw.elf --channels 1 --channel-order roundrobin --bytes-per-channel 16MiB --sink-bytes 4KiB --iterations 8 --pattern linear --stride-elements 16 --block-bytes 4KiB --gap-bytes 0 --samples 5 --warmups 1
+===== CHANNELS=3 BYTES_PER_CHANNEL=16MiB ITERATIONS=8 SAMPLES=5 WARMUPS=1 PATTERN=linear =====
+python shim_dma_bw_placed.py --channels 3 --channel-order roundrobin --bytes-per-channel 16MiB --sink-bytes 4KiB --iterations 8 --pattern linear --stride-elements 16 --block-bytes 4KiB --gap-bytes 0 --burst-length 0 > shim_dma_bw.mlir
+aiecc.py -v --tmpdir=project --xchesscc --xbridge --no-compile-host \
+	--generate-full-elf --full-elf-name=shim_dma_bw.elf shim_dma_bw.mlir
+Successfully parsed input file: shim_dma_bw.mlir
+Using temporary directory: project
+Starting AIE compilation in directory: project
+  Device 'main' with 0 core(s)
+Found 1 AIE device(s)
+Detected target architecture for device main: AIE4
+Detected AIE target: AIE4
+Running resource allocation pipeline in-memory (alloc-scheme=)
+Resource allocation pipeline completed successfully
+Wrote module with addresses to: project/input_with_addresses.mlir
+Running routing pipeline in-memory
+Routing pipeline completed successfully
+
+Processing device: main
+No cores to compile in device main
+Generating NPU instructions for device: main
+Running NPU lowering pipeline in-memory
+NPU lowering pipeline completed successfully
+Running AIE4 cert pipeline via subprocess
+/home/labuser/aie4-dev/install/bin/aie-opt --pass-pipeline=builtin.module(aie.device(aie-trace-to-config, aie-trace-pack-reg-writes, aie-inline-trace-config, aie-dma-to-npu, convert-aie-to-transaction{elf-dir=project}), aie-npu-to-cert, aie.device(cert-legalize-pages)) project/cert_input.mlir -o project/cert.mlir
+/home/labuser/aie4-dev/install/bin/aie-translate --aie-cert-to-asm project/cert.mlir -o project/input_physical.mlir.asm
+Generated cert assembly: project/input_physical.mlir.asm
+Generating CDO artifacts for device: main
+Generated CDO files in: project
+/home/labuser/aie4-dev/install/bin/bootgen -arch versal -image project/main_design.bif -o project/main.pdi -w
+
+
+****** Bootgen v2023.2
+  **** Build date : May 15 2026-18:51:59
+    ** Copyright 1986-2022 Xilinx, Inc. All Rights Reserved.
+    ** Copyright 2022-2023 Advanced Micro Devices, Inc. All Rights Reserved.
+
+
+[INFO]   : Bootimage generated successfully
+
+Generated PDI: project/main.pdi
+Discovered aietools installation: /home/labuser/vitis-HEAD/Vitis/aietools
+Generating full ELF with 1 device(s)
+Generated config.json: project/config.json
+aiebu library call failed, falling back to subprocess
+/opt/xilinx/xrt/bin/aiebu-asm -t aie4_config -j project/config.json -o shim_dma_bw.elf
+Generated full ELF: shim_dma_bw.elf
+Compilation completed successfully
+python host.py --elf shim_dma_bw.elf --channels 3 --channel-order roundrobin --bytes-per-channel 16MiB --sink-bytes 4KiB --iterations 8 --pattern linear --stride-elements 16 --block-bytes 4KiB --gap-bytes 0 --samples 5 --warmups 1
+===== CHANNELS=6 BYTES_PER_CHANNEL=16MiB ITERATIONS=8 SAMPLES=5 WARMUPS=1 PATTERN=linear =====
+python shim_dma_bw_placed.py --channels 6 --channel-order roundrobin --bytes-per-channel 16MiB --sink-bytes 4KiB --iterations 8 --pattern linear --stride-elements 16 --block-bytes 4KiB --gap-bytes 0 --burst-length 0 > shim_dma_bw.mlir
+aiecc.py -v --tmpdir=project --xchesscc --xbridge --no-compile-host \
+	--generate-full-elf --full-elf-name=shim_dma_bw.elf shim_dma_bw.mlir
+Successfully parsed input file: shim_dma_bw.mlir
+Using temporary directory: project
+Starting AIE compilation in directory: project
+  Device 'main' with 0 core(s)
+Found 1 AIE device(s)
+Detected target architecture for device main: AIE4
+Detected AIE target: AIE4
+Running resource allocation pipeline in-memory (alloc-scheme=)
+Resource allocation pipeline completed successfully
+Wrote module with addresses to: project/input_with_addresses.mlir
+Running routing pipeline in-memory
+Routing pipeline completed successfully
+
+Processing device: main
+No cores to compile in device main
+Generating NPU instructions for device: main
+Running NPU lowering pipeline in-memory
+NPU lowering pipeline completed successfully
+Running AIE4 cert pipeline via subprocess
+/home/labuser/aie4-dev/install/bin/aie-opt --pass-pipeline=builtin.module(aie.device(aie-trace-to-config, aie-trace-pack-reg-writes, aie-inline-trace-config, aie-dma-to-npu, convert-aie-to-transaction{elf-dir=project}), aie-npu-to-cert, aie.device(cert-legalize-pages)) project/cert_input.mlir -o project/cert.mlir
+/home/labuser/aie4-dev/install/bin/aie-translate --aie-cert-to-asm project/cert.mlir -o project/input_physical.mlir.asm
+Generated cert assembly: project/input_physical.mlir.asm
+Generating CDO artifacts for device: main
+Generated CDO files in: project
+/home/labuser/aie4-dev/install/bin/bootgen -arch versal -image project/main_design.bif -o project/main.pdi -w
+
+
+****** Bootgen v2023.2
+  **** Build date : May 15 2026-18:51:59
+    ** Copyright 1986-2022 Xilinx, Inc. All Rights Reserved.
+    ** Copyright 2022-2023 Advanced Micro Devices, Inc. All Rights Reserved.
+
+
+[INFO]   : Bootimage generated successfully
+
+Generated PDI: project/main.pdi
+Discovered aietools installation: /home/labuser/vitis-HEAD/Vitis/aietools
+Generating full ELF with 1 device(s)
+Generated config.json: project/config.json
+aiebu library call failed, falling back to subprocess
+/opt/xilinx/xrt/bin/aiebu-asm -t aie4_config -j project/config.json -o shim_dma_bw.elf
+Generated full ELF: shim_dma_bw.elf
+Compilation completed successfully
+python host.py --elf shim_dma_bw.elf --channels 6 --channel-order roundrobin --bytes-per-channel 16MiB --sink-bytes 4KiB --iterations 8 --pattern linear --stride-elements 16 --block-bytes 4KiB --gap-bytes 0 --samples 5 --warmups 1
+===== CHANNELS=9 BYTES_PER_CHANNEL=16MiB ITERATIONS=8 SAMPLES=5 WARMUPS=1 PATTERN=linear =====
+python shim_dma_bw_placed.py --channels 9 --channel-order roundrobin --bytes-per-channel 16MiB --sink-bytes 4KiB --iterations 8 --pattern linear --stride-elements 16 --block-bytes 4KiB --gap-bytes 0 --burst-length 0 > shim_dma_bw.mlir
+aiecc.py -v --tmpdir=project --xchesscc --xbridge --no-compile-host \
+	--generate-full-elf --full-elf-name=shim_dma_bw.elf shim_dma_bw.mlir
+Successfully parsed input file: shim_dma_bw.mlir
+Using temporary directory: project
+Starting AIE compilation in directory: project
+  Device 'main' with 0 core(s)
+Found 1 AIE device(s)
+Detected target architecture for device main: AIE4
+Detected AIE target: AIE4
+Running resource allocation pipeline in-memory (alloc-scheme=)
+Resource allocation pipeline completed successfully
+Wrote module with addresses to: project/input_with_addresses.mlir
+Running routing pipeline in-memory
+Routing pipeline completed successfully
+
+Processing device: main
+No cores to compile in device main
+Generating NPU instructions for device: main
+Running NPU lowering pipeline in-memory
+NPU lowering pipeline completed successfully
+Running AIE4 cert pipeline via subprocess
+/home/labuser/aie4-dev/install/bin/aie-opt --pass-pipeline=builtin.module(aie.device(aie-trace-to-config, aie-trace-pack-reg-writes, aie-inline-trace-config, aie-dma-to-npu, convert-aie-to-transaction{elf-dir=project}), aie-npu-to-cert, aie.device(cert-legalize-pages)) project/cert_input.mlir -o project/cert.mlir
+/home/labuser/aie4-dev/install/bin/aie-translate --aie-cert-to-asm project/cert.mlir -o project/input_physical.mlir.asm
+Generated cert assembly: project/input_physical.mlir.asm
+Generating CDO artifacts for device: main
+Generated CDO files in: project
+/home/labuser/aie4-dev/install/bin/bootgen -arch versal -image project/main_design.bif -o project/main.pdi -w
+
+
+****** Bootgen v2023.2
+  **** Build date : May 15 2026-18:51:59
+    ** Copyright 1986-2022 Xilinx, Inc. All Rights Reserved.
+    ** Copyright 2022-2023 Advanced Micro Devices, Inc. All Rights Reserved.
+
+
+[INFO]   : Bootimage generated successfully
+
+Generated PDI: project/main.pdi
+Discovered aietools installation: /home/labuser/vitis-HEAD/Vitis/aietools
+Generating full ELF with 1 device(s)
+Generated config.json: project/config.json
+aiebu library call failed, falling back to subprocess
+/opt/xilinx/xrt/bin/aiebu-asm -t aie4_config -j project/config.json -o shim_dma_bw.elf
+Generated full ELF: shim_dma_bw.elf
+Compilation completed successfully
+python host.py --elf shim_dma_bw.elf --channels 9 --channel-order roundrobin --bytes-per-channel 16MiB --sink-bytes 4KiB --iterations 8 --pattern linear --stride-elements 16 --block-bytes 4KiB --gap-bytes 0 --samples 5 --warmups 1
+===== CHANNELS=12 BYTES_PER_CHANNEL=16MiB ITERATIONS=8 SAMPLES=5 WARMUPS=1 PATTERN=linear =====
+python shim_dma_bw_placed.py --channels 12 --channel-order roundrobin --bytes-per-channel 16MiB --sink-bytes 4KiB --iterations 8 --pattern linear --stride-elements 16 --block-bytes 4KiB --gap-bytes 0 --burst-length 0 > shim_dma_bw.mlir
+aiecc.py -v --tmpdir=project --xchesscc --xbridge --no-compile-host \
+	--generate-full-elf --full-elf-name=shim_dma_bw.elf shim_dma_bw.mlir
+Successfully parsed input file: shim_dma_bw.mlir
+Using temporary directory: project
+Starting AIE compilation in directory: project
+  Device 'main' with 0 core(s)
+Found 1 AIE device(s)
+Detected target architecture for device main: AIE4
+Detected AIE target: AIE4
+Running resource allocation pipeline in-memory (alloc-scheme=)
+Resource allocation pipeline completed successfully
+Wrote module with addresses to: project/input_with_addresses.mlir
+Running routing pipeline in-memory
+Routing pipeline completed successfully
+
+Processing device: main
+No cores to compile in device main
+Generating NPU instructions for device: main
+Running NPU lowering pipeline in-memory
+NPU lowering pipeline completed successfully
+Running AIE4 cert pipeline via subprocess
+/home/labuser/aie4-dev/install/bin/aie-opt --pass-pipeline=builtin.module(aie.device(aie-trace-to-config, aie-trace-pack-reg-writes, aie-inline-trace-config, aie-dma-to-npu, convert-aie-to-transaction{elf-dir=project}), aie-npu-to-cert, aie.device(cert-legalize-pages)) project/cert_input.mlir -o project/cert.mlir
+/home/labuser/aie4-dev/install/bin/aie-translate --aie-cert-to-asm project/cert.mlir -o project/input_physical.mlir.asm
+Generated cert assembly: project/input_physical.mlir.asm
+Generating CDO artifacts for device: main
+Generated CDO files in: project
+/home/labuser/aie4-dev/install/bin/bootgen -arch versal -image project/main_design.bif -o project/main.pdi -w
+
+
+****** Bootgen v2023.2
+  **** Build date : May 15 2026-18:51:59
+    ** Copyright 1986-2022 Xilinx, Inc. All Rights Reserved.
+    ** Copyright 2022-2023 Advanced Micro Devices, Inc. All Rights Reserved.
+
+
+[INFO]   : Bootimage generated successfully
+
+Generated PDI: project/main.pdi
+Discovered aietools installation: /home/labuser/vitis-HEAD/Vitis/aietools
+Generating full ELF with 1 device(s)
+Generated config.json: project/config.json
+aiebu library call failed, falling back to subprocess
+/opt/xilinx/xrt/bin/aiebu-asm -t aie4_config -j project/config.json -o shim_dma_bw.elf
+Generated full ELF: shim_dma_bw.elf
+Compilation completed successfully
+python host.py --elf shim_dma_bw.elf --channels 12 --channel-order roundrobin --bytes-per-channel 16MiB --sink-bytes 4KiB --iterations 8 --pattern linear --stride-elements 16 --block-bytes 4KiB --gap-bytes 0 --samples 5 --warmups 1
+===== CHANNELS=12 BYTES_PER_CHANNEL=16MiB ITERATIONS=8 SAMPLES=5 WARMUPS=1 PATTERN=interleaved BLOCK_BYTES=4KiB =====
+python shim_dma_bw_placed.py --channels 12 --channel-order roundrobin --bytes-per-channel 16MiB --sink-bytes 4KiB --iterations 8 --pattern interleaved --stride-elements 16 --block-bytes 4KiB --gap-bytes 0 --burst-length 0 > shim_dma_bw.mlir
+aiecc.py -v --tmpdir=project --xchesscc --xbridge --no-compile-host \
+	--generate-full-elf --full-elf-name=shim_dma_bw.elf shim_dma_bw.mlir
+Successfully parsed input file: shim_dma_bw.mlir
+Using temporary directory: project
+Starting AIE compilation in directory: project
+  Device 'main' with 0 core(s)
+Found 1 AIE device(s)
+Detected target architecture for device main: AIE4
+Detected AIE target: AIE4
+Running resource allocation pipeline in-memory (alloc-scheme=)
+Resource allocation pipeline completed successfully
+Wrote module with addresses to: project/input_with_addresses.mlir
+Running routing pipeline in-memory
+Routing pipeline completed successfully
+
+Processing device: main
+No cores to compile in device main
+Generating NPU instructions for device: main
+Running NPU lowering pipeline in-memory
+===== CHANNELS=12 BYTES_PER_CHANNEL=16MiB ITERATIONS=8 SAMPLES=5 WARMUPS=1 PATTERN=block-strided BLOCK_BYTES=4KiB GAP_BYTES=4KiB =====
+python shim_dma_bw_placed.py --channels 12 --channel-order roundrobin --bytes-per-channel 16MiB --sink-bytes 4KiB --iterations 8 --pattern block-strided --stride-elements 16 --block-bytes 4KiB --gap-bytes 4KiB --burst-length 0 > shim_dma_bw.mlir
+aiecc.py -v --tmpdir=project --xchesscc --xbridge --no-compile-host \
+	--generate-full-elf --full-elf-name=shim_dma_bw.elf shim_dma_bw.mlir
+Successfully parsed input file: shim_dma_bw.mlir
+Using temporary directory: project
+Starting AIE compilation in directory: project
+  Device 'main' with 0 core(s)
+Found 1 AIE device(s)
+Detected target architecture for device main: AIE4
+Detected AIE target: AIE4
+Running resource allocation pipeline in-memory (alloc-scheme=)
+Resource allocation pipeline completed successfully
+Wrote module with addresses to: project/input_with_addresses.mlir
+Running routing pipeline in-memory
+Routing pipeline completed successfully
+
+Processing device: main
+No cores to compile in device main
+Generating NPU instructions for device: main
+Running NPU lowering pipeline in-memory
+===== CHANNELS=12 BYTES_PER_CHANNEL=1MiB ITERATIONS=8 SAMPLES=5 WARMUPS=1 PATTERN=strided STRIDE_ELEMENTS=16 =====
+python shim_dma_bw_placed.py --channels 12 --channel-order roundrobin --bytes-per-channel 1MiB --sink-bytes 4KiB --iterations 8 --pattern strided --stride-elements 16 --block-bytes 4KiB --gap-bytes 0 --burst-length 0 > shim_dma_bw.mlir
+aiecc.py -v --tmpdir=project --xchesscc --xbridge --no-compile-host \
+	--generate-full-elf --full-elf-name=shim_dma_bw.elf shim_dma_bw.mlir
+Successfully parsed input file: shim_dma_bw.mlir
+Using temporary directory: project
+Starting AIE compilation in directory: project
+  Device 'main' with 0 core(s)
+Found 1 AIE device(s)
+Detected target architecture for device main: AIE4
+Detected AIE target: AIE4
+Running resource allocation pipeline in-memory (alloc-scheme=)
+Resource allocation pipeline completed successfully
+Wrote module with addresses to: project/input_with_addresses.mlir
+Running routing pipeline in-memory
+Routing pipeline completed successfully
+
+Processing device: main
+No cores to compile in device main
+Generating NPU instructions for device: main
+Running NPU lowering pipeline in-memory
