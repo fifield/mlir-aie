@@ -305,23 +305,38 @@ wall sits. Today's tiny 1-tile PDIs don't pressure it.
 
 ---
 
-## 11. Solve ctrlpkt's 2nd-dispatch hang (new)
+## 11. Solve ctrlpkt's 2nd-dispatch hang  **[~] PARTIAL — hang isolated, not solved**
 
-**Goal.** Find ctrlpkt's *steady-state* per-dispatch cost, not just
-the first-dispatch cost. v2 #3 left this open because dispatch #2
-reliably hangs.
+**What we tried (in bench.cpp's PathC, via `--ctrlpkt-strategy`):**
 
-**Hypothesis to chase.** The column-control-overlay xclbin includes
-reset routes (per the test/npu-xrt/ctrl_packet_reconfig_elf comment
-about routes). Maybe a reset ctrlpkt sequence has to be dispatched
-between functional dispatches. If so:
-- Identify which control packets reset state.
-- Add a "between-dispatch reset" call in bench.cpp's Path-C.
-- Compare steady-state numbers against §1's other mechanisms.
+| strategy        | what's recreated per iter         | result               |
+|-----------------|-----------------------------------|----------------------|
+| `reuse`         | only `xrt::run`                   | hang on dispatch #2  |
+| `fresh_kernel`  | `xrt::ext::kernel`                | hang on dispatch #2  |
+| `fresh_module`  | `xrt::module` + `ext::kernel`     | hang on dispatch #2  |
+| `fresh_ctx`     | `xrt::hw_context` + everything    | **works, ~80 ms / dispatch** |
 
-**Acceptance.**
-- bench can run N consecutive ctrlpkt dispatches without timing out.
-- §6 gets a real steady-state number (warmup + iters > 1).
+**Conclusion.** The hang lives at the `hw_context` layer (driver/
+firmware). Recreating just the user-space handles (kernel, module)
+doesn't reset whatever state ctrlpkt's first dispatch leaves behind.
+The only working strategy costs ~80 ms per call — dominated by
+context creation+teardown, not ctrlpkt work.
+
+We **did** isolate the real first-dispatch cost via the `cold_start`
+metric (which times phases separately): **787 µs p50** for ctrlpkt at
+t=1, b=2 across 30 fresh processes. That's in the same 758-897 µs band
+as every other mechanism's first dispatch. So at first-dispatch
+granularity, ctrlpkt is unremarkable — but we still have **no
+steady-state number** for it.
+
+**To make further progress** we'd need one of:
+1. A between-dispatch reset routine the overlay xclbin supports, or
+2. An XRT API to reset hw_context state without teardown, or
+3. A different ctrlpkt build shape (canonical-style
+   `aiex.npu.dma_memcpy_nd` ops instead of `dma_configure_task_for`).
+
+None are in scope for this round. Documented as the new "v2 #11
+follow-up" subsection of REPORT.md §6.
 
 ---
 
@@ -398,6 +413,13 @@ distribution and subtract estimated process-startup overhead.
   model: you cannot dispatch the ELF without the op present.
   Documented as Anomaly #0 in REPORT.md and as a "Related failure"
   section in the bug write-up.
+- **#11 ctrlpkt hang investigation (2026-05-18).** Probed four
+  workarounds via `--ctrlpkt-strategy`; only `fresh_ctx` works but at
+  ~80 ms per call. Hang is at the `hw_context` layer (driver/firmware),
+  not above. Captured the real first-dispatch number via `cold_start`
+  metric: **787 µs p50 at t=1, b=2** — in the same 758-897 µs band as
+  the other three mechanisms. Steady-state still unmeasurable.
+  Documented in REPORT.md §6 "v2 #11 follow-up" subsection.
 - **#3 ctrlpkt end-to-end (2026-05-18).** Build pipeline (overlay
   pass + dual aiecc) + Path-C in bench.cpp end-to-end. **Caveat:
   dispatch is single-shot** — first call succeeds, second hangs with
