@@ -4,6 +4,23 @@
 > `mlir-aie` branch `location` @ `ab3cf203b0`. All numbers are wall-clock
 > nanoseconds bracketing the kernel submit + wait on the host.
 
+## v2 update — what A↔B actually showed
+
+> **v1 hypothesis (still valuable for context):** the firmware caches PDI
+> loads; v1's `load_pdi_fw` numbers were cache-hit measurements; only
+> `load_pdi_expanded` did real reconfig work.
+>
+> **v2 finding (see §4):** alternating between two *distinct* PDIs
+> produces the *same* numbers as v1's "cached" path (~60-65 µs flat
+> across 1-8 tiles). Either the cache holds ≥ 2 PDIs, or there was never
+> real per-dispatch work to cache — the PDI is loaded into driver memory
+> at ELF registration and `load_pdi` is just a pointer swap. Either way,
+> **the firmware load_pdi path is essentially free regardless of caching
+> state**, while `load_pdi_expanded` always pays its full
+> register-stream cost (~117 µs at t=8). The v1 framing of "real vs
+> cached" was wrong in flavor but right in direction: expanded *is*
+> doing real reconfig work, the firmware path *isn't*.
+
 ## ⚠ Important caveat — v1 does NOT measure real PDI loads
 
 > The runtime/driver/firmware stack **caches PDI loads at the PDI level**:
@@ -174,6 +191,93 @@ One other observed flake: `load_pdi_fw t=1 b=8 cold_start` crashed all 30 proces
 
 - `results/results.jsonl` — 336 rows; `mechanism`, `metric`, `tiles`, `bds`, `batched`, `batch_size`, `ns_samples` per row.
 - `results/plots/` — `pure_dispatch_vs_{tiles,bds}{,_bds*}.png`, `pure_dispatch_batched.png`, `cold_start_breakdown.png`.
+
+## §4. A↔B alternation (v2 — defeats the PDI cache)
+
+> *Added in v2. Builds on the v1 framing.*
+
+v1's framing said `load_pdi_fw` numbers were cache-hit measurements
+because every dispatch reloaded the same PDI. v2 fixes that with a
+proper A↔B path: the AB build now contains **two** runtime sequences in
+the orchestrator (`ab_orch:seq_to_a` and `ab_orch:seq_to_b`), each
+issuing one `npu_load_pdi` against a distinct PDI (`@cfg_a` / `@cfg_b`).
+The bench loop alternates `kernel_a()` and `kernel_b()`, so each
+firmware load is preceded by a load of a *different* PDI — the cache
+cannot short-circuit.
+
+**Important methodology note.** The orchestrator's runtime sequences
+contain *only* the `npu_load_pdi` op — no DMA work, no `dma_configure`,
+no `dma_await`. That means an `ab_toggle` row is measuring **dispatch
+overhead + firmware PDI load + return**, not "switch PDI then run the
+loaded PDI's work." This is exactly what we want for isolating PDI-load
+cost, but it means absolute numbers below are *lower* than `pure_dispatch`
+numbers from §1 (which include actual DMA after the load).
+
+### Table: p50 µs at `bds=2, rows_per_col=1`, iters=100
+
+| mech                | t | baseline (v1, no load_pdi) | cached load_pdi (v1, self-reload) | A→B (v2, uncached) | B→A (v2, uncached) | A→B − baseline |
+|---------------------|--:|---------------------------:|----------------------------------:|-------------------:|-------------------:|---------------:|
+| `load_pdi_fw`       | 1 |                       66.3 |                              61.4 |               60.5 |               61.9 |          −5.8  |
+| `load_pdi_fw`       | 2 |                       69.3 |                              62.3 |               61.8 |               61.5 |          −7.5  |
+| `load_pdi_fw`       | 4 |                       75.2 |                              76.8 |               62.3 |               62.7 |         −13.0  |
+| `load_pdi_fw`       | 8 |                       88.7 |                              80.5 |               65.7 |               64.9 |         −23.0  |
+| `load_pdi_expanded` | 1 |                       66.3 |                              72.5 |               64.9 |               64.6 |          −1.5  |
+| `load_pdi_expanded` | 2 |                       69.3 |                              72.3 |               73.2 |               73.0 |          +3.9  |
+| `load_pdi_expanded` | 4 |                       75.2 |                              90.9 |               82.9 |               82.2 |          +7.7  |
+| `load_pdi_expanded` | 8 |                       88.7 |                             132.4 |              116.7 |              117.2 |         +28.1  |
+
+(`baseline (v1)` = full dispatch including DMA; A↔B rows = orchestrator
+runtime sequence containing only `npu_load_pdi`, so they're DMA-free.)
+
+### Headline findings
+
+1. **Firmware PDI load is essentially flat at ~60-65 µs across all tile
+   counts.** `load_pdi_fw` A↔B numbers go from 60.5 µs at 1 tile to
+   65.7 µs at 8 tiles — a 5 µs swing across 8× the configuration. This
+   is the cost of the firmware op itself (dispatch + look-up + return),
+   *not* the cost of reprogramming the device. The PDI was loaded into
+   driver memory when `xrt::hw_context(device, elf)` ran; `load_pdi`
+   just selects which one is currently active.
+2. **The "PDI cache" in v1 may be a misnomer.** v1 attributed the
+   `load_pdi_fw` ≈ `baseline` collapse to a firmware cache short-
+   circuiting. The v2 A↔B numbers are *the same* as v1's "cached"
+   numbers (within run-to-run noise). Two possibilities are consistent
+   with this:
+   - The firmware/driver holds *both* PDIs simultaneously and switching
+     between them is cheap (effectively a cache of size ≥ 2).
+   - The op never had real "load" work to do in the first place — both
+     PDIs are pre-loaded at ELF registration time, and `load_pdi` is a
+     pointer swap, not a memory move.
+   Distinguishing these would require either (a) rotating through 3+
+   PDIs to overflow a small cache, or (b) instrumenting the firmware
+   side. Worth pursuing if we ever care about >2-PDI workloads.
+3. **`load_pdi_expanded` A↔B numbers scale with configuration size, as
+   expected.** 65 µs at t=1 → 117 µs at t=8. The expansion replaces
+   `load_pdi` with raw write32/blockwrite txn ops; these can't be
+   cached and must execute every time. This *is* the honest "what does
+   it cost to reprogram N tiles on every dispatch" number, and at 8
+   tiles it's ~80% more expensive than the firmware path.
+4. **For workloads that alternate between two distinct configurations,
+   the firmware load_pdi path is strictly cheaper than expanded.**
+   At t=8, firmware A→B costs 66 µs vs expanded's 117 µs — a 1.8×
+   advantage that grows with tile count.
+
+### What v2 still doesn't tell us
+
+- **A↔B with the PDI's actual work.** The orchestrator runtime sequence
+  is DMA-free; we measure load_pdi cost in isolation. To answer "swap
+  workloads and then run the new workload" we'd need the orchestrator
+  to invoke the loaded PDI's runtime_sequence (e.g. via `aiex.configure
+  { aiex.run @inner_sequence }` from `test/npu-xrt/reconfigure_loadpdi/
+  aie.mlir`). That's a generator extension on the v2 backlog.
+- **Whether the cache is actually a "cache".** See finding #2. v2 only
+  tested A↔B with two PDIs; rotating through 4+ PDIs would tell us
+  whether there's a fixed-size cache or unconditional zero-cost
+  swapping.
+- **`load_pdi_expanded` with empty post-load body.** We compared
+  expanded A↔B (no DMA) to expanded `pure_dispatch` (with DMA), and the
+  difference at t=8 was only ~15 µs — small, but it implies the bulk of
+  expanded's cost is the register-write stream, not the surrounding DMA.
 
 ## Whole-array sweep (added)
 
