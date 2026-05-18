@@ -305,6 +305,46 @@ wall sits. Today's tiny 1-tile PDIs don't pressure it.
 
 ---
 
+## 11. Solve ctrlpkt's 2nd-dispatch hang (new)
+
+**Goal.** Find ctrlpkt's *steady-state* per-dispatch cost, not just
+the first-dispatch cost. v2 #3 left this open because dispatch #2
+reliably hangs.
+
+**Hypothesis to chase.** The column-control-overlay xclbin includes
+reset routes (per the test/npu-xrt/ctrl_packet_reconfig_elf comment
+about routes). Maybe a reset ctrlpkt sequence has to be dispatched
+between functional dispatches. If so:
+- Identify which control packets reset state.
+- Add a "between-dispatch reset" call in bench.cpp's Path-C.
+- Compare steady-state numbers against §1's other mechanisms.
+
+**Acceptance.**
+- bench can run N consecutive ctrlpkt dispatches without timing out.
+- §6 gets a real steady-state number (warmup + iters > 1).
+
+---
+
+## 12. Per-process amortization for ctrlpkt (new, fallback if #11 hard)
+
+**Goal.** If we can't solve the hang, at least amortize ctrlpkt's
+fresh-process cost across enough samples to get a tight first-dispatch
+distribution and subtract estimated process-startup overhead.
+
+**Implementation sketch.**
+- Wrap bench in a helper that times `time.time_ns()` deltas across the
+  Python process boundary (in run_matrix.sh).
+- Subtract baseline's first-dispatch p50 as an estimate of
+  "everything except ctrlpkt-specific work."
+- Report what's left.
+
+**Acceptance.**
+- A defensible "ctrlpkt costs ~X µs more than baseline's first
+  dispatch" number, with confidence bounds.
+- Clear caveat that this is *not* steady-state.
+
+---
+
 ## Stretch (not for this round, but on the radar)
 
 - **`xrt::runlist` for the whole array.** v1 batched only tested t=1
@@ -360,11 +400,19 @@ wall sits. Today's tiny 1-tile PDIs don't pressure it.
   section in the bug write-up.
 - **#3 ctrlpkt end-to-end (2026-05-18).** Build pipeline (overlay
   pass + dual aiecc) + Path-C in bench.cpp end-to-end. **Caveat:
-  dispatch is single-shot** — first call succeeds (~1 ms), second
-  hangs with the now-familiar `txn_op_idx = 0xFFFFFFFF` timeout.
-  Captured 30 fresh-process single-shot samples at t ∈ {1,4}; p50 is
-  ~1043 µs and ~852 µs respectively, with ~640-1820 µs variance.
-  ctrlpkt costs ~15× a baseline dispatch and is single-shot — it's a
-  one-shot reconfiguration mechanism, not a hot-loop dispatch
-  mechanism. Documented as §6 in REPORT.md; "Practical conclusion"
-  table revised to rank all four mechanisms.
+  dispatch is single-shot** — first call succeeds, second hangs with
+  the now-familiar `txn_op_idx = 0xFFFFFFFF` timeout. Captured 30
+  fresh-process single-shot samples at t ∈ {1,4}; first-dispatch p50
+  is ~1043 µs and ~852 µs respectively (range 640-1820 µs).
+  
+  **Retraction (2026-05-18, same day).** My initial v2 §6 claim of
+  "ctrlpkt is ~15× slower than baseline" was a category error: I
+  compared ctrlpkt's *first* dispatch to baseline's *steady-state*
+  dispatch. Apples-to-apples (v1 cold_start first_dispatch p50 at
+  same shape: baseline 796 µs, load_pdi_fw 897 µs, load_pdi_expanded
+  758 µs, ctrlpkt 1043 µs), ctrlpkt's first dispatch is in the same
+  band as every other mechanism. **We have no measurement of
+  ctrlpkt's steady-state cost** because dispatch #2 hangs. §6 in
+  REPORT.md was rewritten to retract the misleading number and
+  state the limitation explicitly. Surfaced tasks #11 (solve the
+  hang) and #12 (per-process amortization fallback).

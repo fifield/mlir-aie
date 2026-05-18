@@ -538,46 +538,82 @@ replay without first running an explicit reset routine. The overlay
 xclbin does include the reset routes; we just don't invoke them
 between dispatches.
 
-### Measurement: single-shot first-dispatch (30 fresh processes per cell)
+### Measurement: ctrlpkt single-shot first-dispatch (30 fresh processes per cell)
 
 | t | n  | p10 µs | p50 µs | p90 µs | min µs | max µs |
 |--:|---:|-------:|-------:|-------:|-------:|-------:|
 | 1 | 30 |    741 |  1 043 |  1 611 |    643 |  1 821 |
 | 4 | 30 |    686 |    852 |  1 306 |    677 |  1 753 |
 
-### Comparison vs other mechanisms at t=1, bds=2, rows=1
+### ⚠ We cannot measure ctrlpkt's per-dispatch cost
 
-| measurement                                                  | mechanism           | p50 µs |
-|--------------------------------------------------------------|---------------------|-------:|
-| v1 `pure_dispatch` (steady-state)                            | `baseline`          |   67   |
-| v1 `pure_dispatch` (steady-state)                            | `load_pdi_fw`       |   61   |
-| v1 `pure_dispatch` (steady-state)                            | `load_pdi_expanded` |   73   |
-| **v2 ctrlpkt single-shot, fresh process**                    | **`ctrlpkt`**       | **1 043** |
+This is the key honesty disclaimer. The numbers above are
+**first-dispatch from a fresh process** — they include whatever
+one-time setup the firmware does on the first command. Every other
+mechanism in this report has steady-state numbers (warmup ≥ 10), and
+we **cannot get a steady-state ctrlpkt number** because dispatch #2
+hangs.
 
-ctrlpkt costs roughly **15× a baseline dispatch.** This is the cost of
-full reconfiguration via control packets, including reset routes
-shipping through the column-control overlay. The variance is also
-massive (~640-1820 µs range across 30 samples) — much wider than any
-other mechanism — consistent with an operation whose duration depends
-on what other state the firmware is recovering from.
+The right comparison is against other mechanisms' first-dispatch
+numbers from v1's cold_start data (also "fresh process, one
+dispatch"), at the same shape:
 
-### Practical conclusion (revised v2 summary)
+| mechanism            | t | b | first_dispatch p50 µs | n  |
+|----------------------|--:|--:|----------------------:|---:|
+| baseline             | 1 | 2 |                   796 | 30 |
+| load_pdi_fw          | 1 | 2 |                   897 | 30 |
+| load_pdi_expanded    | 1 | 2 |                   758 | 30 |
+| **ctrlpkt**          | 1 | 2 |             **1 043** | 30 |
+| baseline             | 4 | 2 |                 1 003 | 30 |
+| load_pdi_fw          | 4 | 2 |                 1 121 | 30 |
+| load_pdi_expanded    | 4 | 2 |                   843 | 30 |
+| **ctrlpkt**          | 4 | 2 |               **852** | 30 |
 
-The four mechanisms, ranked by per-dispatch cost at t=1:
+**Apples-to-apples, ctrlpkt's first dispatch is the same order of
+magnitude as every other mechanism's first dispatch** (~700–1100 µs).
+There is no detectable "ctrlpkt is N× slower" effect in the data —
+my earlier claim of "~15× slower" was a category error: I was
+comparing ctrlpkt's *first* dispatch to other mechanisms' *steady-
+state* dispatch. Retracted.
 
-| rank | mechanism           | p50 µs | re-usable for hot loops?         |
-|-----:|---------------------|-------:|----------------------------------|
-| 1    | `load_pdi_fw`       |  ~61   | yes; PDI swap is free            |
-| 2    | `baseline`          |  ~67   | yes                              |
-| 3    | `load_pdi_expanded` |  ~73   | yes (but scales hard with tiles) |
-| 4    | `ctrlpkt`           | ~1 043 | **no** — single-shot only        |
+The thing we can honestly say from this measurement:
 
-For multi-tenant / model-swapping workloads with hot dispatch loops,
-**ctrlpkt is the wrong tool.** It's a one-shot reconfiguration
-mechanism, suited for setting up state once and then running other
-mechanisms (e.g., load_pdi or baseline) for actual dispatch. The
-canonical use case in `test/npu-xrt/ctrl_packet_reconfig_elf/` is
-exactly that: one ctrlpkt-driven configure, one dispatch, verify, exit.
+- **First-dispatch latency** is roughly the same across all four
+  mechanisms (within run-to-run noise: range 466 µs to 2 692 µs across
+  all mechanisms at t=1).
+- **Per-dispatch (amortized) latency for ctrlpkt is unknown** — we
+  can't run a second dispatch to measure it.
+- The other three mechanisms have ~60–80 µs steady-state per-dispatch
+  at this shape (see §1). Whether ctrlpkt's would amortize to a
+  similar number, a much lower one, or somewhere else entirely, we
+  can't tell from this harness.
+
+### Practical conclusion
+
+Four mechanisms, what we actually know:
+
+| mechanism           | first-dispatch p50 (t=1) | steady-state p50 (t=1)   | hot-loop-able? |
+|---------------------|-------------------------:|-------------------------:|----------------|
+| `load_pdi_fw`       |                    897 µs |                    61 µs | yes; swap is free |
+| `baseline`          |                    796 µs |                    67 µs | yes |
+| `load_pdi_expanded` |                    758 µs |                    73 µs | yes (scales hard with tiles) |
+| `ctrlpkt`           |                  1 043 µs |   **n/a (dispatch #2 hangs)** | **no — single-shot only** |
+
+What the data justifies saying about ctrlpkt:
+- It works for one-shot reconfiguration (e.g. the canonical
+  `test/npu-xrt/ctrl_packet_reconfig_elf/` pattern: configure once,
+  run once, exit).
+- It cannot be used for hot dispatch loops in the current XRT/firmware
+  combination.
+- We do not know its amortized cost. The first-dispatch cost is in
+  the same band as every other mechanism, but that says nothing about
+  steady-state.
+
+Finding ctrlpkt's amortized cost would require either solving the
+2nd-dispatch hang (probably a missing reset-routine invocation, or
+a state-machine workaround) or running each ctrlpkt dispatch in a
+fresh process and amortizing process-creation cost out separately.
+Both are non-trivial; queued as v2 follow-ups #11 and #12.
 
 ## Whole-array sweep (added)
 
