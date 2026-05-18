@@ -22,13 +22,13 @@ USE_SILU ?= true
 devicename = npu2
 
 # Kernel compilation
-VPATH := ${srcdir}
+vpath %.cc ${srcdir}
 
 all: build/batchnorm_silu_bf16.o build/final.xclbin
 
 build/batchnorm_silu_bf16.o: batchnorm_silu_bf16.cc
 	mkdir -p ${@D}
-	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang ${PEANOWRAP2P_FLAGS} -c ${srcdir}/$< -o ${@F}
+	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang ${PEANOWRAP2P_FLAGS} -c $< -o ${@F}
 
 build/aie.mlir: ${srcdir}/aie2.py
 	mkdir -p ${@D}

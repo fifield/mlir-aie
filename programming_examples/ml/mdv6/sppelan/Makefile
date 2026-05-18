@@ -21,16 +21,16 @@ NECK_CHANNELS := $(shell echo $$(($(IN_CHANNELS) / 2)))
 
 targetname = sppelan_bf16
 
-VPATH := ${srcdir}
+vpath %.cc ${srcdir}
 
 .PHONY: all
 all: build/${targetname}.o build/final.xclbin
 
 build/${targetname}.o: ${targetname}.cc
 	mkdir -p ${@D}
-	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang ${PEANOWRAP2P_FLAGS} -c ${srcdir}/$< -o ${@F}
+	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang ${PEANOWRAP2P_FLAGS} -c $< -o ${@F}
 
-build/aie.mlir: aie2.py
+build/aie.mlir: ${srcdir}/aie2.py
 	mkdir -p ${@D}
 	python3 $< npu2 ${HEIGHT} ${WIDTH} ${IN_CHANNELS} ${OUT_CHANNELS} > $@
 
@@ -52,12 +52,12 @@ endif
 
 .PHONY: test
 test:
-	python3 test.py --height ${HEIGHT} --width ${WIDTH} \
+	python3 ${srcdir}/test.py --height ${HEIGHT} --width ${WIDTH} \
 		--in-channels ${IN_CHANNELS} --out-channels ${OUT_CHANNELS}
 
 .PHONY: run
 run: build/final.xclbin
-	python3 test.py --height ${HEIGHT} --width ${WIDTH} \
+	python3 ${srcdir}/test.py --height ${HEIGHT} --width ${WIDTH} \
 		--in-channels ${IN_CHANNELS} --out-channels ${OUT_CHANNELS} --use-aie
 
 .PHONY: clean
