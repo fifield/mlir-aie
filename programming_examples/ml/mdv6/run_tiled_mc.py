@@ -23,7 +23,13 @@ bf16_to_uint16 = ett.bf16_to_uint16
 uint16_to_bf16 = ett.uint16_to_bf16
 
 N_CORES = 32
-_bd = os.path.join(_base, "conv", "build")
+# MDV6_BUILD_DIR (set by lit) routes mc/gemm xclbins out of the source tree
+# so test runs never see "already built, skipping" from stale artifacts.
+_MDV6_BUILD_ROOT = os.environ.get("MDV6_BUILD_DIR")
+if _MDV6_BUILD_ROOT:
+    _bd = os.path.abspath(os.path.join(_MDV6_BUILD_ROOT, "mc"))
+else:
+    _bd = os.path.join(_base, "conv", "build")
 _mc_cache = {}
 USE_REGIME_XCLBINS = os.environ.get("USE_REGIME_XCLBINS", "0") == "1"
 USE_REGIME_KBLOCKED = os.environ.get("USE_REGIME_KBLOCKED", "0") == "1"
@@ -470,7 +476,10 @@ def _run_tiled_mc_inner(mc_kh, input_hwc, weights_uint16,
 # GEMM Conv1x1 — vectorized 1×1 conv using mmul<4,8,8>
 # ---------------------------------------------------------------------------
 
-_gemm_bd = os.path.join(_base, "gemm_conv1x1", "build")
+if _MDV6_BUILD_ROOT:
+    _gemm_bd = os.path.abspath(os.path.join(_MDV6_BUILD_ROOT, "gemm"))
+else:
+    _gemm_bd = os.path.join(_base, "gemm_conv1x1", "build")
 
 # Import fuse_bn_transposed for weight repacking
 fuse_bn_transposed = ett.fuse_bn_transposed

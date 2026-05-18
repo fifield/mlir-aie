@@ -1,10 +1,43 @@
 #!/usr/bin/env python3
 """Build all multicore xclbins needed for the full MDV6 model.
-Generates MLIR and compiles for each unique (tile, ic, oc, ks, stride) config."""
+Generates MLIR and compiles for each unique (tile, ic, oc, ks, stride) config.
+
+Output location: ${MDV6_BUILD_DIR}/mc if MDV6_BUILD_DIR is set, otherwise
+<script-dir>/build (legacy in-tree layout)."""
 import os, sys, subprocess, time
 
 sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), "..")))
 from regime_config import CONV_REGIME_ARTIFACTS
+
+
+def _resolve_build_dir():
+    root = os.environ.get("MDV6_BUILD_DIR")
+    if root:
+        return os.path.abspath(os.path.join(root, "mc"))
+    return os.path.join(os.path.dirname(__file__), "build")
+
+
+def _build_unified_kernel(obj_dst):
+    """Compile kernels/rep_elan_bf16.cc to obj_dst directly (no source pollution)."""
+    src = os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "kernels", "rep_elan_bf16.cc")
+    )
+    peano = os.environ.get("PEANO_INSTALL_DIR")
+    if not peano:
+        print("FAIL: PEANO_INSTALL_DIR not set (source env.sh first)")
+        return False
+    from aie.utils.config import root_path as _aie_root
+    inc = os.path.join(_aie_root(), "include")
+    os.makedirs(os.path.dirname(obj_dst), exist_ok=True)
+    cmd = (f"{peano}/bin/clang -O2 -std=c++20 --target=aie2p-none-unknown-elf "
+           f"-Wno-parentheses -Wno-attributes -Wno-macro-redefined "
+           f"-Wno-empty-body -Wno-missing-template-arg-list-after-template-kw "
+           f"-DNDEBUG -I {inc} -c {src} -o {obj_dst}")
+    r = subprocess.run(cmd, shell=True)
+    if r.returncode != 0:
+        print("FAIL: could not build rep_elan_bf16.o")
+        return False
+    return True
 
 # All unique configs from test_full_model.py:
 # (name, n_cores, tile_h, tile_w, ic, oc_block, kernel_size, stride, patches_per_core)
@@ -236,25 +269,12 @@ def build_regime_conv_artifact(artifact, build_dir):
 
 
 def main():
-    build_dir = os.path.join(os.path.dirname(__file__), "build")
+    build_dir = _resolve_build_dir()
     os.makedirs(build_dir, exist_ok=True)
 
-    # Ensure unified kernel .o is built and present in build_dir
-    kernels_dir = os.path.normpath(
-        os.path.join(os.path.dirname(__file__), "..", "kernels")
-    )
-    obj_src = os.path.join(kernels_dir, "rep_elan_bf16.o")
     obj_dst = os.path.join(build_dir, "rep_elan_bf16.o")
-    if not os.path.exists(obj_src):
-        print(f"Building unified kernel in {kernels_dir}...")
-        r = subprocess.run(f"make -C {kernels_dir}", shell=True)
-        if r.returncode != 0:
-            print("FAIL: could not build rep_elan_bf16.o")
-            return False
-    if (not os.path.exists(obj_dst)
-            or os.path.getmtime(obj_src) > os.path.getmtime(obj_dst)):
-        import shutil
-        shutil.copy2(obj_src, obj_dst)
+    if not _build_unified_kernel(obj_dst):
+        return False
 
     # Filter by command line args if provided. Regime artifacts are selected
     # explicitly by name; current per-shape artifacts remain the default build.

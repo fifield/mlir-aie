@@ -25,13 +25,13 @@ RESIDUAL ?= 1
 devicename = npu2
 
 # Kernel compilation
-VPATH := ${srcdir}
+vpath %.cc ${srcdir}
 
 all: build/bottleneck_bf16.o build/final.xclbin
 
 build/bottleneck_bf16.o: bottleneck_bf16.cc
 	mkdir -p ${@D}
-	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang ${PEANOWRAP2P_FLAGS} -c ${srcdir}/$< -o ${@F}
+	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang ${PEANOWRAP2P_FLAGS} -c $< -o ${@F}
 
 build/aie.mlir: ${srcdir}/aie2.py
 	mkdir -p ${@D}

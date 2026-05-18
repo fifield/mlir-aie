@@ -19,14 +19,14 @@ PATCHES_PER_CORE ?= 1
 
 devicename = npu2
 
-VPATH := ${srcdir}
+vpath %.cc ${srcdir}
 
 all: build/gemm_conv1x1_bf16.o build/final.xclbin
 
 # Compile kernel with Peano
 build/gemm_conv1x1_bf16.o: gemm_conv1x1_bf16.cc
 	mkdir -p ${@D}
-	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang ${PEANOWRAP2P_FLAGS} -c ${srcdir}/$< -o ${@F}
+	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang ${PEANOWRAP2P_FLAGS} -c $< -o ${@F}
 
 # Generate MLIR from IRON program
 build/aie.mlir: ${srcdir}/aie2_gemm_conv1x1.py

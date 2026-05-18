@@ -199,23 +199,34 @@ def derive_configs():
     return configs
 
 
+def _resolve_build_dir():
+    root = os.environ.get("MDV6_BUILD_DIR")
+    if root:
+        return os.path.abspath(os.path.join(root, "gemm"))
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "build")
+
+
 def build_kernel(build_dir):
-    """Build rep_elan_bf16.o from unified kernels/ dir and copy into build_dir."""
-    kernels_dir = os.path.normpath(
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "kernels")
+    """Compile kernels/rep_elan_bf16.cc directly into build_dir."""
+    src = os.path.normpath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                     "..", "kernels", "rep_elan_bf16.cc")
     )
-    obj_src = os.path.join(kernels_dir, "rep_elan_bf16.o")
     obj_dst = os.path.join(build_dir, "rep_elan_bf16.o")
-    if not os.path.exists(obj_src):
-        print(f"Building unified kernel in {kernels_dir}...", file=sys.stderr)
-        result = subprocess.run(f"make -C {kernels_dir}", shell=True)
-        if result.returncode != 0:
-            print("FAIL: could not build rep_elan_bf16.o", file=sys.stderr)
-            return False
-    if (not os.path.exists(obj_dst)
-            or os.path.getmtime(obj_src) > os.path.getmtime(obj_dst)):
-        import shutil
-        shutil.copy2(obj_src, obj_dst)
+    peano = os.environ.get("PEANO_INSTALL_DIR")
+    if not peano:
+        print("FAIL: PEANO_INSTALL_DIR not set (source env.sh first)", file=sys.stderr)
+        return False
+    from aie.utils.config import root_path as _aie_root
+    inc = os.path.join(_aie_root(), "include")
+    os.makedirs(build_dir, exist_ok=True)
+    cmd = (f"{peano}/bin/clang -O2 -std=c++20 --target=aie2p-none-unknown-elf "
+           f"-Wno-parentheses -Wno-attributes -Wno-macro-redefined "
+           f"-Wno-empty-body -Wno-missing-template-arg-list-after-template-kw "
+           f"-DNDEBUG -I {inc} -c {src} -o {obj_dst}")
+    if subprocess.run(cmd, shell=True).returncode != 0:
+        print("FAIL: could not build rep_elan_bf16.o", file=sys.stderr)
+        return False
     return True
 
 
@@ -385,7 +396,7 @@ def build_regime_gemm_artifact(artifact, build_dir):
 
 
 def main():
-    build_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "build")
+    build_dir = _resolve_build_dir()
     os.makedirs(build_dir, exist_ok=True)
 
     print("Deriving GEMM conv1x1 configs from MDV6 model...", file=sys.stderr)

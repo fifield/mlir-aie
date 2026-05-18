@@ -20,16 +20,16 @@ PROCESS_CHANNELS ?= 16
 
 targetname = repncsp_elan_bf16
 
-VPATH := ${srcdir}
+vpath %.cc ${srcdir}
 
 .PHONY: all
 all: build/${targetname}.o build/final.xclbin
 
 build/${targetname}.o: ${targetname}.cc
 	mkdir -p ${@D}
-	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang ${PEANOWRAP2P_FLAGS} -c ${srcdir}/$< -o ${@F}
+	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang ${PEANOWRAP2P_FLAGS} -c $< -o ${@F}
 
-build/aie.mlir: aie2.py
+build/aie.mlir: ${srcdir}/aie2.py
 	mkdir -p ${@D}
 	python3 $< npu2 ${HEIGHT} ${WIDTH} ${IN_CHANNELS} ${OUT_CHANNELS} ${PART_CHANNELS} ${PROCESS_CHANNELS} > $@
 

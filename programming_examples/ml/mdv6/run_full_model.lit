@@ -1,0 +1,29 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// MDV6 32-core full-model end-to-end test. Builds all multicore + GEMM
+// xclbins required by test_full_model_mc.py into lit's per-test working
+// directory (never the source tree), then runs one forward pass on NPU2
+// and gates on PASS (max class/vector diff within tolerance).
+//
+// mdv6_weights is set in lit.local.cfg when mdv6_bf16_weights.pt is staged
+// next to the test; without trained weights the model emits NaN under
+// random init.
+//
+// REQUIRES: ryzen_ai_npu2, peano, torch, mdv6_weights
+//
+// RUN: rm -rf test_stx
+// RUN: mkdir -p test_stx
+// RUN: cd test_stx
+//
+// MDV6_BUILD_DIR=. routes all xclbins to test_stx/{mc,gemm}, so the
+// scripts never write into the source tree and never see stale artifacts.
+//
+// build_multicore.py exits 1 on the pre-existing mc_ftconv0_p4
+// L2-overflow config (documented in run_tiled_mc.py as not used in
+// production); ignore its exit code. test_full_model_mc.py is the real
+// correctness gate and will error out if any xclbin it actually loads is
+// missing or broken.
+// RUN: env MDV6_BUILD_DIR=. %run_on_npu2% python3 %S/conv/build_multicore.py || true
+// RUN: env MDV6_BUILD_DIR=. %run_on_npu2% python3 %S/gemm_conv1x1/build_gemm_conv1x1.py
+// RUN: env MDV6_BUILD_DIR=. %run_on_npu2% python3 %S/test_full_model_mc.py
