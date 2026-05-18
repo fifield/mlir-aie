@@ -76,7 +76,8 @@ void usage() {
     "             [--warmup=N] [--iters=N] [--tiles=N] [--bds=N]\n"
     "             [--batched] [--batch-size=N] [--json-out=<file>]\n"
     "  mechanism: baseline | load_pdi_fw | load_pdi_expanded\n"
-    "  metric:    cold_start | warm_reconfig | pure_dispatch\n";
+    "  metric:    cold_start | warm_reconfig | pure_dispatch | ab_toggle\n"
+    "  (ab_toggle requires an ELF-family mechanism and an AB-mode build dir)\n";
 }
 
 bool starts_with(const std::string &s, const char *p) {
@@ -254,7 +255,11 @@ struct PathE {
   // xrt::ext::kernel has no default constructor; hold it in an optional so
   // PathE can be heap-allocated without arguments and built later.
   std::optional<xrt::ext::kernel> kernel;
+  // AB-toggle: second kernel handle bound to the orchestrator's other
+  // runtime sequence. Populated only by build_warm_ab().
+  std::optional<xrt::ext::kernel> kernel_b;
   xrt::bo bo_inout;
+  xrt::bo bo_out;
   size_t bytes = 0;
 
   long long load_ns = 0, register_ns = 0, kernel_ns = 0, first_dispatch_ns = 0;
@@ -266,6 +271,21 @@ struct PathE {
     context = xrt::hw_context(device, elf);
     kernel.emplace(context, "main:seq");
     bo_inout = xrt::ext::bo(device, bytes);
+  }
+
+  // AB-mode warm build. The ELF contains both PDIs (@cfg_a, @cfg_b) plus
+  // the @ab_orch device, whose runtime sequences seq_to_a / seq_to_b each
+  // issue one npu_load_pdi targeting a distinct PDI. Alternating between
+  // the two handles in a hot loop defeats the firmware's PDI cache.
+  void build_warm_ab(const Args &a, size_t total_bytes) {
+    bytes = total_bytes;
+    device = xrt::device(0);
+    elf = xrt::elf(a.build_dir + "/aie.elf");
+    context = xrt::hw_context(device, elf);
+    kernel.emplace(context, "ab_orch:seq_to_a");
+    kernel_b.emplace(context, "ab_orch:seq_to_b");
+    bo_inout = xrt::ext::bo(device, bytes);
+    bo_out = xrt::ext::bo(device, bytes);
   }
 
   void build_cold(const Args &a, size_t total_bytes) {
@@ -290,12 +310,28 @@ struct PathE {
     run.start();
     run.wait2();
   }
+
+  void dispatch_to_a() {
+    auto run = xrt::run(*kernel);
+    run.set_arg(0, bo_inout);
+    run.set_arg(1, bo_out);
+    run.start();
+    run.wait2();
+  }
+
+  void dispatch_to_b() {
+    auto run = xrt::run(*kernel_b);
+    run.set_arg(0, bo_inout);
+    run.set_arg(1, bo_out);
+    run.start();
+    run.wait2();
+  }
 };
 
 // --- emit JSON ------------------------------------------------------------
 
 void emit_json(const Args &a, const TimingResult *warm, PathX *px, PathE *pe,
-               std::ostream &out) {
+               std::ostream &out, const char *direction = nullptr) {
   JsonWriter w(out);
   w.str("mechanism", a.mechanism);
   w.str("metric", a.metric);
@@ -307,6 +343,7 @@ void emit_json(const Args &a, const TimingResult *warm, PathX *px, PathE *pe,
   w.num("iters", a.iters);
   w.boolean("batched", a.batched);
   w.num("batch_size", a.batched ? a.batch_size : 1);
+  if (direction) w.str("direction", direction);
 
   if (warm) {
     std::ostringstream ns;
@@ -374,6 +411,62 @@ int main(int argc, char **argv) {
       pe.build_cold(a, total_bytes);
       emit_json(a, nullptr, nullptr, &pe, *out);
     }
+    return 0;
+  }
+
+  // AB toggle: ELF family only. Alternates dispatches between two ext::kernel
+  // handles (ab_orch:seq_to_a, ab_orch:seq_to_b) so each iteration loads a
+  // *different* PDI than the previous one. Defeats the firmware PDI cache.
+  // We collect samples per direction (a→b vs b→a) and emit two JSON rows.
+  if (a.metric == "ab_toggle") {
+    if (!e_family) {
+      std::cerr << "ab_toggle requires an ELF-family mechanism (load_pdi_*); "
+                << "got " << a.mechanism << "\n";
+      return 2;
+    }
+    PathE pe;
+    pe.build_warm_ab(a, total_bytes);
+
+    // Warmup, alternating directions.
+    for (int w = 0; w < a.warmup; ++w) {
+      if (w & 1) pe.dispatch_to_a(); else pe.dispatch_to_b();
+    }
+    std::vector<long long> samples_to_b, samples_to_a;
+    samples_to_b.reserve(a.iters);
+    samples_to_a.reserve(a.iters);
+    for (int i = 0; i < a.iters; ++i) {
+      // Each loop iteration covers one a→b then one b→a so both directions
+      // run the same number of times.
+      auto t0 = std::chrono::steady_clock::now();
+      pe.dispatch_to_b();
+      auto t1 = std::chrono::steady_clock::now();
+      pe.dispatch_to_a();
+      auto t2 = std::chrono::steady_clock::now();
+      samples_to_b.push_back(
+          std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count());
+      samples_to_a.push_back(
+          std::chrono::duration_cast<std::chrono::nanoseconds>(t2 - t1).count());
+    }
+
+    auto summarize = [](std::vector<long long> &s) {
+      TimingResult r;
+      r.samples_ns = s;
+      auto sorted = s;
+      std::sort(sorted.begin(), sorted.end());
+      r.min_ns = sorted.front();
+      r.max_ns = sorted.back();
+      long long sum = 0; for (auto v : sorted) sum += v;
+      r.avg_ns = sum / static_cast<long long>(sorted.size());
+      auto pct = [&](double p) {
+        return sorted[static_cast<size_t>(p * (sorted.size() - 1))];
+      };
+      r.p50_ns = pct(0.50); r.p90_ns = pct(0.90); r.p99_ns = pct(0.99);
+      return r;
+    };
+    auto tr_b = summarize(samples_to_b);
+    auto tr_a = summarize(samples_to_a);
+    emit_json(a, &tr_b, nullptr, &pe, *out, "a_to_b");
+    emit_json(a, &tr_a, nullptr, &pe, *out, "b_to_a");
     return 0;
   }
 

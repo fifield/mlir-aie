@@ -225,9 +225,15 @@ def emit(mechanism, device_name, cols, rows_per_col, bds_per_task, topology, ab)
             def main_body():
                 tensor_ty = np.ndarray[(total_words,), np.dtype[np.int32]]
 
-                @runtime_sequence(tensor_ty, tensor_ty)
-                def seq(in_buf, out_buf):
+                # Two independent runtime sequences so the host can dispatch
+                # one direction at a time, defeating the firmware's PDI cache
+                # by alternating between distinct PDIs.
+                @runtime_sequence(tensor_ty, tensor_ty, sym_name="seq_to_a")
+                def _seq_a(in_buf, out_buf):
                     npu_load_pdi(device_ref="cfg_a")
+
+                @runtime_sequence(tensor_ty, tensor_ty, sym_name="seq_to_b")
+                def _seq_b(in_buf, out_buf):
                     npu_load_pdi(device_ref="cfg_b")
         else:
             with_self = mechanism in ("load_pdi_fw", "load_pdi_expanded")
