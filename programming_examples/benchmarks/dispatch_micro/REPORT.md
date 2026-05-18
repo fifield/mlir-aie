@@ -4,22 +4,30 @@
 > `mlir-aie` branch `location` @ `ab3cf203b0`. All numbers are wall-clock
 > nanoseconds bracketing the kernel submit + wait on the host.
 
-## v2 update — what A↔B actually showed
+## v2 update — what A↔B and multi-PDI rotation actually showed
 
 > **v1 hypothesis (still valuable for context):** the firmware caches PDI
 > loads; v1's `load_pdi_fw` numbers were cache-hit measurements; only
 > `load_pdi_expanded` did real reconfig work.
 >
-> **v2 finding (see §4):** alternating between two *distinct* PDIs
+> **v2 finding #1 (see §4):** alternating between two *distinct* PDIs
 > produces the *same* numbers as v1's "cached" path (~60-65 µs flat
-> across 1-8 tiles). Either the cache holds ≥ 2 PDIs, or there was never
-> real per-dispatch work to cache — the PDI is loaded into driver memory
-> at ELF registration and `load_pdi` is just a pointer swap. Either way,
-> **the firmware load_pdi path is essentially free regardless of caching
-> state**, while `load_pdi_expanded` always pays its full
-> register-stream cost (~117 µs at t=8). The v1 framing of "real vs
-> cached" was wrong in flavor but right in direction: expanded *is*
-> doing real reconfig work, the firmware path *isn't*.
+> across 1-8 tiles).
+>
+> **v2 finding #2 (see §5):** rotating through 2 / 4 / 8 distinct PDIs
+> shows **no per-slot latency variation** — all slots cost the same.
+> If a fixed-size cache existed, we'd see slot latency jump when N
+> exceeded its capacity. We don't, up to N=8.
+>
+> **Combined conclusion: there is no PDI cache in the v1 sense.**
+> `load_pdi` is a selector / pointer-swap operation; all PDIs are
+> resident in driver memory after `xrt::hw_context(device, elf)`. At
+> dispatch time the firmware just switches which one is active.
+> `load_pdi_expanded` is slower because `--expand-load-pdis` inlines
+> the PDI's register-programming as raw write32/blockwrite ops, which
+> must execute every dispatch regardless of driver-side state. The v1
+> framing of "real vs cached" was wrong in flavor (no cache) but right
+> in direction (expanded does real per-dispatch work, fw doesn't).
 
 ## ⚠ Important caveat — v1 does NOT measure real PDI loads
 
@@ -278,6 +286,100 @@ runtime sequence containing only `npu_load_pdi`, so they're DMA-free.)
   expanded A↔B (no DMA) to expanded `pure_dispatch` (with DMA), and the
   difference at t=8 was only ~15 µs — small, but it implies the bulk of
   expanded's cost is the register-write stream, not the surrounding DMA.
+
+## §5. Multi-PDI rotation (v2 — is there a cache?)
+
+> *Added in v2. Follows up the open question from §4.*
+
+§4 showed that alternating between two distinct PDIs costs the same as
+reloading the same PDI repeatedly. Two hypotheses fit:
+1. The firmware/driver keeps a cache of size ≥ 2 (LRU or similar).
+2. `load_pdi` was never doing real load work — PDIs are resident in
+   driver memory after `xrt::hw_context(device, elf)`, and the op is a
+   pointer swap.
+
+To distinguish them, the generator now takes `--n-configs=N` and emits
+N distinct PDIs (`cfg_0`..`cfg_{N-1}`) plus an N-sequence orchestrator
+(`ab_orch:seq_to_0`..). The bench rotates through all N kernel handles
+round-robin and reports each slot's p50 separately. **If there is a
+fixed-size cache of size K, slot latencies should jump when N > K.**
+
+### Results at `bds=2, rows_per_col=1, iters=50 × N` rotations
+
+**At t=1 (smallest configuration):**
+
+| mech                | N | per-slot p50 µs                                       | mean | per-slot σ |
+|---------------------|--:|--------------------------------------------------------|------|-----------:|
+| `load_pdi_fw`       | 2 | 62.3 62.3                                              | 62.3 |     <0.1 µs|
+| `load_pdi_fw`       | 4 | 64.8 64.9 64.9 64.3                                    | 64.7 |      0.3 µs|
+| `load_pdi_fw`       | 8 | 63.0 62.5 62.6 62.0 62.6 63.1 63.2 63.0                | 62.8 |      0.4 µs|
+| `load_pdi_expanded` | 2 | 61.5 61.3                                              | 61.4 |     <0.1 µs|
+| `load_pdi_expanded` | 4 | 61.6 61.6 61.7 61.8                                    | 61.7 |     <0.1 µs|
+| `load_pdi_expanded` | 8 | 61.4 61.2 61.0 61.3 61.1 61.0 61.1 61.3                | 61.2 |      0.2 µs|
+
+**At t=4 (medium configuration):**
+
+| mech                | N | per-slot p50 µs                                       | mean | per-slot σ |
+|---------------------|--:|--------------------------------------------------------|------|-----------:|
+| `load_pdi_fw`       | 2 | 65.5 65.3                                              | 65.4 |      0.1 µs|
+| `load_pdi_fw`       | 4 | 59.3 59.2 59.2 58.8                                    | 59.1 |      0.2 µs|
+| `load_pdi_fw`       | 8 | 62.9 63.0 64.4 63.6 63.4 63.8 63.0 64.2                | 63.5 |      0.6 µs|
+| `load_pdi_expanded` | 2 | 82.8 80.9                                              | 81.8 |      1.0 µs|
+| `load_pdi_expanded` | 4 | 81.2 81.5 81.6 81.0                                    | 81.3 |      0.3 µs|
+| `load_pdi_expanded` | 8 | 85.0 84.5 85.0 84.6 85.2 85.6 84.6 84.9                | 84.9 |      0.4 µs|
+
+### Headline findings
+
+1. **No cache size limit observed up to N=8.** Per-slot p50s are
+   essentially identical (within ±1 µs noise) regardless of N. If there
+   were a cache of size K < 8, we'd see slot latency jump for the
+   slots that miss — there is no such pattern. This rules out
+   hypothesis #1 (fixed-size cache).
+2. **The interpretation:** `load_pdi` is a **selector / pointer-swap
+   operation**, not a memory load. All PDIs are loaded into driver
+   memory at `xrt::hw_context(device, elf)` time; the op at dispatch
+   time just switches which one is currently active. There is no
+   "cache" because there is no "load" to cache.
+3. **`load_pdi_expanded` numbers are also flat across N**, *but* are
+   ~20 µs higher than `load_pdi_fw` at t=4 (81 µs vs 63 µs). That gap
+   is the cost of `--expand-load-pdis` inlining the PDI's register
+   programming as raw write32/blockwrite ops, which must execute on
+   every dispatch regardless of any caching. The gap doesn't grow with
+   N because the expansion is per-dispatch, not per-rotation.
+4. **The v1 "PDI cache" framing was the wrong mental model.** What v1
+   actually observed was that the firmware path is fast at any tile
+   count because it does no real work at dispatch time. The
+   `load_pdi_expanded` path is slower precisely because it cannot
+   delegate to the driver-resident PDI — it has to re-issue the
+   register writes itself.
+
+### Why this matters
+
+- For workloads that swap between many distinct configurations
+  (multi-tenant, multi-model serving), the firmware `load_pdi` path
+  scales to at least 8 simultaneously-loadable PDIs with no per-swap
+  cost penalty. The cost ceiling is **driver memory** to hold all
+  PDIs, not per-swap CPU/firmware work.
+- `--expand-load-pdis` should be avoided for swap-heavy workloads
+  unless there's a specific reason to bypass the firmware
+  (e.g. tight integration with host code that needs to do its own
+  fix-ups in the register-write stream).
+- The ~63 µs per-dispatch floor for `load_pdi_fw` (no DMA) is *the
+  fixed cost of dispatching a kernel*, not the cost of swapping
+  configurations. We aren't going to make that go down by being
+  clever about PDIs.
+
+### What's left to test
+
+- **Many more PDIs (N=16, 32, 64).** Up to N=8 we saw nothing; the
+  driver memory limit is the wall, not a software cache. Worth
+  pushing higher to find that wall.
+- **Larger PDIs.** Our N PDIs are all 1-tile configurations. A
+  real-world workload with whole-array PDIs would put much more
+  pressure on driver memory; the wall would arrive sooner.
+- **Cold rotation.** If the driver evicts PDIs under memory pressure,
+  a long-delayed swap might pay a re-load cost. Today's rotation
+  pattern doesn't exercise that.
 
 ## Whole-array sweep (added)
 

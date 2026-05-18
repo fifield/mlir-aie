@@ -65,6 +65,7 @@ struct Args {
   int tiles = 1;
   int rows_per_col = 1;
   int bds = 2;
+  int n_configs = 0;
   bool batched = false;
   int batch_size = 16;
   std::string json_out;    // empty = stdout
@@ -76,8 +77,9 @@ void usage() {
     "             [--warmup=N] [--iters=N] [--tiles=N] [--bds=N]\n"
     "             [--batched] [--batch-size=N] [--json-out=<file>]\n"
     "  mechanism: baseline | load_pdi_fw | load_pdi_expanded\n"
-    "  metric:    cold_start | warm_reconfig | pure_dispatch | ab_toggle\n"
-    "  (ab_toggle requires an ELF-family mechanism and an AB-mode build dir)\n";
+    "  metric:    cold_start | warm_reconfig | pure_dispatch | ab_toggle | multi_toggle\n"
+    "  (ab_toggle: ELF mechanism + AB-mode build dir)\n"
+    "  (multi_toggle: ELF mechanism + N-configs build dir; pass --n-configs=N)\n";
 }
 
 bool starts_with(const std::string &s, const char *p) {
@@ -101,6 +103,7 @@ bool parse_args(int argc, char **argv, Args &a) {
     else if (starts_with(s, "--tiles=")) a.tiles = std::stoi(v());
     else if (starts_with(s, "--rows-per-col=")) a.rows_per_col = std::stoi(v());
     else if (starts_with(s, "--bds=")) a.bds = std::stoi(v());
+    else if (starts_with(s, "--n-configs=")) a.n_configs = std::stoi(v());
     else if (s == "--batched") a.batched = true;
     else if (starts_with(s, "--batch-size=")) a.batch_size = std::stoi(v());
     else if (starts_with(s, "--json-out=")) a.json_out = v();
@@ -258,6 +261,8 @@ struct PathE {
   // AB-toggle: second kernel handle bound to the orchestrator's other
   // runtime sequence. Populated only by build_warm_ab().
   std::optional<xrt::ext::kernel> kernel_b;
+  // multi_toggle: N kernel handles, one per ab_orch:seq_to_{i}.
+  std::vector<xrt::ext::kernel> kernels_n;
   xrt::bo bo_inout;
   xrt::bo bo_out;
   size_t bytes = 0;
@@ -326,6 +331,30 @@ struct PathE {
     run.start();
     run.wait2();
   }
+
+  // Build N kernel handles bound to ab_orch:seq_to_0..seq_to_{N-1}.
+  // Used by --metric=multi_toggle to probe whether a PDI cache exists and
+  // how large it is by rotating through N distinct PDIs.
+  void build_warm_multi(const Args &a, int n, size_t total_bytes) {
+    bytes = total_bytes;
+    device = xrt::device(0);
+    elf = xrt::elf(a.build_dir + "/aie.elf");
+    context = xrt::hw_context(device, elf);
+    kernels_n.reserve(n);
+    for (int i = 0; i < n; ++i) {
+      kernels_n.emplace_back(context, "ab_orch:seq_to_" + std::to_string(i));
+    }
+    bo_inout = xrt::ext::bo(device, bytes);
+    bo_out = xrt::ext::bo(device, bytes);
+  }
+
+  void dispatch_to_k(int k) {
+    auto run = xrt::run(kernels_n[k]);
+    run.set_arg(0, bo_inout);
+    run.set_arg(1, bo_out);
+    run.start();
+    run.wait2();
+  }
 };
 
 // --- emit JSON ------------------------------------------------------------
@@ -339,6 +368,7 @@ void emit_json(const Args &a, const TimingResult *warm, PathX *px, PathE *pe,
   w.num("tiles", a.tiles);
   w.num("rows_per_col", a.rows_per_col);
   w.num("bds", a.bds);
+  if (a.n_configs > 0) w.num("n_configs", a.n_configs);
   w.num("warmup", a.warmup);
   w.num("iters", a.iters);
   w.boolean("batched", a.batched);
@@ -467,6 +497,66 @@ int main(int argc, char **argv) {
     auto tr_a = summarize(samples_to_a);
     emit_json(a, &tr_b, nullptr, &pe, *out, "a_to_b");
     emit_json(a, &tr_a, nullptr, &pe, *out, "b_to_a");
+    return 0;
+  }
+
+  // multi_toggle: rotate through N distinct PDIs. Distinguishes
+  // "firmware caches ≥ K PDIs" from "load_pdi is unconditionally a cheap
+  // pointer swap" — if there is a fixed-size cache of size K, per-dispatch
+  // latency should jump when N > K. Emits one JSON row per rotation
+  // position so we can see if any specific PDI is more expensive than the
+  // others (would suggest LRU eviction effects).
+  if (a.metric == "multi_toggle") {
+    if (!e_family) {
+      std::cerr << "multi_toggle requires an ELF-family mechanism; got "
+                << a.mechanism << "\n";
+      return 2;
+    }
+    if (a.n_configs < 2) {
+      std::cerr << "multi_toggle requires --n-configs=N with N >= 2\n";
+      return 2;
+    }
+    PathE pe;
+    pe.build_warm_multi(a, a.n_configs, total_bytes);
+
+    // Warmup: full rotations to settle any cache.
+    for (int w = 0; w < a.warmup; ++w) pe.dispatch_to_k(w % a.n_configs);
+
+    // Each "iter" = one full rotation through N PDIs. Record per-position
+    // samples so each PDI's latency is tracked separately.
+    std::vector<std::vector<long long>> per_slot(a.n_configs);
+    for (int k = 0; k < a.n_configs; ++k) per_slot[k].reserve(a.iters);
+    for (int i = 0; i < a.iters; ++i) {
+      for (int k = 0; k < a.n_configs; ++k) {
+        auto t0 = std::chrono::steady_clock::now();
+        pe.dispatch_to_k(k);
+        auto t1 = std::chrono::steady_clock::now();
+        per_slot[k].push_back(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0)
+                .count());
+      }
+    }
+
+    auto summarize = [](std::vector<long long> &s) {
+      TimingResult r;
+      r.samples_ns = s;
+      auto sorted = s;
+      std::sort(sorted.begin(), sorted.end());
+      r.min_ns = sorted.front();
+      r.max_ns = sorted.back();
+      long long sum = 0; for (auto v : sorted) sum += v;
+      r.avg_ns = sum / static_cast<long long>(sorted.size());
+      auto pct = [&](double p) {
+        return sorted[static_cast<size_t>(p * (sorted.size() - 1))];
+      };
+      r.p50_ns = pct(0.50); r.p90_ns = pct(0.90); r.p99_ns = pct(0.99);
+      return r;
+    };
+    for (int k = 0; k < a.n_configs; ++k) {
+      auto tr = summarize(per_slot[k]);
+      std::string dir = "slot_" + std::to_string(k);
+      emit_json(a, &tr, nullptr, &pe, *out, dir.c_str());
+    }
     return 0;
   }
 
