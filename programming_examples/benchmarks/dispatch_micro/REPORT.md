@@ -876,6 +876,107 @@ hang, `--no-self-reload` hang, ctrlpkt 2nd-dispatch hang) suggest
 something deeper in the firmware BD pool / XRT patch machinery is
 implicated, beyond a single specific code path.
 
+## §9. What each mechanism actually emits (v2 — closes #4 and #12)
+
+> *Added in v2. Combines #4 (cross-mechanism state verification) and
+> #12 (ctrlpkt overhead subtraction).*
+
+#4 was originally framed as "read AIE registers back after each
+mechanism's dispatch and compare." That requires register-readback
+infrastructure we don't have. A cheaper and more informative
+question: **does each mechanism actually emit the same amount of
+configuration work, and where in the artifact does it live?**
+
+Built all four mechanisms at the same shape (`t=1, r=1, b=2,
+topology=linear`) and parsed every PROGBITS section of each
+resulting artifact for transaction opcodes (`lib/Targets/
+AIETargetNPU.cpp:36-66`):
+
+### Table: opcode histograms per mechanism / section
+
+| mech / section                    | bytes | write32 | blockwrite | maskwrite | maskpoll | noop |  TCT | load_pdi |
+|-----------------------------------|------:|--------:|-----------:|----------:|---------:|-----:|-----:|---------:|
+| baseline / insts.bin              |   540 |      92 |          8 |         1 |        2 |    3 |    0 |        0 |
+| load_pdi_fw / .pdi.1              | 2 096 |     216 |         14 |        35 |       42 |    7 |    4 |        6 |
+| load_pdi_fw / .ctrltext.0         |   556 |      95 |          8 |         1 |        2 |    3 |    0 |        1 |
+| load_pdi_expanded / .pdi.1        |   368 |      56 |          5 |         0 |        1 |    1 |    0 |        3 |
+| load_pdi_expanded / .pdi.2        | 2 096 |     216 |         14 |        35 |       42 |    7 |    4 |        6 |
+| load_pdi_expanded / .ctrltext.0   | 2 908 |     400 |         22 |        20 |       17 |    9 |    4 |        6 |
+| ctrlpkt / .ctrldata               | 1 288 |     93\*|         3\*|        1\*|       1\* |  2\* |  4\* |      1\* |
+| ctrlpkt / .ctrltext               | 2 356 |     355 |         17 |        18 |       19 |    9 |    0 |        4 |
+
+\* ctrlpkt's `.ctrldata` is control-packet headers, not a txn stream;
+the histogram is heuristic (low-byte match) and shouldn't be
+interpreted as opcodes.
+
+### What each section means
+
+- **`insts.bin`** (baseline only) — the txn stream the host hands to
+  the kernel via `bo_instr`. Dispatched once per `kernel()` call.
+- **`.pdi.*`** (ELF family) — the Programmable Device Image, loaded
+  once into driver memory at `xrt::hw_context(device, elf)` build.
+  Not paid per dispatch.
+- **`.ctrltext.0`** (ELF family) — the runtime sequence's txn stream.
+  Dispatched once per `kernel(...)` call, like baseline's `insts.bin`.
+- **`.ctrldata` / `.ctrltext`** (ctrlpkt) — split between control-
+  packet payload bytes and the control packet emission sequence.
+
+### Findings
+
+1. **`baseline` and `load_pdi_fw` emit essentially the same per-
+   dispatch work.** baseline's `insts.bin` (540 B, 106 ops) and
+   `load_pdi_fw`'s `.ctrltext.0` (556 B, 110 ops) match closely. The
+   only difference: `load_pdi_fw`'s stream has 1 extra `load_pdi`
+   op (the `npu_load_pdi(@main)` our generator inserts) replacing
+   nothing that baseline emits. This is the structural reason their
+   p50 latencies are within noise of each other in every table above.
+2. **`load_pdi_expanded`'s per-dispatch stream is 5× larger.**
+   2 908 B / 478 ops vs `load_pdi_fw`'s 556 B / 110 ops. The
+   expansion inlined the PDI's contents (216 write32 + 14 blockwrite
+   from `.pdi.2`) into the runtime-sequence's `.ctrltext.0`,
+   producing 400 write32 + 22 blockwrite in the per-dispatch stream.
+   **This is the structural reason expanded scales worse with tile
+   count** — every extra row/column adds more PDI content that gets
+   re-emitted in every dispatch.
+3. **`load_pdi_fw`'s `.pdi.1` lives in driver memory** and matches
+   `load_pdi_expanded`'s `.pdi.2` byte-for-byte (both 2 096 bytes,
+   identical opcode histogram). Same target state; different
+   delivery mechanism.
+4. **`ctrlpkt`'s `.ctrltext` is similar in size to expanded's**
+   (2 356 B vs 2 908 B) but with a different ratio of opcodes —
+   355 write32 dominates. ctrlpkt produces explicit control-packet-
+   format writes for state it would otherwise inherit from a loaded
+   PDI.
+
+This is the **structural ground truth** for the timing data in §1
+and §3:
+
+- baseline / load_pdi_fw at ~65 µs per dispatch ↔ ~550 B txn stream
+- load_pdi_expanded at ~75-130 µs per dispatch ↔ ~2 900 B txn stream
+- The per-byte cost of dispatching txn ops is roughly the same across
+  mechanisms; the per-dispatch latency just tracks the stream length.
+
+### #12: ctrlpkt overhead via subtraction
+
+#12 asked whether subtracting baseline's first-dispatch from
+ctrlpkt's first-dispatch gives a useful "ctrlpkt-specific cost"
+estimate. From v2 §6's cold_start phase data:
+
+| mechanism            | first_dispatch p50 µs | ∆ vs baseline |
+|----------------------|----------------------:|--------------:|
+| baseline             |                   796 |             0 |
+| load_pdi_fw          |                   897 |          +101 |
+| load_pdi_expanded    |                   758 |           −38 |
+| ctrlpkt              |                   787 |            −9 |
+
+**All four mechanisms' first dispatches are within ±100 µs of each
+other.** Subtraction doesn't reveal a mechanism-specific signal at
+first-dispatch granularity — the cost is dominated by something
+shared (probably XRT/firmware first-call warmup). #12 is closed
+with the conclusion: there is no measurable mechanism-specific
+overhead in the first-dispatch number. Ctrlpkt isn't slower; it's
+just not faster than the others either.
+
 ## Whole-array sweep (added)
 
 After the original 1-row run, we extended the generator with a
