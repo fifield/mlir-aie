@@ -36,9 +36,10 @@ BDS          ?= 2
 TOPOLOGY     ?= linear
 AB           ?= 0
 N_CONFIGS    ?= 0
+AB_MODE      ?= isolated
 
-# N_CONFIGS takes precedence over AB. Build key reflects multi-config too.
-KEY := $(MECH)_$(DEVICE)_t$(TILES)_r$(ROWS_PER_COL)_b$(BDS)_$(TOPOLOGY)$(if $(filter-out 0,$(N_CONFIGS)),_n$(N_CONFIGS),$(if $(filter 1,$(AB)),_ab,))
+# N_CONFIGS takes precedence over AB. Build key reflects multi-config + ab_mode.
+KEY := $(MECH)_$(DEVICE)_t$(TILES)_r$(ROWS_PER_COL)_b$(BDS)_$(TOPOLOGY)$(if $(filter-out 0,$(N_CONFIGS)),_n$(N_CONFIGS)$(if $(filter with_work,$(AB_MODE)),_ww,),$(if $(filter 1,$(AB)),_ab,))
 BUILD := build/$(KEY)
 
 # Per-mechanism aiecc flags. xclbin family uses --aie-generate-xclbin; ELF
@@ -68,7 +69,7 @@ endif
 GEN_FLAGS := --mechanism=$(MECH) --device=$(DEVICE) \
              --tiles=$(TILES) --rows-per-col=$(ROWS_PER_COL) \
              --bds=$(BDS) --topology=$(TOPOLOGY) \
-             $(if $(filter-out 0,$(N_CONFIGS)),--n-configs=$(N_CONFIGS),$(if $(filter 1,$(AB)),--ab,))
+             $(if $(filter-out 0,$(N_CONFIGS)),--n-configs=$(N_CONFIGS) --ab-mode=$(AB_MODE),$(if $(filter 1,$(AB)),--ab,))
 
 .PHONY: all bench smoke clean clean-all
 
