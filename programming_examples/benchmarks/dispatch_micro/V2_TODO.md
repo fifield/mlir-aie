@@ -272,26 +272,26 @@ real production cost includes the DMA work that follows.
 
 ---
 
-## 10. Probe whether PDI "cache" has a size limit (new)
+## 10. Probe whether PDI "cache" has a size limit  **[x] DONE**
 
-**Goal.** Distinguish "firmware caches ≥ 2 PDIs" from "load_pdi is
-unconditionally a no-op pointer swap" — both are consistent with the
-v2 data. Rotate through N distinct PDIs and watch for a step change in
-per-dispatch cost.
+**Result.** Added `--n-configs=N` to `generate.py` (1 → N distinct
+PDIs in orchestrator) and `--metric=multi_toggle` to `bench.cpp`
+(rotates N kernel handles, reports per-slot p50). Swept N ∈ {2,4,8}
+at t=1 and t=4 for both `load_pdi_fw` and `load_pdi_expanded`.
 
-**Implementation sketch.**
-- Add `--n-configs=N` to `generate.py` (default 2). Emit N device
-  regions (`cfg_0`..`cfg_{N-1}`) and N corresponding `seq_to_k` ops in
-  the orchestrator.
-- `bench.cpp`: `--metric=multi_toggle --n-configs=N` rotates through
-  all N handles in a round-robin.
-- Sweep N ∈ {2, 4, 8, 16}. If there's a fixed-size cache, latency
-  jumps when N exceeds it.
+**Headline.** **No fixed-size cache exists up to N=8.** Per-slot
+latencies are within ±1 µs of each other at every N. Combined with §4,
+this confirms `load_pdi` is a selector / pointer-swap operation — PDIs
+are loaded into driver memory at `hw_context(device, elf)` time, and
+the dispatch-time op just switches which one is active. There's no
+"load" to cache.
 
-**Acceptance.**
-- A new §5 in REPORT.md with the multi-config rotation curve.
-- Either a confirmed cache size or a confident "no cache, just cheap
-  pointer swap" conclusion.
+Documented as §5 in REPORT.md. Updated the top-of-report v2 summary to
+combine §4 + §5 into a single "no PDI cache in the v1 sense" finding.
+
+**Still open.** Pushing N higher (16, 32, 64) and using larger PDIs
+(whole-array configurations) would tell us where the driver-memory
+wall sits. Today's tiny 1-tile PDIs don't pressure it.
 
 ---
 
@@ -319,3 +319,10 @@ per-dispatch cost.
   essentially free at any tile count. Documented as §4 in REPORT.md.
   Surfaced two new tasks: #9 (with-work AB) and #10 (multi-PDI cache
   probe).
+- **#10 Multi-PDI rotation (2026-05-18).** `--n-configs=N` in generator;
+  `--metric=multi_toggle` in bench. Swept N ∈ {2,4,8} × t ∈ {1,4} ×
+  {fw,expanded}. **No cache size limit observed.** All slots within
+  ±1 µs at every N. Combined with #1 this confirms `load_pdi` is a
+  selector op, not a memory load — PDIs are driver-resident after
+  ELF registration. Documented as §5; v2 top-of-report summary
+  rewritten to combine §4 + §5.

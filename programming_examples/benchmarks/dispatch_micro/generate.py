@@ -198,7 +198,8 @@ def _emit_device(name, dev_enum, cols, rows_per_col, bds_per_task, topology,
                 dma_await_task(t_out)
 
 
-def emit(mechanism, device_name, cols, rows_per_col, bds_per_task, topology, ab):
+def emit(mechanism, device_name, cols, rows_per_col, bds_per_task, topology,
+         ab, n_configs):
     dev_enum, max_cols = DEVICES[device_name]
     if cols > max_cols:
         sys.stderr.write(
@@ -213,7 +214,34 @@ def emit(mechanism, device_name, cols, rows_per_col, bds_per_task, topology, ab)
         sys.exit(2)
 
     with mlir_mod_ctx() as ctx:
-        if ab:
+        if n_configs >= 2:
+            # Multi-config orchestrator. Emits N distinct PDIs (cfg_0..cfg_{N-1})
+            # and an `ab_orch` device with N runtime sequences (seq_to_0..) each
+            # loading one PDI. The host rotates through them to probe whether
+            # a PDI cache exists and how large it is.
+            for i in range(n_configs):
+                _emit_device(f"cfg_{i}", dev_enum, cols, rows_per_col,
+                             bds_per_task, topology, False)
+
+            total_words = LINE_LEN * bds_per_task * cols * rows_per_col
+
+            @device(dev_enum, sym_name="ab_orch")
+            def main_body():
+                tensor_ty = np.ndarray[(total_words,), np.dtype[np.int32]]
+
+                def _mk_seq(i):
+                    @runtime_sequence(tensor_ty, tensor_ty,
+                                      sym_name=f"seq_to_{i}")
+                    def _inner(in_buf, out_buf):
+                        npu_load_pdi(device_ref=f"cfg_{i}")
+                    return _inner
+
+                for i in range(n_configs):
+                    _mk_seq(i)
+        elif ab:
+            # Legacy AB mode (kept for the v2 #1 results). Uses the cfg_a /
+            # cfg_b / seq_to_a / seq_to_b names. Equivalent to n_configs=2
+            # except for the symbol naming.
             _emit_device("cfg_a", dev_enum, cols, rows_per_col,
                          bds_per_task, topology, False)
             _emit_device("cfg_b", dev_enum, cols, rows_per_col,
@@ -225,9 +253,6 @@ def emit(mechanism, device_name, cols, rows_per_col, bds_per_task, topology, ab)
             def main_body():
                 tensor_ty = np.ndarray[(total_words,), np.dtype[np.int32]]
 
-                # Two independent runtime sequences so the host can dispatch
-                # one direction at a time, defeating the firmware's PDI cache
-                # by alternating between distinct PDIs.
                 @runtime_sequence(tensor_ty, tensor_ty, sym_name="seq_to_a")
                 def _seq_a(in_buf, out_buf):
                     npu_load_pdi(device_ref="cfg_a")
@@ -257,10 +282,15 @@ def main():
     p.add_argument("--topology", required=True,
                    choices=["linear", "branch", "hop"])
     p.add_argument("--ab", action="store_true",
-                   help="Emit two-config orchestrator (load_pdi only).")
+                   help="Emit two-config orchestrator (legacy cfg_a/cfg_b "
+                        "naming; load_pdi only).")
+    p.add_argument("--n-configs", type=int, default=0,
+                   help="Multi-config orchestrator: emit N distinct PDIs "
+                        "(cfg_0..cfg_{N-1}) and an N-sequence orchestrator. "
+                        "Takes precedence over --ab. N=0 disables.")
     args = p.parse_args()
     emit(args.mechanism, args.device, args.tiles, args.rows_per_col,
-         args.bds, args.topology, args.ab)
+         args.bds, args.topology, args.ab, args.n_configs)
 
 
 if __name__ == "__main__":
