@@ -1,0 +1,9 @@
+# Build artifacts (regenerable via `make`).
+build/
+_bench/
+bench
+
+# Intermediate per-sweep result files (the canonical dataset is results.jsonl).
+results/results_whole_array.jsonl
+results/results_*.jsonl
+!results/results.jsonl
