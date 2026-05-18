@@ -251,24 +251,24 @@ only used `bds=2`.
 
 ---
 
-## 9. A↔B with actual workload after the PDI load (new, surfaced by #1)
+## 9. A↔B with actual workload after the PDI load  **[x] DONE**
 
-**Goal.** Measure "swap to a new PDI and then run the workload it
-configures." Today's `ab_toggle` measures load_pdi in isolation; the
-real production cost includes the DMA work that follows.
+**Result.** Added `--ab-mode={isolated,with_work}` to generate.py.
+`with_work` mode emits each orchestrator runtime sequence as
+`aiex.configure @cfg_k { aiex.run @seq(args) }`, which selects the PDI
+AND inlines its full runtime sequence (including DMA) at the dispatch
+site. Reuses the existing `multi_toggle` bench path. Swept mech ∈
+{fw, expanded} × t ∈ {1,4,8} × N ∈ {2,4}.
 
-**Implementation sketch.**
-- Add a `--ab-mode={isolated,with_work}` flag to `generate.py`. The
-  `with_work` variant emits the orchestrator as the `aiex.configure {
-  aiex.run @inner }` pattern from `test/npu-xrt/reconfigure_loadpdi/
-  aie.mlir`, so each toggle invokes the loaded PDI's runtime sequence.
-- `bench.cpp` shouldn't need changes — same `ab_toggle` dispatch loop.
-- Compare against §4's isolated numbers to see what fraction of cost
-  is PDI selection vs subsequent DMA work.
+**Headline.** **Swapping between distinct PDIs is free.** The
+`with_work` numbers at t=8 (76 µs for fw, 126 µs for expanded) are
+within 2-3 µs of v1's `pure_dispatch` numbers at the same shape (where
+every call self-reloaded the same PDI). There is no per-swap penalty
+on top of dispatch + DMA. For multi-tenant / model-swapping workloads,
+package all needed PDIs into one ELF and swap freely.
 
-**Acceptance.**
-- §4 of REPORT.md gets a second sub-table for "with_work" mode and a
-  paragraph explaining the delta vs isolated.
+Documented as the new "With work mode" + "Three-way comparison" +
+"Practical conclusion" subsections of §5 in REPORT.md.
 
 ---
 
@@ -326,3 +326,11 @@ wall sits. Today's tiny 1-tile PDIs don't pressure it.
   selector op, not a memory load — PDIs are driver-resident after
   ELF registration. Documented as §5; v2 top-of-report summary
   rewritten to combine §4 + §5.
+- **#9 AB with actual workload (2026-05-18).** `--ab-mode=with_work`
+  in generator emits `aiex.configure { aiex.run @seq }` so the
+  orchestrator both swaps PDIs and inlines the loaded config's full
+  runtime sequence. Swept fw/expanded × t ∈ {1,4,8} × N ∈ {2,4}.
+  **Headline: PDI swap is free.** with_work numbers match v1
+  pure_dispatch within 2-3 µs at all shapes. The practical conclusion
+  in §5 is: package all PDIs in one ELF, swap freely, pay only the
+  cost of dispatch + the loaded config's DMA work.

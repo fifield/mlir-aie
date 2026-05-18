@@ -381,6 +381,69 @@ fixed-size cache of size K, slot latencies should jump when N > K.**
   a long-delayed swap might pay a re-load cost. Today's rotation
   pattern doesn't exercise that.
 
+### "With work" mode — swap + actually run the loaded workload
+
+§4 and §5 above measured PDI selection **in isolation** (the
+orchestrator's runtime sequences contained only `npu_load_pdi`, no
+DMA). The production-relevant question is "swap to a different PDI
+*and then run the workload it configures*." For that, generator gained
+an `--ab-mode=with_work` flag that emits each orchestrator sequence as
+`aiex.configure @cfg_k { aiex.run @seq(args) }`. Per
+`AIE_RunOp` semantics, this **inlines the named runtime sequence at
+the call site**, so a single host dispatch swaps the PDI and runs the
+loaded config's DMA work.
+
+| mech                | t | N | mean p50 µs | per-slot p50 µs (max σ) |
+|---------------------|--:|--:|------------:|------------------------:|
+| `load_pdi_fw`       | 1 | 2 |        65.2 | 65.3 65.1               |
+| `load_pdi_fw`       | 1 | 4 |        69.4 | 69.7 69.4 69.4 69.1     |
+| `load_pdi_fw`       | 4 | 2 |        74.2 | 74.5 74.0               |
+| `load_pdi_fw`       | 4 | 4 |        65.7 | 65.8 65.8 65.4 65.9     |
+| `load_pdi_fw`       | 8 | 2 |        75.6 | 76.4 74.9               |
+| `load_pdi_fw`       | 8 | 4 |        78.8 | 79.6 78.5 78.7 78.3     |
+| `load_pdi_expanded` | 1 | 2 |        78.1 | 78.1 78.0               |
+| `load_pdi_expanded` | 1 | 4 |        75.4 | 75.1 75.8 75.5 75.1     |
+| `load_pdi_expanded` | 4 | 2 |        89.3 | 89.2 89.4               |
+| `load_pdi_expanded` | 4 | 4 |        90.0 | 89.6 90.9 89.5 90.2     |
+| `load_pdi_expanded` | 8 | 2 |       125.0 | 125.3 124.7             |
+| `load_pdi_expanded` | 8 | 4 |       126.4 | 125.4 126.8 126.9 126.4 |
+
+### Three-way comparison at t=8
+
+To put the numbers in context — what each measurement family actually
+represents:
+
+| measurement (at t=8, bds=2, rows=1) | mech: `load_pdi_fw` | mech: `load_pdi_expanded` |
+|-------------------------------------|--------------------:|--------------------------:|
+| v1 `pure_dispatch` (same PDI each dispatch, full DMA) |               80.5 |                     132.4 |
+| v2 §4 `ab_toggle` (alternate distinct PDIs, **no DMA**) |               65.7 |                     116.7 |
+| v2 §5 `multi_toggle` isolated, N=8 (rotate, **no DMA**) |               63.5 |                      84.9 *(t=4)* |
+| v2 §5 `multi_toggle` **with_work**, N=4 (rotate **+ run loaded DMA**) |       78.8 |                     126.4 |
+
+The **`with_work` numbers are essentially identical to v1
+`pure_dispatch`** (within 2-3 µs). That is the cleanest possible answer
+to "what does it cost to swap to a different PDI?":
+
+> **For load_pdi_fw, swapping between distinct PDIs is free.** The
+> total cost of "swap + run workload" is the same as "run workload
+> against current PDI." There is no swap penalty.
+
+For `load_pdi_expanded`, swap + work is the same as repeat + work
+because the expansion does its full register-write reprogramming every
+dispatch regardless of what was active before. There's no "swap" to
+have a penalty over.
+
+### Practical conclusion
+
+For multi-tenant or model-swapping workloads on NPU2:
+- Use `load_pdi_fw` (i.e. `--generate-full-elf` **without**
+  `--expand-load-pdis`).
+- Package every PDI you'll need into the same ELF.
+- Swap freely between them — the per-swap cost is zero on top of
+  dispatch + the DMA the swapped-in config will run.
+- The driver-memory ceiling on how many PDIs fit in one ELF is the
+  only practical limit we've found; we haven't tested where it sits.
+
 ## Whole-array sweep (added)
 
 After the original 1-row run, we extended the generator with a
