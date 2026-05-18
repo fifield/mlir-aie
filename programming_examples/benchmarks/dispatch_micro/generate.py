@@ -199,7 +199,7 @@ def _emit_device(name, dev_enum, cols, rows_per_col, bds_per_task, topology,
 
 
 def emit(mechanism, device_name, cols, rows_per_col, bds_per_task, topology,
-         ab, n_configs, ab_mode):
+         ab, n_configs, ab_mode, no_self_reload):
     dev_enum, max_cols = DEVICES[device_name]
     if cols > max_cols:
         sys.stderr.write(
@@ -276,7 +276,16 @@ def emit(mechanism, device_name, cols, rows_per_col, bds_per_task, topology,
                 def _seq_b(in_buf, out_buf):
                     npu_load_pdi(device_ref="cfg_b")
         else:
-            with_self = mechanism in ("load_pdi_fw", "load_pdi_expanded")
+            # load_pdi_*: insert `npu_load_pdi(@main)` at the top of the
+            # runtime sequence unless --no-self-reload says don't. With
+            # --no-self-reload we still build via --generate-full-elf (so
+            # the PDI is packaged) but no dispatch-time load_pdi op
+            # appears — useful to compare "ELF path + load_pdi" against
+            # "ELF path with no load_pdi at all" and isolate the op cost.
+            with_self = (
+                mechanism in ("load_pdi_fw", "load_pdi_expanded")
+                and not no_self_reload
+            )
             _emit_device("main", dev_enum, cols, rows_per_col,
                          bds_per_task, topology, with_self)
 
@@ -311,9 +320,16 @@ def main():
                         "`aiex.configure { aiex.run @seq }` which selects the "
                         "PDI and inlines its full runtime sequence (incl. DMA) "
                         "— measures realistic swap + run.")
+    p.add_argument("--no-self-reload", action="store_true",
+                   help="For load_pdi_fw/load_pdi_expanded mechanisms: omit "
+                        "the `npu_load_pdi(@main)` op at the top of the "
+                        "runtime sequence. Build still uses --generate-full-elf "
+                        "(PDI packaged). Lets you measure the load_pdi op cost "
+                        "by subtracting from the with-load_pdi baseline.")
     args = p.parse_args()
     emit(args.mechanism, args.device, args.tiles, args.rows_per_col,
-         args.bds, args.topology, args.ab, args.n_configs, args.ab_mode)
+         args.bds, args.topology, args.ab, args.n_configs, args.ab_mode,
+         args.no_self_reload)
 
 
 if __name__ == "__main__":

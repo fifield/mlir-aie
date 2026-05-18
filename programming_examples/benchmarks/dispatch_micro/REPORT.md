@@ -164,27 +164,52 @@ The most likely explanation is that `xrt::ext::kernel` + `xrt::runlist` lets the
 
 ## Failures
 
-Reproducible firmware crash, four cells:
+Reproducible firmware timeout when `aiex.npu.load_pdi` is combined
+with high shim-BD count. Full reproducer + analysis is in
+[`bugs/bd_load_pdi_crash.md`](bugs/bd_load_pdi_crash.md).
 
-| mechanism         | t | b |  
-|-------------------|--:|--:|
-| load_pdi_fw       | 2 | 8 |
-| load_pdi_fw       | 4 | 8 |
-| load_pdi_expanded | 2 | 8 |
-| load_pdi_expanded | 4 | 8 |
+v1 (warmup=10, iters=100) reported the crash at `tiles ∈ {2, 4} ×
+bds=8` only. v2 re-investigation with `warmup=0 --iters=1` (measure
+the very first dispatch from a fresh process) shows the boundary is
+broader: **any `load_pdi_*` build with `bds ≥ 8` crashes**, with the
+`t=8` case intermittent. v1's high warmup masked the failure at `t=1`.
 
-Symptoms (from XRT/kmd log):
+Symptom:
+
 ```
-fatal_error_exception_pc = 0x00000000
-fatal_error_app_module = 0x00000000
+xrt::run::aie_error: Command failed to complete successfully (ERT_CMD_STATE_TIMEOUT)
+txn_op_idx = 0xFFFFFFFF   ← firmware doesn't know what op was executing
+fatal_error_*            = 0  ← no exception, just a stuck BD chain
 ```
 
-Pattern is highly specific: only `tiles ∈ {2, 4}` and `bds == 8`, only with `load_pdi`. `baseline` at the same combos works; `tiles=1, bds=8` works; `tiles=8, bds=8` works. Suspicion: BD-id pool collision between the `load_pdi` expansion's BDs and the dispatch's BDs at intermediate tile counts. Worth filing.
-
-One other observed flake: `load_pdi_fw t=1 b=8 cold_start` crashed all 30 processes despite `pure_dispatch` of the same build working — suggests an additional first-dispatch / fresh-context interaction in cold mode.
+`baseline + bds=8` works at every tile count, so it's the load_pdi op
+in combination with the BD count — not either one alone. Workaround:
+use `bds ≤ 4` with `load_pdi_*`, or use `baseline` at any BD count.
+The PDI swap-cost results in §4 and §5 are unaffected (those used
+`bds=2`).
 
 ## Anomalies worth chasing
 
+0. **`aiex.npu.load_pdi` is load-bearing for full-ELF dispatch
+   (v2 follow-up to #1).** Adding `--no-self-reload` to the generator
+   to omit the op at the top of the runtime sequence — intended as an
+   "ELF baseline" measurement — fails: every dispatch times out with
+   the same `ERT_CMD_STATE_TIMEOUT, txn_op_idx = 0xFFFFFFFF` signature
+   as the bds=8 bug (`bugs/bd_load_pdi_crash.md`). Reproduced at every
+   t and bds we tried (6/6).
+   
+   The likely cause is the comment from `test/npu-xrt/loadpdi/aie.mlir`:
+   "XRT will load the PDI into memory and patch the address of this
+   load_pdi to the correct address." The op is also XRT's patch point;
+   no op → no patch → stuck BD chain. The shared failure signature
+   with the bds=8 bug suggests both problems may share root cause
+   (no patch, or BD configuration confusion).
+   
+   Implication: the v1 framing question "what does a cache-hit cost
+   in isolation" turns out to be unmeasurable in the current runtime
+   model. You can't dispatch the ELF without a load_pdi op. The §4/§5
+   conclusion (rotation ≈ self-reload ≈ no-cache-effect) is the
+   strongest statement we can make.
 1. **`load_pdi_fw` ≈ `baseline` is the PDI cache short-circuiting.** Confirmed: the runtime/driver/firmware stack caches PDI loads at the PDI level, so a self-PDI-load on every dispatch hits the cache after the first iteration. v1's `load_pdi_fw` numbers therefore reflect cache-hit cost (≈ a no-op opcode check), not actual PDI load work. To measure real PDI-load cost we have to alternate between two distinct PDIs — that's v2's A↔B test.
 2. **Baseline's batched-amortization floor at ~22 µs** is much higher than the ELF path's ~1 µs. This is the single largest performance lever in the dataset and the place a profiler should go next.
 3. **`load_pdi_expanded` linear scaling** is exactly as predicted — the inlined txn writes grow with `tiles × bds × rows_per_col` and are uncached. This is v1's only honest reconfig-cost curve, and it's worth keeping that calibration when v2 lands so we can compare "real firmware PDI load" against "host-side txn reprogramming" head-to-head.
