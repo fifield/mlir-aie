@@ -71,29 +71,49 @@ chart.
 
 ---
 
-## 2. `--no-self-reload` generator flag
+## 2. `--no-self-reload` generator flag  **[x] DONE (unexpected outcome)**
 
-**Goal.** Subtract cache-hit cost from baseline-with-load_pdi to isolate
-what the PDI-cache lookup itself costs (~ a few µs we believe).
+**Result.** Added the flag to generate.py + wired through Makefile.
+Generator works correctly: with `--no-self-reload`, no `aiex.npu.load_pdi`
+op is emitted at the top of the runtime sequence for `load_pdi_fw` /
+`load_pdi_expanded` builds.
 
-**Why.** Once #1 lands, we'll have three numbers per mechanism:
-"baseline (no load_pdi)", "load_pdi cache-hit", "load_pdi cache-miss".
-The cache-hit minus baseline gap is currently invisible.
+**Unexpected finding.** **Every NSR dispatch times out** with the same
+signature as the bds=8 firmware crash:
 
-**Implementation sketch.**
-- Add `--no-self-reload` to `generate.py`. When set, omit the
-  `npu_load_pdi(device_ref=name)` op at the top of the single-device
-  runtime sequence.
-- Build matrix grows by one cell per `load_pdi_*` mechanism. Mark the
-  resulting builds with a suffix in the key (`_nsr`).
-- Compare to the existing v1 numbers in the same row.
+```
+xrt::run::aie_error: ERT_CMD_STATE_TIMEOUT
+txn_op_idx = 0xFFFFFFFF
+fatal_error_* = 0
+```
 
-**Acceptance.**
-- A new column in §1 of REPORT.md showing per-mechanism with/without
-  self-reload deltas. The cache-hit cost should be ≤ 5 µs based on the
-  v1 observation that `load_pdi_fw` ≈ `baseline`.
+This held at every tile count and BD count we tried. Reproduced 6/6
+times across `mech ∈ {fw,expanded} × t ∈ {1,4,8}`.
 
-**Files touched.** `generate.py`, `Makefile`, `REPORT.md`.
+**Interpretation.** **The `aiex.npu.load_pdi` op is load-bearing for
+the full-ELF dispatch path.** Even though `xrt::hw_context(device,
+elf)` loads the PDI into driver memory, and even with only one PDI in
+the ELF, dispatch fails without a `load_pdi` op at the top of the
+runtime sequence. The most likely reason (per the comment in
+`test/npu-xrt/loadpdi/aie.mlir`): `load_pdi` is also a patch point
+where XRT fixes up addresses at dispatch time. No patch point ⇒ no
+address fix-up ⇒ dispatch never finds the right state ⇒ stuck BD
+chain.
+
+**Implication for the v1 framing.** The original goal of this task —
+isolating cache-hit cost — turns out to be unmeasurable in the current
+ELF runtime model. You cannot omit the load_pdi op and still dispatch.
+The "no load_pdi" baseline simply doesn't exist for the ELF path.
+
+The v2 §4 + §5 findings stand: rotating between distinct PDIs is the
+same cost as reloading the same one, regardless of whether anything
+is "cached." The op is essentially a patch + selector with no
+load-time work. Trying to remove it from the sequence breaks the
+dispatch entirely.
+
+Documented in REPORT.md (new Anomalies entry) and cross-linked from
+`bugs/bd_load_pdi_crash.md` since the failure mode is identical
+(suggests both bugs share an underlying cause).
 
 ---
 
@@ -163,25 +183,21 @@ compared); could start before.
 
 ---
 
-## 5. File the firmware-crash bug
+## 5. File the firmware-crash bug  **[x] DONE**
 
-**Goal.** Minimal MLIR reproducer for the `load_pdi_* × tiles ∈ {2,4} ×
-bds=8` firmware crash, with a written-up bug report.
+**Result.** Bug write-up at `bugs/bd_load_pdi_crash.md`, with
+reproducer command, minimal failing MLIR copy at
+`bugs/repro_load_pdi_bds8.mlir`, symptom dump, and a boundary table.
+REPORT.md "Failures" section rewritten to point at it.
 
-**Implementation sketch.**
-- Pull the failing build's `aie.mlir` from `build/load_pdi_fw_npu2_4col_t2_r1_b8_linear/aie.mlir`.
-- Strip it to the smallest case that still crashes (probably 2 cols ×
-  many BDs is enough).
-- Write a one-page report including: reproduction recipe, dmesg output
-  (`fatal_error_exception_pc = 0x00000000`), suspected cause (BD-id
-  collision between load_pdi expansion and dispatch DMAs).
-- Save under `programming_examples/benchmarks/dispatch_micro/bugs/bd_load_pdi_crash.md`.
+**Surfaced.** v2 re-investigation widened the boundary — the v1
+report said "tiles ∈ {2, 4}" but at `warmup=0 --iters=1` the crash
+reproduces at **any tile count with bds ≥ 8 + a load_pdi op**.
+v1's warmup masked the t=1 case. Wrote up history note in the bug
+file.
 
-**Acceptance.**
-- Bug write-up exists; reproducer build dir + run command listed.
-- Linked from REPORT.md's "Failures" section.
-
-**Dependencies.** None. Can be tackled any time as a standalone.
+**Workaround documented.** Use `bds ≤ 4` with `load_pdi_*`, or use
+baseline at any BD count.
 
 ---
 
@@ -334,3 +350,17 @@ wall sits. Today's tiny 1-tile PDIs don't pressure it.
   pure_dispatch within 2-3 µs at all shapes. The practical conclusion
   in §5 is: package all PDIs in one ELF, swap freely, pay only the
   cost of dispatch + the loaded config's DMA work.
+- **#5 File firmware-crash bug (2026-05-18).** Reproducer + write-up
+  at `bugs/bd_load_pdi_crash.md`. v2 widened the boundary: at
+  warmup=0/iters=1 the crash reproduces at any tile count with bds≥8
+  and a load_pdi op (v1 had only seen t∈{2,4} because of warmup).
+  Workaround: bds≤4 with load_pdi_*, or use baseline at any BD.
+- **#2 `--no-self-reload` flag (2026-05-18).** Added the flag —
+  generator works. But every NSR dispatch times out with the same
+  signature as the bds=8 bug, regardless of tile count. The `load_pdi`
+  op turns out to be load-bearing for the full-ELF dispatch path
+  (likely an XRT patch point). v1's question "what does the cache
+  hit cost in isolation" is unmeasurable in the current runtime
+  model: you cannot dispatch the ELF without the op present.
+  Documented as Anomaly #0 in REPORT.md and as a "Related failure"
+  section in the bug write-up.
