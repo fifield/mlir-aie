@@ -145,14 +145,8 @@ struct RuntimeSequenceToCertJob : OpConversionPattern<AIE::RuntimeSequenceOp> {
     // Erase the original runtime sequence
     rewriter.eraseOp(op);
 
-    auto symName = op.getSymName();
-    if (symName)
-      jobMap[symName->str()] = jobOp;
     return success();
   }
-
-private:
-  std::map<std::string, AIEX::CertJobOp> &jobMap;
 };
 
 struct NpuWrite32ToCertWrite32 : OpConversionPattern<AIEX::NpuWrite32Op> {
