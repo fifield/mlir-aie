@@ -484,7 +484,7 @@ module {
         memref.store %3, %buf243_unroll_0[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 3, 3>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 3, 3>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_2_5 = aie.mem(%tile_2_5) {
       %0 = aie.dma_start(S2MM, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -588,7 +588,7 @@ module {
         memref.store %3, %buf233_unroll_0[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 2, 3>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 2, 3>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_1_5 = aie.mem(%tile_1_5) {
       %0 = aie.dma_start(S2MM, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -691,7 +691,7 @@ module {
         memref.store %3, %buf223_unroll_0[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 1, 3>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 1, 3>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_0_5 = aie.mem(%tile_0_5) {
       %0 = aie.dma_start(S2MM, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -793,7 +793,7 @@ module {
         memref.store %3, %buf213_unroll_0[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 0, 3>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 0, 3>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_3_4 = aie.mem(%tile_3_4) {
       %0 = aie.dma_start(S2MM, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -923,7 +923,7 @@ module {
         memref.store %3, %buf203_unroll_0[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 3, 2>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 3, 2>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_2_4 = aie.mem(%tile_2_4) {
       %0 = aie.dma_start(S2MM, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -1053,7 +1053,7 @@ module {
         memref.store %3, %buf186_unroll_0[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 2, 2>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 2, 2>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_1_4 = aie.mem(%tile_1_4) {
       %0 = aie.dma_start(S2MM, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -1182,7 +1182,7 @@ module {
         memref.store %3, %buf169_unroll_0[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 1, 2>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 1, 2>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_0_4 = aie.mem(%tile_0_4) {
       %0 = aie.dma_start(S2MM, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -1310,7 +1310,7 @@ module {
         memref.store %3, %buf152_unroll_0[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 0, 2>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 0, 2>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_3_3 = aie.mem(%tile_3_3) {
       %0 = aie.dma_start(S2MM, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -1440,7 +1440,7 @@ module {
         memref.store %3, %buf135_unroll_0[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 3, 1>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 3, 1>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_2_3 = aie.mem(%tile_2_3) {
       %0 = aie.dma_start(S2MM, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -1570,7 +1570,7 @@ module {
         memref.store %3, %buf118_unroll_0[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 2, 1>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 2, 1>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_1_3 = aie.mem(%tile_1_3) {
       %0 = aie.dma_start(S2MM, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -1699,7 +1699,7 @@ module {
         memref.store %3, %buf101_unroll_0[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 1, 1>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 1, 1>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_0_3 = aie.mem(%tile_0_3) {
       %0 = aie.dma_start(S2MM, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -1827,7 +1827,7 @@ module {
         memref.store %3, %buf84_unroll_0[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 0, 1>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 0, 1>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_3_2 = aie.mem(%tile_3_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -1949,7 +1949,7 @@ module {
         memref.store %3, %buf67_unroll_0[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 3, 0>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 3, 0>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_2_2 = aie.mem(%tile_2_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -2071,7 +2071,7 @@ module {
         memref.store %3, %buf50_unroll_0[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 2, 0>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 2, 0>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_1_2 = aie.mem(%tile_1_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -2192,7 +2192,7 @@ module {
         memref.store %3, %buf33_unroll_0[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 1, 0>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 1, 0>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_0_2 = aie.mem(%tile_0_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -2312,23 +2312,23 @@ module {
         memref.store %3, %buf16_unroll_0[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 0, 0>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
-    func.func private @zero_fill_gp_bf16(memref<64x64xbf16, 2 : i32>) attributes {link_with = "attn_npu2.o", llvm.emit_c_interface}
-    func.func private @zero_fill_sp_bf16(memref<64x1xbf16, 2 : i32>) attributes {link_with = "attn_npu2.o", llvm.emit_c_interface}
-    func.func private @neg_inf_fill_up_bf16(memref<64x1xbf16, 2 : i32>) attributes {link_with = "attn_npu2.o", llvm.emit_c_interface}
-    func.func private @copy_tile(memref<64x64xbf16, 2 : i32>, memref<64x64xbf16, 2 : i32>) attributes {link_with = "attn_npu2.o", llvm.emit_c_interface}
-    func.func private @zero_fill_g_bf16(memref<4096xbf16, 2 : i32>) attributes {link_with = "attn_npu2.o", llvm.emit_c_interface}
-    func.func private @matmul_a_b_bf16(memref<64x64xbf16, 2 : i32>, memref<64x64xbf16, 2 : i32>, memref<4096xbf16, 2 : i32>) attributes {link_with = "attn_npu2.o", llvm.emit_c_interface}
-    func.func private @apply_causal_mask(memref<64x64xbf16, 2 : i32>, i32, i32) attributes {link_with = "attn_npu2.o", llvm.emit_c_interface}
-    func.func private @fused_softmax(memref<4096xbf16, 2 : i32>, memref<64x1xbf16, 2 : i32>, memref<64x1xbf16, 2 : i32>, memref<64x1xbf16, 2 : i32>) attributes {link_with = "attn_npu2.o", llvm.emit_c_interface}
-    func.func private @mul_r_gp(memref<64x1xbf16, 2 : i32>, memref<64x64xbf16, 2 : i32>) attributes {link_with = "attn_npu2.o", llvm.emit_c_interface}
-    func.func private @matmul_g_b_bf16(memref<4096xbf16, 2 : i32>, memref<64x64xbf16, 2 : i32>, memref<64x64xbf16, 2 : i32>) attributes {link_with = "attn_npu2.o", llvm.emit_c_interface}
-    func.func private @accum_sp_r_s(memref<64x1xbf16, 2 : i32>, memref<64x1xbf16, 2 : i32>, memref<64x1xbf16, 2 : i32>) attributes {link_with = "attn_npu2.o", llvm.emit_c_interface}
-    func.func private @vector_copy_32elems(i32, memref<64x1xbf16, 2 : i32>, memref<64x1xbf16, 2 : i32>) attributes {link_with = "attn_npu2.o", llvm.emit_c_interface}
-    func.func private @maximum_up_u_bf16(memref<64x1xbf16, 2 : i32>, memref<64x1xbf16, 2 : i32>) attributes {link_with = "attn_npu2.o", llvm.emit_c_interface}
-    func.func private @exp_up_minus_u(memref<64x1xbf16, 2 : i32>, memref<64x1xbf16, 2 : i32>, memref<64x1xbf16, 2 : i32>) attributes {link_with = "attn_npu2.o", llvm.emit_c_interface}
-    func.func private @add_gp_g(memref<64x64xbf16, 2 : i32>, memref<64x64xbf16, 2 : i32>) attributes {link_with = "attn_npu2.o", llvm.emit_c_interface}
-    func.func private @div_gp_sp(memref<64x1xbf16, 2 : i32>, memref<64x64xbf16, 2 : i32>) attributes {link_with = "attn_npu2.o", llvm.emit_c_interface}
+    } {air.herd_local_id = array<i64: 0, 0>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
+    func.func private @zero_fill_gp_bf16(memref<64x64xbf16, 2 : i32>) attributes {link_with = "attn_pythoc.o", llvm.emit_c_interface}
+    func.func private @zero_fill_sp_bf16(memref<64x1xbf16, 2 : i32>) attributes {link_with = "attn_pythoc.o", llvm.emit_c_interface}
+    func.func private @neg_inf_fill_up_bf16(memref<64x1xbf16, 2 : i32>) attributes {link_with = "attn_pythoc.o", llvm.emit_c_interface}
+    func.func private @copy_tile(memref<64x64xbf16, 2 : i32>, memref<64x64xbf16, 2 : i32>) attributes {link_with = "attn_pythoc.o", llvm.emit_c_interface}
+    func.func private @zero_fill_g_bf16(memref<4096xbf16, 2 : i32>) attributes {link_with = "attn_pythoc.o", llvm.emit_c_interface}
+    func.func private @matmul_a_b_bf16(memref<64x64xbf16, 2 : i32>, memref<64x64xbf16, 2 : i32>, memref<4096xbf16, 2 : i32>) attributes {link_with = "attn_pythoc.o", llvm.emit_c_interface}
+    func.func private @apply_causal_mask(memref<64x64xbf16, 2 : i32>, i32, i32) attributes {link_with = "attn_pythoc.o", llvm.emit_c_interface}
+    func.func private @fused_softmax(memref<4096xbf16, 2 : i32>, memref<64x1xbf16, 2 : i32>, memref<64x1xbf16, 2 : i32>, memref<64x1xbf16, 2 : i32>) attributes {link_with = "attn_pythoc.o", llvm.emit_c_interface}
+    func.func private @mul_r_gp(memref<64x1xbf16, 2 : i32>, memref<64x64xbf16, 2 : i32>) attributes {link_with = "attn_pythoc.o", llvm.emit_c_interface}
+    func.func private @matmul_g_b_bf16(memref<4096xbf16, 2 : i32>, memref<64x64xbf16, 2 : i32>, memref<64x64xbf16, 2 : i32>) attributes {link_with = "attn_pythoc.o", llvm.emit_c_interface}
+    func.func private @accum_sp_r_s(memref<64x1xbf16, 2 : i32>, memref<64x1xbf16, 2 : i32>, memref<64x1xbf16, 2 : i32>) attributes {link_with = "attn_pythoc.o", llvm.emit_c_interface}
+    func.func private @vector_copy_32elems(i32, memref<64x1xbf16, 2 : i32>, memref<64x1xbf16, 2 : i32>) attributes {link_with = "attn_pythoc.o", llvm.emit_c_interface}
+    func.func private @maximum_up_u_bf16(memref<64x1xbf16, 2 : i32>, memref<64x1xbf16, 2 : i32>) attributes {link_with = "attn_pythoc.o", llvm.emit_c_interface}
+    func.func private @exp_up_minus_u(memref<64x1xbf16, 2 : i32>, memref<64x1xbf16, 2 : i32>, memref<64x1xbf16, 2 : i32>) attributes {link_with = "attn_pythoc.o", llvm.emit_c_interface}
+    func.func private @add_gp_g(memref<64x64xbf16, 2 : i32>, memref<64x64xbf16, 2 : i32>) attributes {link_with = "attn_pythoc.o", llvm.emit_c_interface}
+    func.func private @div_gp_sp(memref<64x1xbf16, 2 : i32>, memref<64x64xbf16, 2 : i32>) attributes {link_with = "attn_pythoc.o", llvm.emit_c_interface}
     aie.flow(%shim_noc_tile_0_0, DMA : 0, %mem_tile_0_1, DMA : 0)
     aie.flow(%shim_noc_tile_1_0, DMA : 0, %mem_tile_1_1, DMA : 0)
     aie.flow(%shim_noc_tile_2_0, DMA : 0, %mem_tile_2_1, DMA : 0)
@@ -3064,7 +3064,7 @@ module {
         memref.store %3, %buf499_unroll_1[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 3, 3>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 3, 3>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_6_5 = aie.mem(%tile_6_5) {
       %0 = aie.dma_start(S2MM, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -3168,7 +3168,7 @@ module {
         memref.store %3, %buf489_unroll_1[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 2, 3>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 2, 3>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_5_5 = aie.mem(%tile_5_5) {
       %0 = aie.dma_start(S2MM, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -3271,7 +3271,7 @@ module {
         memref.store %3, %buf479_unroll_1[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 1, 3>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 1, 3>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_4_5 = aie.mem(%tile_4_5) {
       %0 = aie.dma_start(S2MM, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -3373,7 +3373,7 @@ module {
         memref.store %3, %buf469_unroll_1[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 0, 3>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 0, 3>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_7_4 = aie.mem(%tile_7_4) {
       %0 = aie.dma_start(S2MM, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -3503,7 +3503,7 @@ module {
         memref.store %3, %buf459_unroll_1[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 3, 2>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 3, 2>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_6_4 = aie.mem(%tile_6_4) {
       %0 = aie.dma_start(S2MM, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -3633,7 +3633,7 @@ module {
         memref.store %3, %buf442_unroll_1[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 2, 2>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 2, 2>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_5_4 = aie.mem(%tile_5_4) {
       %0 = aie.dma_start(S2MM, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -3762,7 +3762,7 @@ module {
         memref.store %3, %buf425_unroll_1[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 1, 2>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 1, 2>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_4_4 = aie.mem(%tile_4_4) {
       %0 = aie.dma_start(S2MM, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -3890,7 +3890,7 @@ module {
         memref.store %3, %buf408_unroll_1[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 0, 2>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 0, 2>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_7_3 = aie.mem(%tile_7_3) {
       %0 = aie.dma_start(S2MM, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -4020,7 +4020,7 @@ module {
         memref.store %3, %buf391_unroll_1[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 3, 1>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 3, 1>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_6_3 = aie.mem(%tile_6_3) {
       %0 = aie.dma_start(S2MM, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -4150,7 +4150,7 @@ module {
         memref.store %3, %buf374_unroll_1[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 2, 1>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 2, 1>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_5_3 = aie.mem(%tile_5_3) {
       %0 = aie.dma_start(S2MM, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -4279,7 +4279,7 @@ module {
         memref.store %3, %buf357_unroll_1[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 1, 1>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 1, 1>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_4_3 = aie.mem(%tile_4_3) {
       %0 = aie.dma_start(S2MM, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -4407,7 +4407,7 @@ module {
         memref.store %3, %buf340_unroll_1[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 0, 1>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 0, 1>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_7_2 = aie.mem(%tile_7_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -4529,7 +4529,7 @@ module {
         memref.store %3, %buf323_unroll_1[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 3, 0>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 3, 0>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_6_2 = aie.mem(%tile_6_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -4651,7 +4651,7 @@ module {
         memref.store %3, %buf306_unroll_1[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 2, 0>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 2, 0>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_5_2 = aie.mem(%tile_5_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -4772,7 +4772,7 @@ module {
         memref.store %3, %buf289_unroll_1[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 1, 0>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 1, 0>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     %mem_4_2 = aie.mem(%tile_4_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -4892,7 +4892,7 @@ module {
         memref.store %3, %buf272_unroll_1[%c2] : memref<3xi32, 2 : i32>
       }
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 0, 0>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_npu2.o"}
+    } {air.herd_local_id = array<i64: 0, 0>, air.herd_name = "herd_0", air.herd_size = array<i64: 4, 4>, link_with = "attn_pythoc.o"}
     aie.flow(%shim_noc_tile_4_0, DMA : 0, %mem_tile_4_1, DMA : 0)
     aie.flow(%shim_noc_tile_5_0, DMA : 0, %mem_tile_5_1, DMA : 0)
     aie.flow(%shim_noc_tile_6_0, DMA : 0, %mem_tile_6_1, DMA : 0)
