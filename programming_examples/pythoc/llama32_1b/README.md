@@ -20,7 +20,7 @@ serves as the substrate until the placed-IRON builders land.
 | matvec (BF16 GEMV, K=8192) | o_gemv_ffn (FFN down) | ✓ `kernels/matvec_k8192.py` |
 | Flash attention | flash_attn (prefill) | ☐ Phase 3.4 |
 | Prefill RMSNorm | rms_gemms_rope | ☐ deferred |
-| Builders (placed-IRON) | 2 of 6 done (lm_head_gemv, rms_gemv_rope) | ☐ Phase 4 (in progress) |
+| Builders (placed-IRON) | 3 of 6 done (lm_head_gemv, rms_gemv_rope, o_gemv_ffn) | ☐ Phase 4 (in progress) |
 | AWQ uint4 path | (off by default) | ☐ Phase 6 |
 
 Validation gate: every PythoC swap must answer correctly to a real-HF

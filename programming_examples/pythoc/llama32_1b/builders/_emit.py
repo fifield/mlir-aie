@@ -59,6 +59,47 @@ def bf16_memref(*shape, memory_space=None):
 # ``run_rms_gemv_rope`` -- see the cached IR's ``aiex.runtime_sequence
 # @rms_gemv_rope(...)`` block for the canonical ordering.
 # ---------------------------------------------------------------------------
+def o_gemv_ffn_host_arg_types(emb_dim: int = 2048, hidden_dim: int = 8192):
+    """Return the 15 host arg ``np.ndarray`` type specs for o_gemv_ffn.
+
+    Layout (matches the cached dispatcher device's
+    ``aiex.runtime_sequence @o_gemv_ffn``)::
+
+        arg0  : memref<emb_dim x emb_dim x bf16>      wo (O proj weight)
+        arg1  : memref<emb_dim x bf16>                attn_out
+        arg2  : memref<emb_dim x bf16>                proj (intermediate)
+        arg3  : memref<emb_dim x bf16>                x_residual
+        arg4  : memref<emb_dim x bf16>                res1 (intermediate)
+        arg5  : memref<emb_dim x bf16>                ffn_norm_w
+        arg6  : memref<emb_dim x bf16>                normed2 (broadcast input)
+        arg7  : memref<hidden_dim x emb_dim x bf16>   wgate
+        arg8  : memref<hidden_dim x bf16>             gate (intermediate)
+        arg9  : memref<hidden_dim x emb_dim x bf16>   wup
+        arg10 : memref<hidden_dim x bf16>             up (intermediate)
+        arg11 : memref<hidden_dim x bf16>             swiglu (intermediate)
+        arg12 : memref<emb_dim x hidden_dim x bf16>   wdown
+        arg13 : memref<emb_dim x bf16>                down (intermediate)
+        arg14 : memref<emb_dim x bf16>                output
+    """
+    return [
+        bf16_np(emb_dim, emb_dim),
+        bf16_np(emb_dim),
+        bf16_np(emb_dim),
+        bf16_np(emb_dim),
+        bf16_np(emb_dim),
+        bf16_np(emb_dim),
+        bf16_np(emb_dim),
+        bf16_np(hidden_dim, emb_dim),
+        bf16_np(hidden_dim),
+        bf16_np(hidden_dim, emb_dim),
+        bf16_np(hidden_dim),
+        bf16_np(hidden_dim),
+        bf16_np(emb_dim, hidden_dim),
+        bf16_np(emb_dim),
+        bf16_np(emb_dim),
+    ]
+
+
 def rms_gemv_rope_host_arg_types(emb_dim: int = 2048, kv_dim: int = 512):
     """Return the 13 host arg ``np.ndarray`` type specs in order.
 
