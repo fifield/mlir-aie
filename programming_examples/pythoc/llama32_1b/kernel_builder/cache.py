@@ -34,17 +34,15 @@ from .aie_compile import AIECompileArtifact, compile_aie_to_elf
 # ---------------------------------------------------------------------------
 
 _LINK_OBJS = [
-    # AIR-reference .cc kernels still in use (Phase 3.4 / lm_head_gemv).
-    "attn.o",
-    "attn_npu2.o",
-    "attn_decode_npu2.o",
-    # PythoC-built kernels.
+    # PythoC-built kernels (Phase 3.4 complete: all flash-attention symbols
+    # now live in attn_pythoc.o, so attn.o / attn_npu2.o / attn_decode_npu2.o
+    # are no longer staged or linked).
     "rms_norm_2048_bf16.o",
     "silu_and_mul_bf16.o",
     "rope_pythoc.o",
     "mv_pythoc.o",
     "mv_k8192_pythoc.o",
-    # "attn_pythoc.o",  # Phase 3.4 WIP -- see kernels/attn.py docstring
+    "attn_pythoc.o",
 ]
 
 
