@@ -56,8 +56,8 @@ module {
         aie.use_lock(%lock_0_2_4, Release, 1)
       } {loop_annotation = #loop_annotation}
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 0, 0>, air.herd_name = "rk_rope_herd", air.herd_size = array<i64: 1, 1>, link_with = "rope.o"}
-    func.func private @rope(memref<64xbf16, 2 : i32>, memref<64xbf16, 2 : i32>, memref<64xbf16, 2 : i32>, i32) attributes {link_with = "rope.o", llvm.emit_c_interface}
+    } {air.herd_local_id = array<i64: 0, 0>, air.herd_name = "rk_rope_herd", air.herd_size = array<i64: 1, 1>, link_with = "rope_pythoc.o"}
+    func.func private @rope(memref<64xbf16, 2 : i32>, memref<64xbf16, 2 : i32>, memref<64xbf16, 2 : i32>, i32) attributes {link_with = "rope_pythoc.o", llvm.emit_c_interface}
     aie.flow(%shim_noc_tile_0_0, DMA : 0, %tile_0_2, DMA : 0)
     aie.flow(%shim_noc_tile_0_0, DMA : 1, %tile_0_2, DMA : 1)
     aie.flow(%tile_0_2, DMA : 0, %shim_noc_tile_0_0, DMA : 0)
@@ -141,8 +141,8 @@ module {
         aie.use_lock(%lock_0_2_4, Release, 1)
       } {loop_annotation = #loop_annotation}
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 0, 0>, air.herd_name = "rq_rope_herd", air.herd_size = array<i64: 1, 1>, link_with = "rope.o"}
-    func.func private @rope(memref<64xbf16, 2 : i32>, memref<64xbf16, 2 : i32>, memref<64xbf16, 2 : i32>, i32) attributes {link_with = "rope.o", llvm.emit_c_interface}
+    } {air.herd_local_id = array<i64: 0, 0>, air.herd_name = "rq_rope_herd", air.herd_size = array<i64: 1, 1>, link_with = "rope_pythoc.o"}
+    func.func private @rope(memref<64xbf16, 2 : i32>, memref<64xbf16, 2 : i32>, memref<64xbf16, 2 : i32>, i32) attributes {link_with = "rope_pythoc.o", llvm.emit_c_interface}
     aie.flow(%shim_noc_tile_0_0, DMA : 0, %tile_0_2, DMA : 0)
     aie.flow(%shim_noc_tile_0_0, DMA : 1, %tile_0_2, DMA : 1)
     aie.flow(%tile_0_2, DMA : 0, %shim_noc_tile_0_0, DMA : 0)

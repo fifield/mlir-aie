@@ -31,6 +31,8 @@ _REQUIRED_OBJS = [
 # PythoC-built kernels - compiled lazily from kernels/*.py into CWD.
 _PYTHOC_KERNELS = [
     ("rms_norm_2048_bf16.o", "compile_rms_norm"),
+    ("silu_and_mul_bf16.o", "compile_silu_and_mul"),
+    ("rope_pythoc.o", "compile_rope"),
 ]
 
 

@@ -6,6 +6,9 @@ build_chess/
 *.o
 !reference_o/*.o
 
+# Root .gitignore has `build*` which would skip our PythoC kernels/build.py.
+!kernels/build.py
+
 # AWQ model dir (not source-controlled)
 awq_repacked/
 

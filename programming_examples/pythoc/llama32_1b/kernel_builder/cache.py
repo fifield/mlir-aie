@@ -42,6 +42,8 @@ _LINK_OBJS = [
     "mv_k8192.o",
     "attn_decode_npu2.o",
     "rms_norm_2048_bf16.o",
+    "silu_and_mul_bf16.o",
+    "rope_pythoc.o",
 ]
 
 
