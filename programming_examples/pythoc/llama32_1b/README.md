@@ -1,131 +1,130 @@
-# LLAMA-3.2-1B BF16 Inference on AMD NPU2 — MLIR-AIE port
+# LLAMA-3.2-1B BF16 Inference on AMD NPU2 — PythoC + placed IRON
 
-Low-level duplicate of [`../llama32_1b`](../llama32_1b) (the MLIR-AIR
-implementation). The model definition, weight loading, prefill/decode
-orchestration, CPU reference, and Makefile mirror the source 1:1. The
-difference is where the seam to the hardware sits.
+End-to-end Llama-3.2-1B inference on AMD NPU2 (Strix Halo, aie2p), built
+incrementally on top of the MLIR-AIR reference at
+[`mlir-air-llama_awq_impl/programming_examples/llama32_1b_aie`][air-src].
+Each kernel is being replaced with a PythoC `@aie_kernel` function
+behind a hard correctness gate; the cached AIR-emitted aie/aiex MLIR
+serves as the substrate until the placed-IRON builders land.
 
-| Layer | `../llama32_1b` (MLIR-AIR) | This project (MLIR-AIE) |
-|-------|---------------------------|--------------------------|
-| Kernel IR builders | mlir-air dialect via python, stitched in-process | reuses the same mlir-air builders today, but the post-stitching aie/aiex IR is captured and cached as `<name>.npu.air.mlir` |
-| Compile backend | `aircc` (runs AIR passes + invokes `aiecc`) | `aiecc` directly on the cached IR |
-| ELF / XRT load | `xrt.elf` / `xrt.ext.kernel` | same |
+[air-src]: ../../../../mlir-air-llama_awq_impl/programming_examples/llama32_1b_aie
 
-The purpose of this fork is to let you tweak the design at the low level
-— the aie/aiex dialect, the same input aiecc consumes — without
-mlir-air's compiler in the loop. Each unique kernel's IR is saved
-alongside its `.elf` and is regenerated only when missing.
+## Status
 
-## What's the seam?
+| Kernel | Where used | Replacement |
+|---|---|---|
+| RMSNorm (2048) | rms_gemv_rope (decode) | ✓ `kernels/rms_norm.py` |
+| silu_and_mul (SwiGLU) | o_gemv_ffn, o_ffn | ✓ `kernels/silu_and_mul.py` |
+| rope (half-split) | rms_gemv_rope, rms_gemms_rope | ✓ `kernels/rope.py` |
+| matvec (BF16 GEMV, K=2048) | rms_gemv_rope, o_gemv_ffn, lm_head_gemv | ✓ `kernels/matvec.py` |
+| matvec (BF16 GEMV, K=8192) | o_gemv_ffn (FFN down) | ✓ `kernels/matvec_k8192.py` |
+| Flash attention | flash_attn (prefill) | ☐ Phase 3.4 |
+| Prefill RMSNorm | rms_gemms_rope | ☐ deferred |
+| Builders (placed-IRON) | all 6 | ☐ Phase 4 |
+| AWQ uint4 path | (off by default) | ☐ Phase 6 |
 
-`kernel_builder/aie_ir_gen.py` has one function per unique kernel:
+Validation gate: every PythoC swap must answer correctly to a real-HF
+prompt before commit. `make hf-gate` runs the "What is the capital of
+France?" → "Paris" check; `make snapshot` captures a per-kernel timing
++ correlation JSON for regression-tracking.
 
-```python
-def build_rms_gemv_rope_ir(...) -> str: ...
-def build_o_gemv_ffn_ir(...) -> str: ...
-def build_lm_head_gemv_ir(...) -> str: ...
-def build_rms_gemms_rope_ir(...) -> str: ...
-def build_o_ffn_ir(...) -> str: ...
-def build_flash_attn_ir(...) -> str: ...
+Decode steady-state: ~7.9 tok/s on NPU2 with the current kernels.
+
+## Layout
+
+```
+llama32_1b/
+├── llama32_1b_inference.py     # entry point (verbatim from AIR ref)
+├── llama32_1b_prefill.py       # prefill orchestration
+├── llama32_1b_decode.py        # decode orchestration
+├── llama32_1b_reference.py     # F32 CPU reference (verify)
+├── llama32_1b_weights.py       # HF weight loader
+├── llama32_1b_awq_runtime.py   # (Phase 6 -- inert today)
+├── Makefile                    # compile / run / verify / snapshot / hf-gate
+├── kernels/                    # PythoC @aie_kernel libraries
+│   ├── rms_norm.py
+│   ├── silu_and_mul.py
+│   ├── rope.py
+│   ├── matvec.py               #  mv_pythoc.o  (K=2048)
+│   ├── matvec_k8192.py         #  mv_k8192_pythoc.o (dg_* symbols, K=8192)
+│   └── build.py                # compile_* helpers (each PythoC kernel)
+├── builders/                   # (Phase 4 -- placed-IRON program builders)
+├── reference_mlir/             # cached AIR-emitted aie/aiex MLIR
+│   ├── rms_gemv_rope.npu.air.mlir
+│   ├── o_gemv_ffn.npu.air.mlir
+│   ├── lm_head_gemv.npu.air.mlir
+│   ├── rms_gemms_rope.npu.air.mlir
+│   ├── o_ffn.npu.air.mlir
+│   └── flash_attn.npu.air.mlir
+├── reference_o/                # AIR-built .o still in use (flash attn)
+│   ├── attn.o, attn_npu2.o, attn_decode_npu2.o
+├── kernel_builder/             # aiecc compile + XRT cache (no aircc at runtime)
+│   ├── aie_compile.py
+│   ├── aie_ir_gen.py           # cached-only loader (Phase 0/1 substrate)
+│   ├── cache.py                # KernelCache + Profiler + XRT BO reuse
+│   ├── external_kernels.py     # stage .o files (reference + PythoC)
+│   └── backend_presets.py
+└── tests/
+    ├── test_phase_snapshot.py  # synthetic verify -> JSON snapshot
+    ├── test_hf_answer_gate.py  # real HF "Paris" gate
+    └── snapshots/              # per-phase baselines
 ```
 
-Each returns post-stitched mlir-aie text (multiple `aie.device` blocks
-plus a top-level unnamed `aie.device` containing an `aie.runtime_sequence
-@<instance>` dispatcher — exactly the form aiecc accepts and XRT loads
-via `main:<instance>`). Today they shell through the existing
-multi-launch builders + `aircc --output-format=elf` to harvest the IR.
-Replacing any one of them with hand-written placed-iron python that
-emits the same dialect is a drop-in change — no other file needs to be
-touched.
+`build_peano/` is regenerated by `make compile` and is gitignored.
 
-`kernel_builder/aie_compile.py` is the aiecc-only compile path; given
-`(ir_text, instance_name, output_elf)` it produces an ELF that the
-existing `KernelCache.load_and_run(...)` path can run.
+## Build & run
 
-## What changed vs `../llama32_1b`
+The Makefile auto-points `PEANO_INSTALL_DIR` at the AIR-tree pip
+`llvm-aie` (commit `5ed1593`) which avoids a crash in the pythoc-tree's
+in-tree `llvm-aie` (commit `55604435`) on the RoPE-K core. Set
+`PYTHOC_LLAMA_PEANO` to override.
 
-The port keeps host code, kernel builders, and Makefile targets
-identical. All edits are localized to the compile/load seam.
+```bash
+source ../../../../env.sh                # mlir-aie venv + XRT + paths
 
-**Verbatim from the source (no edits):**
+make compile                             # ~80s; populates build_peano/{decode,prefill}_kernel_cache/
+make run    HF_MODEL_ID=unsloth/Llama-3.2-1B-Instruct \
+            PROMPT="What is the capital of France?"
+make verify N_TOKENS=10                  # F32 CPU reference diff
+make profile                             # per-kernel + per-token breakdown
+make snapshot                            # capture JSON; gate vs prior phase
+make hf-gate                             # real-HF answer-level check (skips if cache missing)
+make chat                                # interactive REPL
+```
 
-- `llama32_1b_weights.py`, `llama32_1b_reference.py`
-- `requirements.txt`, `.gitignore`
-- `multi_launch_builder/` (all 5 stitched-kernel builders)
-- `kernel_builder/{backend_presets.py, external_kernels.py,
-  gemm_builder.py, rope_halfsplit.cc, stitching.py, ffn_swiglu/}`
+## How the PythoC swap works
 
-**Modified files (compile-path seam only):**
+Each cached `*.npu.air.mlir` had `link_with = "<name>.o"` attributes on
+its `aie.core` regions and external `func.func` declarations. Porting a
+kernel is two parts:
 
-- `kernel_builder/cache.py` — rewritten. Compile path uses
-  `aie_compile.py` (aiecc-only). Load path uses `xrt.elf` +
-  `xrt.hw_context` + `xrt.ext.kernel` directly, dropping the
-  `air.backend` runtime dependency and the xclbin code path.
-  Same public API (`compile_and_cache`, `load_manifest`,
-  `load_and_run`). Also writes `<name>.npu.air.mlir` next to each
-  `.elf` so the IR is tweakable on disk.
-- `llama32_1b_prefill.py` — only `compile_all_kernels` was rewritten
-  to call `aie_ir_gen.build_*_ir` + the new
-  `cache.compile_and_cache(name, ir_text, instance_name=...)`.
-  `run_transformer_block` and `preload_prefill_weights` are
-  unchanged.
-- `llama32_1b_decode.py` — same kind of change to
-  `compile_decode_kernels` only; `run_decode_block` unchanged.
-- `llama32_1b_inference.py` — only the top docstring changed.
-- `Makefile` — cosmetic differences (header text, section comments).
-  Targets and flags match 1:1 with the source.
-- `README.md` — this file.
+1. Write the PythoC kernel under `kernels/<name>.py` (one or more
+   `@aie_kernel` functions, with the LATER one named in
+   `compile_pythoc_source(function_name=...)` so earlier ones get pulled
+   in as helpers and exported in the same `.o`). Add a build helper to
+   `kernels/build.py` and register it in
+   `kernel_builder/external_kernels.py::_PYTHOC_KERNELS`. The first
+   `make compile` after that builds the `.o` into the work dir.
+2. Sed-swap the `link_with` strings in `reference_mlir/*.npu.air.mlir`
+   to point at the new `.o`. Aiecc picks it up from CWD.
 
-**New files:**
-
-- `kernel_builder/aie_compile.py` — `aiecc` invocation +
-  minimal `_XRTRunner` (replaces `air.backend.xrt.XRTBackend` at
-  load time).
-- `kernel_builder/aie_ir_gen.py` — `build_*_ir(...)` per unique
-  kernel; harvests the post-stitching aie/aiex IR from `aircc
-  --output-format=elf` (matching what `XRTBackend` passes through, so
-  single-launch kernels like `flash_attn` get a `main:<instance>`
-  dispatcher).
-
-**Not copied from the source:**
-
-- `ARCHITECTURE.md`, `docs/`, `run_npu2_makefile_peano_synthetic_verify.lit`.
-  None affect runtime behavior — recreate them only if needed.
-
-**Behavior differences worth noting:**
-
-- `backend_presets.py` is still imported by prefill/decode for
-  `RGR_BACKEND` etc., but `cache.load_and_run` ignores its
-  `backend_kwargs` argument (kept only for API parity). The
-  kernel-tuning knobs (`omit_pingpong`, `runtime_loop_tiling_sizes`,
-  `omit_while_true_loop`, etc.) move to kwargs on the `build_*_ir`
-  calls and are applied during the one-shot IR-generation step.
-- `prepare_air_project()` in the source wipes a single global
-  `air_project/` between compiles; this port wipes per-kernel
-  `.<name>.work/` workdirs inside `compile_aie_to_elf` and stages
-  `.o` files per-call instead.
+The MAC config bits matter: AIE2P bf16 mac intrinsics like
+`I512_I512_ACC1024_bf_mac_conf` accept a `conf` operand that selects
+sub-element multiply patterns. **Use `conf=60` for per-lane bf16 MAC**
+(matches `attn.py`); `conf=0` silently produces wrong dot products and
+the synthetic-weights verify doesn't always catch it. Real-HF prompts
+do.
 
 ## Hand-editing the IR
 
 ```bash
-make compile                                       # populates the *.npu.air.mlir cache
+make compile
 $EDITOR build_peano/decode_kernel_cache/lm_head_gemv.npu.air.mlir
 rm build_peano/decode_kernel_cache/lm_head_gemv.elf
-# next `make run` will rebuild lm_head_gemv.elf from your edited IR
-# (or call cache.compile_from_cached_ir("lm_head_gemv", "lm_head_gemv"))
+make run                                 # rebuilds lm_head_gemv.elf from your edits
 ```
 
-## Quick start
+## Plan & tracking
 
-```bash
-# Compile all unique kernels (~80 s; flash_attn IR-gen is the slow step)
-make compile
-
-# Run inference (instruct model, up to 1000 tokens, stops on EOT)
-make run HF_MODEL_ID=unsloth/Llama-3.2-1B-Instruct \
-    PROMPT="What is the capital of France?"
-```
-
-See [`../llama32_1b/README.md`](../llama32_1b/README.md) for prerequisites
-(MLIR-AIR base env, HuggingFace setup, weight download, etc.) — the
-project shares all of them.
+Full project plan: `~/.claude/plans/using-flash-attention-which-is-rosy-crane.md`
+Beads epic: `PythoC-8ns` in `~/npu-dev-pythoc/PythoC`.
