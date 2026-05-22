@@ -79,7 +79,7 @@ endif
 PREFILL_MANIFEST := $(BUILD_DIR)/prefill_kernel_cache/manifest.json
 DECODE_MANIFEST  := $(BUILD_DIR)/decode_kernel_cache/manifest.json
 
-.PHONY: help compile ensure-cache run profile verify chat check-awq-weights run-awq run-awq-experimental profile-awq verify-awq test-awq-gemv test-awq-gemv-npu clean
+.PHONY: help compile ensure-cache run profile verify chat check-awq-weights run-awq run-awq-experimental profile-awq verify-awq test-awq-gemv test-awq-gemv-npu snapshot hf-gate clean
 
 help:
 	@echo "============================================================"
@@ -98,6 +98,10 @@ help:
 	@echo "  make run-awq-experimental  Opt-in packed-AWQ NPU decode o_proj+FFN path"
 	@echo "  make profile-awq      Profile AIE/NPU pipeline with repacked AWQ weights"
 	@echo "  make verify-awq       Verify AIE/NPU pipeline with repacked AWQ weights"
+	@echo ""
+	@echo "Phase metrics:"
+	@echo "  make snapshot         Capture a per-phase JSON snapshot + diff vs latest"
+	@echo "  make hf-gate          Real-HF-weights answer correctness gate"
 	@echo ""
 	@echo "Maintenance:"
 	@echo "  make clean            Remove all build artifacts"
@@ -174,6 +178,22 @@ test-awq-gemv-npu:
 chat: ensure-cache
 	cd $(BUILD_DIR) && python3 $(srcdir)/llama32_1b_inference.py \
 		--run-only --interactive --n-tokens $(N_TOKENS) --model $(MODEL) $(WEIGHTS_FLAG) $(HF_MODEL_FLAG) $(QUANT_FLAG) $(AWQ_DECODE_EXPERIMENTAL_FLAG)
+
+# ---------------------------------------------------------------------------
+# Per-phase metrics harness (tests/test_phase_snapshot.py).
+# Captures a JSON snapshot of compile times, per-token decode latency, K/V
+# corr, logits corr, and the generated token sequence. Then diffs against
+# the most recent prior snapshot under tests/snapshots/.
+SNAPSHOT_N_TOKENS ?= 10
+SNAPSHOT_PROMPT   ?= What is the capital of France?
+snapshot: ensure-cache
+	python3 $(srcdir)/tests/test_phase_snapshot.py capture \
+		--n-tokens $(SNAPSHOT_N_TOKENS) --prompt "$(SNAPSHOT_PROMPT)"
+
+# Gold-standard answer-level correctness gate (real HF weights).
+# Auto-skips with a clear message if the HF cache isn't populated.
+hf-gate: ensure-cache
+	python3 -m pytest $(srcdir)/tests/test_hf_answer_gate.py -v -s
 
 all: compile profile
 
