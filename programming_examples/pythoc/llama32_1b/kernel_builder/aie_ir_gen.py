@@ -61,6 +61,18 @@ def _load_cached(name: str) -> str:
 
 def build_rms_gemms_rope_ir(seq_len, emb_dim, kv_dim, n_heads, n_kv_heads, head_dim,
                             *, verbose=False, omit_while_true_loop=False):
+    if _placed_builder_enabled("rms_gemms_rope"):
+        _ensure_builders_on_path()
+        from builders.rms_gemms_rope import build_rms_gemms_rope_module
+        if verbose:
+            print(f"  [aie_ir_gen] Using placed-IRON builder for rms_gemms_rope "
+                  f"(seq_len={seq_len}, emb_dim={emb_dim}, kv_dim={kv_dim}, "
+                  f"n_heads={n_heads}, n_kv_heads={n_kv_heads}, head_dim={head_dim})")
+        return build_rms_gemms_rope_module(
+            seq_len=seq_len, emb_dim=emb_dim, kv_dim=kv_dim,
+            n_heads=n_heads, n_kv_heads=n_kv_heads, head_dim=head_dim,
+            verbose=verbose,
+        )
     del seq_len, emb_dim, kv_dim, n_heads, n_kv_heads, head_dim
     del verbose, omit_while_true_loop
     return _load_cached("rms_gemms_rope")
