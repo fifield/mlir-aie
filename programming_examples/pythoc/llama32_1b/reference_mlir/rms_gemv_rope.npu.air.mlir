@@ -3049,53 +3049,18 @@ module {
       aie.next_bd ^bb6
     }
     %core_0_2 = aie.core(%tile_0_2) {
-      %cst = arith.constant 0.000000e+00 : bf16
-      %cst_5 = arith.constant 2.048000e+03 : bf16
-      %cst_6 = arith.constant 1.001360e-05 : bf16
-      %c2048 = arith.constant 2048 : index
-      %c16 = arith.constant 16 : index
-      %cst_7 = arith.constant dense<0.000000e+00> : vector<16xbf16>
-      %c0 = arith.constant 0 : index
       cf.br ^bb1
     ^bb1:  // 2 preds: ^bb0, ^bb1
       aie.use_lock(%lock_0_2_3, AcquireGreaterEqual, 1)
       aie.use_lock(%lock_0_2_2, AcquireGreaterEqual, 1)
       aie.use_lock(%lock_0_2_0, AcquireGreaterEqual, 1)
-      vector.transfer_write %cst_7, %buf0[%c0] {in_bounds = [true]} : vector<16xbf16>, memref<16xbf16, 2 : i32>
-      scf.for %arg0 = %c0 to %c2048 step %c16 {
-        %subview = memref.subview %buf3[%arg0] [16] [1] : memref<2048xbf16, 2 : i32> to memref<16xbf16, strided<[1], offset: ?>, 2 : i32>
-        %subview_8 = memref.subview %buf2[%arg0] [16] [1] : memref<2048xbf16, 2 : i32> to memref<16xbf16, strided<[1], offset: ?>, 2 : i32>
-        %8 = vector.transfer_read %subview[%c0], %cst {in_bounds = [true]} : memref<16xbf16, strided<[1], offset: ?>, 2 : i32>, vector<16xbf16>
-        %9 = arith.mulf %8, %8 : vector<16xbf16>
-        vector.transfer_write %9, %subview_8[%c0] {in_bounds = [true]} : vector<16xbf16>, memref<16xbf16, strided<[1], offset: ?>, 2 : i32>
-        %10 = vector.transfer_read %subview_8[%c0], %cst {in_bounds = [true]} : memref<16xbf16, strided<[1], offset: ?>, 2 : i32>, vector<16xbf16>
-        %11 = vector.transfer_read %buf0[%c0], %cst {in_bounds = [true]} : memref<16xbf16, 2 : i32>, vector<16xbf16>
-        %12 = arith.addf %11, %10 : vector<16xbf16>
-        vector.transfer_write %12, %buf0[%c0] {in_bounds = [true]} : vector<16xbf16>, memref<16xbf16, 2 : i32>
-      } {loop_annotation = #loop_annotation}
-      %0 = vector.transfer_read %buf0[%c0], %cst {in_bounds = [true]} : memref<16xbf16, 2 : i32>, vector<16xbf16>
-      %1 = vector.reduction <add>, %0 : vector<16xbf16> into bf16
-      %2 = arith.divf %1, %cst_5 : bf16
-      %3 = arith.addf %2, %cst_6 : bf16
-      %4 = arith.extf %3 : bf16 to f32
-      %5 = math.rsqrt %4 : f32
-      %6 = arith.truncf %5 : f32 to bf16
-      %7 = vector.broadcast %6 : bf16 to vector<16xbf16>
-      scf.for %arg0 = %c0 to %c2048 step %c16 {
-        %subview = memref.subview %buf3[%arg0] [16] [1] : memref<2048xbf16, 2 : i32> to memref<16xbf16, strided<[1], offset: ?>, 2 : i32>
-        %subview_8 = memref.subview %buf1[%arg0] [16] [1] : memref<2048xbf16, 2 : i32> to memref<16xbf16, strided<[1], offset: ?>, 2 : i32>
-        %subview_9 = memref.subview %buf2[%arg0] [16] [1] : memref<2048xbf16, 2 : i32> to memref<16xbf16, strided<[1], offset: ?>, 2 : i32>
-        %8 = vector.transfer_read %subview[%c0], %cst {in_bounds = [true]} : memref<16xbf16, strided<[1], offset: ?>, 2 : i32>, vector<16xbf16>
-        %9 = vector.transfer_read %subview_8[%c0], %cst {in_bounds = [true]} : memref<16xbf16, strided<[1], offset: ?>, 2 : i32>, vector<16xbf16>
-        %10 = arith.mulf %8, %7 : vector<16xbf16>
-        %11 = arith.mulf %10, %9 : vector<16xbf16>
-        vector.transfer_write %11, %subview_9[%c0] {in_bounds = [true]} : vector<16xbf16>, memref<16xbf16, strided<[1], offset: ?>, 2 : i32>
-      } {loop_annotation = #loop_annotation}
+      func.call @rms_norm_2048_bf16(%buf3, %buf1, %buf2, %buf0) : (memref<2048xbf16, 2 : i32>, memref<2048xbf16, 2 : i32>, memref<2048xbf16, 2 : i32>, memref<16xbf16, 2 : i32>) -> ()
       aie.use_lock(%lock_0_2, Release, 1)
       aie.use_lock(%lock_0_2_4, Release, 1)
       aie.use_lock(%lock_0_2_1, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 0, 0>, air.herd_name = "r_rms_herd", air.herd_size = array<i64: 1, 1>}
+    } {air.herd_local_id = array<i64: 0, 0>, air.herd_name = "r_rms_herd", air.herd_size = array<i64: 1, 1>, link_with = "rms_norm_2048_bf16.o"}
+    func.func private @rms_norm_2048_bf16(memref<2048xbf16, 2 : i32>, memref<2048xbf16, 2 : i32>, memref<2048xbf16, 2 : i32>, memref<16xbf16, 2 : i32>) attributes {link_with = "rms_norm_2048_bf16.o", llvm.emit_c_interface}
     aie.flow(%shim_noc_tile_0_0, DMA : 0, %tile_0_2, DMA : 0)
     aie.flow(%shim_noc_tile_0_0, DMA : 1, %tile_0_2, DMA : 1)
     aie.flow(%tile_0_2, DMA : 0, %shim_noc_tile_0_0, DMA : 0)

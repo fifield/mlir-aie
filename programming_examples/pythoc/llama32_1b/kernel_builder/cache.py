@@ -41,6 +41,7 @@ _LINK_OBJS = [
     "mv.o",
     "mv_k8192.o",
     "attn_decode_npu2.o",
+    "rms_norm_2048_bf16.o",
 ]
 
 

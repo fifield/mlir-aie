@@ -19,8 +19,7 @@ import sys
 import numpy as np
 from ml_dtypes import bfloat16
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.dirname(__file__))
 
 from llama32_1b_weights import LlamaConfig
 from kernel_builder.cache import KernelCache
