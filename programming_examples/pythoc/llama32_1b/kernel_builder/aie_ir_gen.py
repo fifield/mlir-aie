@@ -94,6 +94,15 @@ def build_rms_gemv_rope_ir(emb_dim, kv_dim, n_heads, n_kv_heads, head_dim,
 
 
 def build_o_gemv_ffn_ir(emb_dim, hidden_dim, *, verbose=False):
+    if _placed_builder_enabled("o_gemv_ffn"):
+        _ensure_builders_on_path()
+        from builders.o_gemv_ffn import build_o_gemv_ffn_module
+        if verbose:
+            print(f"  [aie_ir_gen] Using placed-IRON builder for o_gemv_ffn "
+                  f"(emb_dim={emb_dim}, hidden_dim={hidden_dim})")
+        return build_o_gemv_ffn_module(
+            emb_dim=emb_dim, hidden_dim=hidden_dim,
+        )
     del emb_dim, hidden_dim, verbose
     return _load_cached("o_gemv_ffn")
 
