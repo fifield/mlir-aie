@@ -28,9 +28,14 @@ _REQUIRED_OBJS = [
     "mv_k8192.o",
 ]
 
+# PythoC-built kernels - compiled lazily from kernels/*.py into CWD.
+_PYTHOC_KERNELS = [
+    ("rms_norm_2048_bf16.o", "compile_rms_norm"),
+]
+
 
 def _stage_required_objs():
-    """Copy required `.o` files from build/ into the current working dir.
+    """Copy required `.o` files from reference_o/ + build PythoC kernels into CWD.
 
     KernelCache stages link_with files from CWD into aiecc's tmpdir, so we
     must drop them into CWD before the first `compile_and_cache` call.
@@ -49,9 +54,23 @@ def _stage_required_objs():
     if missing:
         raise FileNotFoundError(
             f"Reference `.o` files missing from {_BUILD_DIR}: {missing}. "
-            "Seed build/ from the AIR worktree's build_peano, or build "
-            "from the kernels' .cc sources (Phase 3 replaces these)."
+            "Seed reference_o/ from the AIR worktree's build_peano."
         )
+
+    # Build PythoC-defined kernels (Phase 2+ replacements).
+    import importlib
+    kernels_build = importlib.import_module("kernels.build")
+    for obj_name, builder_name in _PYTHOC_KERNELS:
+        if (cwd / obj_name).exists():
+            continue
+        builder = getattr(kernels_build, builder_name)
+        out = builder(output_dir=str(cwd), verbose=False)
+        # compile_pythoc_source returns the basename in output_dir; sanity-check.
+        produced = (cwd / Path(out).name)
+        if not produced.exists() or produced.name != obj_name:
+            raise RuntimeError(
+                f"PythoC kernel {builder_name} produced {out!r} but expected {obj_name}"
+            )
 
 
 def compile_all_external_kernels(head_dim=64):
