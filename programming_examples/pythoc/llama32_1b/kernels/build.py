@@ -59,12 +59,7 @@ def compile_matvec(output_dir: Optional[str] = None, verbose: bool = False) -> P
     reference_o/mv.o is preserved.
     """
     import shutil, tempfile
-    from pythoc.aie import (
-        I512_I512_ACC1024_bf_mac_conf,
-        v32accfloat_to_v32bf16,
-    )
-    from pythoc.aie import extract_elem as _extract_elem
-    from pythoc.aie import shuffle_down as _shuffle_down
+    from pythoc.aie import I512_I512_ACC1024_bf_mac_conf, reduce_add
 
     with tempfile.TemporaryDirectory(prefix="mv_pythoc_") as tmp:
         produced = compile_pythoc_source(
@@ -75,9 +70,7 @@ def compile_matvec(output_dir: Optional[str] = None, verbose: bool = False) -> P
             verbose=verbose,
             extra_globals={
                 "I512_I512_ACC1024_bf_mac_conf": I512_I512_ACC1024_bf_mac_conf,
-                "v32accfloat_to_v32bf16": v32accfloat_to_v32bf16,
-                "extract_elem": _extract_elem,
-                "shuffle_down": _shuffle_down,
+                "reduce_add": reduce_add,
             },
         )
         dst_dir = Path(output_dir) if output_dir else Path.cwd()
