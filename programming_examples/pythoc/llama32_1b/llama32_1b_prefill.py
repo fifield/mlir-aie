@@ -34,10 +34,12 @@ from pathlib import Path
 import numpy as np
 from ml_dtypes import bfloat16
 
-# Add parent directory to path for kernel imports
-_PROG_EXAMPLES = str(Path(__file__).resolve().parent.parent)
-if _PROG_EXAMPLES not in sys.path:
-    sys.path.insert(0, _PROG_EXAMPLES)
+# Make sibling orchestration modules importable. We deliberately don't add
+# programming_examples/pythoc/ to sys.path: that directory is an implicit
+# namespace package and would shadow the real PythoC `pythoc` install.
+_HERE = str(Path(__file__).resolve().parent)
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
 
 from llama32_1b_weights import LlamaConfig, load_weights, generate_rope_lut
 from llama32_1b_reference import (
