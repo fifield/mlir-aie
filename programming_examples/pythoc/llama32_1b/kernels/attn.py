@@ -1,26 +1,18 @@
 # Flash attention kernels for llama32_1b decode path.
 #
-# Phase 3.4 STATUS: 15 of 19 attn_npu2.o symbols ported. The remaining
-# four (`max_g_bf16`, `sum_g`, `apply_causal_mask`, `fused_softmax`)
-# are NOT yet PythoC -- attn_npu2.o still provides them, and because
-# the 15 ported kernels are also defined inside attn_npu2.o, linking
-# both at once trips ld.lld's duplicate-symbol check. Until the
-# remaining four land (or attn_npu2.o is rebuilt with the 15 stripped /
-# renamed), the cached MLIR continues to point `link_with` at
-# attn_npu2.o for all 16 declarations and this .o is built but not
-# linked.
-#
-# kernels/build.py:compile_attn still builds attn_pythoc.o so the
-# 15-kernel port is exercised at compile time and the symbol table is
-# validated. To wire it in, port the four remaining kernels (see
-# attn_npu2.cc:270-700) and then run:
-#   python -c "import re,sys; ..."   to flip the func.func link_with
-# attributes in reference_mlir/flash_attn.npu.air.mlir.
+# Phase 3.4 STATUS: all 19 attn_npu2.o symbols ported. The four kernels
+# added at the bottom (`max_g_bf16`, `sum_g`, `apply_causal_mask`,
+# `fused_softmax`) close the port. `compile_attn` in kernels/build.py
+# uses `fused_softmax` as the named entry; every other @aie_kernel is
+# treated as a helper in the same TU and lands in attn_pythoc.o, which
+# is now wired up via _PYTHOC_KERNELS / _LINK_OBJS in kernel_builder/.
+# The cached MLIR's `link_with = "attn_npu2.o"` attributes are likewise
+# patched to "attn_pythoc.o" and attn_npu2.o is no longer staged.
 
 from aie.iron.pythoc import aie_kernel
 
 from pythoc import ptr, i16, i32, i64, f32, bf16, void
-from pythoc.aie import ACC2048_accfloat_add_conf, BFP576_BFP576_ACC2048_mac_conf, I1024_I1024_ACC2048_bf_mul_conf, I512_I512_ACC1024_bf_mac_conf, I512_I512_ACC1024_bf_mul_conf, I512_I512_ACC1024_bf_negmul_conf, acc_extract, acc_grow, aie_vector, broadcast, concat, exp2, getExpBf16, load_v, set_ctrl_reg, store_v, v32accfloat_to_v32bf16, v32bf16_to_v32accfloat, v64accfloat_to_v64bfp16ebs8, vector_add, vector_blend, vector_cast, vector_extract, vector_grow, vector_insert, vector_mul, vector_sub, vmax_ltbf16, vshuffle, zeros
+from pythoc.aie import ACC2048_accfloat_add_conf, BFP576_BFP576_ACC2048_mac_conf, I1024_I1024_ACC2048_bf_mul_conf, I512_I512_ACC1024_bf_mac_conf, I512_I512_ACC1024_bf_mul_conf, I512_I512_ACC1024_bf_negmul_conf, acc_extract, acc_grow, aie_vector, broadcast, concat, exp2, extract_elem, getExpBf16, insert_elem, load_v, reduce_add, set_ctrl_reg, store_v, v32accfloat_to_v32bf16, v32bf16_to_v32accfloat, v64accfloat_to_v64bfp16ebs8, vector_add, vector_blend, vector_cast, vector_extract, vector_grow, vector_insert, vector_mul, vector_sub, vmax_ltbf16, vshuffle, zeros
 
 
 @aie_kernel
@@ -782,5 +774,253 @@ def matmul_g_b_bf16(g_in: ptr[bf16, True], b_in: ptr[bf16, True], out: ptr[bf16,
 		m = m + 2
 
 
+# ---------------------------------------------------------------------------
+# Phase 3.4 (complete): the remaining four flash-attention kernels.
+#
+# These are appended AFTER the 15 already-working kernels above so they
+# act as additional helpers in the same compilation unit; `fused_softmax`
+# is intentionally placed LAST so PythoC's `compile_pythoc_source` AST
+# walker -- which `break`s on `function_name` -- picks it as the entry
+# point with everything else (matmul_g_b_bf16 included) compiled as
+# helpers in the same .o.
+#
+# Layout assumptions match attn_npu2.cc (lqp=lkp=64, column-major 8x8
+# tiled). See attn_npu2.cc:270-700 for the C++ source these mirror.
+# ---------------------------------------------------------------------------
 
 
+@aie_kernel
+def max_g_bf16(g: ptr[bf16, True], out: ptr[bf16, True]) -> void:
+	# Per-row max over G (column-major 8x8 tiled). Mirrors attn_npu2.cc:270.
+	# VecLen=32 processes 4 rows at a time (half a row-block).
+	#
+	# Init to bf16 lowest (0xff7f, ~-3.389e38) instead of -inf so that a
+	# fully-masked row collapsing to lowest-lowest=0 inside exp_g_minus_u
+	# does not produce NaN.
+	#
+	# llvm-aie's GISel legalizer has no lowering for either
+	# `vector.reduce.fmax` (bf16 or f32) on these widths, so we fold the
+	# per-row max in scalar bf16 via repeated extractelement + IfExp.
+	# We then pack the 8 row-maxes for the block into the low 8 lanes of
+	# a v32 bf16 and emit a single 8-lane store -- writing 4 contiguous
+	# scalar bf16 stores trips the same `<4 x bf16> G_FPTRUNC` legaliser
+	# bug as f32 does, even when the values are already bf16 (the
+	# optimiser keeps them in f32 registers internally).
+	vec_size: i32 = 32
+	block_size: i32 = 64
+	row_blocks: i32 = 8
+	col_blocks: i32 = 8
+	block_stride: i32 = 512
+	rows_per_block: i32 = 8
+	lowest_vec: aie_vector[bf16, 32] = broadcast(bf16, 32, -3.389e38)
+
+	p_out: ptr[bf16] = out
+
+	rb: i32 = 0
+	while rb < row_blocks:
+		# Build a v32 bf16 staging vector holding all 8 row-maxes for this
+		# row block in the low 8 lanes.
+		row_max_vec: aie_vector[bf16, 32] = lowest_vec
+
+		half: i32 = 0
+		while half < 2:
+			# Inner loop over column blocks accumulating element-wise max.
+			max_vec: aie_vector[bf16, 32] = lowest_vec
+			base: i32 = rb * block_size + half * vec_size
+			cb: i32 = 0
+			while cb < col_blocks:
+				v: aie_vector[bf16, 32] = load_v(g + base + cb * block_stride, 32)
+				max_vec, cmp_mask = vmax_ltbf16(max_vec, v)
+				cb = cb + 1
+
+			# Scalar-reduce each 8-lane group in bf16. Scalar bf16
+			# comparisons lower to the native `vlt.bf16` predicate and
+			# avoid pulling in __gtsf2 (softfloat) from libcompiler-rt.
+			lane: i32 = 0
+			while lane < 4:
+				base_lane: i32 = lane * 8
+				m: bf16 = extract_elem(max_vec, base_lane)
+				e1: bf16 = extract_elem(max_vec, base_lane + 1)
+				m = e1 if e1 > m else m
+				e2: bf16 = extract_elem(max_vec, base_lane + 2)
+				m = e2 if e2 > m else m
+				e3: bf16 = extract_elem(max_vec, base_lane + 3)
+				m = e3 if e3 > m else m
+				e4: bf16 = extract_elem(max_vec, base_lane + 4)
+				m = e4 if e4 > m else m
+				e5: bf16 = extract_elem(max_vec, base_lane + 5)
+				m = e5 if e5 > m else m
+				e6: bf16 = extract_elem(max_vec, base_lane + 6)
+				m = e6 if e6 > m else m
+				e7: bf16 = extract_elem(max_vec, base_lane + 7)
+				m = e7 if e7 > m else m
+				row_max_vec = insert_elem(row_max_vec, half * 4 + lane, m)
+				lane = lane + 1
+			half = half + 1
+
+		# Emit a single 8-lane bf16 store from lanes [0..7] of the staging vec.
+		row_max_v8: aie_vector[bf16, 8] = vector_extract(row_max_vec, 0, 8)
+		store_v(p_out, row_max_v8)
+		p_out = p_out + rows_per_block
+		rb = rb + 1
+
+
+@aie_kernel
+def sum_g(g: ptr[bf16, True], s: ptr[bf16, True]) -> void:
+	# Per-row sum over G (column-major 8x8 tiled). Mirrors attn_npu2.cc:472.
+	#
+	# The .cc accumulates in accfloat (f32-equivalent) and reduces in f32.
+	# We can't replicate that in PythoC without bumping into:
+	#   - the accfloat register-pair format (`<32 x f32>` at the LLVM level
+	#     but a 40-bit-per-lane HW register pair semantically); inserting
+	#     plain f32 values via `insert_elem` corrupts the back-conversion;
+	#   - the missing legaliser for `<N x bfloat> G_FPTRUNC`, so we cannot
+	#     emit four scalar `bf16(f32)` stores in a row without llc dying.
+	#
+	# Solution: stay in BF16 throughout. After exp_g_minus_u every lane is
+	# in [0, 1], 8 column-block adds keep each lane in [0, 8], 8 row-block
+	# horizontal sums in [0, 64] -- all exactly representable in bf16. We
+	# `vector_add` v32 bf16 across the col blocks (which lowers via the
+	# AIE2P accfloat-internal addition intrinsic), then scalar-fold each
+	# 8-lane row group via IfExp-style += (bf16 scalar add lowers to a
+	# single `vadd.bf16`, no softfloat libcalls). The 8 row-sums for the
+	# whole row block stage in a v32 bf16 vector and emit a single v8
+	# store at the end.
+	vec_size: i32 = 32
+	block_size: i32 = 64
+	row_blocks: i32 = 8
+	col_blocks: i32 = 8
+	block_stride: i32 = 512
+	rows_per_block: i32 = 8
+
+	p_s: ptr[bf16] = s
+
+	rb: i32 = 0
+	while rb < row_blocks:
+		row_sum_vec: aie_vector[bf16, 32] = zeros(bf16, 32)
+
+		half: i32 = 0
+		while half < 2:
+			sum_vec: aie_vector[bf16, 32] = zeros(bf16, 32)
+			base: i32 = rb * block_size + half * vec_size
+			cb: i32 = 0
+			while cb < col_blocks:
+				v: aie_vector[bf16, 32] = load_v(g + base + cb * block_stride, 32)
+				sum_vec = vector_add(sum_vec, v)
+				cb = cb + 1
+
+			# Scalar-fold each 8-lane row group via bf16 scalar adds.
+			lane: i32 = 0
+			while lane < 4:
+				base_lane: i32 = lane * 8
+				m: bf16 = extract_elem(sum_vec, base_lane)
+				m = m + extract_elem(sum_vec, base_lane + 1)
+				m = m + extract_elem(sum_vec, base_lane + 2)
+				m = m + extract_elem(sum_vec, base_lane + 3)
+				m = m + extract_elem(sum_vec, base_lane + 4)
+				m = m + extract_elem(sum_vec, base_lane + 5)
+				m = m + extract_elem(sum_vec, base_lane + 6)
+				m = m + extract_elem(sum_vec, base_lane + 7)
+				row_sum_vec = insert_elem(row_sum_vec, half * 4 + lane, m)
+				lane = lane + 1
+			half = half + 1
+
+		row_sum_v8: aie_vector[bf16, 8] = vector_extract(row_sum_vec, 0, 8)
+		store_v(p_s, row_sum_v8)
+		p_s = p_s + rows_per_block
+		rb = rb + 1
+
+
+@aie_kernel
+def apply_causal_mask(g: ptr[bf16, True], q_block_idx: i32, kv_block_idx: i32) -> void:
+	# Causal mask on a 64x64 column-major 8x8 tiled G buffer.
+	# Mirrors attn_npu2.cc:634. Three cases:
+	#   1. kv > q : entire block above diagonal -> all -inf.
+	#   2. kv < q : entire block below diagonal -> no-op.
+	#   3. kv == q: scalar fallback (one BlkDim=8 row slice at a time).
+	#
+	# The C++ implementation builds an aie::mask<8> + aie::select for
+	# partial blocks; we drop that in favour of scalar writes, which is
+	# acceptable here because the diagonal block runs once per layer and
+	# the mask shape is constant 64x64.
+	#
+	# The mask value MUST be a true bf16 -inf (0xff80), not just bf16
+	# lowest (0xff7f, ~-3.389e38). max_g_bf16 initialises with lowest;
+	# if we mask with lowest too, max(...) returns lowest for a fully
+	# masked row, then `G - max = lowest - lowest = 0` and `exp(0) = 1`
+	# instead of 0 -- which corrupts the softmax. With true -inf,
+	# `max(lowest, -inf) = lowest` and `-inf - lowest = -inf`, which
+	# `exp_g_minus_u` clamps back to lowest before `exp`, yielding 0.
+	#
+	# llvmlite's `ir.Constant(bfloat, -1e40)` overflows float32; build
+	# the -inf vector by broadcasting the 0xff80 bit-pattern as an i16
+	# (-128 signed) and bitcasting to bf16.
+	vec_size: i32 = 32
+	lqp: i32 = 64
+	lkp: i32 = 64
+	blk_dim: i32 = 8
+	neg_inf_bits_vec: aie_vector[i16, 32] = broadcast(i16, 32, -128)
+	neg_inf_vec: aie_vector[bf16, 32] = vector_cast(neg_inf_bits_vec, bf16, 32)
+	neg_inf_v8_bits: aie_vector[i16, 8] = broadcast(i16, 8, -128)
+	neg_inf_v8: aie_vector[bf16, 8] = vector_cast(neg_inf_v8_bits, bf16, 8)
+	neg_inf_val: bf16 = extract_elem(neg_inf_v8, 0)
+
+	if kv_block_idx > q_block_idx:
+		# Above-diagonal block -> overwrite all 4096 elements with -inf.
+		p: ptr[bf16] = g
+		i: i32 = 0
+		total: i32 = lqp * lkp
+		while i < total:
+			store_v(p, neg_inf_vec)
+			p = p + vec_size
+			i = i + vec_size
+	else:
+		if kv_block_idx == q_block_idx:
+			# Diagonal block: scalar masking per row, per 8-element slice.
+			row: i32 = 0
+			while row < lqp:
+				mask_start: i32 = row + 1
+				row_blk: i32 = row // blk_dim
+				row_in: i32 = row - row_blk * blk_dim
+				col_blk: i32 = 0
+				while col_blk < lkp // blk_dim:
+					col_start: i32 = col_blk * blk_dim
+					off: i32 = col_blk * (lqp * blk_dim) + row_blk * (blk_dim * blk_dim) + row_in * blk_dim
+					p_row: ptr[bf16] = g + off
+					if mask_start < lkp:
+						if col_start >= mask_start:
+							# Entire 8-element slice is masked.
+							c: i32 = 0
+							while c < blk_dim:
+								p_row[c] = neg_inf_val
+								c = c + 1
+						else:
+							if col_start + blk_dim > mask_start:
+								# Partial slice: mask cols >= mask_start.
+								c2: i32 = 0
+								while c2 < blk_dim:
+									if col_start + c2 >= mask_start:
+										p_row[c2] = neg_inf_val
+									c2 = c2 + 1
+					col_blk = col_blk + 1
+				row = row + 1
+
+
+@aie_kernel
+def fused_softmax(g: ptr[bf16, True], up: ptr[bf16, True], sp: ptr[bf16, True], r: ptr[bf16, True]) -> void:
+	# Composes the helpers above. Mirrors attn_npu2.cc:601.
+	#   r  = max(G, axis=-1)
+	#   r  = max(up, r)             # online new max
+	#   G  = exp(G - r)             # softmax numerator
+	#   sp = exp(up - r)            # rescale factor
+	#   up = r                      # publish new max
+	#   r  = sp                     # downstream wants r=rescale
+	#   sp = sum(G, axis=-1)        # softmax denominator
+	zero_offset: i32 = 0
+	max_g_bf16(g, r)
+	maximum_up_u_bf16(up, r)
+	exp_g_minus_u(r, g)
+	exp_up_minus_u(up, r, sp)
+	vector_copy_32elems(zero_offset, r, up)
+	vector_copy_32elems(zero_offset, sp, r)
+	sum_g(g, sp)
