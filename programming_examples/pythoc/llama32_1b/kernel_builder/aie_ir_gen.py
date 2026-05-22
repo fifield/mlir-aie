@@ -73,6 +73,18 @@ def build_o_ffn_ir(seq_len, emb_dim, hidden_dim, *, verbose=False,
 
 
 def build_flash_attn_ir(seq_len, n_heads, n_kv_heads, head_dim, *, verbose=False):
+    if _placed_builder_enabled("flash_attn"):
+        _ensure_builders_on_path()
+        from builders.flash_attn import build_flash_attn_module
+        if verbose:
+            print(f"  [aie_ir_gen] Using placed-IRON builder for flash_attn "
+                  f"(seq_len={seq_len}, n_heads={n_heads}, "
+                  f"n_kv_heads={n_kv_heads}, head_dim={head_dim})")
+        return build_flash_attn_module(
+            seq_len=seq_len, n_heads=n_heads,
+            n_kv_heads=n_kv_heads, head_dim=head_dim,
+            verbose=verbose,
+        )
     del seq_len, n_heads, n_kv_heads, head_dim, verbose
     return _load_cached("flash_attn")
 
