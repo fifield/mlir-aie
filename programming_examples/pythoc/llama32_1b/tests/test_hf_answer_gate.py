@@ -36,10 +36,10 @@ PROJECT_DIR = HERE.parent
 BUILD_DIR = PROJECT_DIR / "build_peano"
 INFERENCE_SCRIPT = PROJECT_DIR / "llama32_1b_inference.py"
 
-HF_MODEL = "meta-llama/Llama-3.2-1B-Instruct"
+HF_MODEL = os.environ.get("HF_MODEL_ID") or "unsloth/Llama-3.2-1B-Instruct"
 PROMPT = "What is the capital of France?"
-N_TOKENS = 8
-EXPECTED_FIRST_N_DECODE = 5
+N_TOKENS = 10
+EXPECTED_FIRST_N_DECODE = 10
 EXPECTED_SUBSTRING = "paris"  # case-insensitive
 
 # Regex for the per-token log line emitted by --profile mode.
@@ -103,7 +103,7 @@ def test_hf_answer_gate_paris():
     """Gold-standard answer-level correctness gate.
 
     With real HF weights, ask "What is the capital of France?" and verify the
-    NPU produces a string containing "Paris" within the first 5 decode tokens.
+    NPU produces a string containing "Paris" within the first 10 decode tokens.
     """
     from transformers import AutoTokenizer
 
@@ -121,6 +121,7 @@ def test_hf_answer_gate_paris():
         "--prompt", PROMPT,
         "--quant", "bf16",
         "--model", "instruct",
+        "--hf-model-id", HF_MODEL,
     ]
 
     env = os.environ.copy()

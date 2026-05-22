@@ -45,9 +45,10 @@ QUANT ?= bf16
 AWQ_WEIGHTS ?=
 AWQ_DECODE_EXPERIMENTAL ?= 0
 
-# Optional: override the HF repo (or pass a local dir). Useful for non-gated
-# mirrors, e.g. HF_MODEL_ID=unsloth/Llama-3.2-1B-Instruct
-HF_MODEL_ID ?=
+# HF repo (or local dir) to load weights+tokenizer from. Defaults to the
+# unsloth non-gated mirror so `make run` and `make hf-gate` work out of
+# the box without HF auth. Override with HF_MODEL_ID=meta-llama/...
+HF_MODEL_ID ?= unsloth/Llama-3.2-1B-Instruct
 
 # Quote Make variables for safe shell forwarding. PROMPT is intentionally left
 # inside double quotes in recipes so normal make run PROMPT="..." remains tidy.
@@ -192,8 +193,10 @@ snapshot: ensure-cache
 
 # Gold-standard answer-level correctness gate (real HF weights).
 # Auto-skips with a clear message if the HF cache isn't populated.
+# The gate reads HF_MODEL_ID from the environment (default
+# unsloth/Llama-3.2-1B-Instruct) so it works without HF auth.
 hf-gate: ensure-cache
-	python3 -m pytest $(srcdir)/tests/test_hf_answer_gate.py -v -s
+	HF_MODEL_ID=$(HF_MODEL_ID_Q) python3 -m pytest $(srcdir)/tests/test_hf_answer_gate.py -v -s
 
 all: compile profile
 
