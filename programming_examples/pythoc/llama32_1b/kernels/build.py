@@ -218,6 +218,12 @@ def compile_bf16_gemm(
     verbose: bool = False,
     A_layout_transposed: bool = False,
     c_dtype: str = "f32",
+    A_M_STRIDE: Optional[int] = None,
+    A_K_STRIDE: Optional[int] = None,
+    B_K_STRIDE: Optional[int] = None,
+    B_N_STRIDE: Optional[int] = None,
+    C_M_STRIDE: Optional[int] = None,
+    C_N_STRIDE: Optional[int] = None,
 ) -> Path:
     """Compile kernels/bf16_gemm.py -> bf16_gemm_pythoc[_<tag>].o for one tile shape.
 
@@ -272,17 +278,26 @@ def compile_bf16_gemm(
 
     # Stride scalars for the [M_BLOCKS, K_MICRO, 8, 8] reference layout. Each
     # 8x8 micro-tile is 64 elems; strides count elements (not bytes).
+    #
+    # Each stride can be overridden via an explicit argument; the defaults
+    # below assume the kernel's M_BLOCKS / N_BLOCKS / K_MICRO loop bounds
+    # match the L1 buffer's outer-dim layout. When the kernel iterates beyond
+    # the buffer's own M/N/K extent (e.g. accumulating into a buf_C that's
+    # larger than one (M_BLOCKS, N_BLOCKS) tile), the strides must reference
+    # the BUFFER's outer dims, not the loop bounds -- pass overrides then.
     if A_layout_transposed:
         # A laid out as [K_MICRO, M_BLOCKS, 8, 8].
-        A_M_STRIDE = 64
-        A_K_STRIDE = M_BLOCKS * 64
+        A_M_STRIDE_def = 64
+        A_K_STRIDE_def = M_BLOCKS * 64
     else:
-        A_M_STRIDE = K_MICRO * 64
-        A_K_STRIDE = 64
-    B_K_STRIDE = N_BLOCKS * 64
-    B_N_STRIDE = 64
-    C_M_STRIDE = N_BLOCKS * 64
-    C_N_STRIDE = 64
+        A_M_STRIDE_def = K_MICRO * 64
+        A_K_STRIDE_def = 64
+    A_M_STRIDE = A_M_STRIDE if A_M_STRIDE is not None else A_M_STRIDE_def
+    A_K_STRIDE = A_K_STRIDE if A_K_STRIDE is not None else A_K_STRIDE_def
+    B_K_STRIDE = B_K_STRIDE if B_K_STRIDE is not None else N_BLOCKS * 64
+    B_N_STRIDE = B_N_STRIDE if B_N_STRIDE is not None else 64
+    C_M_STRIDE = C_M_STRIDE if C_M_STRIDE is not None else N_BLOCKS * 64
+    C_N_STRIDE = C_N_STRIDE if C_N_STRIDE is not None else 64
 
     extras = {
         "BFP576_BFP576_ACC2048_mac_conf": BFP576_BFP576_ACC2048_mac_conf,
@@ -324,6 +339,12 @@ def compile_bf16_gemm(
         function_name = "bf16_gemm_kernel_bf16out"
     else:
         function_name = "bf16_gemm_kernel"
+    # If any stride differs from the AT/non-AT default, mangle the tag so
+    # the output name disambiguates from the default-stride variant.
+    if (A_M_STRIDE != A_M_STRIDE_def or A_K_STRIDE != A_K_STRIDE_def
+        or B_K_STRIDE != N_BLOCKS * 64 or B_N_STRIDE != 64
+        or C_M_STRIDE != N_BLOCKS * 64 or C_N_STRIDE != 64):
+        tag += f"_s{A_M_STRIDE}_{A_K_STRIDE}_{B_K_STRIDE}_{B_N_STRIDE}_{C_M_STRIDE}_{C_N_STRIDE}"
     name = output_name or f"bf16_gemm_pythoc_{tag}"
 
     try:
