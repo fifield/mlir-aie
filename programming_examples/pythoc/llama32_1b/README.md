@@ -35,8 +35,14 @@ behind a feature flag until each builder lands.
 | `builders/rms_gemv_rope.py` | decode (RMSNorm + QKV GEMV + RoPE) | per-layer decode | ✓ Phase 4.3 |
 | `builders/o_gemv_ffn.py` | decode (O + FFN) | per-layer decode | ✓ Phase 4.4 |
 | `builders/flash_attn.py` | prefill flash attention | `llama32_1b_prefill.py` | ✓ Phase 4.2 |
-| `rms_gemms_rope` | prefill (RMSNorm + QKV GEMM + RoPE) | per-layer prefill | ☐ cached MLIR substrate |
+| `builders/rms_gemms_rope.py` | prefill (RMSNorm + QKV GEMM + RoPE) | per-layer prefill | ◐ Phase 4.5a (RMSNorm device only, cached-splice) |
 | `o_ffn` | prefill (O + FFN with GEMMs) | per-layer prefill | ☐ cached MLIR substrate |
+
+Note: Phase 4.5a (rms_gemms_rope: r_weighted_rms_norm_seg device only)
+on placed-IRON; the other 6 devices in the prefill RMS+GEMMS+RoPE
+fused launch (4 GEMM segs, 2 RoPE segs, 1 dispatcher) come from the
+cached MLIR via splice. Subsequent phases (4.5b/c/d/e) extend the
+splice to the remaining devices.
 
 Decode steady-state: ~7.8 tok/s on NPU2 with the current kernels (real
 HF weights, `unsloth/Llama-3.2-1B-Instruct`).
