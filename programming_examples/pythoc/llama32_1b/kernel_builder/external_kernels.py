@@ -34,6 +34,7 @@ _PYTHOC_KERNELS = [
     ("silu_and_mul_bf16.o", "compile_silu_and_mul"),
     ("rope_pythoc.o", "compile_rope"),
     ("mv_pythoc.o", "compile_matvec"),
+    ("mv_k8192_pythoc.o", "compile_matvec_k8192"),
 ]
 
 
