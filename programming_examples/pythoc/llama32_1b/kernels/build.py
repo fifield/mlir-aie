@@ -49,6 +49,32 @@ def compile_silu_and_mul(output_dir: Optional[str] = None, verbose: bool = False
     )
 
 
+def compile_matvec_k8192(output_dir: Optional[str] = None, verbose: bool = False) -> Path:
+    """Compile kernels/matvec_k8192.py -> mv_k8192_pythoc.o.
+
+    Same shape as compile_matvec but with the FFN down-projection symbol
+    names (`dg_matvec_vectorized_bf16_bf16`, `dg_linalg_fill_bf16`).
+    """
+    import shutil, tempfile
+    from pythoc.aie import I512_I512_ACC1024_bf_mac_conf, reduce_add
+    with tempfile.TemporaryDirectory(prefix="mv_k8192_pythoc_") as tmp:
+        produced = compile_pythoc_source(
+            source_code=_read("matvec_k8192.py"),
+            function_name="dg_matvec_vectorized_bf16_bf16",
+            target_arch="aie2p",
+            output_dir=tmp,
+            verbose=verbose,
+            extra_globals={
+                "I512_I512_ACC1024_bf_mac_conf": I512_I512_ACC1024_bf_mac_conf,
+                "reduce_add": reduce_add,
+            },
+        )
+        dst_dir = Path(output_dir) if output_dir else Path.cwd()
+        dst = dst_dir / "mv_k8192_pythoc.o"
+        shutil.copy2(produced, dst)
+        return dst
+
+
 def compile_matvec(output_dir: Optional[str] = None, verbose: bool = False) -> Path:
     """Compile kernels/matvec.py -> mv_pythoc.o.
 
