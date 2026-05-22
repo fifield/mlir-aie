@@ -34,13 +34,11 @@ from .aie_compile import AIECompileArtifact, compile_aie_to_elf
 # ---------------------------------------------------------------------------
 
 _LINK_OBJS = [
-    "silu_and_mul.o",
-    "rope.o",
+    # AIR-reference .cc kernels still in use (Phase 3.4 / lm_head_gemv).
     "attn.o",
     "attn_npu2.o",
-    "mv.o",
-    "mv_k8192.o",
     "attn_decode_npu2.o",
+    # PythoC-built kernels.
     "rms_norm_2048_bf16.o",
     "silu_and_mul_bf16.o",
     "rope_pythoc.o",

@@ -17,15 +17,13 @@ from pathlib import Path
 
 _BUILD_DIR = Path(__file__).resolve().parent.parent / "reference_o"
 
-# Object files referenced by the cached MLIRs via `link_with = "..."`.
+# Object files still on the AIR reference (no PythoC port yet) -- staged
+# from reference_o/ into CWD so aiecc's link step finds them. As kernels
+# get ported, their entry moves to _PYTHOC_KERNELS below.
 _REQUIRED_OBJS = [
-    "silu_and_mul.o",
-    "rope.o",
     "attn.o",
     "attn_npu2.o",
     "attn_decode_npu2.o",
-    "mv.o",
-    "mv_k8192.o",
 ]
 
 # PythoC-built kernels - compiled lazily from kernels/*.py into CWD.
