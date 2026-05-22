@@ -10,7 +10,6 @@ here wires that up and writes the resulting `.o` into CWD so the cache
 stages it for aiecc link.
 """
 
-import os
 from pathlib import Path
 from typing import Optional
 
