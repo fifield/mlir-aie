@@ -48,6 +48,85 @@ def compile_silu_and_mul(output_dir: Optional[str] = None, verbose: bool = False
     )
 
 
+def compile_attn(output_dir: Optional[str] = None, verbose: bool = False) -> Path:
+    """Compile kernels/attn.py -> attn_pythoc.o.
+
+    Source carries 16+ @aie_kernel functions for flash attention. The
+    last one defined (`matmul_g_b_bf16`) is the named entry point;
+    every earlier function becomes a "helper" and is exported in the
+    same .o thanks to PythoC's AST walker breaking on the named match.
+
+    All lazy AIE2P intrinsics referenced inside the kernels must be
+    injected via `extra_globals` -- compile_pythoc_source only seeds
+    its hard-coded import list and the AST visitor's NameError trap
+    fires on anything else.
+    """
+    import shutil, tempfile
+    from pythoc.aie import (
+        ACC2048_accfloat_add_conf,
+        BFP576_BFP576_ACC2048_mac_conf,
+        I1024_I1024_ACC2048_bf_mul_conf,
+        I512_I512_ACC1024_bf_mac_conf,
+        I512_I512_ACC1024_bf_mul_conf,
+        I512_I512_ACC1024_bf_negmul_conf,
+        acc_extract,
+        acc_grow,
+        concat,
+        exp2,
+        getExpBf16,
+        set_ctrl_reg,
+        v32accfloat_to_v32bf16,
+        v32bf16_to_v32accfloat,
+        v64accfloat_to_v64bfp16ebs8,
+        vector_blend,
+        vector_cast,
+        vector_extract,
+        vector_grow,
+        vector_insert,
+        vector_sub,
+        vmax_ltbf16,
+        vshuffle,
+    )
+    extras = {
+        "ACC2048_accfloat_add_conf": ACC2048_accfloat_add_conf,
+        "BFP576_BFP576_ACC2048_mac_conf": BFP576_BFP576_ACC2048_mac_conf,
+        "I1024_I1024_ACC2048_bf_mul_conf": I1024_I1024_ACC2048_bf_mul_conf,
+        "I512_I512_ACC1024_bf_mac_conf": I512_I512_ACC1024_bf_mac_conf,
+        "I512_I512_ACC1024_bf_mul_conf": I512_I512_ACC1024_bf_mul_conf,
+        "I512_I512_ACC1024_bf_negmul_conf": I512_I512_ACC1024_bf_negmul_conf,
+        "acc_extract": acc_extract,
+        "acc_grow": acc_grow,
+        "concat": concat,
+        "exp2": exp2,
+        "getExpBf16": getExpBf16,
+        "set_ctrl_reg": set_ctrl_reg,
+        "v32accfloat_to_v32bf16": v32accfloat_to_v32bf16,
+        "v32bf16_to_v32accfloat": v32bf16_to_v32accfloat,
+        "v64accfloat_to_v64bfp16ebs8": v64accfloat_to_v64bfp16ebs8,
+        "vector_blend": vector_blend,
+        "vector_cast": vector_cast,
+        "vector_extract": vector_extract,
+        "vector_grow": vector_grow,
+        "vector_insert": vector_insert,
+        "vector_sub": vector_sub,
+        "vmax_ltbf16": vmax_ltbf16,
+        "vshuffle": vshuffle,
+    }
+    with tempfile.TemporaryDirectory(prefix="attn_pythoc_") as tmp:
+        produced = compile_pythoc_source(
+            source_code=_read("attn.py"),
+            function_name="matmul_g_b_bf16",
+            target_arch="aie2p",
+            output_dir=tmp,
+            verbose=verbose,
+            extra_globals=extras,
+        )
+        dst_dir = Path(output_dir) if output_dir else Path.cwd()
+        dst = dst_dir / "attn_pythoc.o"
+        shutil.copy2(produced, dst)
+        return dst
+
+
 def compile_matvec_k8192(output_dir: Optional[str] = None, verbose: bool = False) -> Path:
     """Compile kernels/matvec_k8192.py -> mv_k8192_pythoc.o.
 
