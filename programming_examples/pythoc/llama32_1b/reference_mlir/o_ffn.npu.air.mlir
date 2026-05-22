@@ -8929,7 +8929,7 @@ module {
         aie.use_lock(%lock_7_2_39, Release, 1)
       } {loop_annotation = #loop_annotation}
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 7, 0>, air.herd_name = "sw_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "silu_and_mul.o"}
+    } {air.herd_local_id = array<i64: 7, 0>, air.herd_name = "sw_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "silu_and_mul_bf16.o"}
     %mem_6_2 = aie.mem(%tile_6_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb4)
     ^bb1:  // 2 preds: ^bb0, ^bb2
@@ -8993,7 +8993,7 @@ module {
         aie.use_lock(%lock_6_2_34, Release, 1)
       } {loop_annotation = #loop_annotation}
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 6, 0>, air.herd_name = "sw_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "silu_and_mul.o"}
+    } {air.herd_local_id = array<i64: 6, 0>, air.herd_name = "sw_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "silu_and_mul_bf16.o"}
     %mem_5_2 = aie.mem(%tile_5_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb4)
     ^bb1:  // 2 preds: ^bb0, ^bb2
@@ -9057,7 +9057,7 @@ module {
         aie.use_lock(%lock_5_2_29, Release, 1)
       } {loop_annotation = #loop_annotation}
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 5, 0>, air.herd_name = "sw_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "silu_and_mul.o"}
+    } {air.herd_local_id = array<i64: 5, 0>, air.herd_name = "sw_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "silu_and_mul_bf16.o"}
     %mem_4_2 = aie.mem(%tile_4_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb4)
     ^bb1:  // 2 preds: ^bb0, ^bb2
@@ -9121,7 +9121,7 @@ module {
         aie.use_lock(%lock_4_2_24, Release, 1)
       } {loop_annotation = #loop_annotation}
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 4, 0>, air.herd_name = "sw_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "silu_and_mul.o"}
+    } {air.herd_local_id = array<i64: 4, 0>, air.herd_name = "sw_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "silu_and_mul_bf16.o"}
     %mem_3_2 = aie.mem(%tile_3_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb4)
     ^bb1:  // 2 preds: ^bb0, ^bb2
@@ -9185,7 +9185,7 @@ module {
         aie.use_lock(%lock_3_2_19, Release, 1)
       } {loop_annotation = #loop_annotation}
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 3, 0>, air.herd_name = "sw_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "silu_and_mul.o"}
+    } {air.herd_local_id = array<i64: 3, 0>, air.herd_name = "sw_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "silu_and_mul_bf16.o"}
     %mem_2_2 = aie.mem(%tile_2_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb4)
     ^bb1:  // 2 preds: ^bb0, ^bb2
@@ -9249,7 +9249,7 @@ module {
         aie.use_lock(%lock_2_2_14, Release, 1)
       } {loop_annotation = #loop_annotation}
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 2, 0>, air.herd_name = "sw_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "silu_and_mul.o"}
+    } {air.herd_local_id = array<i64: 2, 0>, air.herd_name = "sw_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "silu_and_mul_bf16.o"}
     %mem_1_2 = aie.mem(%tile_1_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb4)
     ^bb1:  // 2 preds: ^bb0, ^bb2
@@ -9313,7 +9313,7 @@ module {
         aie.use_lock(%lock_1_2_9, Release, 1)
       } {loop_annotation = #loop_annotation}
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 1, 0>, air.herd_name = "sw_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "silu_and_mul.o"}
+    } {air.herd_local_id = array<i64: 1, 0>, air.herd_name = "sw_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "silu_and_mul_bf16.o"}
     %mem_0_2 = aie.mem(%tile_0_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb4)
     ^bb1:  // 2 preds: ^bb0, ^bb2
@@ -9377,8 +9377,8 @@ module {
         aie.use_lock(%lock_0_2_4, Release, 1)
       } {loop_annotation = #loop_annotation}
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 0, 0>, air.herd_name = "sw_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "silu_and_mul.o"}
-    func.func private @silu_and_mul_bf16(memref<4096xbf16, 2 : i32>, memref<4096xbf16, 2 : i32>, memref<4096xbf16, 2 : i32>, i32) attributes {link_with = "silu_and_mul.o", llvm.emit_c_interface}
+    } {air.herd_local_id = array<i64: 0, 0>, air.herd_name = "sw_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "silu_and_mul_bf16.o"}
+    func.func private @silu_and_mul_bf16(memref<4096xbf16, 2 : i32>, memref<4096xbf16, 2 : i32>, memref<4096xbf16, 2 : i32>, i32) attributes {link_with = "silu_and_mul_bf16.o", llvm.emit_c_interface}
     aie.flow(%shim_noc_tile_0_0, DMA : 0, %tile_0_2, DMA : 0)
     aie.flow(%shim_noc_tile_1_0, DMA : 0, %tile_1_2, DMA : 0)
     aie.flow(%shim_noc_tile_2_0, DMA : 0, %tile_2_2, DMA : 0)
