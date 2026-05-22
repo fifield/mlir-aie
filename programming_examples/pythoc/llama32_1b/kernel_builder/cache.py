@@ -44,6 +44,7 @@ _LINK_OBJS = [
     "rope_pythoc.o",
     "mv_pythoc.o",
     "mv_k8192_pythoc.o",
+    # "attn_pythoc.o",  # Phase 3.4 WIP -- see kernels/attn.py docstring
 ]
 
 
