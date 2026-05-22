@@ -79,6 +79,16 @@ def build_flash_attn_ir(seq_len, n_heads, n_kv_heads, head_dim, *, verbose=False
 
 def build_rms_gemv_rope_ir(emb_dim, kv_dim, n_heads, n_kv_heads, head_dim,
                            *, verbose=False):
+    if _placed_builder_enabled("rms_gemv_rope"):
+        _ensure_builders_on_path()
+        from builders.rms_gemv_rope import build_rms_gemv_rope_module
+        if verbose:
+            print(f"  [aie_ir_gen] Using placed-IRON builder for rms_gemv_rope "
+                  f"(emb_dim={emb_dim}, kv_dim={kv_dim}, head_dim={head_dim})")
+        return build_rms_gemv_rope_module(
+            emb_dim=emb_dim, kv_dim=kv_dim,
+            n_heads=n_heads, n_kv_heads=n_kv_heads, head_dim=head_dim,
+        )
     del emb_dim, kv_dim, n_heads, n_kv_heads, head_dim, verbose
     return _load_cached("rms_gemv_rope")
 
