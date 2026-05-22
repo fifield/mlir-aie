@@ -13,9 +13,34 @@ Replacing one of these entry points with a placed-iron Python builder that
 emits the same `aie/aiex`-dialect text is the Phase 4 work.
 """
 
+import os
+import sys
 from pathlib import Path
 
 _REFERENCE_DIR = Path(__file__).resolve().parent.parent / "reference_mlir"
+
+# Phase 4 feature flag.  Set
+# `PYTHOC_LLAMA_USE_PLACED_BUILDERS=lm_head_gemv` (or "all") to route
+# build_*_ir() calls through the placed-IRON Python builder under
+# ../builders/<name>.py instead of reading the cached AIR-stitched IR.
+# Comma-separated list of kernel names; "all" enables every builder.
+_PLACED_BUILDERS_ENV = "PYTHOC_LLAMA_USE_PLACED_BUILDERS"
+
+
+def _placed_builder_enabled(name: str) -> bool:
+    val = os.environ.get(_PLACED_BUILDERS_ENV, "").strip()
+    if not val:
+        return False
+    if val == "all":
+        return True
+    return name in {tok.strip() for tok in val.split(",") if tok.strip()}
+
+
+def _ensure_builders_on_path() -> None:
+    project_root = _REFERENCE_DIR.parent
+    p = str(project_root)
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
 
 def _load_cached(name: str) -> str:
@@ -64,7 +89,14 @@ def build_o_gemv_ffn_ir(emb_dim, hidden_dim, *, verbose=False):
 
 
 def build_lm_head_gemv_ir(emb_dim, *, verbose=False):
-    del emb_dim, verbose
+    if _placed_builder_enabled("lm_head_gemv"):
+        _ensure_builders_on_path()
+        from builders.lm_head_gemv import build_lm_head_gemv_module
+        if verbose:
+            print(f"  [aie_ir_gen] Using placed-IRON builder for lm_head_gemv "
+                  f"(emb_dim={emb_dim})")
+        return build_lm_head_gemv_module(emb_dim=emb_dim)
+    del verbose
     return _load_cached("lm_head_gemv")
 
 
