@@ -51,10 +51,13 @@ def compile_silu_and_mul(output_dir: Optional[str] = None, verbose: bool = False
 def compile_attn(output_dir: Optional[str] = None, verbose: bool = False) -> Path:
     """Compile kernels/attn.py -> attn_pythoc.o.
 
-    Source carries 16+ @aie_kernel functions for flash attention. The
-    last one defined (`matmul_g_b_bf16`) is the named entry point;
-    every earlier function becomes a "helper" and is exported in the
-    same .o thanks to PythoC's AST walker breaking on the named match.
+    Source carries all 19 @aie_kernel functions for flash attention.
+    The named entry is `fused_softmax` (defined last); every earlier
+    function becomes a "helper" and is exported in the same .o thanks
+    to PythoC's AST walker breaking on the named match. `fused_softmax`
+    itself calls back into six of its helper symbols, which works
+    because compile_pythoc_source's helper loop registers each compiled
+    helper in user_globals before compiling the next function.
 
     All lazy AIE2P intrinsics referenced inside the kernels must be
     injected via `extra_globals` -- compile_pythoc_source only seeds
@@ -73,7 +76,10 @@ def compile_attn(output_dir: Optional[str] = None, verbose: bool = False) -> Pat
         acc_grow,
         concat,
         exp2,
+        extract_elem,
         getExpBf16,
+        insert_elem,
+        reduce_add,
         set_ctrl_reg,
         v32accfloat_to_v32bf16,
         v32bf16_to_v32accfloat,
@@ -98,7 +104,10 @@ def compile_attn(output_dir: Optional[str] = None, verbose: bool = False) -> Pat
         "acc_grow": acc_grow,
         "concat": concat,
         "exp2": exp2,
+        "extract_elem": extract_elem,
         "getExpBf16": getExpBf16,
+        "insert_elem": insert_elem,
+        "reduce_add": reduce_add,
         "set_ctrl_reg": set_ctrl_reg,
         "v32accfloat_to_v32bf16": v32accfloat_to_v32bf16,
         "v32bf16_to_v32accfloat": v32bf16_to_v32accfloat,
@@ -112,19 +121,35 @@ def compile_attn(output_dir: Optional[str] = None, verbose: bool = False) -> Pat
         "vmax_ltbf16": vmax_ltbf16,
         "vshuffle": vshuffle,
     }
-    with tempfile.TemporaryDirectory(prefix="attn_pythoc_") as tmp:
-        produced = compile_pythoc_source(
-            source_code=_read("attn.py"),
-            function_name="matmul_g_b_bf16",
-            target_arch="aie2p",
-            output_dir=tmp,
-            verbose=verbose,
-            extra_globals=extras,
-        )
-        dst_dir = Path(output_dir) if output_dir else Path.cwd()
-        dst = dst_dir / "attn_pythoc.o"
-        shutil.copy2(produced, dst)
-        return dst
+    # attn_pythoc.o packs all 19 flash-attn helpers into one TU. Without
+    # `--function-sections` they all land in a single .text and the
+    # AIE2P core ELFs overflow program memory (the AIR-reference
+    # attn_npu2.o uses per-function .text.* sections via `aie::reduce_max`
+    # tree intrinsics, so the linker can gc-section the unused ones).
+    # Persist any user-provided PYTHOC_LLC_FLAGS while we splice ours in.
+    import os
+    user_flags = os.environ.get("PYTHOC_LLC_FLAGS", "")
+    new_flags = (user_flags + " --function-sections").strip()
+    os.environ["PYTHOC_LLC_FLAGS"] = new_flags
+    try:
+        with tempfile.TemporaryDirectory(prefix="attn_pythoc_") as tmp:
+            produced = compile_pythoc_source(
+                source_code=_read("attn.py"),
+                function_name="fused_softmax",
+                target_arch="aie2p",
+                output_dir=tmp,
+                verbose=verbose,
+                extra_globals=extras,
+            )
+            dst_dir = Path(output_dir) if output_dir else Path.cwd()
+            dst = dst_dir / "attn_pythoc.o"
+            shutil.copy2(produced, dst)
+            return dst
+    finally:
+        if user_flags:
+            os.environ["PYTHOC_LLC_FLAGS"] = user_flags
+        else:
+            os.environ.pop("PYTHOC_LLC_FLAGS", None)
 
 
 def compile_matvec_k8192(output_dir: Optional[str] = None, verbose: bool = False) -> Path:
