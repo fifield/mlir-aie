@@ -191,7 +191,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_7_2_63, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 7, 0>, air.herd_name = "p7_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 7, 0>, air.herd_name = "p7_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_6_2 = aie.mem(%tile_6_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -235,7 +235,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_6_2_58, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 6, 0>, air.herd_name = "p7_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 6, 0>, air.herd_name = "p7_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_5_2 = aie.mem(%tile_5_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -279,7 +279,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_5_2_53, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 5, 0>, air.herd_name = "p7_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 5, 0>, air.herd_name = "p7_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_4_2 = aie.mem(%tile_4_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -323,7 +323,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_4_2_48, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 4, 0>, air.herd_name = "p7_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 4, 0>, air.herd_name = "p7_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_3_2 = aie.mem(%tile_3_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -367,7 +367,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_3_2_43, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 3, 0>, air.herd_name = "p7_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 3, 0>, air.herd_name = "p7_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_2_2 = aie.mem(%tile_2_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -411,7 +411,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_2_2_38, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 2, 0>, air.herd_name = "p7_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 2, 0>, air.herd_name = "p7_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_1_2 = aie.mem(%tile_1_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -455,7 +455,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_1_2_33, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 1, 0>, air.herd_name = "p7_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 1, 0>, air.herd_name = "p7_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_0_2 = aie.mem(%tile_0_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -499,9 +499,9 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_0_2_28, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 0, 0>, air.herd_name = "p7_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
-    func.func private @linalg_fill_bf16(bf16, memref<8xbf16, 2 : i32>) attributes {link_with = "mv.o", llvm.emit_c_interface}
-    func.func private @matvec_vectorized_bf16_bf16(i32, i32, i32, memref<4x2048xbf16, 2 : i32>, memref<2048xbf16, 2 : i32>, memref<8xbf16, 2 : i32>) attributes {link_with = "mv.o", llvm.emit_c_interface}
+    } {air.herd_local_id = array<i64: 0, 0>, air.herd_name = "p7_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
+    func.func private @linalg_fill_bf16(bf16, memref<8xbf16, 2 : i32>) attributes {link_with = "mv_pythoc.o", llvm.emit_c_interface}
+    func.func private @matvec_vectorized_bf16_bf16(i32, i32, i32, memref<4x2048xbf16, 2 : i32>, memref<2048xbf16, 2 : i32>, memref<8xbf16, 2 : i32>) attributes {link_with = "mv_pythoc.o", llvm.emit_c_interface}
     aie.flow(%shim_noc_tile_0_0, DMA : 0, %mem_tile_0_1, DMA : 0)
     aie.flow(%shim_noc_tile_1_0, DMA : 0, %mem_tile_1_1, DMA : 0)
     aie.flow(%shim_noc_tile_2_0, DMA : 0, %mem_tile_2_1, DMA : 0)
@@ -2633,7 +2633,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_7_2_63, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 7, 0>, air.herd_name = "p6_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 7, 0>, air.herd_name = "p6_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_6_2 = aie.mem(%tile_6_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -2677,7 +2677,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_6_2_58, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 6, 0>, air.herd_name = "p6_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 6, 0>, air.herd_name = "p6_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_5_2 = aie.mem(%tile_5_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -2721,7 +2721,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_5_2_53, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 5, 0>, air.herd_name = "p6_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 5, 0>, air.herd_name = "p6_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_4_2 = aie.mem(%tile_4_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -2765,7 +2765,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_4_2_48, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 4, 0>, air.herd_name = "p6_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 4, 0>, air.herd_name = "p6_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_3_2 = aie.mem(%tile_3_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -2809,7 +2809,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_3_2_43, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 3, 0>, air.herd_name = "p6_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 3, 0>, air.herd_name = "p6_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_2_2 = aie.mem(%tile_2_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -2853,7 +2853,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_2_2_38, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 2, 0>, air.herd_name = "p6_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 2, 0>, air.herd_name = "p6_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_1_2 = aie.mem(%tile_1_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -2897,7 +2897,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_1_2_33, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 1, 0>, air.herd_name = "p6_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 1, 0>, air.herd_name = "p6_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_0_2 = aie.mem(%tile_0_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -2941,9 +2941,9 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_0_2_28, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 0, 0>, air.herd_name = "p6_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
-    func.func private @linalg_fill_bf16(bf16, memref<8xbf16, 2 : i32>) attributes {link_with = "mv.o", llvm.emit_c_interface}
-    func.func private @matvec_vectorized_bf16_bf16(i32, i32, i32, memref<4x2048xbf16, 2 : i32>, memref<2048xbf16, 2 : i32>, memref<8xbf16, 2 : i32>) attributes {link_with = "mv.o", llvm.emit_c_interface}
+    } {air.herd_local_id = array<i64: 0, 0>, air.herd_name = "p6_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
+    func.func private @linalg_fill_bf16(bf16, memref<8xbf16, 2 : i32>) attributes {link_with = "mv_pythoc.o", llvm.emit_c_interface}
+    func.func private @matvec_vectorized_bf16_bf16(i32, i32, i32, memref<4x2048xbf16, 2 : i32>, memref<2048xbf16, 2 : i32>, memref<8xbf16, 2 : i32>) attributes {link_with = "mv_pythoc.o", llvm.emit_c_interface}
     aie.flow(%shim_noc_tile_0_0, DMA : 0, %mem_tile_0_1, DMA : 0)
     aie.flow(%shim_noc_tile_1_0, DMA : 0, %mem_tile_1_1, DMA : 0)
     aie.flow(%shim_noc_tile_2_0, DMA : 0, %mem_tile_2_1, DMA : 0)
@@ -5075,7 +5075,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_7_2_63, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 7, 0>, air.herd_name = "p5_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 7, 0>, air.herd_name = "p5_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_6_2 = aie.mem(%tile_6_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -5119,7 +5119,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_6_2_58, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 6, 0>, air.herd_name = "p5_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 6, 0>, air.herd_name = "p5_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_5_2 = aie.mem(%tile_5_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -5163,7 +5163,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_5_2_53, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 5, 0>, air.herd_name = "p5_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 5, 0>, air.herd_name = "p5_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_4_2 = aie.mem(%tile_4_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -5207,7 +5207,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_4_2_48, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 4, 0>, air.herd_name = "p5_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 4, 0>, air.herd_name = "p5_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_3_2 = aie.mem(%tile_3_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -5251,7 +5251,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_3_2_43, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 3, 0>, air.herd_name = "p5_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 3, 0>, air.herd_name = "p5_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_2_2 = aie.mem(%tile_2_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -5295,7 +5295,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_2_2_38, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 2, 0>, air.herd_name = "p5_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 2, 0>, air.herd_name = "p5_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_1_2 = aie.mem(%tile_1_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -5339,7 +5339,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_1_2_33, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 1, 0>, air.herd_name = "p5_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 1, 0>, air.herd_name = "p5_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_0_2 = aie.mem(%tile_0_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -5383,9 +5383,9 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_0_2_28, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 0, 0>, air.herd_name = "p5_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
-    func.func private @linalg_fill_bf16(bf16, memref<8xbf16, 2 : i32>) attributes {link_with = "mv.o", llvm.emit_c_interface}
-    func.func private @matvec_vectorized_bf16_bf16(i32, i32, i32, memref<4x2048xbf16, 2 : i32>, memref<2048xbf16, 2 : i32>, memref<8xbf16, 2 : i32>) attributes {link_with = "mv.o", llvm.emit_c_interface}
+    } {air.herd_local_id = array<i64: 0, 0>, air.herd_name = "p5_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
+    func.func private @linalg_fill_bf16(bf16, memref<8xbf16, 2 : i32>) attributes {link_with = "mv_pythoc.o", llvm.emit_c_interface}
+    func.func private @matvec_vectorized_bf16_bf16(i32, i32, i32, memref<4x2048xbf16, 2 : i32>, memref<2048xbf16, 2 : i32>, memref<8xbf16, 2 : i32>) attributes {link_with = "mv_pythoc.o", llvm.emit_c_interface}
     aie.flow(%shim_noc_tile_0_0, DMA : 0, %mem_tile_0_1, DMA : 0)
     aie.flow(%shim_noc_tile_1_0, DMA : 0, %mem_tile_1_1, DMA : 0)
     aie.flow(%shim_noc_tile_2_0, DMA : 0, %mem_tile_2_1, DMA : 0)
@@ -7517,7 +7517,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_7_2_63, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 7, 0>, air.herd_name = "p4_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 7, 0>, air.herd_name = "p4_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_6_2 = aie.mem(%tile_6_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -7561,7 +7561,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_6_2_58, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 6, 0>, air.herd_name = "p4_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 6, 0>, air.herd_name = "p4_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_5_2 = aie.mem(%tile_5_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -7605,7 +7605,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_5_2_53, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 5, 0>, air.herd_name = "p4_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 5, 0>, air.herd_name = "p4_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_4_2 = aie.mem(%tile_4_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -7649,7 +7649,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_4_2_48, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 4, 0>, air.herd_name = "p4_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 4, 0>, air.herd_name = "p4_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_3_2 = aie.mem(%tile_3_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -7693,7 +7693,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_3_2_43, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 3, 0>, air.herd_name = "p4_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 3, 0>, air.herd_name = "p4_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_2_2 = aie.mem(%tile_2_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -7737,7 +7737,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_2_2_38, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 2, 0>, air.herd_name = "p4_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 2, 0>, air.herd_name = "p4_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_1_2 = aie.mem(%tile_1_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -7781,7 +7781,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_1_2_33, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 1, 0>, air.herd_name = "p4_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 1, 0>, air.herd_name = "p4_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_0_2 = aie.mem(%tile_0_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -7825,9 +7825,9 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_0_2_28, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 0, 0>, air.herd_name = "p4_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
-    func.func private @linalg_fill_bf16(bf16, memref<8xbf16, 2 : i32>) attributes {link_with = "mv.o", llvm.emit_c_interface}
-    func.func private @matvec_vectorized_bf16_bf16(i32, i32, i32, memref<4x2048xbf16, 2 : i32>, memref<2048xbf16, 2 : i32>, memref<8xbf16, 2 : i32>) attributes {link_with = "mv.o", llvm.emit_c_interface}
+    } {air.herd_local_id = array<i64: 0, 0>, air.herd_name = "p4_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
+    func.func private @linalg_fill_bf16(bf16, memref<8xbf16, 2 : i32>) attributes {link_with = "mv_pythoc.o", llvm.emit_c_interface}
+    func.func private @matvec_vectorized_bf16_bf16(i32, i32, i32, memref<4x2048xbf16, 2 : i32>, memref<2048xbf16, 2 : i32>, memref<8xbf16, 2 : i32>) attributes {link_with = "mv_pythoc.o", llvm.emit_c_interface}
     aie.flow(%shim_noc_tile_0_0, DMA : 0, %mem_tile_0_1, DMA : 0)
     aie.flow(%shim_noc_tile_1_0, DMA : 0, %mem_tile_1_1, DMA : 0)
     aie.flow(%shim_noc_tile_2_0, DMA : 0, %mem_tile_2_1, DMA : 0)
@@ -9959,7 +9959,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_7_2_63, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 7, 0>, air.herd_name = "p3_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 7, 0>, air.herd_name = "p3_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_6_2 = aie.mem(%tile_6_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -10003,7 +10003,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_6_2_58, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 6, 0>, air.herd_name = "p3_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 6, 0>, air.herd_name = "p3_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_5_2 = aie.mem(%tile_5_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -10047,7 +10047,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_5_2_53, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 5, 0>, air.herd_name = "p3_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 5, 0>, air.herd_name = "p3_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_4_2 = aie.mem(%tile_4_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -10091,7 +10091,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_4_2_48, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 4, 0>, air.herd_name = "p3_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 4, 0>, air.herd_name = "p3_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_3_2 = aie.mem(%tile_3_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -10135,7 +10135,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_3_2_43, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 3, 0>, air.herd_name = "p3_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 3, 0>, air.herd_name = "p3_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_2_2 = aie.mem(%tile_2_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -10179,7 +10179,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_2_2_38, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 2, 0>, air.herd_name = "p3_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 2, 0>, air.herd_name = "p3_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_1_2 = aie.mem(%tile_1_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -10223,7 +10223,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_1_2_33, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 1, 0>, air.herd_name = "p3_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 1, 0>, air.herd_name = "p3_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_0_2 = aie.mem(%tile_0_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -10267,9 +10267,9 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_0_2_28, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 0, 0>, air.herd_name = "p3_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
-    func.func private @linalg_fill_bf16(bf16, memref<8xbf16, 2 : i32>) attributes {link_with = "mv.o", llvm.emit_c_interface}
-    func.func private @matvec_vectorized_bf16_bf16(i32, i32, i32, memref<4x2048xbf16, 2 : i32>, memref<2048xbf16, 2 : i32>, memref<8xbf16, 2 : i32>) attributes {link_with = "mv.o", llvm.emit_c_interface}
+    } {air.herd_local_id = array<i64: 0, 0>, air.herd_name = "p3_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
+    func.func private @linalg_fill_bf16(bf16, memref<8xbf16, 2 : i32>) attributes {link_with = "mv_pythoc.o", llvm.emit_c_interface}
+    func.func private @matvec_vectorized_bf16_bf16(i32, i32, i32, memref<4x2048xbf16, 2 : i32>, memref<2048xbf16, 2 : i32>, memref<8xbf16, 2 : i32>) attributes {link_with = "mv_pythoc.o", llvm.emit_c_interface}
     aie.flow(%shim_noc_tile_0_0, DMA : 0, %mem_tile_0_1, DMA : 0)
     aie.flow(%shim_noc_tile_1_0, DMA : 0, %mem_tile_1_1, DMA : 0)
     aie.flow(%shim_noc_tile_2_0, DMA : 0, %mem_tile_2_1, DMA : 0)
@@ -12401,7 +12401,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_7_2_63, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 7, 0>, air.herd_name = "p2_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 7, 0>, air.herd_name = "p2_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_6_2 = aie.mem(%tile_6_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -12445,7 +12445,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_6_2_58, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 6, 0>, air.herd_name = "p2_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 6, 0>, air.herd_name = "p2_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_5_2 = aie.mem(%tile_5_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -12489,7 +12489,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_5_2_53, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 5, 0>, air.herd_name = "p2_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 5, 0>, air.herd_name = "p2_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_4_2 = aie.mem(%tile_4_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -12533,7 +12533,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_4_2_48, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 4, 0>, air.herd_name = "p2_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 4, 0>, air.herd_name = "p2_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_3_2 = aie.mem(%tile_3_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -12577,7 +12577,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_3_2_43, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 3, 0>, air.herd_name = "p2_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 3, 0>, air.herd_name = "p2_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_2_2 = aie.mem(%tile_2_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -12621,7 +12621,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_2_2_38, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 2, 0>, air.herd_name = "p2_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 2, 0>, air.herd_name = "p2_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_1_2 = aie.mem(%tile_1_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -12665,7 +12665,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_1_2_33, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 1, 0>, air.herd_name = "p2_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 1, 0>, air.herd_name = "p2_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_0_2 = aie.mem(%tile_0_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -12709,9 +12709,9 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_0_2_28, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 0, 0>, air.herd_name = "p2_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
-    func.func private @linalg_fill_bf16(bf16, memref<8xbf16, 2 : i32>) attributes {link_with = "mv.o", llvm.emit_c_interface}
-    func.func private @matvec_vectorized_bf16_bf16(i32, i32, i32, memref<4x2048xbf16, 2 : i32>, memref<2048xbf16, 2 : i32>, memref<8xbf16, 2 : i32>) attributes {link_with = "mv.o", llvm.emit_c_interface}
+    } {air.herd_local_id = array<i64: 0, 0>, air.herd_name = "p2_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
+    func.func private @linalg_fill_bf16(bf16, memref<8xbf16, 2 : i32>) attributes {link_with = "mv_pythoc.o", llvm.emit_c_interface}
+    func.func private @matvec_vectorized_bf16_bf16(i32, i32, i32, memref<4x2048xbf16, 2 : i32>, memref<2048xbf16, 2 : i32>, memref<8xbf16, 2 : i32>) attributes {link_with = "mv_pythoc.o", llvm.emit_c_interface}
     aie.flow(%shim_noc_tile_0_0, DMA : 0, %mem_tile_0_1, DMA : 0)
     aie.flow(%shim_noc_tile_1_0, DMA : 0, %mem_tile_1_1, DMA : 0)
     aie.flow(%shim_noc_tile_2_0, DMA : 0, %mem_tile_2_1, DMA : 0)
@@ -14843,7 +14843,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_7_2_63, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 7, 0>, air.herd_name = "p1_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 7, 0>, air.herd_name = "p1_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_6_2 = aie.mem(%tile_6_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -14887,7 +14887,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_6_2_58, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 6, 0>, air.herd_name = "p1_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 6, 0>, air.herd_name = "p1_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_5_2 = aie.mem(%tile_5_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -14931,7 +14931,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_5_2_53, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 5, 0>, air.herd_name = "p1_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 5, 0>, air.herd_name = "p1_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_4_2 = aie.mem(%tile_4_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -14975,7 +14975,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_4_2_48, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 4, 0>, air.herd_name = "p1_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 4, 0>, air.herd_name = "p1_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_3_2 = aie.mem(%tile_3_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -15019,7 +15019,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_3_2_43, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 3, 0>, air.herd_name = "p1_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 3, 0>, air.herd_name = "p1_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_2_2 = aie.mem(%tile_2_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -15063,7 +15063,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_2_2_38, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 2, 0>, air.herd_name = "p1_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 2, 0>, air.herd_name = "p1_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_1_2 = aie.mem(%tile_1_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -15107,7 +15107,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_1_2_33, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 1, 0>, air.herd_name = "p1_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 1, 0>, air.herd_name = "p1_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_0_2 = aie.mem(%tile_0_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -15151,9 +15151,9 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_0_2_28, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 0, 0>, air.herd_name = "p1_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
-    func.func private @linalg_fill_bf16(bf16, memref<8xbf16, 2 : i32>) attributes {link_with = "mv.o", llvm.emit_c_interface}
-    func.func private @matvec_vectorized_bf16_bf16(i32, i32, i32, memref<4x2048xbf16, 2 : i32>, memref<2048xbf16, 2 : i32>, memref<8xbf16, 2 : i32>) attributes {link_with = "mv.o", llvm.emit_c_interface}
+    } {air.herd_local_id = array<i64: 0, 0>, air.herd_name = "p1_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
+    func.func private @linalg_fill_bf16(bf16, memref<8xbf16, 2 : i32>) attributes {link_with = "mv_pythoc.o", llvm.emit_c_interface}
+    func.func private @matvec_vectorized_bf16_bf16(i32, i32, i32, memref<4x2048xbf16, 2 : i32>, memref<2048xbf16, 2 : i32>, memref<8xbf16, 2 : i32>) attributes {link_with = "mv_pythoc.o", llvm.emit_c_interface}
     aie.flow(%shim_noc_tile_0_0, DMA : 0, %mem_tile_0_1, DMA : 0)
     aie.flow(%shim_noc_tile_1_0, DMA : 0, %mem_tile_1_1, DMA : 0)
     aie.flow(%shim_noc_tile_2_0, DMA : 0, %mem_tile_2_1, DMA : 0)
@@ -17285,7 +17285,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_7_2_63, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 7, 0>, air.herd_name = "p0_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 7, 0>, air.herd_name = "p0_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_6_2 = aie.mem(%tile_6_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -17329,7 +17329,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_6_2_58, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 6, 0>, air.herd_name = "p0_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 6, 0>, air.herd_name = "p0_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_5_2 = aie.mem(%tile_5_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -17373,7 +17373,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_5_2_53, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 5, 0>, air.herd_name = "p0_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 5, 0>, air.herd_name = "p0_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_4_2 = aie.mem(%tile_4_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -17417,7 +17417,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_4_2_48, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 4, 0>, air.herd_name = "p0_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 4, 0>, air.herd_name = "p0_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_3_2 = aie.mem(%tile_3_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -17461,7 +17461,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_3_2_43, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 3, 0>, air.herd_name = "p0_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 3, 0>, air.herd_name = "p0_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_2_2 = aie.mem(%tile_2_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -17505,7 +17505,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_2_2_38, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 2, 0>, air.herd_name = "p0_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 2, 0>, air.herd_name = "p0_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_1_2 = aie.mem(%tile_1_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -17549,7 +17549,7 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_1_2_33, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 1, 0>, air.herd_name = "p0_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
+    } {air.herd_local_id = array<i64: 1, 0>, air.herd_name = "p0_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
     %mem_0_2 = aie.mem(%tile_0_2) {
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb1
@@ -17593,9 +17593,9 @@ module {
       } {loop_annotation = #loop_annotation}
       aie.use_lock(%lock_0_2_28, Release, 1)
       cf.br ^bb1
-    } {air.herd_local_id = array<i64: 0, 0>, air.herd_name = "p0_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv.o"}
-    func.func private @linalg_fill_bf16(bf16, memref<8xbf16, 2 : i32>) attributes {link_with = "mv.o", llvm.emit_c_interface}
-    func.func private @matvec_vectorized_bf16_bf16(i32, i32, i32, memref<4x2048xbf16, 2 : i32>, memref<2048xbf16, 2 : i32>, memref<8xbf16, 2 : i32>) attributes {link_with = "mv.o", llvm.emit_c_interface}
+    } {air.herd_local_id = array<i64: 0, 0>, air.herd_name = "p0_herd_0", air.herd_size = array<i64: 8, 1>, link_with = "mv_pythoc.o"}
+    func.func private @linalg_fill_bf16(bf16, memref<8xbf16, 2 : i32>) attributes {link_with = "mv_pythoc.o", llvm.emit_c_interface}
+    func.func private @matvec_vectorized_bf16_bf16(i32, i32, i32, memref<4x2048xbf16, 2 : i32>, memref<2048xbf16, 2 : i32>, memref<8xbf16, 2 : i32>) attributes {link_with = "mv_pythoc.o", llvm.emit_c_interface}
     aie.flow(%shim_noc_tile_0_0, DMA : 0, %mem_tile_0_1, DMA : 0)
     aie.flow(%shim_noc_tile_1_0, DMA : 0, %mem_tile_1_1, DMA : 0)
     aie.flow(%shim_noc_tile_2_0, DMA : 0, %mem_tile_2_1, DMA : 0)
