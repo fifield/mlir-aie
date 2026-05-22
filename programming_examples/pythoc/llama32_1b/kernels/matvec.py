@@ -3,18 +3,24 @@
 
 """BF16 matrix-vector multiply + zero-fill kernels.
 
-Replaces the AIR-tree reference `mv.cc`:
+Replaces the AIR-tree reference `mv.cc`. For each output row:
     c[i] = sum_j a[i*k + j] * b[j]   for i in [0, m)
 with `row_offset` adding into c (c_out += row_offset).
 
-Mirrors the .cc's precision discipline: the per-row dot product is
-accumulated in 32-lane accfloat via `I512_I512_ACC1024_bf_mac_conf`,
-then horizontally reduced to a scalar f32 via `reduce_add`, and only
-the final scalar is truncated to bf16 at store time. (Reducing in bf16
-earlier loses too much precision -- caught by the HF answer-level gate.)
+Mirrors the .cc's precision discipline: each row's dot product is
+accumulated in 32-lane accfloat via `I512_I512_ACC1024_bf_mac_conf`
+(conf=60 -- per-lane bf16 MAC; conf=0 silently picks a different
+sub-element pattern and produces garbage), then horizontally reduced to
+scalar f32 via `reduce_add`, and only the final scalar is truncated to
+bf16 at store. Reducing in bf16 earlier loses too much precision; the
+HF answer-level gate catches it.
 
-Depends on a small PythoC fix that adds float support to `reduce_add` /
-`extract_elem` type-hint mapping (PythoC/pythoc/aie/operations.py).
+Wired into rms_gemv_rope, o_gemv_ffn, and lm_head_gemv as mv_pythoc.o
+(see kernels/build.py:compile_matvec). The K=8192 FFN down-projection
+variant with `dg_*` symbol names lives in matvec_k8192.py.
+
+Depends on the PythoC fix at PythoC@09cf024 that adds float support to
+`reduce_add` and to `extract_elem`'s type-hint mapping.
 """
 
 from aie.iron.pythoc import aie_kernel
