@@ -3,6 +3,30 @@
 
 """BF16 matrix-vector multiply + zero-fill kernels.
 
+STATUS: PARKED -- this kernel produces a non-functional model on real HF
+weights (the answer-level gate produces "ancesancesances..." instead of
+"Paris" for "What is the capital of France?"). Reverting just this swap
+restores correct behavior; rms_norm + rope + silu_and_mul stay green.
+
+The root cause is the bf16-domain horizontal reduction below: the .cc
+accumulates the dot product in 32-lane accfloat and then reduces in f32
+before truncating to bf16, while we reduce in bf16 via 5x shuffle_down
+adds (precision loss of ~7 bits per partial sum stage). On synthetic
+weights the drift looked like a few ULPs but on real activations it
+collapses the lm_head argmax onto a single ID and the model output runs
+into a repeat loop.
+
+Path to fix:
+  1. PythoC bug: reduce_add hard-codes llvm.vector.reduce.add.v<N>i<W> --
+     needs a float code path (fadd reduction or HW intrinsic).
+  2. PythoC bug: unify_binop_types raises on `f32 + f32` (promote_to_float
+     bypass missing for same-type case).
+  3. With (1) or (2), keep the v64f32 accumulator end-to-end and reduce
+     in f32 like the .cc, casting to bf16 only at the final store.
+
+The MLIR currently links rms_gemv_rope + o_gemv_ffn against the AIR
+reference mv.o; this kernel is preserved as a starting point for the fix.
+
 Replaces the AIR-tree reference `mv.cc`:
     c[i] = sum_j a[i*k + j] * b[j]   for i in [0, m)
 with `row_offset` adding into c (c_out += row_offset).
