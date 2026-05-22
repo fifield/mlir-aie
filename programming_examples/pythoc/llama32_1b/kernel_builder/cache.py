@@ -44,6 +44,7 @@ _LINK_OBJS = [
     "rms_norm_2048_bf16.o",
     "silu_and_mul_bf16.o",
     "rope_pythoc.o",
+    "mv_pythoc.o",
 ]
 
 

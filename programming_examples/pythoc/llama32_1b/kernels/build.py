@@ -10,6 +10,7 @@ here wires that up and writes the resulting `.o` into CWD so the cache
 stages it for aiecc link.
 """
 
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -46,6 +47,43 @@ def compile_silu_and_mul(output_dir: Optional[str] = None, verbose: bool = False
         verbose=verbose,
         extra_globals={"getTanhBf16": getTanhBf16},
     )
+
+
+def compile_matvec(output_dir: Optional[str] = None, verbose: bool = False) -> Path:
+    """Compile kernels/matvec.py -> mv_pythoc.o.
+
+    Source has two @aie_kernel functions; the helper (`linalg_fill_bf16`)
+    is defined FIRST so compile_pythoc_source picks it up via helper_nodes
+    while compiling `matvec_vectorized_bf16_bf16`. Both symbols land in
+    one .o, which is renamed to mv_pythoc.o so the AIR reference at
+    reference_o/mv.o is preserved.
+    """
+    import shutil, tempfile
+    from pythoc.aie import (
+        I512_I512_ACC1024_bf_mac_conf,
+        v32accfloat_to_v32bf16,
+    )
+    from pythoc.aie import extract_elem as _extract_elem
+    from pythoc.aie import shuffle_down as _shuffle_down
+
+    with tempfile.TemporaryDirectory(prefix="mv_pythoc_") as tmp:
+        produced = compile_pythoc_source(
+            source_code=_read("matvec.py"),
+            function_name="matvec_vectorized_bf16_bf16",
+            target_arch="aie2p",
+            output_dir=tmp,
+            verbose=verbose,
+            extra_globals={
+                "I512_I512_ACC1024_bf_mac_conf": I512_I512_ACC1024_bf_mac_conf,
+                "v32accfloat_to_v32bf16": v32accfloat_to_v32bf16,
+                "extract_elem": _extract_elem,
+                "shuffle_down": _shuffle_down,
+            },
+        )
+        dst_dir = Path(output_dir) if output_dir else Path.cwd()
+        dst = dst_dir / "mv_pythoc.o"
+        shutil.copy2(produced, dst)
+        return dst
 
 
 def compile_rope(output_dir: Optional[str] = None, verbose: bool = False) -> Path:
