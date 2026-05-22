@@ -33,6 +33,12 @@ _PYTHOC_KERNELS = [
     ("rope_pythoc.o", "compile_rope"),
     ("mv_pythoc.o", "compile_matvec"),
     ("mv_k8192_pythoc.o", "compile_matvec_k8192"),
+    # Phase 3.4 WIP: 15 of 19 attn kernels ported but not yet linked
+    # (duplicate symbols with attn_npu2.o). compile_attn() is exposed in
+    # kernels.build for compile-time validation; flip this on once
+    # max_g_bf16 / sum_g / apply_causal_mask / fused_softmax are also
+    # ported (see kernels/attn.py docstring + reference_o/attn_npu2.o).
+    # ("attn_pythoc.o", "compile_attn"),
 ]
 
 
