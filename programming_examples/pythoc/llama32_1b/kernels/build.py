@@ -217,6 +217,7 @@ def compile_bf16_gemm(
     output_dir: Optional[str] = None,
     verbose: bool = False,
     A_layout_transposed: bool = False,
+    c_dtype: str = "f32",
 ) -> Path:
     """Compile kernels/bf16_gemm.py -> bf16_gemm_pythoc[_<tag>].o for one tile shape.
 
@@ -231,8 +232,19 @@ def compile_bf16_gemm(
         Use True  for `A : [K_MICRO, M_BLOCKS, 8, 8]` (col-major A blocks --
         matches the AIR-tree prefill `dims_to_stream` retile for K/V GEMMs).
         Internally swaps A_M_STRIDE / A_K_STRIDE.
+    c_dtype : "f32" | "bf16", default "f32"
+        Output buffer dtype:
+          - "f32": uses `bf16_gemm_kernel(a: bf16, b: bf16, c: f32)`. C buffer is
+            held as f32 in L1; no boundary truncation. Matches the standalone
+            bf16_gemm_multi_core kernel.
+          - "bf16": uses `bf16_gemm_kernel_bf16out(a: bf16, b: bf16, c: bf16)`.
+            C buffer is bf16 in L1 with explicit extf-on-load / truncf-on-store
+            around an f32 register-resident accumulator. Matches the cached
+            prefill MLIR's L1 layout. Output name gets a `_bf16out` suffix
+            unless overridden.
     output_name : str, optional
-        Filename (without `.o`). Default: `bf16_gemm_pythoc_M{M_BLOCKS}_N{N_BLOCKS}_K{K_MICRO}`.
+        Filename (without `.o`). Default: `bf16_gemm_pythoc_M{M_BLOCKS}_N{N_BLOCKS}_K{K_MICRO}`
+        with `_AT` if transposed and `_bf16out` if c_dtype=="bf16".
 
     Returns
     -------
@@ -242,12 +254,15 @@ def compile_bf16_gemm(
         raise ValueError(f"M_BLOCKS must be even (2x2 reg blocking); got {M_BLOCKS}")
     if N_BLOCKS % 2 != 0:
         raise ValueError(f"N_BLOCKS must be even (2x2 reg blocking); got {N_BLOCKS}")
+    if c_dtype not in ("f32", "bf16"):
+        raise ValueError(f"c_dtype must be 'f32' or 'bf16'; got {c_dtype!r}")
 
     import shutil, tempfile
     from pythoc.aie import (
         BFP576_BFP576_ACC2048_mac_conf,
         concat,
         set_ctrl_reg,
+        v32accfloat_to_v32bf16,
         v32bf16_to_v32accfloat,
         v64accfloat_to_v64bfp16ebs8,
         vector_cast,
@@ -273,6 +288,7 @@ def compile_bf16_gemm(
         "BFP576_BFP576_ACC2048_mac_conf": BFP576_BFP576_ACC2048_mac_conf,
         "concat": concat,
         "set_ctrl_reg": set_ctrl_reg,
+        "v32accfloat_to_v32bf16": v32accfloat_to_v32bf16,
         "v32bf16_to_v32accfloat": v32bf16_to_v32accfloat,
         "v64accfloat_to_v64bfp16ebs8": v64accfloat_to_v64bfp16ebs8,
         "vector_cast": vector_cast,
@@ -303,13 +319,18 @@ def compile_bf16_gemm(
     tag = f"M{M_BLOCKS}_N{N_BLOCKS}_K{K_MICRO}"
     if A_layout_transposed:
         tag += "_AT"
+    if c_dtype == "bf16":
+        tag += "_bf16out"
+        function_name = "bf16_gemm_kernel_bf16out"
+    else:
+        function_name = "bf16_gemm_kernel"
     name = output_name or f"bf16_gemm_pythoc_{tag}"
 
     try:
         with tempfile.TemporaryDirectory(prefix="bf16_gemm_pythoc_") as tmp:
             produced = compile_pythoc_source(
                 source_code=_read("bf16_gemm.py"),
-                function_name="bf16_gemm_kernel",
+                function_name=function_name,
                 target_arch="aie2p",
                 output_dir=tmp,
                 verbose=verbose,
