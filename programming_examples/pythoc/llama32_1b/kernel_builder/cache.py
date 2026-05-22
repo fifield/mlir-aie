@@ -45,6 +45,7 @@ _LINK_OBJS = [
     "silu_and_mul_bf16.o",
     "rope_pythoc.o",
     "mv_pythoc.o",
+    "mv_k8192_pythoc.o",
 ]
 
 
