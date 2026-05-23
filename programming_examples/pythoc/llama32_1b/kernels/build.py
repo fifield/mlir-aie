@@ -368,6 +368,39 @@ def compile_bf16_gemm(
             os.environ.pop("PYTHOC_LLC_FLAGS", None)
 
 
+def _compile_bf16_gemm_rms_gemms_rope(
+    output_dir: Optional[str] = None, verbose: bool = False
+) -> Path:
+    """Compile the bf16 GEMM .o consumed by the placed-IRON v_matmul_seg device.
+
+    The (M_BLOCKS, N_BLOCKS, K_MICRO) loop bounds (16, 8, 4) walk one full
+    128x64 C tile (= 16 8x8 m-blocks x 8 8x8 n-blocks) over a single K=4
+    micro-reduction.  Strides reference the cached prefill MLIR's L1 layout:
+      * buf_A is 1x1x16x4x8x8 (K_outer=16, M_outer=4)        -> A_M=64, A_K=256
+      * buf_B is 1x1x4x8x8x8  (K_outer=4,  N_outer=8)        -> B_K=512, B_N=64
+      * buf_C is 1x1x16x8x8x8 (M_outer=16, N_outer=8)        -> C_M=512, C_N=64
+
+    Symbol inside is ``bf16_gemm_kernel_bf16out`` (bf16-out variant: C is held
+    as bf16 in L1, extf-on-load / truncf-on-store around an f32 register
+    accumulator).
+    """
+    return compile_bf16_gemm(
+        M_BLOCKS=16,
+        N_BLOCKS=8,
+        K_MICRO=4,
+        A_layout_transposed=True,
+        c_dtype="bf16",
+        A_M_STRIDE=64,
+        A_K_STRIDE=256,
+        B_K_STRIDE=512,
+        B_N_STRIDE=64,
+        C_M_STRIDE=512,
+        C_N_STRIDE=64,
+        output_dir=output_dir,
+        verbose=verbose,
+    )
+
+
 def compile_rope(output_dir: Optional[str] = None, verbose: bool = False) -> Path:
     """Compile kernels/rope.py -> rope_pythoc.o for aiecc linking.
 
