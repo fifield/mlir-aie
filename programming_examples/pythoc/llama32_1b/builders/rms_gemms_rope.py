@@ -2,23 +2,24 @@
 # SPDX-License-Identifier: MIT
 """Placed-IRON builder for the llama32_1b prefill RMS+GEMMS+RoPE kernel.
 
-Phase 4.5d scope: 6 of 7 devices are emitted from placed IRON --
+Phase 4.5e scope: all 7 devices are emitted from placed IRON --
 ``@r_weighted_rms_norm_seg``, ``@rk_rope_seg``, ``@rq_rope_seg``,
-``@v_matmul_seg``, ``@k_matmul_seg``, and ``@q_matmul_seg``.  Only the
-outer dispatcher device is still spliced in from the cached
-``rms_gemms_rope.npu.air.mlir`` text.  Phase 4.5e will land the
-outer dispatcher.
+``@v_matmul_seg``, ``@k_matmul_seg``, ``@q_matmul_seg``, and the outer
+unnamed dispatcher ``aie.device(npu2)`` that hosts
+``aiex.runtime_sequence @rms_gemms_rope``.  Only the leading
+``module { ... }`` wrapper text and inter-device whitespace still come
+from the cached ``rms_gemms_rope.npu.air.mlir`` text via splice.
 
 Splice mechanism::
 
     cached_text =
-      aie.device @rk_rope_seg { ... }
-      aie.device @rq_rope_seg { ... }
-      aie.device @v_matmul_seg { ... }
-      aie.device @k_matmul_seg { ... }
-      aie.device @q_matmul_seg { ... }
-      aie.device @r_weighted_rms_norm_seg { ... }   <-- REPLACED
-      aie.device (dispatcher) { ... }
+      aie.device @rk_rope_seg { ... }              <-- REPLACED
+      aie.device @rq_rope_seg { ... }              <-- REPLACED
+      aie.device @v_matmul_seg { ... }             <-- REPLACED
+      aie.device @k_matmul_seg { ... }             <-- REPLACED
+      aie.device @q_matmul_seg { ... }             <-- REPLACED
+      aie.device @r_weighted_rms_norm_seg { ... }  <-- REPLACED
+      aie.device (dispatcher) { ... }              <-- REPLACED
 
 The cached file's structure for ``r_weighted_rms_norm_seg`` (1230 lines)
 contains a 1x8 herd of compute tiles (col 0..7, row 2) executing inline
@@ -104,7 +105,7 @@ from aie.dialects.aiex import (
 from aie.extras.context import mlir_mod_ctx
 from aie.extras.dialects import arith
 from aie.helpers.dialects.scf import _for as range_
-from aie.ir import AffineDimExpr, AffineMap, UnitAttr
+from aie.ir import AffineDimExpr, AffineMap, InsertionPoint, UnitAttr
 
 from ._emit import bf16_memref, bf16_np
 
@@ -1785,6 +1786,54 @@ def _emit_q_matmul_seg() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Dispatcher device emitter.
+#
+# Outer wrapper that fires the 6 inner devices in topological order:
+#   r_weighted_rms_norm_seg ->
+#   q_matmul_seg -> k_matmul_seg -> v_matmul_seg ->
+#   rq_rope_seg -> rk_rope_seg
+# All 6 segments share the same 13-arg host signature
+# (see ``_rms_gemms_rope_host_arg_types``).
+# ---------------------------------------------------------------------------
+_DISPATCHER_ORDER = (
+    "r_weighted_rms_norm_seg",
+    "q_matmul_seg",
+    "k_matmul_seg",
+    "v_matmul_seg",
+    "rq_rope_seg",
+    "rk_rope_seg",
+)
+
+
+def _emit_dispatcher_device() -> None:
+    """Emit the outer unnamed ``aie.device(npu2) { ... }`` dispatcher.
+
+    Carries an ``aiex.runtime_sequence @rms_gemms_rope`` whose body fires
+    each of the 6 inner segment sequences via ``aiex.configure`` +
+    ``aiex.run``.  Each inner sequence receives the full 13-arg list
+    (matches the cached IR; the inner devices only use the subset they
+    need).
+    """
+    from aie.dialects._aiex_ops_gen import ConfigureOp, RunOp
+
+    @device(AIEDevice.npu2)
+    def _dispatcher():
+        @runtime_sequence(
+            *_rms_gemms_rope_host_arg_types(),
+            sym_name="rms_gemms_rope",
+        )
+        def _outer(*args):
+            for sym in _DISPATCHER_ORDER:
+                cfg = ConfigureOp(symbol=sym)
+                blk = cfg.body.blocks.append()
+                with InsertionPoint(blk):
+                    RunOp(
+                        runtime_sequence_symbol=f"{sym}_sequence",
+                        args=list(args),
+                    )
+
+
+# ---------------------------------------------------------------------------
 # Splice helper.
 # ---------------------------------------------------------------------------
 def _splice_device(cached_text: str, device_sym: str, new_device_block: str) -> str:
@@ -1845,6 +1894,125 @@ def _splice_device(cached_text: str, device_sym: str, new_device_block: str) -> 
     return cached_text[:start] + new_device_block + cached_text[end:]
 
 
+def _splice_dispatcher_device(cached_text: str, new_device_block: str) -> str:
+    """Replace the unnamed ``aie.device(npu2) { ... }`` dispatcher device.
+
+    The cached file has exactly one unnamed ``aie.device(npu2)`` op (all
+    others carry an ``@<sym>`` attribute).  Match on
+    ``aie.device(npu2) {`` (with a literal `{` after the paren, no `@`).
+    """
+    # The named devices in cached look like ``aie.device(npu2) @<sym>``;
+    # the unnamed dispatcher looks like ``aie.device(npu2) {`` (whitespace
+    # optional).  Search for the latter explicitly to avoid matching named
+    # devices.
+    import re
+    pattern = re.compile(r"aie\.device\(npu2\)\s*\{")
+    # Find the unique unnamed match.
+    matches = []
+    for m in pattern.finditer(cached_text):
+        # Skip matches that are part of a named device (i.e. there's `@`
+        # between `aie.device(npu2)` and `{`).  But our regex already
+        # requires `{` directly after the paren+whitespace, so any match
+        # is unnamed.
+        matches.append(m)
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"expected exactly 1 unnamed aie.device(npu2) dispatcher in "
+            f"cached MLIR; found {len(matches)}"
+        )
+    m = matches[0]
+    start = m.start()
+    brace_open = m.end() - 1  # position of the literal `{`
+
+    depth = 0
+    i = brace_open
+    n = len(cached_text)
+    body_close = -1
+    while i < n:
+        c = cached_text[i]
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                body_close = i
+                break
+        i += 1
+    if body_close < 0:
+        raise RuntimeError("unbalanced braces for unnamed dispatcher device")
+
+    # Consume any trailing attribute dict ` {...}` after the body close.
+    j = body_close + 1
+    while j < n and cached_text[j] in " \t":
+        j += 1
+    if j < n and cached_text[j] == "{":
+        depth = 0
+        k = j
+        while k < n:
+            c = cached_text[k]
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    j = k + 1
+                    break
+            k += 1
+    end = j
+
+    return cached_text[:start] + new_device_block + cached_text[end:]
+
+
+def _extract_dispatcher_device(module_text: str) -> str:
+    """Extract the unnamed ``aie.device(npu2) { ... }`` from an emitted module.
+
+    Mirrors ``_extract_single_device`` but matches on the unnamed
+    dispatcher (no ``@<sym>`` attribute).
+    """
+    import re
+    pattern = re.compile(r"aie\.device\(npu2\)\s*\{")
+    matches = list(pattern.finditer(module_text))
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"expected exactly 1 unnamed aie.device(npu2) dispatcher in "
+            f"emitted module; found {len(matches)}"
+        )
+    m = matches[0]
+    start = m.start()
+    brace_open = m.end() - 1
+
+    depth = 0
+    i = brace_open
+    n = len(module_text)
+    while i < n:
+        c = module_text[i]
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                # Include trailing attribute dict if present.
+                j = i + 1
+                while j < n and module_text[j] in " \t":
+                    j += 1
+                if j < n and module_text[j] == "{":
+                    depth2 = 0
+                    k = j
+                    while k < n:
+                        cc = module_text[k]
+                        if cc == "{":
+                            depth2 += 1
+                        elif cc == "}":
+                            depth2 -= 1
+                            if depth2 == 0:
+                                i = k
+                                break
+                        k += 1
+                return module_text[start:i + 1]
+        i += 1
+    raise RuntimeError("unbalanced braces extracting dispatcher device")
+
+
 def _extract_single_device(module_text: str, device_sym: str) -> str:
     """Extract just ``aie.device(npu2) @<device_sym> { ... }`` from a module text.
 
@@ -1903,11 +2071,12 @@ def build_rms_gemms_rope_module(seq_len: int = SEQ_LEN,
                                  verbose: bool = False) -> str:
     """Build the prefill RMS+GEMMS+RoPE MLIR module.
 
-    Phase 4.5d: the ``r_weighted_rms_norm_seg``, ``rk_rope_seg``,
-    ``rq_rope_seg``, ``v_matmul_seg``, ``k_matmul_seg``, and
-    ``q_matmul_seg`` devices are emitted via placed-IRON; only the
-    outer dispatcher device still comes from the cached MLIR text via
-    string splice.
+    Phase 4.5e: all 7 devices are emitted via placed-IRON --
+    ``r_weighted_rms_norm_seg``, ``rk_rope_seg``, ``rq_rope_seg``,
+    ``v_matmul_seg``, ``k_matmul_seg``, ``q_matmul_seg``, and the outer
+    unnamed dispatcher.  Only the leading ``module { ... }`` wrapper and
+    inter-device whitespace still come from the cached MLIR via splice;
+    every device body is placed-IRON.
 
     All dimensions must match the Llama-3.2-1B values; the cached AIR
     layout is shape-specialized.
@@ -1928,6 +2097,7 @@ def build_rms_gemms_rope_module(seq_len: int = SEQ_LEN,
         _emit_v_matmul_seg()
         _emit_k_matmul_seg()
         _emit_q_matmul_seg()
+        _emit_dispatcher_device()
         module = ctx.module
 
     placed_text = str(module)
@@ -1937,6 +2107,7 @@ def build_rms_gemms_rope_module(seq_len: int = SEQ_LEN,
     placed_v_matmul = _extract_single_device(placed_text, "v_matmul_seg")
     placed_k_matmul = _extract_single_device(placed_text, "k_matmul_seg")
     placed_q_matmul = _extract_single_device(placed_text, "q_matmul_seg")
+    placed_dispatcher = _extract_dispatcher_device(placed_text)
 
     # Load the cached prefill MLIR and splice in the placed devices.
     project_root = Path(__file__).resolve().parents[1]
@@ -1950,11 +2121,12 @@ def build_rms_gemms_rope_module(seq_len: int = SEQ_LEN,
     spliced = _splice_device(spliced, "v_matmul_seg", placed_v_matmul)
     spliced = _splice_device(spliced, "k_matmul_seg", placed_k_matmul)
     spliced = _splice_device(spliced, "q_matmul_seg", placed_q_matmul)
+    spliced = _splice_dispatcher_device(spliced, placed_dispatcher)
 
     if verbose:
         print(f"  [rms_gemms_rope builder] Spliced placed-IRON "
               f"r_weighted_rms_norm_seg + rk_rope_seg + rq_rope_seg + "
-              f"v/k/q_matmul_seg into cached MLIR "
+              f"v/k/q_matmul_seg + dispatcher into cached MLIR "
               f"({original_len} -> {len(spliced)} bytes).")
 
     return spliced
@@ -1980,6 +2152,7 @@ if __name__ == "__main__":  # pragma: no cover
             _emit_v_matmul_seg()
             _emit_k_matmul_seg()
             _emit_q_matmul_seg()
+            _emit_dispatcher_device()
             mod = ctx.module
         text = str(mod)
     else:
