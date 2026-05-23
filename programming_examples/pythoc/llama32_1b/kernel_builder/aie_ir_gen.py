@@ -1,16 +1,25 @@
 # Copyright (C) 2026, Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Cached-only MLIR-AIE IR provider for the PythoC + IRON llama32_1b port.
+"""MLIR-AIE IR provider for the PythoC + IRON llama32_1b port.
 
-The AIR-tree counterpart of this file runs aircc on multi_launch_builder modules
-to harvest post-stitched `npu.air.mlir`. In the pythoc tree we ship the cached
-IR up-front (under `reference_mlir/`) and never invoke aircc at compile time.
-Every `build_*_ir(...)` here returns the matching cached text; the orchestration
-hands that text to `KernelCache.compile_and_cache`, which calls aiecc.
+By default every `build_*_ir(...)` here dispatches to a placed-IRON Python
+builder under `../builders/<name>.py`, which emits the `aie/aiex`-dialect
+text directly from Python. The orchestration hands that text to
+`KernelCache.compile_and_cache`, which calls aiecc.
 
-Replacing one of these entry points with a placed-iron Python builder that
-emits the same `aie/aiex`-dialect text is the Phase 4 work.
+The cached AIR-emitted MLIR under `reference_mlir/` is kept as a fallback
+substrate for two reasons:
+  1. The 4 GEMM devices in `o_ffn` (og/dg/gg/ug) are spliced from cached
+     by `builders/o_ffn.py` -- pending future debugging of a hang/garbage
+     issue that doesn't appear in the structurally-identical
+     `rms_gemms_rope::v_matmul_seg` device. See README "Phase 4 status".
+  2. Setting `PYTHOC_LLAMA_USE_PLACED_BUILDERS=cached` forces every builder
+     onto the cached path -- useful for A/B regression-testing.
+
+The AIR-tree counterpart of this file runs aircc on multi_launch_builder
+modules to harvest post-stitched `npu.air.mlir`; the pythoc tree never
+invokes aircc at compile time.
 """
 
 import os
@@ -19,20 +28,39 @@ from pathlib import Path
 
 _REFERENCE_DIR = Path(__file__).resolve().parent.parent / "reference_mlir"
 
-# Phase 4 feature flag.  Set
-# `PYTHOC_LLAMA_USE_PLACED_BUILDERS=lm_head_gemv` (or "all") to route
-# build_*_ir() calls through the placed-IRON Python builder under
-# ../builders/<name>.py instead of reading the cached AIR-stitched IR.
-# Comma-separated list of kernel names; "all" enables every builder.
+# Override which builders use the placed-IRON Python path vs the cached
+# `reference_mlir/<name>.npu.air.mlir` substrate. Default (env unset): every
+# builder in `_DEFAULT_PLACED_BUILDERS` is placed-IRON.
+#
+# Env var values:
+#   unset / empty   -> default set below (all six current builders)
+#   "all"           -> identical to default; kept for backwards-compat
+#   "cached"/"none" -> force every builder onto the cached MLIR substrate
+#   "n1,n2,..."     -> explicit allowlist; only these builders are placed-IRON
 _PLACED_BUILDERS_ENV = "PYTHOC_LLAMA_USE_PLACED_BUILDERS"
+
+# Builders that default to placed-IRON. Phase 4.6's `o_ffn` is included even
+# though it splices 4 GEMM devices from cached MLIR -- the splice is internal
+# to `builders/o_ffn.py` and is transparent to call sites here. Phase 6 AWQ
+# entry points stay cached-only and are not listed.
+_DEFAULT_PLACED_BUILDERS = frozenset({
+    "lm_head_gemv",    # Phase 4.1
+    "flash_attn",      # Phase 4.2
+    "rms_gemv_rope",   # Phase 4.3
+    "o_gemv_ffn",      # Phase 4.4
+    "rms_gemms_rope",  # Phase 4.5 (all 7 devices)
+    "o_ffn",           # Phase 4.6 (5 of 9 devices; 4 GEMM devices spliced)
+})
 
 
 def _placed_builder_enabled(name: str) -> bool:
     val = os.environ.get(_PLACED_BUILDERS_ENV, "").strip()
     if not val:
-        return False
+        return name in _DEFAULT_PLACED_BUILDERS
     if val == "all":
         return True
+    if val.lower() in ("cached", "none", "off"):
+        return False
     return name in {tok.strip() for tok in val.split(",") if tok.strip()}
 
 

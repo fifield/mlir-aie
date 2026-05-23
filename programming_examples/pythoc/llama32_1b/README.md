@@ -3,10 +3,13 @@
 End-to-end Llama-3.2-1B inference on AMD NPU2 (Strix Halo, aie2p), built
 incrementally on top of the MLIR-AIR reference at
 [`mlir-air-llama_awq_impl/programming_examples/llama32_1b_aie`][air-src].
-Each kernel is replaced with a PythoC `@aie_kernel` function and each
-AIR multi-launch is replaced with a placed-IRON (`aie/aiex`-dialect)
-Python builder; the cached AIR-emitted MLIR serves as the substrate
-behind a feature flag until each builder lands.
+Every kernel is now a PythoC `@aie_kernel` function and every AIR
+multi-launch is now a placed-IRON (`aie/aiex`-dialect) Python builder
+that runs by default (`PYTHOC_LLAMA_USE_PLACED_BUILDERS=cached` reverts
+to the cached AIR-emitted MLIR substrate for A/B). One builder
+(`o_ffn`) ships partial: 5 of its 9 devices are on placed-IRON; the 4
+prefill GEMM devices are spliced from cached MLIR — see *Phase 4.6
+status* below.
 
 [air-src]: ../../../../mlir-air-llama_awq_impl/programming_examples/llama32_1b_aie
 
@@ -38,15 +41,33 @@ behind a feature flag until each builder lands.
 | `builders/rms_gemms_rope.py` | prefill (RMSNorm + QKV GEMM + RoPE) | per-layer prefill | ✓ Phase 4.5 |
 | `builders/o_ffn.py` | prefill (O + FFN with GEMMs) | per-layer prefill | ◐ Phase 4.6 (5 of 9 devices placed; 4 GEMM devices deferred via cached-splice) |
 
-Phase 4.6 ships partial: `rm_weighted_rms_norm_seg`, `ra_add_seg`,
-`fa_add_seg`, `sw_silu_mul_seg`, and the outer unnamed dispatcher
-device are on placed-IRON. The 4 GEMM devices (`og_matmul_seg`,
-`dg_matmul_seg`, `gg_matmul_seg`, `ug_matmul_seg`) hit a real wall in
-two prior attempts (structural diff perfect, runtime garbage);
-deferred pending deeper analysis (likely AIR source-of-truth).
+#### Phase 4.6 status (partial)
 
-Decode steady-state: ~7.8 tok/s on NPU2 with the current kernels (real
-HF weights, `unsloth/Llama-3.2-1B-Instruct`).
+5 of 9 devices in `o_ffn` are on placed-IRON:
+`rm_weighted_rms_norm_seg`, `ra_add_seg`, `fa_add_seg`,
+`sw_silu_mul_seg`, and the outer dispatcher. The 4 GEMM devices
+(`og_matmul_seg`, `dg_matmul_seg`, `gg_matmul_seg`, `ug_matmul_seg`)
+are spliced from `reference_mlir/o_ffn.npu.air.mlir` by the builder
+itself — transparent to call sites in `aie_ir_gen.py`. The 4 GEMM
+devices hit a real wall in two attempts (Phases 4.6d + 4.6e):
+structural diff vs cached was perfect, but runtime produced garbage
+output. Common factor is dispatch fan-out × `^bb1` re-entry count
+(8-16× higher than `rms_gemms_rope::v_matmul_seg`, which works); root
+cause is likely in L2/shim DMA streaming behavior that the
+`func.call @bf16_gemm_kernel_bf16out` substitution doesn't preserve.
+Deferred pending AIR source-of-truth analysis or an inline-emit
+approach.
+
+#### Performance
+
+Real HF weights (`unsloth/Llama-3.2-1B-Instruct`), measured on NPU2:
+
+| Config | Prefill (16 layers, seq=2048) | Decode steady-state |
+|---|---|---|
+| Cached (`=cached`) | 1.93s (~118ms/layer) | 7.86 tok/s |
+| Placed-IRON (default) | 1.94s (~118ms/layer) | 7.82 tok/s |
+
+Delta within run-to-run noise — placed-IRON is performance-neutral.
 
 ### Where each part of the pipeline runs
 
@@ -117,7 +138,7 @@ llama32_1b/
 ├── reference_o/                # EMPTY -- all .o now PythoC-built
 ├── kernel_builder/             # aiecc compile + XRT cache (no aircc at runtime)
 │   ├── aie_compile.py
-│   ├── aie_ir_gen.py           # cached loader + placed-builder feature-flag wiring
+│   ├── aie_ir_gen.py           # placed-builder dispatcher (cached substrate as override)
 │   ├── cache.py                # KernelCache + Profiler + XRT BO reuse
 │   ├── external_kernels.py     # stage .o files (PythoC-built)
 │   └── backend_presets.py
@@ -144,18 +165,25 @@ make hf-gate                             # real-HF answer-level check (~25s)
 make chat                                # interactive REPL
 ```
 
-### Feature flag — A/B between cached MLIR and placed-IRON
+### Feature flag — A/B between placed-IRON (default) and cached MLIR
 
 ```bash
-# Use only the 3 decode builders (default for decode regressions):
+# Default: every builder runs placed-IRON Python emit:
+make hf-gate
+
+# Force every builder onto the cached MLIR substrate (A/B regression test):
+PYTHOC_LLAMA_USE_PLACED_BUILDERS=cached make hf-gate
+
+# Explicit allowlist (overrides the default; only these builders use placed-IRON):
 PYTHOC_LLAMA_USE_PLACED_BUILDERS=lm_head_gemv,rms_gemv_rope,o_gemv_ffn make hf-gate
 
-# Use the full set including prefill flash_attn:
-PYTHOC_LLAMA_USE_PLACED_BUILDERS=flash_attn,lm_head_gemv,rms_gemv_rope,o_gemv_ffn make hf-gate
-
-# Use the cached MLIR (no placed builders):
-make hf-gate
+# "all" is identical to the default; kept for backwards-compat:
+PYTHOC_LLAMA_USE_PLACED_BUILDERS=all make hf-gate
 ```
+
+Default set: `lm_head_gemv`, `flash_attn`, `rms_gemv_rope`,
+`o_gemv_ffn`, `rms_gemms_rope`, `o_ffn` (all 6 current builders). See
+`kernel_builder/aie_ir_gen.py::_DEFAULT_PLACED_BUILDERS`.
 
 The `Makefile` auto-points `PEANO_INSTALL_DIR` at the AIR-tree pip
 `llvm-aie` (commit `5ed1593`); the pythoc-tree's in-tree `llvm-aie`
@@ -176,8 +204,10 @@ on the RoPE-K core. Set `PYTHOC_LLAMA_PEANO` to override.
 4. Sed-swap the `link_with = "<name>.o"` strings in
    `reference_mlir/*.npu.air.mlir` to point at the new `.o` (or set the
    right name when emitting from a placed-IRON builder).
-5. Run `make compile && PYTHOC_LLAMA_USE_PLACED_BUILDERS=... make hf-gate`
-   to confirm correctness before commit.
+5. Run `make compile && make hf-gate` to confirm correctness before
+   commit (placed-IRON is default; add
+   `PYTHOC_LLAMA_USE_PLACED_BUILDERS=cached` to verify the cached
+   path still works as an A/B reference).
 
 **Watch out**: AIE2P bf16 mac intrinsics like
 `I512_I512_ACC1024_bf_mac_conf` accept a `conf` operand that selects
@@ -189,21 +219,33 @@ the synthetic-weights verify doesn't always catch it.
 
 Each builder under `builders/<name>.py` exposes a single
 `build_<name>_module(...) -> str` that returns the MLIR module text.
-`kernel_builder/aie_ir_gen.py::build_<name>_ir` calls it when
-`PYTHOC_LLAMA_USE_PLACED_BUILDERS=<name>` is set; otherwise the cached
-MLIR under `reference_mlir/` is used. Mimic the wiring in
-`build_lm_head_gemv_ir` (lines 110-119 of `aie_ir_gen.py`).
+`kernel_builder/aie_ir_gen.py::build_<name>_ir` calls it by default if
+the name is in `_DEFAULT_PLACED_BUILDERS`; setting
+`PYTHOC_LLAMA_USE_PLACED_BUILDERS=cached` forces a fallback to
+`reference_mlir/<name>.npu.air.mlir`. Mimic the wiring in
+`build_lm_head_gemv_ir` and add the new name to
+`_DEFAULT_PLACED_BUILDERS` when the builder lands the HF gate.
 
 `builders/_emit.py` collects shared helpers (lock-barrier emission,
-host-arg-type generation, common DMA-config patterns) that the four
-existing builders share — add to it when a pattern repeats.
+host-arg-type generation, common DMA-config patterns) that the
+existing builders share — add to it when a pattern repeats. The Phase
+4.5/4.6 builders also share device-emit + splice helpers via direct
+imports from `builders/rms_gemms_rope.py` (`_splice_device`,
+`_extract_single_device`, `_emit_matmul_device`) — see
+`builders/o_ffn.py` for the pattern.
 
 The structural acceptance bar for a new builder is **exact op-count
 parity** against its cached `npu.air.mlir` across `aie.tile`,
 `aie.lock`, `aie.buffer`, `aie.core`, `aie.flow`, `aie.memtile_dma`,
 `aie.shim_dma_allocation`, `aie.cascade_flow`, `aiex.dma_configure_task_for`,
 `aiex.dma_start_task`, `aiex.dma_await_task`, `aiex.dma_free_task`.
-The four existing builders all match within 0 across every category.
+Body deltas are expected for GEMM cores where the cached emits inline
+`vector.contract` chains and the placed-IRON emit collapses them to
+`func.call @bf16_gemm_kernel_bf16out`. **Structural parity is
+necessary but not sufficient** — Phases 4.6d/e shipped perfect
+structural matches that hung at runtime due to dispatch/DMA-streaming
+differences not visible in the MLIR text. The HF gate is the gold
+standard; never commit on structural diff alone.
 
 ## Hand-editing the IR
 
@@ -214,32 +256,48 @@ rm build_peano/decode_kernel_cache/lm_head_gemv.elf
 make run                                 # rebuilds lm_head_gemv.elf from your edits
 ```
 
-## Prefill GEMM plan (in progress)
+## Deferred: 4 prefill GEMM devices in o_ffn
 
-The two remaining prefill builders — `rms_gemms_rope` and `o_ffn` —
-contain **1792 inline `vector.contract` ops** between them (768 + 1024)
-implementing the BF16 GEMMs at seq_len=2048 for Q/K/V/O projections
-plus the FFN gate/up/down. Today aiecc auto-lowers these directly to
-AIE MAC intrinsics; no PythoC `.o` is involved.
+Phase 4.6's `og_matmul_seg`, `dg_matmul_seg`, `gg_matmul_seg`, and
+`ug_matmul_seg` are spliced from cached MLIR by `builders/o_ffn.py`.
+Two attempts (Phases 4.6d at K=8 and 4.6e at K=16) achieved **exact
+structural op-count parity** vs cached — same tiles, locks (with same
+init values), buffers, flows, memtile_dmas, shim_dma_allocations, and
+runtime_sequence configures — but the runtime produced garbage tokens
+(e.g. `, 0, 0, 10,` instead of `Paris`).
 
-**Plan (Option B):** write a reusable PythoC BF16 GEMM kernel and have
-the two placed-IRON builders link to it as an external `.o`, the same
-way `flash_attn.py` links to `attn_pythoc.o`. This:
+Striking finding: `gg/ug` per-core body is **byte-identical** to
+`rms_gemms_rope::v_matmul_seg` (Phase 4.5c, which lands first attempt
+with the same kernel). The differences are entirely above the core
+level: dispatch fan-out (4 Y-dispatches per col vs 1), the shim/memtile
+DMA reshape stride pattern, and `^bb1` re-entry count (gg/ug ≈ 64 per
+core vs v_matmul ≈ 4). The cached's inline `vector.contract` chain
+appears to have implicit register / accumulator / control-state
+semantics that the `func.call @bf16_gemm_kernel_bf16out` substitution
+doesn't preserve when the L2-streaming pattern advances data through
+the same L1 buffer many times.
 
-- pushes all GEMM math into PythoC (advancing the "pure PythoC" goal),
-- factors out the inline-vector.contract body into a function call per
-  core (cuts the builders from O(thousands) LOC to something closer to
-  the decode builders' size),
-- converges the prefill design on the same external-kernel pattern as
-  flash_attn and the decode builders.
+Future work paths (any of these can unblock these 4 devices):
+- **Read AIR source-of-truth**: pull
+  `mlir-air/.../o_ffn_multi_launch.py` (the AIR-level builder that
+  generates the cached MLIR via aircc). Understanding the LOGICAL
+  tiling intent — rather than reverse-engineering aircc's
+  post-lowering structure — would likely reveal what state the inline
+  body assumes.
+- **Inline GEMM emit**: drop the `func.call` substitution; emit the
+  cached's exact `vector.contract` + `extf`/`truncf` chain inline
+  from placed-IRON Python. Much larger LOC per device but sidesteps
+  the `func.call` state-preservation question entirely.
+- **Diagnostic test**: a/b the kernel with `set_ctrl_reg` re-init
+  hoisted outside the K_OUTER loop vs inside; or reduce gg/ug's
+  `repeat_count` to match v_matmul's fan-out and see if the failure
+  disappears.
 
-Reuse candidate: `programming_examples/pythoc/bf16_gemm_multi_core.py`
-already implements a working BF16 GEMM in PythoC. Step 1 is to check
-whether its kernel signature + tile shapes can be adapted for the
-prefill GEMM dimensions (Q/K/V at seq=2048, head_dim=64; FFN
-intermediate=8192); if not, fork or extend it. Step 2 is one of the
-two builders (probably `rms_gemms_rope` first since it has 75% of the
-GEMM count of `o_ffn`).
+The 4 deferred devices being on the cached MLIR substrate is
+end-to-end-equivalent to the pre-Phase-4.6 state for the
+`o_ffn`-portion of prefill. No correctness regression; only the
+"every core's MLIR is emitted from placed-IRON Python" milestone is
+unmet for these 4 devices.
 
 ## Plan & tracking
 
@@ -250,6 +308,13 @@ GEMM count of `o_ffn`).
   - Phase 2: RMSNorm PythoC swap
   - Phase 3.1-3.3: silu_and_mul, rope, matvec, matvec_k8192 PythoC swaps
   - Phase 3.4: 19 flash-attention primitives in PythoC (`attn_pythoc.o`)
-  - Phase 4.1-4.4: placed-IRON builders (lm_head_gemv, rms_gemv_rope, o_gemv_ffn, flash_attn)
-  - Phase 4.5-4.6: prefill GEMM builders (in progress — see *Prefill GEMM plan* above)
+  - Phase 4.1: `lm_head_gemv` placed-IRON
+  - Phase 4.2: `flash_attn` placed-IRON
+  - Phase 4.3: `rms_gemv_rope` placed-IRON
+  - Phase 4.4: `o_gemv_ffn` placed-IRON
+  - Phase 4.5 (a→e): `rms_gemms_rope` placed-IRON, 7 of 7 devices
+  - Phase 4.6 (a→c, f): `o_ffn` placed-IRON, 5 of 9 devices; 4 GEMM devices deferred (see *Deferred* above)
   - Phase 6: AWQ uint4 path (deferred)
+- Defaults: placed-IRON for every shipped builder. Override with
+  `PYTHOC_LLAMA_USE_PLACED_BUILDERS=cached` to A/B against the cached
+  MLIR substrate.
