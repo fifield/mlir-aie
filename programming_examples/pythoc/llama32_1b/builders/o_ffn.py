@@ -2,18 +2,19 @@
 # SPDX-License-Identifier: MIT
 """Placed-IRON builder for the llama32_1b prefill o_ffn kernel.
 
-Phase 4.6b scope: the ``@rm_weighted_rms_norm_seg``, ``@ra_add_seg`` and
-``@fa_add_seg`` devices are emitted from placed IRON.  The remaining 6
-devices (``og_matmul_seg``, ``gg_matmul_seg``, ``ug_matmul_seg``,
-``sw_silu_mul_seg``, ``dg_matmul_seg``, plus the outer unnamed dispatcher)
-come from the cached ``o_ffn.npu.air.mlir`` text via string splice.
+Phase 4.6c scope: the ``@rm_weighted_rms_norm_seg``, ``@ra_add_seg``,
+``@fa_add_seg`` and ``@sw_silu_mul_seg`` devices are emitted from
+placed IRON.  The remaining 5 devices (``og_matmul_seg``,
+``gg_matmul_seg``, ``ug_matmul_seg``, ``dg_matmul_seg``, plus the outer
+unnamed dispatcher) come from the cached ``o_ffn.npu.air.mlir`` text
+via string splice.
 
 Splice mechanism::
 
     cached_text =
       aie.device @fa_add_seg { ... }                  <-- REPLACED (4.6b)
       aie.device @dg_matmul_seg { ... }               <-- cached
-      aie.device @sw_silu_mul_seg { ... }             <-- cached
+      aie.device @sw_silu_mul_seg { ... }             <-- REPLACED (4.6c)
       aie.device @ug_matmul_seg { ... }               <-- cached
       aie.device @gg_matmul_seg { ... }               <-- cached
       aie.device @rm_weighted_rms_norm_seg { ... }    <-- REPLACED (4.6a)
@@ -35,6 +36,14 @@ inline ``arith.addf`` over ping-pong 2048xbf16 L1 buffers, with 6 locks
 per tile (all ping-pong: init pattern 2,0,2,0,2,0), 6 buffers per tile
 (2 inputs + output, ping/pong), and 3 DMA channels per col (2 inputs +
 1 output).
+
+The cached ``sw_silu_mul_seg`` (lines 8753-9576, 824 lines) is a 1x8
+strip of compute tiles, each calling the ``silu_and_mul_bf16``
+PythoC kernel twice per outer iteration (ping/pong) over 4096xbf16 L1
+buffers.  The locks (6 per tile, init pattern 2,0,2,0,2,0) and buffers
+(6 per tile: 3 ping + 3 pong) follow the same layout as the add
+devices.  Inputs: arg8 (gate), arg10 (up); output: arg11 (silu*up).
+Channels: 54 = MM2S 0 (gate), 55 = MM2S 1 (up), 56 = S2MM 0 (out).
 
 Channel ids and host args per add device:
 
@@ -62,6 +71,7 @@ from aie.dialects.aie import (
     dma_bd,
     dma_start,
     external_buffer,
+    external_func,
     flow,
     lock,
     mem,
@@ -82,7 +92,7 @@ from aie.dialects.aiex import (
 from aie.extras.context import mlir_mod_ctx
 from aie.extras.dialects import arith
 from aie.helpers.dialects.scf import _for as range_
-from aie.ir import AffineDimExpr, AffineMap
+from aie.ir import AffineDimExpr, AffineMap, UnitAttr
 
 from ._emit import bf16_memref, bf16_np
 
@@ -846,6 +856,330 @@ def _emit_fa_add_seg() -> None:
 
 
 # ---------------------------------------------------------------------------
+# @sw_silu_mul_seg device.
+#
+# Per cached IR (lines 8753-9576, 824 lines), 1x8 herd; each compute
+# tile invokes the ``silu_and_mul_bf16`` external kernel twice per
+# outer-loop iteration (ping/pong) over L1 buffers of 4096xbf16.
+#
+# Per-tile layout (matches sw_silu_mul cached order; SAME as add devices):
+#   Locks (6 ids, init pattern 2,0,2,0,2,0):
+#     id=5 (init=2) up_avail        -- mem S2MM 1 acq           (lock_C_2)
+#     id=4 (init=0) up_ready        -- mem S2MM 1 rel; core acq (lock_C_2_n)
+#     id=3 (init=2) gate_avail      -- mem S2MM 0 acq           (lock_C_2_n+1)
+#     id=2 (init=0) gate_ready      -- mem S2MM 0 rel; core acq (lock_C_2_n+2)
+#     id=1 (init=2) out_done        -- mem MM2S 0 rel; core acq (lock_C_2_n+3)
+#     id=0 (init=0) out_full        -- mem MM2S 0 acq; core rel (lock_C_2_n+4)
+#
+#   Buffers (6 per tile, 4096xbf16, top->bottom in cached desc sym-id;
+#   tile-iter order is col 7 first):
+#     slot 0 (highest sym): gate_pong   (in2_pong)
+#     slot 1:               up_pong     (in1_pong)
+#     slot 2:               out_pong
+#     slot 3:               gate_ping   (in2_ping)
+#     slot 4:               out_ping
+#     slot 5 (lowest sym):  up_ping     (in1_ping)
+#
+#   aie.mem block per tile (3 DMA channels):
+#     MM2S 0 (out):   bb1=out_ping, bb2=out_pong; acq out_full, rel out_done
+#     S2MM 0 (gate):  bb5=gate_ping, bb6=gate_pong; acq gate_avail, rel gate_ready
+#     S2MM 1 (up):    bb8=up_ping, bb9=up_pong; acq up_avail, rel up_ready
+#
+#   aie.core body (cf.br ^bb1 infinite loop wrapping):
+#     scf.for arg0 = 0 to 16777216 step 65536 {           # 256 iters
+#       # ping iter
+#       acq(out_done) x2; acq(gate_ready); acq(up_ready)
+#       silu_and_mul_bf16(gate_ping, up_ping, out_ping, 4096)
+#       rel(up_avail); rel(gate_avail)
+#       # pong iter
+#       acq(gate_ready); acq(up_ready)
+#       silu_and_mul_bf16(gate_pong, up_pong, out_pong, 4096)
+#       rel(up_avail); rel(gate_avail)
+#       rel(out_full) x2
+#     }
+#
+#   Flows (24 total): same shape as add devices.
+#
+#   Shim allocations (24 total, cached order):
+#     8x S2MM 0 (chan 56, silu*up out)  on shim_C_0
+#     8x MM2S 0 (chan 54, gate in)      on shim_C_0
+#     8x MM2S 1 (chan 55, up in)        on shim_C_0
+#
+#   Runtime sequence:
+#     8 gate-input tasks  (MM2S 0, channel 54, arg8)
+#     8 up-input tasks    (MM2S 1, channel 55, arg10)
+#     8 out tasks         (S2MM 0, channel 56, arg11, issue_token=true)
+#     -> 16 dma_free_task (gate+up), 8 dma_await_task (out).
+#
+#   Per-col DMA: each col reads/writes 2097152 bf16 from a
+#   2048x8192 buffer at offset col * 4096; dims
+#   [(512, 32768), (8, 512), (512, 1)] -- 512 rows * 8 partial-cols *
+#   512 inner = 2M bf16 elements.
+# ---------------------------------------------------------------------------
+_SILU_L1_LEN = 4096            # per-call element count (L1 buffer size)
+_SILU_OUTER_UB = 16777216      # outer scf.for upper bound
+_SILU_OUTER_STEP = 65536       # outer scf.for step (= 16 * 4096)
+
+_SILU_PER_COL_LEN = 2097152
+_SILU_PER_COL_OFFSET = 4096
+_SILU_DIMS = [(512, 32768), (8, 512), (512, 1)]
+
+# Per cached IR shim_dma_allocation block (lines 9406-9429).
+_CHAN_SILU_GATE = 54   # MM2S 0
+_CHAN_SILU_UP   = 55   # MM2S 1
+_CHAN_SILU_OUT  = 56   # S2MM 0
+
+# Host arg indices per cached runtime_sequence body (lines 9430-9575):
+#   gate -> arg8, up -> arg10, out -> arg11.
+_SILU_ARG_GATE = 8
+_SILU_ARG_UP   = 10
+_SILU_ARG_OUT  = 11
+
+
+def _emit_sw_silu_mul_seg() -> None:
+    """Emit the placed-IRON ``@sw_silu_mul_seg`` device.
+
+    Must be called inside an active ``mlir_mod_ctx()``; registers one
+    ``aie.device(npu2) @sw_silu_mul_seg`` op matching the cached
+    AIR-stitched IR op-for-op (modulo SSA naming).
+    """
+    from aie.extras import types as T
+
+    @device(AIEDevice.npu2, sym_name="sw_silu_mul_seg")
+    def _dev():
+        # 8 shim tiles + 8 compute tiles (1x8 herd).
+        shim_tiles = [tile(c, 0) for c in range(N_COLS)]
+        compute_tiles = [tile(c, 2) for c in range(N_COLS)]
+
+        # Locks per compute tile.  Ids descending (5..0), init pattern
+        # (2,0,2,0,2,0).  Lock-id semantics (see comment block above).
+        core_locks = {}
+        for col in range(N_COLS):
+            ct = compute_tiles[col]
+            core_locks[col] = {
+                "up_avail":   lock(ct, lock_id=5, init=2),
+                "up_ready":   lock(ct, lock_id=4, init=0),
+                "gate_avail": lock(ct, lock_id=3, init=2),
+                "gate_ready": lock(ct, lock_id=2, init=0),
+                "out_done":   lock(ct, lock_id=1, init=2),
+                "out_full":   lock(ct, lock_id=0, init=0),
+            }
+
+        # Buffers per compute tile.  Emit order top->bottom (descending
+        # sym-id, descending col): bufN..bufN-5 -> gate_pong, up_pong,
+        # out_pong, gate_ping, out_ping, up_ping.
+        _BF16_4096_L1 = bf16_memref(_SILU_L1_LEN, memory_space=2)
+        core_buf = {col: {} for col in range(N_COLS)}
+        for col in reversed(range(N_COLS)):
+            ct = compute_tiles[col]
+            core_buf[col]["gate_pong"] = buffer(ct, datatype=_BF16_4096_L1)
+            core_buf[col]["up_pong"]   = buffer(ct, datatype=_BF16_4096_L1)
+            core_buf[col]["out_pong"]  = buffer(ct, datatype=_BF16_4096_L1)
+            core_buf[col]["gate_ping"] = buffer(ct, datatype=_BF16_4096_L1)
+            core_buf[col]["out_ping"]  = buffer(ct, datatype=_BF16_4096_L1)
+            core_buf[col]["up_ping"]   = buffer(ct, datatype=_BF16_4096_L1)
+
+        # External buffers (3, opaque AIR metadata; all 2048x8192 in cached).
+        external_buffer(bf16_np(EMB_DIM, HIDDEN_DIM),
+                        name="__air_external_buffer")
+        external_buffer(bf16_np(EMB_DIM, HIDDEN_DIM),
+                        name="__air_external_buffer_1")
+        external_buffer(bf16_np(EMB_DIM, HIDDEN_DIM),
+                        name="__air_external_buffer_2")
+
+        # aie.mem block per compute tile.
+        #   MM2S 0 (out):  bb1=out_ping,  bb2=out_pong;  acq out_full, rel out_done
+        #   S2MM 0 (gate): bb5=gate_ping, bb6=gate_pong; acq gate_avail, rel gate_ready
+        #   S2MM 1 (up):   bb8=up_ping,   bb9=up_pong;   acq up_avail, rel up_ready
+        def _make_core_mem(_ct, _cl, _bufs):
+            @mem(_ct)
+            def _core_mem(block):
+                dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[4])
+                with block[1]:
+                    use_lock(_cl["out_full"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_bufs["out_ping"], offset=0, len=_SILU_L1_LEN)
+                    use_lock(_cl["out_done"], LockAction.Release, value=1)
+                    next_bd(block[2])
+                with block[2]:
+                    use_lock(_cl["out_full"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_bufs["out_pong"], offset=0, len=_SILU_L1_LEN)
+                    use_lock(_cl["out_done"], LockAction.Release, value=1)
+                    next_bd(block[1])
+                with block[3]:
+                    EndOp()
+                with block[4]:
+                    dma_start(DMAChannelDir.S2MM, 0, dest=block[5], chain=block[7])
+                with block[5]:
+                    use_lock(_cl["gate_avail"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_bufs["gate_ping"], offset=0, len=_SILU_L1_LEN)
+                    use_lock(_cl["gate_ready"], LockAction.Release, value=1)
+                    next_bd(block[6])
+                with block[6]:
+                    use_lock(_cl["gate_avail"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_bufs["gate_pong"], offset=0, len=_SILU_L1_LEN)
+                    use_lock(_cl["gate_ready"], LockAction.Release, value=1)
+                    next_bd(block[5])
+                with block[7]:
+                    dma_start(DMAChannelDir.S2MM, 1, dest=block[8], chain=block[3])
+                with block[8]:
+                    use_lock(_cl["up_avail"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_bufs["up_ping"], offset=0, len=_SILU_L1_LEN)
+                    use_lock(_cl["up_ready"], LockAction.Release, value=1)
+                    next_bd(block[9])
+                with block[9]:
+                    use_lock(_cl["up_avail"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_bufs["up_pong"], offset=0, len=_SILU_L1_LEN)
+                    use_lock(_cl["up_ready"], LockAction.Release, value=1)
+                    next_bd(block[8])
+
+        for col in reversed(range(N_COLS)):
+            _make_core_mem(compute_tiles[col], core_locks[col], core_buf[col])
+
+        # Declare @silu_and_mul_bf16 external function (cached emits it
+        # after the cores but before the flows -- placement here is
+        # functionally equivalent and the assign-core-link-files pass
+        # routes link_with onto each core).
+        _BF16_4096_L1_ty = bf16_memref(_SILU_L1_LEN, memory_space=2)
+        silu_fn = external_func(
+            "silu_and_mul_bf16",
+            inputs=[_BF16_4096_L1_ty, _BF16_4096_L1_ty, _BF16_4096_L1_ty,
+                    np.int32],
+            link_with="silu_and_mul_bf16.o",
+        )
+        silu_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
+
+        # aie.core body per compute tile.
+        def _make_core_body(_ct, _cl, _bufs):
+            @core(_ct)
+            def _core_body():
+                len_c = arith.constant(_SILU_L1_LEN, T.i32())  # noqa: F841
+
+                # Infinite outer loop (cf.br ^bb1 in cached IR).
+                for _outer in range_(_sys.maxsize):
+                    for _inner in range_(0, _SILU_OUTER_UB, _SILU_OUTER_STEP):
+                        # Ping iter: drain out_done x2, fill gate_ready + up_ready,
+                        # compute, release inputs.
+                        use_lock(_cl["out_done"], LockAction.AcquireGreaterEqual, value=1)
+                        use_lock(_cl["out_done"], LockAction.AcquireGreaterEqual, value=1)
+                        use_lock(_cl["gate_ready"], LockAction.AcquireGreaterEqual, value=1)
+                        use_lock(_cl["up_ready"], LockAction.AcquireGreaterEqual, value=1)
+                        silu_fn(_bufs["gate_ping"], _bufs["up_ping"],
+                                _bufs["out_ping"], len_c)
+                        use_lock(_cl["up_avail"], LockAction.Release, value=1)
+                        use_lock(_cl["gate_avail"], LockAction.Release, value=1)
+                        # Pong iter.
+                        use_lock(_cl["gate_ready"], LockAction.AcquireGreaterEqual, value=1)
+                        use_lock(_cl["up_ready"], LockAction.AcquireGreaterEqual, value=1)
+                        silu_fn(_bufs["gate_pong"], _bufs["up_pong"],
+                                _bufs["out_pong"], len_c)
+                        use_lock(_cl["up_avail"], LockAction.Release, value=1)
+                        use_lock(_cl["gate_avail"], LockAction.Release, value=1)
+                        # Output produced for both ping and pong.
+                        use_lock(_cl["out_full"], LockAction.Release, value=1)
+                        use_lock(_cl["out_full"], LockAction.Release, value=1)
+
+        for col in reversed(range(N_COLS)):
+            _make_core_body(compute_tiles[col], core_locks[col], core_buf[col])
+
+        # Flows (24 total, cached order):
+        #   8x: shim_C_0 DMA 0 -> tile_C_2 DMA 0   (gate)
+        #   8x: shim_C_0 DMA 1 -> tile_C_2 DMA 1   (up)
+        #   8x: tile_C_2 DMA 0 -> shim_C_0 DMA 0   (out)
+        for col in range(N_COLS):
+            flow(shim_tiles[col], WireBundle.DMA, 0,
+                 compute_tiles[col], WireBundle.DMA, 0)
+        for col in range(N_COLS):
+            flow(shim_tiles[col], WireBundle.DMA, 1,
+                 compute_tiles[col], WireBundle.DMA, 1)
+        for col in range(N_COLS):
+            flow(compute_tiles[col], WireBundle.DMA, 0,
+                 shim_tiles[col], WireBundle.DMA, 0)
+
+        # Shim allocations (24 total, cached order):
+        #   8x out (S2MM 0, chan 56), 8x gate (MM2S 0, chan 54),
+        #   8x up (MM2S 1, chan 55).
+        for col in range(N_COLS):
+            shim_dma_allocation(
+                f"air_channel_{_CHAN_SILU_OUT}_{col}", shim_tiles[col],
+                DMAChannelDir.S2MM, 0)
+        for col in range(N_COLS):
+            shim_dma_allocation(
+                f"air_channel_{_CHAN_SILU_GATE}_{col}", shim_tiles[col],
+                DMAChannelDir.MM2S, 0)
+        for col in range(N_COLS):
+            shim_dma_allocation(
+                f"air_channel_{_CHAN_SILU_UP}_{col}", shim_tiles[col],
+                DMAChannelDir.MM2S, 1)
+
+        # Runtime sequence.  Cached order:
+        #   8 gate tasks (MM2S 0, arg8), 8 up tasks (MM2S 1, arg10),
+        #   8 out tasks (S2MM 0, arg11, issue_token=true).
+        #   Then 16 dma_free_task (gate + up), 8 dma_await_task (out).
+        @runtime_sequence(*_o_ffn_host_arg_types(),
+                          sym_name="sw_silu_mul_seg_sequence")
+        def _seq(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8,
+                 arg9, arg10, arg11, arg12, arg13, arg14):
+            host_args = (arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7,
+                         arg8, arg9, arg10, arg11, arg12, arg13, arg14)
+            arg_gate = host_args[_SILU_ARG_GATE]
+            arg_up   = host_args[_SILU_ARG_UP]
+            arg_out  = host_args[_SILU_ARG_OUT]
+
+            # 8 gate-input tasks (MM2S 0).
+            gate_tasks = []
+            for col in range(N_COLS):
+                offset = col * _SILU_PER_COL_OFFSET
+                t = dma_configure_task_for(
+                    f"air_channel_{_CHAN_SILU_GATE}_{col}")
+                with bds(t) as bd:
+                    with bd[0]:
+                        dma_bd(arg_gate, offset=offset,
+                               len=_SILU_PER_COL_LEN,
+                               dimensions=_SILU_DIMS)
+                        EndOp()
+                dma_start_task(t)
+                gate_tasks.append(t)
+
+            # 8 up-input tasks (MM2S 1).
+            up_tasks = []
+            for col in range(N_COLS):
+                offset = col * _SILU_PER_COL_OFFSET
+                t = dma_configure_task_for(
+                    f"air_channel_{_CHAN_SILU_UP}_{col}")
+                with bds(t) as bd:
+                    with bd[0]:
+                        dma_bd(arg_up, offset=offset,
+                               len=_SILU_PER_COL_LEN,
+                               dimensions=_SILU_DIMS)
+                        EndOp()
+                dma_start_task(t)
+                up_tasks.append(t)
+
+            # 8 out tasks (S2MM 0, issue_token=true).
+            out_tasks = []
+            for col in range(N_COLS):
+                offset = col * _SILU_PER_COL_OFFSET
+                t = dma_configure_task_for(
+                    f"air_channel_{_CHAN_SILU_OUT}_{col}", issue_token=True)
+                with bds(t) as bd:
+                    with bd[0]:
+                        dma_bd(arg_out, offset=offset,
+                               len=_SILU_PER_COL_LEN,
+                               dimensions=_SILU_DIMS)
+                        EndOp()
+                dma_start_task(t)
+                out_tasks.append(t)
+
+            # Free 16 inputs (gate then up), then await 8 outputs.
+            for t in gate_tasks:
+                dma_free_task(t)
+            for t in up_tasks:
+                dma_free_task(t)
+            for t in out_tasks:
+                dma_await_task(t)
+
+
+# ---------------------------------------------------------------------------
 # Public entry point.
 # ---------------------------------------------------------------------------
 def build_o_ffn_module(seq_len: int = SEQ_LEN,
@@ -856,9 +1190,10 @@ def build_o_ffn_module(seq_len: int = SEQ_LEN,
                        omit_while_true_loop: bool = False) -> str:
     """Build the prefill o_ffn MLIR module.
 
-    Phase 4.6b: the ``rm_weighted_rms_norm_seg``, ``ra_add_seg`` and
-    ``fa_add_seg`` devices are emitted via placed-IRON; the other 6
-    devices come from the cached MLIR text via string splice.
+    Phase 4.6c: the ``rm_weighted_rms_norm_seg``, ``ra_add_seg``,
+    ``fa_add_seg`` and ``sw_silu_mul_seg`` devices are emitted via
+    placed-IRON; the other 5 devices come from the cached MLIR text
+    via string splice.
 
     All dimensions must match the Llama-3.2-1B values; the cached AIR
     layout is shape-specialized.
@@ -876,12 +1211,14 @@ def build_o_ffn_module(seq_len: int = SEQ_LEN,
         _emit_rm_weighted_rms_norm_seg()
         _emit_ra_add_seg()
         _emit_fa_add_seg()
+        _emit_sw_silu_mul_seg()
         module = ctx.module
 
     placed_text = str(module)
     placed_rms = _extract_single_device(placed_text, "rm_weighted_rms_norm_seg")
     placed_ra  = _extract_single_device(placed_text, "ra_add_seg")
     placed_fa  = _extract_single_device(placed_text, "fa_add_seg")
+    placed_sw  = _extract_single_device(placed_text, "sw_silu_mul_seg")
 
     # Load the cached prefill MLIR and splice in the placed devices.
     project_root = Path(__file__).resolve().parents[1]
@@ -892,11 +1229,12 @@ def build_o_ffn_module(seq_len: int = SEQ_LEN,
     spliced = _splice_device(cached_text, "rm_weighted_rms_norm_seg", placed_rms)
     spliced = _splice_device(spliced, "ra_add_seg", placed_ra)
     spliced = _splice_device(spliced, "fa_add_seg", placed_fa)
+    spliced = _splice_device(spliced, "sw_silu_mul_seg", placed_sw)
 
     if verbose:
         print(f"  [o_ffn builder] Spliced placed-IRON rm_weighted_rms_norm_seg "
-              f"+ ra_add_seg + fa_add_seg into cached MLIR "
-              f"({original_len} -> {len(spliced)} bytes).")
+              f"+ ra_add_seg + fa_add_seg + sw_silu_mul_seg into cached "
+              f"MLIR ({original_len} -> {len(spliced)} bytes).")
 
     return spliced
 
@@ -911,15 +1249,17 @@ if __name__ == "__main__":  # pragma: no cover
     parser.add_argument("-o", "--output", help="Output path (default: stdout)",
                         default=None)
     parser.add_argument("--device-only", action="store_true",
-                        help="Emit just the 3 placed devices "
+                        help="Emit just the 4 placed devices "
                              "(rm_weighted_rms_norm_seg, ra_add_seg, "
-                             "fa_add_seg) -- skips cached splice")
+                             "fa_add_seg, sw_silu_mul_seg) -- skips "
+                             "cached splice")
     args = parser.parse_args()
     if args.device_only:
         with mlir_mod_ctx() as ctx:
             _emit_rm_weighted_rms_norm_seg()
             _emit_ra_add_seg()
             _emit_fa_add_seg()
+            _emit_sw_silu_mul_seg()
             mod = ctx.module
         text = str(mod)
     else:
