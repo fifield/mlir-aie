@@ -2,25 +2,28 @@
 # SPDX-License-Identifier: MIT
 """Placed-IRON builder for the llama32_1b prefill o_ffn kernel.
 
-Phase 4.6c scope: the ``@rm_weighted_rms_norm_seg``, ``@ra_add_seg``,
-``@fa_add_seg`` and ``@sw_silu_mul_seg`` devices are emitted from
-placed IRON.  The remaining 5 devices (``og_matmul_seg``,
-``gg_matmul_seg``, ``ug_matmul_seg``, ``dg_matmul_seg``, plus the outer
-unnamed dispatcher) come from the cached ``o_ffn.npu.air.mlir`` text
-via string splice.
+Phase 4.6f scope: 5 of 9 devices are emitted from placed IRON --
+``@rm_weighted_rms_norm_seg`` (4.6a), ``@ra_add_seg`` + ``@fa_add_seg``
+(4.6b), ``@sw_silu_mul_seg`` (4.6c), and the outer unnamed dispatcher
+``aie.device(npu2)`` that hosts ``aiex.runtime_sequence @o_ffn``
+(4.6f).  The 4 remaining GEMM devices (``og_matmul_seg``,
+``gg_matmul_seg``, ``ug_matmul_seg``, ``dg_matmul_seg``) come from
+the cached ``o_ffn.npu.air.mlir`` text via string splice; phases
+4.6d/4.6e are deferred pending deeper analysis of an issue that
+produced garbage runtime output despite a perfect structural diff.
 
 Splice mechanism::
 
     cached_text =
       aie.device @fa_add_seg { ... }                  <-- REPLACED (4.6b)
-      aie.device @dg_matmul_seg { ... }               <-- cached
+      aie.device @dg_matmul_seg { ... }               <-- cached (deferred)
       aie.device @sw_silu_mul_seg { ... }             <-- REPLACED (4.6c)
-      aie.device @ug_matmul_seg { ... }               <-- cached
-      aie.device @gg_matmul_seg { ... }               <-- cached
+      aie.device @ug_matmul_seg { ... }               <-- cached (deferred)
+      aie.device @gg_matmul_seg { ... }               <-- cached (deferred)
       aie.device @rm_weighted_rms_norm_seg { ... }    <-- REPLACED (4.6a)
       aie.device @ra_add_seg { ... }                  <-- REPLACED (4.6b)
-      aie.device @og_matmul_seg { ... }               <-- cached
-      aie.device (dispatcher) { ... }                 <-- cached
+      aie.device @og_matmul_seg { ... }               <-- cached (deferred)
+      aie.device (dispatcher) { ... }                 <-- REPLACED (4.6f)
 
 The cached ``rm_weighted_rms_norm_seg`` (lines 25351-26580 of
 ``reference_mlir/o_ffn.npu.air.mlir``, 1230 lines) is structurally
@@ -92,13 +95,19 @@ from aie.dialects.aiex import (
 from aie.extras.context import mlir_mod_ctx
 from aie.extras.dialects import arith
 from aie.helpers.dialects.scf import _for as range_
-from aie.ir import AffineDimExpr, AffineMap, UnitAttr
+from aie.ir import AffineDimExpr, AffineMap, InsertionPoint, UnitAttr
 
 from ._emit import bf16_memref, bf16_np
 
-# Reuse the splice helper from rms_gemms_rope -- it's device-agnostic
-# (brace-counting parser keyed on the device sym name).
-from .rms_gemms_rope import _splice_device, _extract_single_device
+# Reuse the splice/extract helpers from rms_gemms_rope -- they're
+# device-agnostic (brace-counting parser keyed on the device sym name,
+# or on the unnamed-dispatcher signature).
+from .rms_gemms_rope import (
+    _extract_dispatcher_device,
+    _extract_single_device,
+    _splice_device,
+    _splice_dispatcher_device,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1180,6 +1189,63 @@ def _emit_sw_silu_mul_seg() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Dispatcher device emitter.
+#
+# Outer wrapper that fires the 8 inner devices in the cached file's
+# topological order:
+#   og_matmul_seg ->
+#   ra_add_seg ->
+#   rm_weighted_rms_norm_seg ->
+#   gg_matmul_seg ->
+#   ug_matmul_seg ->
+#   sw_silu_mul_seg ->
+#   dg_matmul_seg ->
+#   fa_add_seg
+# All 8 segments share the same 15-arg host signature
+# (see ``_o_ffn_host_arg_types``).  Verified against cached
+# reference_mlir/o_ffn.npu.air.mlir lines 35291-35318.
+# ---------------------------------------------------------------------------
+_DISPATCHER_ORDER = (
+    "og_matmul_seg",
+    "ra_add_seg",
+    "rm_weighted_rms_norm_seg",
+    "gg_matmul_seg",
+    "ug_matmul_seg",
+    "sw_silu_mul_seg",
+    "dg_matmul_seg",
+    "fa_add_seg",
+)
+
+
+def _emit_dispatcher_device() -> None:
+    """Emit the outer unnamed ``aie.device(npu2) { ... }`` dispatcher.
+
+    Carries an ``aiex.runtime_sequence @o_ffn`` whose body fires
+    each of the 8 inner segment sequences via ``aiex.configure`` +
+    ``aiex.run``.  Each inner sequence receives the full 15-arg list
+    (matches the cached IR; the inner devices only use the subset
+    they need).
+    """
+    from aie.dialects._aiex_ops_gen import ConfigureOp, RunOp
+
+    @device(AIEDevice.npu2)
+    def _dispatcher():
+        @runtime_sequence(
+            *_o_ffn_host_arg_types(),
+            sym_name="o_ffn",
+        )
+        def _outer(*args):
+            for sym in _DISPATCHER_ORDER:
+                cfg = ConfigureOp(symbol=sym)
+                blk = cfg.body.blocks.append()
+                with InsertionPoint(blk):
+                    RunOp(
+                        runtime_sequence_symbol=f"{sym}_sequence",
+                        args=list(args),
+                    )
+
+
+# ---------------------------------------------------------------------------
 # Public entry point.
 # ---------------------------------------------------------------------------
 def build_o_ffn_module(seq_len: int = SEQ_LEN,
@@ -1190,10 +1256,12 @@ def build_o_ffn_module(seq_len: int = SEQ_LEN,
                        omit_while_true_loop: bool = False) -> str:
     """Build the prefill o_ffn MLIR module.
 
-    Phase 4.6c: the ``rm_weighted_rms_norm_seg``, ``ra_add_seg``,
-    ``fa_add_seg`` and ``sw_silu_mul_seg`` devices are emitted via
-    placed-IRON; the other 5 devices come from the cached MLIR text
-    via string splice.
+    Phase 4.6f: 5 of 9 devices are emitted via placed-IRON --
+    ``rm_weighted_rms_norm_seg``, ``ra_add_seg``, ``fa_add_seg``,
+    ``sw_silu_mul_seg``, plus the outer unnamed dispatcher device.
+    The 4 remaining GEMM devices (``og_matmul_seg``, ``gg_matmul_seg``,
+    ``ug_matmul_seg``, ``dg_matmul_seg``) come from the cached MLIR
+    text via string splice; phases 4.6d/4.6e are deferred.
 
     All dimensions must match the Llama-3.2-1B values; the cached AIR
     layout is shape-specialized.
@@ -1212,13 +1280,25 @@ def build_o_ffn_module(seq_len: int = SEQ_LEN,
         _emit_ra_add_seg()
         _emit_fa_add_seg()
         _emit_sw_silu_mul_seg()
+        _emit_dispatcher_device()
         module = ctx.module
 
-    placed_text = str(module)
+    # Use ``assume_verified=True`` here -- the dispatcher's
+    # ``aiex.configure`` ops reference the 4 cached GEMM device syms
+    # (``og_matmul_seg``, ``gg_matmul_seg``, ``ug_matmul_seg``,
+    # ``dg_matmul_seg``) which are NOT present in this freshly-emitted
+    # module (they live only in the cached MLIR text and are stitched
+    # back in via ``_splice_device`` below).  Without
+    # ``assume_verified=True`` the verifier flags
+    # "No such device: '@og_matmul_seg'" and the printer falls back to
+    # the generic op form, which breaks the brace-counting
+    # ``_extract_*`` helpers.
+    placed_text = module.operation.get_asm(assume_verified=True)
     placed_rms = _extract_single_device(placed_text, "rm_weighted_rms_norm_seg")
     placed_ra  = _extract_single_device(placed_text, "ra_add_seg")
     placed_fa  = _extract_single_device(placed_text, "fa_add_seg")
     placed_sw  = _extract_single_device(placed_text, "sw_silu_mul_seg")
+    placed_dispatcher = _extract_dispatcher_device(placed_text)
 
     # Load the cached prefill MLIR and splice in the placed devices.
     project_root = Path(__file__).resolve().parents[1]
@@ -1230,11 +1310,12 @@ def build_o_ffn_module(seq_len: int = SEQ_LEN,
     spliced = _splice_device(spliced, "ra_add_seg", placed_ra)
     spliced = _splice_device(spliced, "fa_add_seg", placed_fa)
     spliced = _splice_device(spliced, "sw_silu_mul_seg", placed_sw)
+    spliced = _splice_dispatcher_device(spliced, placed_dispatcher)
 
     if verbose:
         print(f"  [o_ffn builder] Spliced placed-IRON rm_weighted_rms_norm_seg "
-              f"+ ra_add_seg + fa_add_seg + sw_silu_mul_seg into cached "
-              f"MLIR ({original_len} -> {len(spliced)} bytes).")
+              f"+ ra_add_seg + fa_add_seg + sw_silu_mul_seg + dispatcher "
+              f"into cached MLIR ({original_len} -> {len(spliced)} bytes).")
 
     return spliced
 
@@ -1249,10 +1330,10 @@ if __name__ == "__main__":  # pragma: no cover
     parser.add_argument("-o", "--output", help="Output path (default: stdout)",
                         default=None)
     parser.add_argument("--device-only", action="store_true",
-                        help="Emit just the 4 placed devices "
+                        help="Emit just the 5 placed devices "
                              "(rm_weighted_rms_norm_seg, ra_add_seg, "
-                             "fa_add_seg, sw_silu_mul_seg) -- skips "
-                             "cached splice")
+                             "fa_add_seg, sw_silu_mul_seg, dispatcher) "
+                             "-- skips cached splice")
     args = parser.parse_args()
     if args.device_only:
         with mlir_mod_ctx() as ctx:
@@ -1260,8 +1341,12 @@ if __name__ == "__main__":  # pragma: no cover
             _emit_ra_add_seg()
             _emit_fa_add_seg()
             _emit_sw_silu_mul_seg()
+            _emit_dispatcher_device()
             mod = ctx.module
-        text = str(mod)
+        # See note in build_o_ffn_module() about assume_verified=True:
+        # the dispatcher references 4 GEMM devs not present in this
+        # standalone module, so the verifier fails -- skip it.
+        text = mod.operation.get_asm(assume_verified=True)
     else:
         text = build_o_ffn_module()
     if args.output:
