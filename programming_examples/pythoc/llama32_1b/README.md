@@ -27,7 +27,7 @@ behind a feature flag until each builder lands.
 
 `reference_o/` is empty — no `.cc`-built `.o` left in the project.
 
-### Placed-IRON builders — 4 of 6 done
+### Placed-IRON builders — 5 of 6 done
 
 | Builder | Phase | Used by | Status |
 |---|---|---|---|
@@ -35,14 +35,8 @@ behind a feature flag until each builder lands.
 | `builders/rms_gemv_rope.py` | decode (RMSNorm + QKV GEMV + RoPE) | per-layer decode | ✓ Phase 4.3 |
 | `builders/o_gemv_ffn.py` | decode (O + FFN) | per-layer decode | ✓ Phase 4.4 |
 | `builders/flash_attn.py` | prefill flash attention | `llama32_1b_prefill.py` | ✓ Phase 4.2 |
-| `builders/rms_gemms_rope.py` | prefill (RMSNorm + QKV GEMM + RoPE) | per-layer prefill | ◐ Phase 4.5d (6 of 7 devices on placed-IRON: rms_norm + 2 rope + 3 matmuls; only outer dispatcher via splice) |
+| `builders/rms_gemms_rope.py` | prefill (RMSNorm + QKV GEMM + RoPE) | per-layer prefill | ✓ Phase 4.5 |
 | `o_ffn` | prefill (O + FFN with GEMMs) | per-layer prefill | ☐ cached MLIR substrate |
-
-Note: Phase 4.5d (rms_gemms_rope: 6 of 7 devices —
-r_weighted_rms_norm_seg, rk_rope_seg, rq_rope_seg, and all three
-v/k/q_matmul_seg GEMMs) on placed-IRON; only the outer dispatcher
-device in the prefill RMS+GEMMS+RoPE fused launch still comes from
-the cached MLIR via splice. Phase 4.5e will land the outer dispatcher.
 
 Decode steady-state: ~7.8 tok/s on NPU2 with the current kernels (real
 HF weights, `unsloth/Llama-3.2-1B-Instruct`).
@@ -51,7 +45,7 @@ HF weights, `unsloth/Llama-3.2-1B-Instruct`).
 
 | Stage | Runs on | Notes |
 |---|---|---|
-| Prefill: RMSNorm + QKV GEMM + RoPE | NPU (placed-IRON + PythoC `rope_pythoc.o` + `bf16_gemm_kernel_bf16out.o`) | 6 of 7 devices on placed-IRON (dispatcher via splice) |
+| Prefill: RMSNorm + QKV GEMM + RoPE | NPU (placed-IRON + PythoC `rope_pythoc.o` + `bf16_gemm_pythoc_*.o`) | All 7 devices on placed-IRON |
 | Prefill: flash attention | NPU (placed-IRON + PythoC `attn_pythoc.o`) | All 32 cores, cascade chain |
 | Prefill: O + FFN | NPU (cached MLIR + PythoC `silu_and_mul_bf16.o`) | GEMM = 1024 inline `vector.contract` |
 | Decode: RMSNorm + QKV GEMV + RoPE | NPU (placed-IRON + PythoC kernels) | per-layer, per-token |
@@ -103,13 +97,14 @@ llama32_1b/
 │   ├── lm_head_gemv.py         # 622 LOC
 │   ├── rms_gemv_rope.py        # 883 LOC -- 6-phase decode multi-launch
 │   ├── o_gemv_ffn.py           # 1377 LOC -- 8-phase decode multi-launch
-│   └── flash_attn.py           # 1105 LOC -- 32-core 4-stage cascade prefill
+│   ├── flash_attn.py           # 1105 LOC -- 32-core 4-stage cascade prefill
+│   └── rms_gemms_rope.py       # 2164 LOC -- 7-device prefill RMS+QKV-GEMM+RoPE
 ├── reference_mlir/             # cached AIR-emitted aie/aiex MLIR
 │   ├── rms_gemv_rope.npu.air.mlir   # decode (placed-IRON has parity)
 │   ├── o_gemv_ffn.npu.air.mlir      # decode (placed-IRON has parity)
 │   ├── lm_head_gemv.npu.air.mlir    # decode (placed-IRON has parity)
 │   ├── flash_attn.npu.air.mlir      # prefill (placed-IRON has parity)
-│   ├── rms_gemms_rope.npu.air.mlir  # prefill -- still substrate
+│   ├── rms_gemms_rope.npu.air.mlir  # prefill (placed-IRON has parity)
 │   └── o_ffn.npu.air.mlir           # prefill -- still substrate
 ├── reference_o/                # EMPTY -- all .o now PythoC-built
 ├── kernel_builder/             # aiecc compile + XRT cache (no aircc at runtime)
