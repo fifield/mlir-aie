@@ -22,7 +22,7 @@ behind a feature flag until each builder lands.
 | matvec (BF16 GEMV K=2048) | rms_gemv_rope, o_gemv_ffn, lm_head_gemv | `kernels/matvec.py` | `mv_pythoc.o` ✓ |
 | matvec (BF16 GEMV K=8192) | o_gemv_ffn (FFN down) | `kernels/matvec_k8192.py` | `mv_k8192_pythoc.o` ✓ |
 | Flash-attention primitives (19) | flash_attn | `kernels/attn.py` | `attn_pythoc.o` ✓ |
-| BF16 GEMM (prefill matmuls) | rms_gemms_rope, o_ffn | ☐ next — see *Prefill GEMM plan* | — |
+| BF16 GEMM (prefill matmuls) | rms_gemms_rope (v_matmul), o_ffn | `kernels/bf16_gemm.py` | `bf16_gemm_pythoc_M16_N8_K4_AT_bf16out_*.o` ✓ |
 | AWQ uint4 GEMV | (AWQ path) | ☐ Phase 6 deferred | — |
 
 `reference_o/` is empty — no `.cc`-built `.o` left in the project.
@@ -35,14 +35,15 @@ behind a feature flag until each builder lands.
 | `builders/rms_gemv_rope.py` | decode (RMSNorm + QKV GEMV + RoPE) | per-layer decode | ✓ Phase 4.3 |
 | `builders/o_gemv_ffn.py` | decode (O + FFN) | per-layer decode | ✓ Phase 4.4 |
 | `builders/flash_attn.py` | prefill flash attention | `llama32_1b_prefill.py` | ✓ Phase 4.2 |
-| `builders/rms_gemms_rope.py` | prefill (RMSNorm + QKV GEMM + RoPE) | per-layer prefill | ◐ Phase 4.5b (3 of 7 devices on placed-IRON: rms_norm + both rope; other 4 via splice) |
+| `builders/rms_gemms_rope.py` | prefill (RMSNorm + QKV GEMM + RoPE) | per-layer prefill | ◐ Phase 4.5c (4 of 7 devices on placed-IRON: rms_norm + 2 rope + v_matmul; other 3 via splice) |
 | `o_ffn` | prefill (O + FFN with GEMMs) | per-layer prefill | ☐ cached MLIR substrate |
 
-Note: Phase 4.5b (rms_gemms_rope: 3 of 7 devices — r_weighted_rms_norm_seg
-plus rk_rope_seg and rq_rope_seg) on placed-IRON; the other 4 devices
-in the prefill RMS+GEMMS+RoPE fused launch (3 GEMM segs + 1 dispatcher)
-come from the cached MLIR via splice. Subsequent phases (4.5c/d/e)
-extend the splice to the remaining GEMM/dispatcher devices.
+Note: Phase 4.5c (rms_gemms_rope: 4 of 7 devices — r_weighted_rms_norm_seg
+plus rk_rope_seg, rq_rope_seg, and v_matmul_seg, the first prefill GEMM)
+on placed-IRON; the other 3 devices in the prefill RMS+GEMMS+RoPE fused
+launch (2 remaining GEMM segs + 1 dispatcher) come from the cached MLIR
+via splice. Subsequent phases (4.5d/e) extend the splice to the
+remaining GEMM/dispatcher devices.
 
 Decode steady-state: ~7.8 tok/s on NPU2 with the current kernels (real
 HF weights, `unsloth/Llama-3.2-1B-Instruct`).
