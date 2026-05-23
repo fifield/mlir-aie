@@ -35,15 +35,14 @@ behind a feature flag until each builder lands.
 | `builders/rms_gemv_rope.py` | decode (RMSNorm + QKV GEMV + RoPE) | per-layer decode | ✓ Phase 4.3 |
 | `builders/o_gemv_ffn.py` | decode (O + FFN) | per-layer decode | ✓ Phase 4.4 |
 | `builders/flash_attn.py` | prefill flash attention | `llama32_1b_prefill.py` | ✓ Phase 4.2 |
-| `builders/rms_gemms_rope.py` | prefill (RMSNorm + QKV GEMM + RoPE) | per-layer prefill | ◐ Phase 4.5c (4 of 7 devices on placed-IRON: rms_norm + 2 rope + v_matmul; other 3 via splice) |
+| `builders/rms_gemms_rope.py` | prefill (RMSNorm + QKV GEMM + RoPE) | per-layer prefill | ◐ Phase 4.5d (6 of 7 devices on placed-IRON: rms_norm + 2 rope + 3 matmuls; only outer dispatcher via splice) |
 | `o_ffn` | prefill (O + FFN with GEMMs) | per-layer prefill | ☐ cached MLIR substrate |
 
-Note: Phase 4.5c (rms_gemms_rope: 4 of 7 devices — r_weighted_rms_norm_seg
-plus rk_rope_seg, rq_rope_seg, and v_matmul_seg, the first prefill GEMM)
-on placed-IRON; the other 3 devices in the prefill RMS+GEMMS+RoPE fused
-launch (2 remaining GEMM segs + 1 dispatcher) come from the cached MLIR
-via splice. Subsequent phases (4.5d/e) extend the splice to the
-remaining GEMM/dispatcher devices.
+Note: Phase 4.5d (rms_gemms_rope: 6 of 7 devices —
+r_weighted_rms_norm_seg, rk_rope_seg, rq_rope_seg, and all three
+v/k/q_matmul_seg GEMMs) on placed-IRON; only the outer dispatcher
+device in the prefill RMS+GEMMS+RoPE fused launch still comes from
+the cached MLIR via splice. Phase 4.5e will land the outer dispatcher.
 
 Decode steady-state: ~7.8 tok/s on NPU2 with the current kernels (real
 HF weights, `unsloth/Llama-3.2-1B-Instruct`).
@@ -52,7 +51,7 @@ HF weights, `unsloth/Llama-3.2-1B-Instruct`).
 
 | Stage | Runs on | Notes |
 |---|---|---|
-| Prefill: RMSNorm + QKV GEMM + RoPE | NPU (cached MLIR + PythoC `rope_pythoc.o`) | GEMM = 768 inline `vector.contract` |
+| Prefill: RMSNorm + QKV GEMM + RoPE | NPU (placed-IRON + PythoC `rope_pythoc.o` + `bf16_gemm_kernel_bf16out.o`) | 6 of 7 devices on placed-IRON (dispatcher via splice) |
 | Prefill: flash attention | NPU (placed-IRON + PythoC `attn_pythoc.o`) | All 32 cores, cascade chain |
 | Prefill: O + FFN | NPU (cached MLIR + PythoC `silu_and_mul_bf16.o`) | GEMM = 1024 inline `vector.contract` |
 | Decode: RMSNorm + QKV GEMV + RoPE | NPU (placed-IRON + PythoC kernels) | per-layer, per-token |

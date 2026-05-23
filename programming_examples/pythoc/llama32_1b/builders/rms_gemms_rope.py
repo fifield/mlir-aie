@@ -2,11 +2,12 @@
 # SPDX-License-Identifier: MIT
 """Placed-IRON builder for the llama32_1b prefill RMS+GEMMS+RoPE kernel.
 
-Phase 4.5a scope: emit the ``@r_weighted_rms_norm_seg`` device on placed
-IRON and splice it into the cached ``rms_gemms_rope.npu.air.mlir`` text,
-leaving the other 6 devices (4 GEMM segments, 2 RoPE segments, 1
-dispatcher) untouched.  Subsequent phases (4.5b/c/d/e) extend the
-splice to the remaining devices.
+Phase 4.5d scope: 6 of 7 devices are emitted from placed IRON --
+``@r_weighted_rms_norm_seg``, ``@rk_rope_seg``, ``@rq_rope_seg``,
+``@v_matmul_seg``, ``@k_matmul_seg``, and ``@q_matmul_seg``.  Only the
+outer dispatcher device is still spliced in from the cached
+``rms_gemms_rope.npu.air.mlir`` text.  Phase 4.5e will land the
+outer dispatcher.
 
 Splice mechanism::
 
@@ -1009,23 +1010,46 @@ V_MATMUL_C_M = 16                  # buf_C outer-M dim (16 m-blocks of 8x8)
 V_MATMUL_C_N = 8                   # buf_C outer-N dim (8 n-blocks of 8x8)
 
 
-def _emit_v_matmul_seg() -> None:
-    """Emit the placed-IRON v_matmul_seg device.
+def _emit_matmul_device(
+    sym_name: str,
+    *,
+    weight_arg: int,
+    x_arg: int,
+    output_arg: int,
+    output_shape: tuple,         # (M, N), e.g. (2048, 512) or (2048, 2048)
+    weight_shape: tuple,         # (Kw, Nw), e.g. (2048, 512) or (2048, 2048)
+    x_channel: int,              # shim MM2S 0 channel id (e.g. 60 for V)
+    weight_channel: int,         # shim MM2S 1 channel id (e.g. 65 for V)
+    output_channel: int,         # shim S2MM 0 channel id (e.g. 61 for V)
+    extbuf_shapes: tuple,        # 3 shapes for the __air_external_buffer triplet
+) -> None:
+    """Emit a placed-IRON matmul segment device (v / k / q).
 
-    Must be called inside an mlir_mod_ctx(); registers one
-    ``aie.device(npu2) @v_matmul_seg`` op.  Body-level divergence from
+    Must be called inside an mlir_mod_ctx().  Registers one
+    ``aie.device(npu2) @<sym_name>`` op.  Body-level divergence from
     cached: each K-outer iteration calls ``bf16_gemm_kernel_bf16out``
     once on the L1 (A, B, C) buffer triple instead of inlining the
     4-MAC vector.contract chain.  Infrastructure (tiles, locks with
     init values, buffers, flows, memtile_dma BD chains, shim allocs,
     runtime_sequence) matches the cached verbatim.
+
+    The three matmul segments (v/k/q) all share the same compute
+    topology (32 cores in 8x4, 8 mem tiles with asymmetric lock counts,
+    same per-core GEMM kernel call).  They differ only in:
+      * shim channel ids (parameter ``*_channel``)
+      * host-arg indices for X / weight / output buffers
+      * output and weight shapes (drive the runtime_sequence offsets and
+        in Q's case the unrolled 4-way dispatch pattern)
+      * the opaque ``__air_external_buffer`` metadata shapes
     """
     from aie.dialects import memref as memref_dialect
     from aie.dialects import vector as vector_dialect
     from aie.extras import types as T
     from aie.ir import UnitAttr
 
-    @device(AIEDevice.npu2, sym_name="v_matmul_seg")
+    out_M, out_N = output_shape
+
+    @device(AIEDevice.npu2, sym_name=sym_name)
     def _dev():
         # 8 shim + 8 mem + 32 compute tiles (cols 0..7, rows 2..5).
         shim_tiles   = [tile(c, 0) for c in range(N_COLS)]
@@ -1138,9 +1162,12 @@ def _emit_v_matmul_seg() -> None:
                 core_buf[(col, row)] = bufs
 
         # External buffers (opaque AIR metadata; kept for diff parity).
-        external_buffer(bf16_np(SEQ_LEN, EMB_DIM), name="__air_external_buffer")
-        external_buffer(bf16_np(SEQ_LEN, KV_DIM), name="__air_external_buffer_1")
-        external_buffer(bf16_np(SEQ_LEN, KV_DIM), name="__air_external_buffer_2")
+        # Shapes vary across v/k/q matmul devices (V/K: 2048x2048 + 2x
+        # 2048x512; Q: all 2048x2048).
+        eb0, eb1, eb2 = extbuf_shapes
+        external_buffer(bf16_np(*eb0), name="__air_external_buffer")
+        external_buffer(bf16_np(*eb1), name="__air_external_buffer_1")
+        external_buffer(bf16_np(*eb2), name="__air_external_buffer_2")
 
         # ------------------------------------------------------------
         # aie.mem blocks per compute tile.  Cached order: row 5 col 7
@@ -1497,88 +1524,264 @@ def _emit_v_matmul_seg() -> None:
                 _make_memtile_dma_no_x_col(col)
 
         # ------------------------------------------------------------
-        # Shim allocations.  Cached order:
-        #   air_channel_61_C (S2MM 0 on shim_C_0)  V output, 8 channels
-        #   air_channel_60_C (MM2S 0 on shim_C_0)  X input, 8 channels
-        #   air_channel_65_C (MM2S 1 on shim_C_0)  V weight, cols 0-3
+        # Shim allocations.  Cached order (per device):
+        #   air_channel_<output_channel>_C (S2MM 0 on shim_C_0)  output,    8 channels
+        #   air_channel_<x_channel>_C      (MM2S 0 on shim_C_0)  X input,   8 channels
+        #   air_channel_<weight_channel>_C (MM2S 1 on shim_C_0)  W weight,  cols 0-3
         # ------------------------------------------------------------
         for col in range(N_COLS):
             shim_dma_allocation(
-                f"air_channel_61_{col}", shim_tiles[col],
+                f"air_channel_{output_channel}_{col}", shim_tiles[col],
                 DMAChannelDir.S2MM, 0)
         for col in range(N_COLS):
             shim_dma_allocation(
-                f"air_channel_60_{col}", shim_tiles[col],
+                f"air_channel_{x_channel}_{col}", shim_tiles[col],
                 DMAChannelDir.MM2S, 0)
         for col in range(4):
             shim_dma_allocation(
-                f"air_channel_65_{col}", shim_tiles[col],
+                f"air_channel_{weight_channel}_{col}", shim_tiles[col],
                 DMAChannelDir.MM2S, 1)
 
         # ------------------------------------------------------------
         # Runtime sequence.
-        # Cached order:
-        #   8 X-input tasks  (60_0..60_7 on arg2,    repeat_count=3)
-        #   4 V-weight tasks (65_0..65_3 on arg7,    repeat_count=3)
-        #   8 V-output tasks (61_0..61_7 on arg8,    issue_token=True)
-        #   12 dma_free_task (8 X + 4 V-weight)
-        #   8 dma_await_task (V-out)
+        # The V and K matmul devices emit a 2048x512 output and use a
+        # single 4-way unrolled dma_bd dim on the X input (so 8 X-tasks,
+        # 4 W-tasks, 8 output-tasks total).  The Q matmul device emits
+        # a 2048x2048 output (4x larger) so it unrolls each X-channel
+        # into 4 dispatches (32 X-tasks total), each W-channel into 4
+        # dispatches (16 W-tasks), and adds repeat_count=3 to the
+        # output tasks.  Q also uses a reverse await + interleaved free
+        # ordering to match the cached IR.
         # ------------------------------------------------------------
+        # Output shape decides dispatch fan-out:
+        #   2048x512  : single-dispatch (4 inner outer iters baked into
+        #               the x bd's leading <4, 1048576> dim) -- V and K
+        #   2048x2048 : 4-dispatch unrolled (the leading <4, ...> is the
+        #               dispatcher count, not a bd dim) -- Q
+        if (out_M, out_N) == (2048, 512):
+            n_dispatches = 1
+        elif (out_M, out_N) == (2048, 2048):
+            n_dispatches = 4
+        else:
+            raise ValueError(f"unsupported output_shape {output_shape!r}")
+
         @runtime_sequence(*_rms_gemms_rope_host_arg_types(),
-                          sym_name="v_matmul_seg_sequence")
+                          sym_name=f"{sym_name}_sequence")
         def _seq(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8,
                  arg9, arg10, arg11, arg12):
-            del arg0, arg1, arg3, arg4, arg5, arg6, arg9, arg10, arg11, arg12
-            # 8 X-input tasks.
+            args = (arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7,
+                    arg8, arg9, arg10, arg11, arg12)
+            x_buf = args[x_arg]
+            w_buf = args[weight_arg]
+            y_buf = args[output_arg]
+
             x_tasks = []
-            for col in range(N_COLS):
-                offset = col * 131072
-                t = dma_configure_task_for(f"air_channel_60_{col}",
-                                            repeat_count=3)
-                with bds(t) as bd:
-                    with bd[0]:
-                        dma_bd(arg2, offset=offset, len=131072,
-                               dimensions=[(4, 1048576), (32, 64),
-                                           (64, 2048), (64, 1)])
-                        EndOp()
-                dma_start_task(t)
-                x_tasks.append(t)
-
-            # 4 V-weight tasks (cols 0-3 only).
             w_tasks = []
-            for col in range(4):
-                offset = col * 128
-                t = dma_configure_task_for(f"air_channel_65_{col}",
-                                            repeat_count=3)
-                with bds(t) as bd:
-                    with bd[0]:
-                        dma_bd(arg7, offset=offset, len=262144,
-                               dimensions=[(32, 32768), (64, 512), (128, 1)])
-                        EndOp()
-                dma_start_task(t)
-                w_tasks.append(t)
-
-            # 8 V-output tasks.
             y_tasks = []
-            for col in range(N_COLS):
-                offset = col * 32768
-                t = dma_configure_task_for(f"air_channel_61_{col}",
-                                            issue_token=True)
-                with bds(t) as bd:
-                    with bd[0]:
-                        dma_bd(arg8, offset=offset, len=131072,
-                               dimensions=[(4, 262144), (64, 512), (512, 1)])
-                        EndOp()
-                dma_start_task(t)
-                y_tasks.append(t)
 
-            # Free inputs (X then V-weight), await outputs.
-            for t in x_tasks:
-                dma_free_task(t)
-            for t in w_tasks:
-                dma_free_task(t)
-            for t in y_tasks:
-                dma_await_task(t)
+            if n_dispatches == 1:
+                # V/K shape: 8 X-tasks, 4 W-tasks, 8 Y-tasks.
+                for col in range(N_COLS):
+                    offset = col * 131072
+                    t = dma_configure_task_for(
+                        f"air_channel_{x_channel}_{col}",
+                        repeat_count=3)
+                    with bds(t) as bd:
+                        with bd[0]:
+                            dma_bd(x_buf, offset=offset, len=131072,
+                                   dimensions=[(4, 1048576), (32, 64),
+                                               (64, 2048), (64, 1)])
+                            EndOp()
+                    dma_start_task(t)
+                    x_tasks.append(t)
+
+                for col in range(4):
+                    offset = col * 128
+                    t = dma_configure_task_for(
+                        f"air_channel_{weight_channel}_{col}",
+                        repeat_count=3)
+                    with bds(t) as bd:
+                        with bd[0]:
+                            dma_bd(w_buf, offset=offset, len=262144,
+                                   dimensions=[(32, 32768), (64, 512),
+                                               (128, 1)])
+                            EndOp()
+                    dma_start_task(t)
+                    w_tasks.append(t)
+
+                for col in range(N_COLS):
+                    offset = col * 32768
+                    t = dma_configure_task_for(
+                        f"air_channel_{output_channel}_{col}",
+                        issue_token=True)
+                    with bds(t) as bd:
+                        with bd[0]:
+                            dma_bd(y_buf, offset=offset, len=131072,
+                                   dimensions=[(4, 262144), (64, 512),
+                                               (512, 1)])
+                            EndOp()
+                    dma_start_task(t)
+                    y_tasks.append(t)
+
+                # Frees: X first (in order), then W; then awaits.
+                for t in x_tasks:
+                    dma_free_task(t)
+                for t in w_tasks:
+                    dma_free_task(t)
+                for t in y_tasks:
+                    dma_await_task(t)
+
+            else:
+                # Q shape: 32 X-tasks, 16 W-tasks, 8 Y-tasks.
+                # Outer order: col-major (col 0..7), and within each col,
+                # dispatch-major (d 0..3).  X offset per dispatch:
+                #   col*131072 + d * 1048576.
+                # W offset is constant per col (col*128) -- the cached's
+                # dispatches all re-issue the same bd-base.
+                # Y offset per col: col*131072 (with repeat_count=3 to
+                # cover the 4 inner outer iters).
+                for col in range(N_COLS):
+                    for d in range(4):
+                        offset = col * 131072 + d * 1048576
+                        t = dma_configure_task_for(
+                            f"air_channel_{x_channel}_{col}",
+                            repeat_count=3)
+                        with bds(t) as bd:
+                            with bd[0]:
+                                dma_bd(x_buf, offset=offset, len=131072,
+                                       dimensions=[(32, 64), (64, 2048),
+                                                   (64, 1)])
+                                EndOp()
+                        dma_start_task(t)
+                        x_tasks.append(t)
+
+                for col in range(4):
+                    for d in range(4):
+                        offset = col * 128
+                        t = dma_configure_task_for(
+                            f"air_channel_{weight_channel}_{col}",
+                            repeat_count=3)
+                        with bds(t) as bd:
+                            with bd[0]:
+                                dma_bd(w_buf, offset=offset, len=262144,
+                                       dimensions=[(4, 512),
+                                                   (32, 131072),
+                                                   (64, 2048),
+                                                   (128, 1)])
+                                EndOp()
+                        dma_start_task(t)
+                        w_tasks.append(t)
+
+                for col in range(N_COLS):
+                    offset = col * 131072
+                    t = dma_configure_task_for(
+                        f"air_channel_{output_channel}_{col}",
+                        issue_token=True, repeat_count=3)
+                    with bds(t) as bd:
+                        with bd[0]:
+                            dma_bd(y_buf, offset=offset, len=131072,
+                                   dimensions=[(4, 1048576),
+                                               (4, 512),
+                                               (64, 2048),
+                                               (512, 1)])
+                            EndOp()
+                    dma_start_task(t)
+                    y_tasks.append(t)
+
+                # Q ordering: awaits first (reverse), then frees in
+                # reverse-col groups of 4 (W first, then X).
+                for t in reversed(y_tasks):
+                    dma_await_task(t)
+                # W frees: cols 3 -> 0, each col's 4 dispatches in order.
+                for col in reversed(range(4)):
+                    for d in range(4):
+                        dma_free_task(w_tasks[col * 4 + d])
+                # X frees: cols 7 -> 0, each col's 4 dispatches in order.
+                for col in reversed(range(N_COLS)):
+                    for d in range(4):
+                        dma_free_task(x_tasks[col * 4 + d])
+
+
+# ---------------------------------------------------------------------------
+# Per-device thin wrappers around _emit_matmul_device.
+#
+# Host-arg index conventions (verified against the cached runtime_sequence
+# blocks in reference_mlir/rms_gemms_rope.npu.air.mlir):
+#   arg0 : Q-weight        (memref<2048x2048xbf16>)  -- unused by v/k
+#   arg1 : RMSNorm gamma   (memref<2048xbf16>)
+#   arg2 : X-input (RMS'd) (memref<2048x2048xbf16>)
+#   arg3 : Q-output        (memref<2048x2048xbf16>)
+#   arg4 : (post-RoPE Q)   (memref<2048x2048xbf16>)
+#   arg5 : K-weight        (memref<2048x512xbf16>)
+#   arg6 : K-output        (memref<2048x512xbf16>)
+#   arg7 : V-weight        (memref<2048x512xbf16>)
+#   arg8 : V-output        (memref<2048x512xbf16>)
+#
+# Wait -- the cached runtime_sequence shows:
+#   v_matmul_seg: x=arg2, w=arg7, y=arg8   (channels 60/65/61)
+#   k_matmul_seg: x=arg2, w=arg5, y=arg6   (channels 57/58/62)
+#   q_matmul_seg: x=arg2, w=arg3, y=arg4   (channels 59/64/63)
+#
+# So in Q, arg3 is the Q-weight (2048x2048) and arg4 is Q-output
+# (2048x2048).  This contradicts the naming convention used in the
+# host-arg-types comment at the top of this file, but matches what the
+# cached MLIR actually does.  The 4.5b RoPE phase already verified that
+# arg4 is the pre-RoPE Q (output of q_matmul_seg, input to rq_rope_seg)
+# and arg6 is the pre-RoPE K (output of k_matmul_seg, input to
+# rk_rope_seg).  This is consistent.
+# ---------------------------------------------------------------------------
+def _emit_v_matmul_seg() -> None:
+    """Emit the placed-IRON v_matmul_seg device."""
+    _emit_matmul_device(
+        "v_matmul_seg",
+        weight_arg=7,
+        x_arg=2,
+        output_arg=8,
+        output_shape=(SEQ_LEN, KV_DIM),       # 2048 x 512
+        weight_shape=(EMB_DIM, KV_DIM),       # 2048 x 512
+        x_channel=60,
+        weight_channel=65,
+        output_channel=61,
+        extbuf_shapes=((SEQ_LEN, EMB_DIM),
+                       (SEQ_LEN, KV_DIM),
+                       (SEQ_LEN, KV_DIM)),
+    )
+
+
+def _emit_k_matmul_seg() -> None:
+    """Emit the placed-IRON k_matmul_seg device."""
+    _emit_matmul_device(
+        "k_matmul_seg",
+        weight_arg=5,
+        x_arg=2,
+        output_arg=6,
+        output_shape=(SEQ_LEN, KV_DIM),       # 2048 x 512
+        weight_shape=(EMB_DIM, KV_DIM),       # 2048 x 512
+        x_channel=57,
+        weight_channel=58,
+        output_channel=62,
+        extbuf_shapes=((SEQ_LEN, EMB_DIM),
+                       (SEQ_LEN, KV_DIM),
+                       (SEQ_LEN, KV_DIM)),
+    )
+
+
+def _emit_q_matmul_seg() -> None:
+    """Emit the placed-IRON q_matmul_seg device."""
+    _emit_matmul_device(
+        "q_matmul_seg",
+        weight_arg=3,
+        x_arg=2,
+        output_arg=4,
+        output_shape=(SEQ_LEN, EMB_DIM),      # 2048 x 2048
+        weight_shape=(EMB_DIM, EMB_DIM),      # 2048 x 2048
+        x_channel=59,
+        weight_channel=64,
+        output_channel=63,
+        extbuf_shapes=((SEQ_LEN, EMB_DIM),
+                       (SEQ_LEN, EMB_DIM),
+                       (SEQ_LEN, EMB_DIM)),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1700,10 +1903,11 @@ def build_rms_gemms_rope_module(seq_len: int = SEQ_LEN,
                                  verbose: bool = False) -> str:
     """Build the prefill RMS+GEMMS+RoPE MLIR module.
 
-    Phase 4.5c: the ``r_weighted_rms_norm_seg``, ``rk_rope_seg``,
-    ``rq_rope_seg``, and ``v_matmul_seg`` devices are emitted via
-    placed-IRON; the other 3 devices (2 remaining GEMM segments +
-    1 dispatcher) come from the cached MLIR text via string splice.
+    Phase 4.5d: the ``r_weighted_rms_norm_seg``, ``rk_rope_seg``,
+    ``rq_rope_seg``, ``v_matmul_seg``, ``k_matmul_seg``, and
+    ``q_matmul_seg`` devices are emitted via placed-IRON; only the
+    outer dispatcher device still comes from the cached MLIR text via
+    string splice.
 
     All dimensions must match the Llama-3.2-1B values; the cached AIR
     layout is shape-specialized.
@@ -1722,6 +1926,8 @@ def build_rms_gemms_rope_module(seq_len: int = SEQ_LEN,
         _emit_rk_rope_seg()
         _emit_rq_rope_seg()
         _emit_v_matmul_seg()
+        _emit_k_matmul_seg()
+        _emit_q_matmul_seg()
         module = ctx.module
 
     placed_text = str(module)
@@ -1729,6 +1935,8 @@ def build_rms_gemms_rope_module(seq_len: int = SEQ_LEN,
     placed_rk_rope = _extract_single_device(placed_text, "rk_rope_seg")
     placed_rq_rope = _extract_single_device(placed_text, "rq_rope_seg")
     placed_v_matmul = _extract_single_device(placed_text, "v_matmul_seg")
+    placed_k_matmul = _extract_single_device(placed_text, "k_matmul_seg")
+    placed_q_matmul = _extract_single_device(placed_text, "q_matmul_seg")
 
     # Load the cached prefill MLIR and splice in the placed devices.
     project_root = Path(__file__).resolve().parents[1]
@@ -1740,11 +1948,13 @@ def build_rms_gemms_rope_module(seq_len: int = SEQ_LEN,
     spliced = _splice_device(spliced, "rk_rope_seg", placed_rk_rope)
     spliced = _splice_device(spliced, "rq_rope_seg", placed_rq_rope)
     spliced = _splice_device(spliced, "v_matmul_seg", placed_v_matmul)
+    spliced = _splice_device(spliced, "k_matmul_seg", placed_k_matmul)
+    spliced = _splice_device(spliced, "q_matmul_seg", placed_q_matmul)
 
     if verbose:
         print(f"  [rms_gemms_rope builder] Spliced placed-IRON "
               f"r_weighted_rms_norm_seg + rk_rope_seg + rq_rope_seg + "
-              f"v_matmul_seg into cached MLIR "
+              f"v/k/q_matmul_seg into cached MLIR "
               f"({original_len} -> {len(spliced)} bytes).")
 
     return spliced
@@ -1768,6 +1978,8 @@ if __name__ == "__main__":  # pragma: no cover
             _emit_rk_rope_seg()
             _emit_rq_rope_seg()
             _emit_v_matmul_seg()
+            _emit_k_matmul_seg()
+            _emit_q_matmul_seg()
             mod = ctx.module
         text = str(mod)
     else:
