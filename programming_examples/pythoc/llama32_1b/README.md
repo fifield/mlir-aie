@@ -36,12 +36,14 @@ behind a feature flag until each builder lands.
 | `builders/o_gemv_ffn.py` | decode (O + FFN) | per-layer decode | ✓ Phase 4.4 |
 | `builders/flash_attn.py` | prefill flash attention | `llama32_1b_prefill.py` | ✓ Phase 4.2 |
 | `builders/rms_gemms_rope.py` | prefill (RMSNorm + QKV GEMM + RoPE) | per-layer prefill | ✓ Phase 4.5 |
-| `builders/o_ffn.py` | prefill (O + FFN with GEMMs) | per-layer prefill | ◐ Phase 4.6c (4 of 9 devices placed, cached-splice) |
+| `builders/o_ffn.py` | prefill (O + FFN with GEMMs) | per-layer prefill | ◐ Phase 4.6 (5 of 9 devices placed; 4 GEMM devices deferred via cached-splice) |
 
-Phase 4.6c: 4 of 9 devices on placed-IRON (`rm_weighted_rms_norm_seg`,
-`ra_add_seg`, `fa_add_seg`, `sw_silu_mul_seg`); other 5 devices via
-splice. Subsequent phases 4.6d-f extend the splice to remaining
-devices.
+Phase 4.6 ships partial: `rm_weighted_rms_norm_seg`, `ra_add_seg`,
+`fa_add_seg`, `sw_silu_mul_seg`, and the outer unnamed dispatcher
+device are on placed-IRON. The 4 GEMM devices (`og_matmul_seg`,
+`dg_matmul_seg`, `gg_matmul_seg`, `ug_matmul_seg`) hit a real wall in
+two prior attempts (structural diff perfect, runtime garbage);
+deferred pending deeper analysis (likely AIR source-of-truth).
 
 Decode steady-state: ~7.8 tok/s on NPU2 with the current kernels (real
 HF weights, `unsloth/Llama-3.2-1B-Instruct`).
@@ -52,7 +54,7 @@ HF weights, `unsloth/Llama-3.2-1B-Instruct`).
 |---|---|---|
 | Prefill: RMSNorm + QKV GEMM + RoPE | NPU (placed-IRON + PythoC `rope_pythoc.o` + `bf16_gemm_pythoc_*.o`) | All 7 devices on placed-IRON |
 | Prefill: flash attention | NPU (placed-IRON + PythoC `attn_pythoc.o`) | All 32 cores, cascade chain |
-| Prefill: O + FFN | NPU (cached MLIR + PythoC `silu_and_mul_bf16.o`) | GEMM = 1024 inline `vector.contract` |
+| Prefill: O + FFN | NPU (cached MLIR + PythoC `silu_and_mul_bf16.o`) | 5 of 9 devices on placed-IRON; 4 GEMM devices cached-spliced (1024 inline `vector.contract`) |
 | Decode: RMSNorm + QKV GEMV + RoPE | NPU (placed-IRON + PythoC kernels) | per-layer, per-token |
 | Decode: attention compute | **CPU numpy** | LQ=1, dispatch overhead beats NPU GEMV |
 | Decode: O + FFN | NPU (placed-IRON + PythoC kernels) | per-layer, per-token |
@@ -103,14 +105,15 @@ llama32_1b/
 │   ├── rms_gemv_rope.py        # 883 LOC -- 6-phase decode multi-launch
 │   ├── o_gemv_ffn.py           # 1377 LOC -- 8-phase decode multi-launch
 │   ├── flash_attn.py           # 1105 LOC -- 32-core 4-stage cascade prefill
-│   └── rms_gemms_rope.py       # 2164 LOC -- 7-device prefill RMS+QKV-GEMM+RoPE
+│   ├── rms_gemms_rope.py       # 2164 LOC -- 7-device prefill RMS+QKV-GEMM+RoPE
+│   └── o_ffn.py                # 1356 LOC -- 5/9 devices placed (4 GEMM devs cached-spliced)
 ├── reference_mlir/             # cached AIR-emitted aie/aiex MLIR
 │   ├── rms_gemv_rope.npu.air.mlir   # decode (placed-IRON has parity)
 │   ├── o_gemv_ffn.npu.air.mlir      # decode (placed-IRON has parity)
 │   ├── lm_head_gemv.npu.air.mlir    # decode (placed-IRON has parity)
 │   ├── flash_attn.npu.air.mlir      # prefill (placed-IRON has parity)
 │   ├── rms_gemms_rope.npu.air.mlir  # prefill (placed-IRON has parity)
-│   └── o_ffn.npu.air.mlir           # prefill -- still substrate
+│   └── o_ffn.npu.air.mlir           # prefill -- 5/9 devices placed; 4 GEMM devs spliced from this
 ├── reference_o/                # EMPTY -- all .o now PythoC-built
 ├── kernel_builder/             # aiecc compile + XRT cache (no aircc at runtime)
 │   ├── aie_compile.py
