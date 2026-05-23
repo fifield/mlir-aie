@@ -80,6 +80,16 @@ def build_rms_gemms_rope_ir(seq_len, emb_dim, kv_dim, n_heads, n_kv_heads, head_
 
 def build_o_ffn_ir(seq_len, emb_dim, hidden_dim, *, verbose=False,
                    omit_while_true_loop=False):
+    if _placed_builder_enabled("o_ffn"):
+        _ensure_builders_on_path()
+        from builders.o_ffn import build_o_ffn_module
+        if verbose:
+            print(f"  [aie_ir_gen] Using placed-IRON builder for o_ffn "
+                  f"(seq_len={seq_len}, emb_dim={emb_dim}, hidden_dim={hidden_dim})")
+        return build_o_ffn_module(
+            seq_len=seq_len, emb_dim=emb_dim, hidden_dim=hidden_dim,
+            verbose=verbose, omit_while_true_loop=omit_while_true_loop,
+        )
     del seq_len, emb_dim, hidden_dim, verbose, omit_while_true_loop
     return _load_cached("o_ffn")
 
