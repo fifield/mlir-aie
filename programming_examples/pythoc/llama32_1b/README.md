@@ -36,11 +36,12 @@ behind a feature flag until each builder lands.
 | `builders/o_gemv_ffn.py` | decode (O + FFN) | per-layer decode | ✓ Phase 4.4 |
 | `builders/flash_attn.py` | prefill flash attention | `llama32_1b_prefill.py` | ✓ Phase 4.2 |
 | `builders/rms_gemms_rope.py` | prefill (RMSNorm + QKV GEMM + RoPE) | per-layer prefill | ✓ Phase 4.5 |
-| `builders/o_ffn.py` | prefill (O + FFN with GEMMs) | per-layer prefill | ◐ Phase 4.6b (3 of 9 devices placed, cached-splice) |
+| `builders/o_ffn.py` | prefill (O + FFN with GEMMs) | per-layer prefill | ◐ Phase 4.6c (4 of 9 devices placed, cached-splice) |
 
-Phase 4.6b: 3 of 9 devices on placed-IRON (`rm_weighted_rms_norm_seg`,
-`ra_add_seg`, `fa_add_seg`); other 6 devices via splice. Subsequent
-phases 4.6c-f extend the splice to remaining devices.
+Phase 4.6c: 4 of 9 devices on placed-IRON (`rm_weighted_rms_norm_seg`,
+`ra_add_seg`, `fa_add_seg`, `sw_silu_mul_seg`); other 5 devices via
+splice. Subsequent phases 4.6d-f extend the splice to remaining
+devices.
 
 Decode steady-state: ~7.8 tok/s on NPU2 with the current kernels (real
 HF weights, `unsloth/Llama-3.2-1B-Instruct`).
