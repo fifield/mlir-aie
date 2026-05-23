@@ -277,21 +277,27 @@ semantics that the `func.call @bf16_gemm_kernel_bf16out` substitution
 doesn't preserve when the L2-streaming pattern advances data through
 the same L1 buffer many times.
 
-Future work paths (any of these can unblock these 4 devices):
-- **Read AIR source-of-truth**: pull
-  `mlir-air/.../o_ffn_multi_launch.py` (the AIR-level builder that
-  generates the cached MLIR via aircc). Understanding the LOGICAL
-  tiling intent — rather than reverse-engineering aircc's
-  post-lowering structure — would likely reveal what state the inline
-  body assumes.
-- **Inline GEMM emit**: drop the `func.call` substitution; emit the
-  cached's exact `vector.contract` + `extf`/`truncf` chain inline
-  from placed-IRON Python. Much larger LOC per device but sidesteps
-  the `func.call` state-preservation question entirely.
-- **Diagnostic test**: a/b the kernel with `set_ctrl_reg` re-init
-  hoisted outside the K_OUTER loop vs inside; or reduce gg/ug's
-  `repeat_count` to match v_matmul's fan-out and see if the failure
-  disappears.
+**Full multi-session brief** with the complete structural analysis,
+verified host-arg corrections, and recommended next-session task lives
+in beads at `PythoC-8ns.13` (see `bd show PythoC-8ns.13` in
+`~/npu-dev-pythoc/PythoC`). Investigation history so far:
+
+- The AIR source-of-truth read at
+  `mlir-air-llama_awq_impl/.../multi_launch_builder/o_ffn_multi.py`
+  produced a partial diagnosis (kernel `M_BLOCKS=16` vs og/dg L1 C
+  buffer `M=8` causes out-of-bounds writes), but the retry attempt
+  found og/dg also differ at the **L2 memtile shape**, **memtile
+  DMA bd dim**, **core body adds an `arg1=0..8 step 2` inner loop**,
+  and **runtime repeat_count** levels. og/dg can't be parametrically
+  extended from `_emit_matmul_device`; they need a separate
+  `_emit_og_matmul_device` helper.
+- gg/ug's L1 buffer shape is byte-identical to v_matmul's but they
+  still fail — separate root cause (likely the 4× wider N=8192 output
+  exposing X-broadcast DMA grid behavior that v's smaller N doesn't).
+- Recommended path: isolation testing (place ONE device, splice the
+  other 8 from cached, gate the device's HF correctness independently
+  before extending). See the PythoC-8ns.13 note for the per-device
+  structural diff and the per-session task list.
 
 The 4 deferred devices being on the cached MLIR substrate is
 end-to-end-equivalent to the pre-Phase-4.6 state for the
