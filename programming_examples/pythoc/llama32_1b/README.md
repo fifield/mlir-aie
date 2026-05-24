@@ -30,7 +30,7 @@ status* below.
 
 `reference_o/` is empty — no `.cc`-built `.o` left in the project.
 
-### Placed-IRON builders — 5 of 6 enabled by default
+### Placed-IRON builders — 6 of 6 enabled by default
 
 | Builder | Phase | Used by | Default |
 |---|---|---|---|
@@ -38,16 +38,17 @@ status* below.
 | `builders/rms_gemv_rope.py` | decode (RMSNorm + QKV GEMV + RoPE) | per-layer decode | ✓ placed-IRON |
 | `builders/o_gemv_ffn.py` | decode (O + FFN) | per-layer decode | ✓ placed-IRON |
 | `builders/flash_attn.py` | prefill flash attention | `llama32_1b_prefill.py` | ✓ placed-IRON |
-| `builders/rms_gemms_rope.py` | prefill (RMSNorm + QKV GEMM + RoPE) | per-layer prefill | ☐ **cached** (see *Deferred* below) |
+| `builders/rms_gemms_rope.py` | prefill (RMSNorm + QKV GEMM + RoPE) | per-layer prefill | ✓ placed-IRON |
 | `builders/o_ffn.py` | prefill (O + FFN with GEMMs) | per-layer prefill | ◐ placed-IRON (5 of 9 devices; 4 GEMM devices internally spliced from cached) |
 
-`rms_gemms_rope`'s placed-IRON emit has a known GEMM operand/stride bug
-introduced in Phase 4.5c — it produces garbage tokens on real-HF
-prompts, so it's not in the default placed-IRON set. The cached fallback
-is bit-equivalent to the AIR-tree reference and runs by default. Set
-`PYTHOC_LLAMA_USE_PLACED_BUILDERS=rms_gemms_rope` (or include it in the
-explicit allowlist) to opt in when investigating the bug. See *Deferred*
-below.
+`rms_gemms_rope`'s prefill V/K/Q GEMMs originally landed with a kernel
+stride/loop-bound mismatch (kernel built as `M_BLOCKS=16, N_BLOCKS=8`
+when the cached contract walks the L1 buffers as if `M_BLOCKS=8,
+N_BLOCKS=16`). The kernel produced uncorrelated output (corr=0.007 vs
+cached element-wise). Fixed by re-deriving the strides directly from
+the cached contract's `arg1*64 + arg3*512` access pattern; see
+`kernels/build.py::_compile_bf16_gemm_rms_gemms_rope` and
+`tests/test_v_matmul_oracle.py` for the diagnostic harness.
 
 #### Phase 4.6 status (o_ffn partial)
 
@@ -57,19 +58,22 @@ below.
 (`og_matmul_seg`, `dg_matmul_seg`, `gg_matmul_seg`, `ug_matmul_seg`)
 are spliced from `reference_mlir/o_ffn.npu.air.mlir` by the builder
 itself — transparent to call sites in `aie_ir_gen.py`. The 4 GEMM
-devices hit a real wall in two attempts (Phases 4.6d + 4.6e) — same
-underlying class of bug as `rms_gemms_rope`'s GEMM emit; deferred
-pending the root-cause fix.
+devices hit the same class of bug as `rms_gemms_rope`'s V/K/Q GEMMs
+(structural-diff-clean / runtime-garbage from a kernel-stride/L1-layout
+mismatch). Now that `rms_gemms_rope` is fixed, the same diagnostic
+approach (see `tests/test_v_matmul_oracle.py`) can be applied to derive
+the correct kernel params for og/dg/gg/ug — they each have different
+K/N shapes from v_matmul so they need their own per-device kernel
+builds.
 
 #### Performance
 
-Real HF weights (`unsloth/Llama-3.2-1B-Instruct`), measured on NPU2 at
-the current default (5 placed builders + `rms_gemms_rope` cached):
+Real HF weights (`unsloth/Llama-3.2-1B-Instruct`), measured on NPU2:
 
 | Config | Prefill (16 layers, seq=2048) | Decode steady-state |
 |---|---|---|
-| Default (5 placed + rms_gemms_rope cached) | ~1.94s | ~7.8 tok/s |
-| All cached (`PYTHOC_LLAMA_USE_PLACED_BUILDERS=cached`) | ~1.93s | ~7.86 tok/s |
+| Default (6 placed builders) | ~1.91s | ~8.05 tok/s |
+| All cached (`PYTHOC_LLAMA_USE_PLACED_BUILDERS=cached`) | ~1.92s | ~8.07 tok/s |
 
 Delta within run-to-run noise.
 
@@ -189,6 +193,16 @@ Default set: `lm_head_gemv`, `flash_attn`, `rms_gemv_rope`,
 `o_gemv_ffn`, `rms_gemms_rope`, `o_ffn` (all 6 current builders). See
 `kernel_builder/aie_ir_gen.py::_DEFAULT_PLACED_BUILDERS`.
 
+### Runtime oracle for the prefill GEMM kernel
+
+`tests/test_v_matmul_oracle.py` compiles two versions of `rms_gemms_rope`
+(all-cached vs placed-IRON with one or more devices spliced) and diffs
+the V/K/Q outputs element-by-element. Used to catch
+structural-diff-clean / runtime-garbage bugs in the placed-IRON GEMM
+emit. Modes: `--mode=v_only` (default), `--mode=vkq`, `--mode=full`.
+Run as `cd build_peano && python3 ../tests/test_v_matmul_oracle.py
+--mode=full`.
+
 The `Makefile` auto-points `PEANO_INSTALL_DIR` at the AIR-tree pip
 `llvm-aie` (commit `5ed1593`); the pythoc-tree's in-tree `llvm-aie`
 (commit `55604435`) crashes in `InterBlockScheduling::emitLoopRemarks`
@@ -264,44 +278,30 @@ make run                                 # rebuilds lm_head_gemv.elf from your e
 
 Phase 4.6's `og_matmul_seg`, `dg_matmul_seg`, `gg_matmul_seg`, and
 `ug_matmul_seg` are spliced from cached MLIR by `builders/o_ffn.py`.
-Two attempts (Phases 4.6d at K=8 and 4.6e at K=16) achieved **exact
+Three attempts (Phases 4.6d twice and 4.6e once) achieved **exact
 structural op-count parity** vs cached — same tiles, locks (with same
 init values), buffers, flows, memtile_dmas, shim_dma_allocations, and
 runtime_sequence configures — but the runtime produced garbage tokens
 (e.g. `, 0, 0, 10,` instead of `Paris`).
 
-Striking finding: `gg/ug` per-core body is **byte-identical** to
-`rms_gemms_rope::v_matmul_seg` (Phase 4.5c, which lands first attempt
-with the same kernel). The differences are entirely above the core
-level: dispatch fan-out (4 Y-dispatches per col vs 1), the shim/memtile
-DMA reshape stride pattern, and `^bb1` re-entry count (gg/ug ≈ 64 per
-core vs v_matmul ≈ 4). The cached's inline `vector.contract` chain
-appears to have implicit register / accumulator / control-state
-semantics that the `func.call @bf16_gemm_kernel_bf16out` substitution
-doesn't preserve when the L2-streaming pattern advances data through
-the same L1 buffer many times.
+**Root cause was the same class of bug as `rms_gemms_rope::v_matmul_seg`**:
+the GEMM kernel was being built with stride/loop-bound params that
+didn't match how the cached contract walks the L1 buffer. For
+`v_matmul_seg`, the kernel was configured as `M_BLOCKS=16/N_BLOCKS=8`
+but the cached contract actually walks the buffers as `M_BLOCKS=8/
+N_BLOCKS=16` with K-stride 512 (not 256) and N-stride 256 (not 64).
+See `kernels/build.py::_compile_bf16_gemm_rms_gemms_rope` for the
+verified derivation against `reference_mlir/rms_gemms_rope.npu.air.mlir`.
 
-**Full multi-session brief** with the complete structural analysis,
-verified host-arg corrections, and recommended next-session task lives
-in beads at `PythoC-8ns.13` (see `bd show PythoC-8ns.13` in
-`~/npu-dev-pythoc/PythoC`). Investigation history so far:
+`og/dg/gg/ug` each have different K/N tile shapes from v_matmul, so
+they each need a separate kernel build with strides derived from
+their respective cached contract access patterns. The diagnostic
+harness at `tests/test_v_matmul_oracle.py` can be adapted per-device
+(splice ONE device's placed-IRON emit into otherwise-cached
+`o_ffn.npu.air.mlir`, diff the device's output buffer vs all-cached).
 
-- The AIR source-of-truth read at
-  `mlir-air-llama_awq_impl/.../multi_launch_builder/o_ffn_multi.py`
-  produced a partial diagnosis (kernel `M_BLOCKS=16` vs og/dg L1 C
-  buffer `M=8` causes out-of-bounds writes), but the retry attempt
-  found og/dg also differ at the **L2 memtile shape**, **memtile
-  DMA bd dim**, **core body adds an `arg1=0..8 step 2` inner loop**,
-  and **runtime repeat_count** levels. og/dg can't be parametrically
-  extended from `_emit_matmul_device`; they need a separate
-  `_emit_og_matmul_device` helper.
-- gg/ug's L1 buffer shape is byte-identical to v_matmul's but they
-  still fail — separate root cause (likely the 4× wider N=8192 output
-  exposing X-broadcast DMA grid behavior that v's smaller N doesn't).
-- Recommended path: isolation testing (place ONE device, splice the
-  other 8 from cached, gate the device's HF correctness independently
-  before extending). See the PythoC-8ns.13 note for the per-device
-  structural diff and the per-session task list.
+**Full multi-session brief** lives in beads at `PythoC-8ns.13` (see
+`bd show PythoC-8ns.13` in `~/npu-dev-pythoc/PythoC`).
 
 The 4 deferred devices being on the cached MLIR substrate is
 end-to-end-equivalent to the pre-Phase-4.6 state for the
