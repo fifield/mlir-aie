@@ -47,9 +47,14 @@ HEAD_DIM = 64
 def _build_modules(mode: str = "v_only"):
     """Return (cached_text, placed_text).
 
-    mode "v_only" -- cached MLIR with only @v_matmul_seg replaced by placed-IRON.
-    mode "vkq"    -- cached MLIR with v/k/q_matmul_seg replaced by placed-IRON.
-    mode "full"   -- full rms_gemms_rope placed-IRON build (all 7 devices).
+    Modes:
+      "v_only" -- cached rms_gemms_rope with only @v_matmul_seg placed.
+      "vkq"    -- cached rms_gemms_rope with v/k/q_matmul_seg placed.
+      "full"   -- full rms_gemms_rope placed-IRON build (all 7 devices).
+      "og"     -- cached o_ffn with only @og_matmul_seg placed.
+      "dg"     -- cached o_ffn with only @dg_matmul_seg placed.
+      "gg"     -- cached o_ffn with only @gg_matmul_seg placed.
+      "ug"     -- cached o_ffn with only @ug_matmul_seg placed.
     """
     from aie.extras.context import mlir_mod_ctx
 
@@ -62,6 +67,28 @@ def _build_modules(mode: str = "v_only"):
         build_rms_gemms_rope_module,
     )
     from builders._emit import attach_loop_annotation_to_all_scf_for
+
+    O_FFN_DEVICES = {"og", "dg", "gg", "ug"}
+
+    if mode in O_FFN_DEVICES:
+        from builders import o_ffn as _ofn
+        emit_name = f"_emit_{mode}_matmul_seg"
+        if not hasattr(_ofn, emit_name):
+            raise NotImplementedError(
+                f"builders/o_ffn.py does not yet expose {emit_name}; "
+                "see the README's Deferred section."
+            )
+        emit_fn = getattr(_ofn, emit_name)
+        cached_path = PROJECT_DIR / "reference_mlir" / "o_ffn.npu.air.mlir"
+        cached_text = cached_path.read_text()
+        with mlir_mod_ctx() as ctx:
+            emit_fn()
+            module = ctx.module
+            attach_loop_annotation_to_all_scf_for(module)
+        placed_text = module.operation.get_asm(assume_verified=True)
+        placed_dev = _extract_single_device(placed_text, f"{mode}_matmul_seg")
+        spliced = _splice_device(cached_text, f"{mode}_matmul_seg", placed_dev)
+        return cached_text, spliced
 
     cached_path = PROJECT_DIR / "reference_mlir" / "rms_gemms_rope.npu.air.mlir"
     cached_text = cached_path.read_text()
@@ -212,6 +239,55 @@ def _stats(label, a, b):
 # Main
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# o_ffn synthetic inputs + runner (15-arg host signature)
+# ---------------------------------------------------------------------------
+
+O_FFN_HIDDEN_DIM = 8192
+
+
+def _synth_o_ffn_inputs(seed: int = 0):
+    """Synthetic 15-arg input list matching _o_ffn_host_arg_types."""
+    rng = np.random.default_rng(seed)
+
+    def rand_bf16(*shape, scale=0.02):
+        a = (rng.standard_normal(size=shape) * scale).astype(np.float32)
+        return a.astype(bfloat16)
+
+    return [
+        rand_bf16(EMB_DIM, EMB_DIM),                     # arg0  (X input -- og reads this)
+        rand_bf16(EMB_DIM, EMB_DIM),                     # arg1  (W weight -- og reads this)
+        np.zeros((EMB_DIM, EMB_DIM), dtype=bfloat16),    # arg2  (Y output -- og writes here)
+        rand_bf16(EMB_DIM, EMB_DIM),                     # arg3  (residual base, unused by og)
+        np.zeros((EMB_DIM, EMB_DIM), dtype=bfloat16),    # arg4  (ra_add target, unused by og)
+        rand_bf16(EMB_DIM, scale=1.0),                   # arg5  (gamma)
+        np.zeros((EMB_DIM, EMB_DIM), dtype=bfloat16),    # arg6  (rms output, unused by og)
+        rand_bf16(EMB_DIM, O_FFN_HIDDEN_DIM),             # arg7  (Wgate)
+        rand_bf16(EMB_DIM, O_FFN_HIDDEN_DIM),             # arg8  (Wup)
+        np.zeros((EMB_DIM, O_FFN_HIDDEN_DIM), dtype=bfloat16),  # arg9
+        np.zeros((EMB_DIM, O_FFN_HIDDEN_DIM), dtype=bfloat16),  # arg10
+        np.zeros((EMB_DIM, O_FFN_HIDDEN_DIM), dtype=bfloat16),  # arg11
+        rand_bf16(O_FFN_HIDDEN_DIM, EMB_DIM),             # arg12 (Wdown)
+        np.zeros((EMB_DIM, EMB_DIM), dtype=bfloat16),    # arg13
+        np.zeros((SEQ_LEN * 2048,), dtype=bfloat16),     # arg14 (work buffer)
+    ]
+
+
+def _run_o_ffn(name, ir_text, inputs, cache_dir, verbose=False,
+               output_indices=(2,)):
+    from kernel_builder.cache import KernelCache
+
+    cache = KernelCache(cache_dir=cache_dir, verbose=verbose)
+    cache.compile_and_cache(name, ir_text, instance_name="o_ffn")
+    results = cache.load_and_run(
+        name,
+        {},
+        *inputs,
+        output_indices=list(output_indices),
+    )
+    return {idx: results[idx].copy() for idx in output_indices}
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--seed", type=int, default=0)
@@ -220,10 +296,12 @@ def main():
                    help="Reuse a previously-compiled cached run (skip recompile + rerun)")
     p.add_argument("--skip-placed", action="store_true")
     p.add_argument("--verbose", action="store_true")
-    p.add_argument("--mode", choices=["v_only", "vkq", "full"], default="v_only",
+    p.add_argument("--mode", choices=["v_only", "vkq", "full", "og"],
+                   default="v_only",
                    help="v_only: splice only @v_matmul_seg; "
                         "vkq: splice v/k/q_matmul_seg; "
-                        "full: full placed-IRON rms_gemms_rope (all 7 devices)")
+                        "full: full placed-IRON rms_gemms_rope (all 7 devices); "
+                        "og: splice only @og_matmul_seg into o_ffn cached MLIR")
     args = p.parse_args()
 
     workdir = Path(args.workdir).resolve()
@@ -238,6 +316,69 @@ def main():
     print(f"[oracle]  placed-{args.mode:8s}: {len(placed_text)} bytes "
           f"(delta {len(placed_text) - len(cached_text):+d})")
 
+    # ---------------------------------------------------------------
+    # og mode: diff only the og_matmul output buffer (arg2 of o_ffn).
+    # ---------------------------------------------------------------
+    if args.mode == "og":
+        print("[oracle] Generating synthetic o_ffn inputs...")
+        inputs_cached = _synth_o_ffn_inputs(seed=args.seed)
+        inputs_placed = _synth_o_ffn_inputs(seed=args.seed)
+        assert np.array_equal(
+            inputs_cached[0].view(np.int16), inputs_placed[0].view(np.int16))
+
+        cached_dir = workdir / "cached_og"
+        placed_dir = workdir / "placed_og"
+        cached_dir.mkdir(parents=True, exist_ok=True)
+        placed_dir.mkdir(parents=True, exist_ok=True)
+
+        cached_results = None
+        placed_results = None
+
+        if not args.skip_cached:
+            print("\n[oracle] === Run 1: o_ffn CACHED reference ===")
+            cached_results = _run_o_ffn(
+                "o_ffn_cached", cached_text, inputs_cached,
+                cache_dir=cached_dir, verbose=args.verbose,
+                output_indices=(2, 4, 6, 11, 13, 14),
+            )
+        if not args.skip_placed:
+            print("\n[oracle] === Run 2: o_ffn PLACED-og ===")
+            placed_results = _run_o_ffn(
+                "o_ffn_placed_og", placed_text, inputs_placed,
+                cache_dir=placed_dir, verbose=args.verbose,
+                output_indices=(2, 4, 6, 11, 13, 14),
+            )
+
+        if cached_results is None or placed_results is None:
+            print("[oracle] skipping diffs (a run was skipped)")
+            return 0
+
+        print("\n[oracle] === Diff: placed-og vs cached (og output / arg2) ===")
+        og_stats = _stats("og (placed vs cached)",
+                          placed_results[2], cached_results[2])
+
+        # Classification
+        print("\n[oracle] === Classification ===")
+        og_corr = og_stats["corr"]
+        og_max = og_stats["max_abs"]
+        if og_max == 0:
+            verdict = "MATCH: placed og == cached og"
+        elif og_corr > 0.99:
+            verdict = f"CLOSE: placed og correlates {og_corr:.4f} (likely numeric noise)"
+        elif placed_results[2].astype(np.float32).std() < 1e-6:
+            verdict = "PLACED og IS ZERO/CONSTANT: kernel may not be writing"
+        elif og_corr > 0:
+            verdict = (f"PARTIAL: corr={og_corr:.4f}, max_abs={og_max:.4f} "
+                       "(possible operand/stride bug)")
+        else:
+            verdict = (f"DIVERGENT: corr={og_corr:.4f} -- output structurally "
+                       "wrong (operand swap, sign error, scale)")
+        print(f"  {verdict}")
+        return 0
+
+    # ---------------------------------------------------------------
+    # rms_gemms_rope mode (v_only / vkq / full)
+    # ---------------------------------------------------------------
     print("[oracle] Generating synthetic inputs...")
     inputs_cached = _synth_inputs(seed=args.seed)
     inputs_placed = _synth_inputs(seed=args.seed)

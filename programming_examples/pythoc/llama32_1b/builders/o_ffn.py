@@ -2,15 +2,14 @@
 # SPDX-License-Identifier: MIT
 """Placed-IRON builder for the llama32_1b prefill o_ffn kernel.
 
-Phase 4.6f scope: 5 of 9 devices are emitted from placed IRON --
+Phase 4.6d scope: 6 of 9 devices are emitted from placed IRON --
 ``@rm_weighted_rms_norm_seg`` (4.6a), ``@ra_add_seg`` + ``@fa_add_seg``
-(4.6b), ``@sw_silu_mul_seg`` (4.6c), and the outer unnamed dispatcher
-``aie.device(npu2)`` that hosts ``aiex.runtime_sequence @o_ffn``
-(4.6f).  The 4 remaining GEMM devices (``og_matmul_seg``,
-``gg_matmul_seg``, ``ug_matmul_seg``, ``dg_matmul_seg``) come from
-the cached ``o_ffn.npu.air.mlir`` text via string splice; phases
-4.6d/4.6e are deferred pending deeper analysis of an issue that
-produced garbage runtime output despite a perfect structural diff.
+(4.6b), ``@sw_silu_mul_seg`` (4.6c), ``@og_matmul_seg`` (4.6d), and the
+outer unnamed dispatcher ``aie.device(npu2)`` that hosts
+``aiex.runtime_sequence @o_ffn`` (4.6f).  The 3 remaining GEMM devices
+(``gg_matmul_seg``, ``ug_matmul_seg``, ``dg_matmul_seg``) come from
+the cached ``o_ffn.npu.air.mlir`` text via string splice; phase 4.6e
+is deferred.
 
 Splice mechanism::
 
@@ -22,7 +21,7 @@ Splice mechanism::
       aie.device @gg_matmul_seg { ... }               <-- cached (deferred)
       aie.device @rm_weighted_rms_norm_seg { ... }    <-- REPLACED (4.6a)
       aie.device @ra_add_seg { ... }                  <-- REPLACED (4.6b)
-      aie.device @og_matmul_seg { ... }               <-- cached (deferred)
+      aie.device @og_matmul_seg { ... }               <-- REPLACED (4.6d)
       aie.device (dispatcher) { ... }                 <-- REPLACED (4.6f)
 
 The cached ``rm_weighted_rms_norm_seg`` (lines 25351-26580 of
@@ -78,6 +77,7 @@ from aie.dialects.aie import (
     flow,
     lock,
     mem,
+    memtile_dma,
     next_bd,
     shim_dma_allocation,
     tile,
@@ -1189,6 +1189,703 @@ def _emit_sw_silu_mul_seg() -> None:
 
 
 # ---------------------------------------------------------------------------
+# og_matmul_seg device (Phase 4.6d -- O-projection GEMM of o_ffn).
+# ---------------------------------------------------------------------------
+# Structurally mirrors the rms_gemms_rope @v_matmul_seg device (8x4 herd,
+# 8 mem tiles with asymmetric lock counts: cols 0-3 = 10 locks, cols 4-7
+# = 6 locks).  Per-tile compute structure is identical to v's except for
+# L1 buffer shapes (half the C and B sizes) and the core body's loop
+# structure (nested 8 outer x 4 ping-pong vs v's flat 32 ping-pong).
+#
+# Per compute tile (32 total):
+#   * 5 buffers in L1 (memory_space=2):
+#       buf_C       memref<1x1x8x8x8x8 xbf16, 2>      (C-out, 4096 elts)
+#       buf_A_pong  memref<1x1x4x8x8x8  xbf16, 2>     (A-in pong, 2048 elts)
+#       buf_B_pong  memref<1x1x8x4x8x8  xbf16, 2>     (B-in pong, 2048 elts)
+#       buf_B_ping  memref<1x1x8x4x8x8  xbf16, 2>     (B-in ping, 2048 elts)
+#       buf_A_ping  memref<1x1x4x8x8x8  xbf16, 2>     (A-in ping, 2048 elts)
+#     NOTE: cached IR emits these in order (C, A_pong, B_pong, B_ping,
+#     A_ping); the labeling here matches the lock pattern in the cached
+#     aie.mem block (bb4=A_ping, bb5=A_pong, bb7=B_ping, bb8=B_pong).
+#   * 6 locks at ids 5..0, init=(2, 0, 2, 0, 1, 0) -- same as v's compute
+#     tiles.
+#   * aie.mem block (3 DMA channels, same structure as v's):
+#       MM2S 0 (C out): buf_C self-loop, len 4096, 3D dims
+#       S2MM 0 (A in):  buf_A_ping <-> buf_A_pong ping-pong, len 2048
+#       S2MM 1 (B in):  buf_B_ping <-> buf_B_pong ping-pong, len 2048
+#   * aie.core body:
+#       acquire C_done x1
+#       zero buf_C (nested 8x8 over 8x8 micro-tiles)
+#       for m_outer in 0..8:
+#         for n_inner_pair in 0..4:        # 4 ping/pong pairs per outer
+#           acquire A_ready, B_ready; gemm(A_ping, B_ping, C); release B_sem, A_sem
+#           acquire A_ready, B_ready; gemm(A_pong, B_pong, C); release B_sem, A_sem
+#       release C_full x1
+#       cf.br ^bb1
+#
+# Per mem tile (8 total): same asymmetric lock + DMA channel layout as
+# v's mem tiles.  Buffer shapes differ:
+#   cols 0..7: 1 W-weight buf (1x4x64x64 bf16, L2, 16384 elts)
+#   cols 0..7: 2 C-out bufs   (1x1x64x256 bf16, L2, 16384 elts each)   ping/pong
+#   cols 0..3: 2 X-input bufs (1x1x256x64 bf16, L2, 16384 elts each)   ping/pong
+#
+# aie.memtile_dma per col:
+#   cols 0-3 -- 9 channels (with X chain):
+#       MM2S 0: W-weight broadcast (self-loop, len 16384, 3D dims)
+#       MM2S 1: C-out ping/pong (len 16384 each, 3D dims)
+#       MM2S 2: X-broadcast ping/pong (len 16384 each, 4D dims)
+#       S2MM 0: C-in ping/pong (mirror of MM2S 1)
+#       S2MM 1: X-in ping/pong (mirror of MM2S 2)
+#       S2MM 2..5: W-weight slices (4 chans, each 1-BD self-loop at
+#                  offset = slice * 4096, len 4096 -- half of v's 8192)
+#   cols 4-7 -- 7 channels (no X chain):
+#       MM2S 0, MM2S 1, S2MM 0, S2MM 1..4 (W-weight slices)
+#
+# Flows (116 total): same shape as v_matmul.
+#
+# Shim allocations (20 total):
+#   air_channel_78_C  MM2S 0 on shim_C_0  (X input  = arg0,  8 cols)
+#   air_channel_77_C  MM2S 1 on shim_C_0  (W weight = arg1,  cols 0-3)
+#   air_channel_84_C  S2MM 0 on shim_C_0  (Y output = arg2,  8 cols)
+#
+# Runtime sequence: 32 X-tasks (4 per col), 16 W-tasks (4 per col 0-3),
+# 8 Y-tasks (1 per col).  X & W use repeat_count=7 (8 inner iters).
+# Y tasks use issue_token=true + repeat_count=3 (4 inner iters).  Free
+# order (cached): 8 awaits (reverse), then 48 frees in reverse-col
+# groups of 4 (W cols 3->0, then X cols 7->0).
+OG_MATMUL_M_OUTER = 8              # outer M loop bound per core dispatch
+OG_MATMUL_N_INNER_HALF = 4         # inner-N step (= 8/2; 2 calls per step)
+OG_MATMUL_C_M = 8                  # buf_C outer-M dim (8 m-blocks of 8x8)
+OG_MATMUL_C_N = 8                  # buf_C outer-N dim (8 n-blocks of 8x8)
+
+# Channel ids for og_matmul_seg in the cached IR.
+_CHAN_OG_X      = 78               # MM2S 0 (X input) on shim_C_0
+_CHAN_OG_WEIGHT = 77               # MM2S 1 (W weight) on shim_C_0
+_CHAN_OG_Y      = 84               # S2MM 0 (Y output) on shim_C_0
+
+
+def _emit_og_matmul_seg() -> None:
+    """Emit the placed-IRON og_matmul_seg device (O-projection GEMM).
+
+    Must be called inside an mlir_mod_ctx().  Registers one
+    ``aie.device(npu2) @og_matmul_seg`` op.  Body-level divergence from
+    cached: each inner ping/pong call invokes
+    ``bf16_gemm_kernel_bf16out`` on the L1 (A, B, C) buffer triple
+    instead of inlining a 4-MAC vector.contract chain.  Infrastructure
+    (tiles, locks, buffers, flows, memtile_dma BD chains, shim allocs,
+    runtime_sequence) matches the cached verbatim.
+
+    Host args (verified at cached runtime_sequence @og_matmul_seg_sequence,
+    line 34952):
+      arg0: 2048x2048 bf16  X input  (attention-output residual, post-flash-attn)
+      arg1: 2048x2048 bf16  W weight (O-projection Wo)
+      arg2: 2048x2048 bf16  Y output (target buffer)
+    """
+    from aie.dialects import memref as memref_dialect
+    from aie.dialects import vector as vector_dialect
+    from aie.extras import types as T
+    from aie.ir import UnitAttr
+
+    @device(AIEDevice.npu2, sym_name="og_matmul_seg")
+    def _dev():
+        # 8 shim + 8 mem + 32 compute tiles (cols 0..7, rows 2..5).
+        shim_tiles    = [tile(c, 0) for c in range(N_COLS)]
+        mem_tiles     = [tile(c, 1) for c in range(N_COLS)]
+        compute_tiles = {}
+        for col in range(N_COLS):
+            for row in range(2, 6):
+                compute_tiles[(col, row)] = tile(col, row)
+
+        # ------------------------------------------------------------
+        # Locks.  Cached emit order: mem tiles col 7 first (6 locks),
+        # then 6 5 4 (6 each), then 3 2 1 0 (10 each).  Then compute
+        # tiles row 2 col 0..7, row 3 col 0..7, ..., row 5 col 0..7
+        # (ascending row-major).
+        # ------------------------------------------------------------
+        mem_locks = {}
+        for col in reversed(range(4, N_COLS)):    # 7, 6, 5, 4 (6 locks each)
+            mt = mem_tiles[col]
+            mem_locks[col] = {
+                "C_pong_sem":   lock(mt, lock_id=5, init=1),
+                "C_pong_ready": lock(mt, lock_id=4, init=0),
+                "C_ping_sem":   lock(mt, lock_id=3, init=1),
+                "C_ping_ready": lock(mt, lock_id=2, init=0),
+                "W_sem":        lock(mt, lock_id=1, init=4),
+                "W_ready":      lock(mt, lock_id=0, init=0),
+            }
+        for col in reversed(range(4)):            # 3, 2, 1, 0 (10 locks each)
+            mt = mem_tiles[col]
+            mem_locks[col] = {
+                "X_pong_sem":   lock(mt, lock_id=9, init=1),
+                "X_pong_ready": lock(mt, lock_id=8, init=0),
+                "X_ping_sem":   lock(mt, lock_id=7, init=1),
+                "X_ping_ready": lock(mt, lock_id=6, init=0),
+                "C_pong_sem":   lock(mt, lock_id=5, init=1),
+                "C_pong_ready": lock(mt, lock_id=4, init=0),
+                "C_ping_sem":   lock(mt, lock_id=3, init=1),
+                "C_ping_ready": lock(mt, lock_id=2, init=0),
+                "W_sem":        lock(mt, lock_id=1, init=4),
+                "W_ready":      lock(mt, lock_id=0, init=0),
+            }
+
+        # Compute-tile locks: row-major ascending (row 2 cols 0..7,
+        # row 3 cols 0..7, ..., row 5 cols 0..7).
+        core_locks = {}
+        for row in range(2, 6):
+            for col in range(N_COLS):
+                ct = compute_tiles[(col, row)]
+                core_locks[(col, row)] = {
+                    "B_sem":   lock(ct, lock_id=5, init=2),
+                    "B_ready": lock(ct, lock_id=4, init=0),
+                    "A_sem":   lock(ct, lock_id=3, init=2),
+                    "A_ready": lock(ct, lock_id=2, init=0),
+                    "C_done":  lock(ct, lock_id=1, init=1),
+                    "C_full":  lock(ct, lock_id=0, init=0),
+                }
+
+        # ------------------------------------------------------------
+        # Buffers.  Mem-tile buffers first (col 0..7 ascending per
+        # category), then compute-tile buffers (descending row, then
+        # descending col).
+        # ------------------------------------------------------------
+        # Cached mem-tile emit order:
+        #   buf191..buf184 : 1x4x64x64  (W-weight, col 0..7)
+        #   buf183..buf168 : 1x1x64x256 (C-out ping/pong, 2 per col,
+        #                                cols 0..7 ascending)
+        #   buf167..buf160 : 1x1x256x64 (X-input ping/pong, 2 per col,
+        #                                cols 0..3 ascending)
+        BF16_W_L2  = bf16_memref(1, 4, 64, 64,  memory_space=1)
+        BF16_CO_L2 = bf16_memref(1, 1, 64, 256, memory_space=1)
+        BF16_XI_L2 = bf16_memref(1, 1, 256, 64, memory_space=1)
+
+        mem_buf = {col: {} for col in range(N_COLS)}
+        # W-weight: 1 per col, col order 0..7.
+        for col in range(N_COLS):
+            mem_buf[col]["W"] = buffer(mem_tiles[col], datatype=BF16_W_L2)
+        # C-out ping/pong: 2 per col, order col 0 (ping then pong), col 1, ...
+        for col in range(N_COLS):
+            mem_buf[col]["C_ping"] = buffer(mem_tiles[col], datatype=BF16_CO_L2)
+            mem_buf[col]["C_pong"] = buffer(mem_tiles[col], datatype=BF16_CO_L2)
+        # X-input ping/pong: 2 each on cols 0..3 only.
+        for col in range(4):
+            mem_buf[col]["X_ping"] = buffer(mem_tiles[col], datatype=BF16_XI_L2)
+            mem_buf[col]["X_pong"] = buffer(mem_tiles[col], datatype=BF16_XI_L2)
+
+        # Compute-tile buffers.  Cached emit order: row 5 col 7 first,
+        # then row 5 col 6, ..., down to row 2 col 0.  Per tile, the
+        # cached declaration order is (C, A_pong, B_pong, B_ping,
+        # A_ping) -- different from v_matmul's (C, A_pong, B_ping,
+        # A_ping, B_pong).  We follow og's order here so the emitted
+        # MLIR's buffer-decl sequence matches the cached IR sym-for-sym.
+        BF16_C_L1 = bf16_memref(1, 1, 8, 8, 8, 8, memory_space=2)
+        BF16_A_L1 = bf16_memref(1, 1, 4, 8, 8, 8, memory_space=2)
+        BF16_B_L1 = bf16_memref(1, 1, 8, 4, 8, 8, memory_space=2)
+
+        core_buf = {}
+        for row in reversed(range(2, 6)):
+            for col in reversed(range(N_COLS)):
+                ct = compute_tiles[(col, row)]
+                bufs = {}
+                bufs["C"]      = buffer(ct, datatype=BF16_C_L1)
+                bufs["A_pong"] = buffer(ct, datatype=BF16_A_L1)
+                bufs["B_pong"] = buffer(ct, datatype=BF16_B_L1)
+                bufs["B_ping"] = buffer(ct, datatype=BF16_B_L1)
+                bufs["A_ping"] = buffer(ct, datatype=BF16_A_L1)
+                core_buf[(col, row)] = bufs
+
+        # External buffers (opaque AIR metadata; kept for diff parity).
+        # og uses (2048x2048, 2048x2048, 2048x2048) -- the X/W/Y triple.
+        external_buffer(bf16_np(EMB_DIM, EMB_DIM), name="__air_external_buffer")
+        external_buffer(bf16_np(EMB_DIM, EMB_DIM), name="__air_external_buffer_1")
+        external_buffer(bf16_np(EMB_DIM, EMB_DIM), name="__air_external_buffer_2")
+
+        # ------------------------------------------------------------
+        # aie.mem blocks per compute tile.  Cached order: row 5 col 7
+        # first, then col 6 .., row 4 col 7 .., ..., row 2 col 0.
+        # ------------------------------------------------------------
+        def _make_compute_mem(_ct, _cl, _bufs):
+            @mem(_ct)
+            def _core_mem(block):
+                # MM2S 0: C-out self-loop, len 4096 elts (= 8192 bytes).
+                # 3D dims: [<size=64, stride=8>, <size=8, stride=512>,
+                #           <size=8, stride=1>]  total walk = 4096
+                dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
+                with block[1]:
+                    use_lock(_cl["C_full"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_bufs["C"], offset=0, len=4096,
+                           dimensions=[(64, 8), (8, 512), (8, 1)])
+                    use_lock(_cl["C_done"], LockAction.Release, value=1)
+                    next_bd(block[1])
+                with block[2]:
+                    EndOp()
+                with block[3]:
+                    dma_start(DMAChannelDir.S2MM, 0, dest=block[4], chain=block[6])
+                # S2MM 0: A-in ping/pong (len 2048).
+                with block[4]:
+                    use_lock(_cl["A_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_bufs["A_ping"], offset=0, len=2048)
+                    use_lock(_cl["A_ready"], LockAction.Release, value=1)
+                    next_bd(block[5])
+                with block[5]:
+                    use_lock(_cl["A_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_bufs["A_pong"], offset=0, len=2048)
+                    use_lock(_cl["A_ready"], LockAction.Release, value=1)
+                    next_bd(block[4])
+                with block[6]:
+                    dma_start(DMAChannelDir.S2MM, 1, dest=block[7], chain=block[2])
+                # S2MM 1: B-in ping/pong (len 2048).
+                with block[7]:
+                    use_lock(_cl["B_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_bufs["B_ping"], offset=0, len=2048)
+                    use_lock(_cl["B_ready"], LockAction.Release, value=1)
+                    next_bd(block[8])
+                with block[8]:
+                    use_lock(_cl["B_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_bufs["B_pong"], offset=0, len=2048)
+                    use_lock(_cl["B_ready"], LockAction.Release, value=1)
+                    next_bd(block[7])
+
+        for row in reversed(range(2, 6)):
+            for col in reversed(range(N_COLS)):
+                _make_compute_mem(compute_tiles[(col, row)],
+                                  core_locks[(col, row)],
+                                  core_buf[(col, row)])
+
+        # ------------------------------------------------------------
+        # External function declaration.  Each compute core's link_with
+        # attr is set by the aie-assign-core-link-files pass based on
+        # this declaration.
+        # ------------------------------------------------------------
+        gemm_fn = external_func(
+            "bf16_gemm_kernel_bf16out",
+            inputs=[BF16_A_L1, BF16_B_L1, BF16_C_L1],
+            link_with="bf16_gemm_pythoc_M8_N8_K4_AT_bf16out_s64_512_64_256_64_512.o",
+        )
+        gemm_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
+
+        # ------------------------------------------------------------
+        # aie.core body per compute tile.  Mirrors cached's nested-loop
+        # structure: 8 outer (arg0) x 4 inner step=2 (arg1) ping/pong
+        # pairs = 32 ping/pong pairs (= 64 kernel calls) per dispatch.
+        # ------------------------------------------------------------
+        def _make_compute_core(_ct, _cl, _bufs):
+            @core(_ct)
+            def _core_body():
+                # 6D identity permutation map for the zero-init transfer_write.
+                zero_perm = AffineMap.get(
+                    6, 0,
+                    [AffineDimExpr.get(0), AffineDimExpr.get(1),
+                     AffineDimExpr.get(2), AffineDimExpr.get(3),
+                     AffineDimExpr.get(4), AffineDimExpr.get(5)])
+                vec_zero_ty = T.vector(1, 1, 1, 1, 8, 8, T.bf16())
+                np_zero = np.zeros((1, 1, 1, 1, 8, 8), dtype=bfloat16)
+                cst_zero = arith.constant(np_zero, vec_zero_ty)
+                c0_idx = arith.constant(0, T.index())
+
+                for _ in range_(_sys.maxsize):
+                    use_lock(_cl["C_done"], LockAction.AcquireGreaterEqual, value=1)
+                    # Zero buf_C inline: nested 8x8 over 8x8 micro-tiles.
+                    for m_i in range_(0, OG_MATMUL_C_M, 1):
+                        for n_i in range_(0, OG_MATMUL_C_N, 1):
+                            vector_dialect.transfer_write(
+                                None, cst_zero, _bufs["C"],
+                                [c0_idx, c0_idx, m_i, n_i, c0_idx, c0_idx],
+                                permutation_map=zero_perm,
+                                in_bounds=[True, True, True, True, True, True])
+                    # Outer-M loop: 8 iters.
+                    for _m_outer in range_(0, OG_MATMUL_M_OUTER, 1):
+                        # Inner ping/pong: 4 step=2 pairs (cached uses
+                        # `arg1 = 0..8 step 2`, with 2 kernel calls per
+                        # arg1 value).
+                        for _n_pair in range_(0, OG_MATMUL_N_INNER_HALF, 1):
+                            # Iter A (ping).
+                            use_lock(_cl["A_ready"], LockAction.AcquireGreaterEqual, value=1)
+                            use_lock(_cl["B_ready"], LockAction.AcquireGreaterEqual, value=1)
+                            gemm_fn(_bufs["A_ping"], _bufs["B_ping"], _bufs["C"])
+                            use_lock(_cl["B_sem"], LockAction.Release, value=1)
+                            use_lock(_cl["A_sem"], LockAction.Release, value=1)
+                            # Iter B (pong).
+                            use_lock(_cl["A_ready"], LockAction.AcquireGreaterEqual, value=1)
+                            use_lock(_cl["B_ready"], LockAction.AcquireGreaterEqual, value=1)
+                            gemm_fn(_bufs["A_pong"], _bufs["B_pong"], _bufs["C"])
+                            use_lock(_cl["B_sem"], LockAction.Release, value=1)
+                            use_lock(_cl["A_sem"], LockAction.Release, value=1)
+                    use_lock(_cl["C_full"], LockAction.Release, value=1)
+
+        for row in reversed(range(2, 6)):
+            for col in reversed(range(N_COLS)):
+                _make_compute_core(compute_tiles[(col, row)],
+                                   core_locks[(col, row)],
+                                   core_buf[(col, row)])
+
+        # ------------------------------------------------------------
+        # Flows.  Same shape as v_matmul (116 total):
+        #   8 shim->mem DMA 0       (W-weight in)
+        #   4 shim->mem DMA 1       (X-input in, cols 0-3)
+        #   8 mem->shim DMA 0       (C-out)
+        #   32 mem->core DMA 1      (W-weight broadcast: mem_C -> 4 cores
+        #                             in same col)
+        #   32 mem->core DMA 2      (X-broadcast: mem_{0..3} -> 8 cores
+        #                             in row 2..5 respectively)
+        #   32 core->mem DMA 0      (C-out feedback to mem-tile;
+        #                             cols 0-3 use mem DMA 2..5;
+        #                             cols 4-7 use mem DMA 1..4)
+        # ------------------------------------------------------------
+        # 8 shim -> mem DMA 0 (W-weight in).
+        for col in range(N_COLS):
+            flow(shim_tiles[col], WireBundle.DMA, 0,
+                 mem_tiles[col], WireBundle.DMA, 0)
+        # 4 shim -> mem DMA 1 (X-input in, cols 0-3 only).
+        for col in range(4):
+            flow(shim_tiles[col], WireBundle.DMA, 1,
+                 mem_tiles[col], WireBundle.DMA, 1)
+        # 8 mem -> shim DMA 0 (C-out).
+        for col in range(N_COLS):
+            flow(mem_tiles[col], WireBundle.DMA, 0,
+                 shim_tiles[col], WireBundle.DMA, 0)
+        # 32 mem -> core DMA 1 (W-weight broadcast).
+        for col in range(N_COLS):
+            for row in range(2, 6):
+                flow(mem_tiles[col], WireBundle.DMA, 1,
+                     compute_tiles[(col, row)], WireBundle.DMA, 0)
+        # 32 mem -> core DMA 2 (X-broadcast).
+        for row_offset in range(4):       # mem 0..3 -> rows 2..5
+            for col in range(N_COLS):
+                flow(mem_tiles[row_offset], WireBundle.DMA, 2,
+                     compute_tiles[(col, 2 + row_offset)], WireBundle.DMA, 1)
+        # 32 core -> mem DMA channels (C-out feedback).
+        for col in range(4):
+            for row in range(2, 6):
+                flow(compute_tiles[(col, row)], WireBundle.DMA, 0,
+                     mem_tiles[col], WireBundle.DMA, 2 + (row - 2))
+        for col in range(4, N_COLS):
+            for row in range(2, 6):
+                flow(compute_tiles[(col, row)], WireBundle.DMA, 0,
+                     mem_tiles[col], WireBundle.DMA, 1 + (row - 2))
+
+        # ------------------------------------------------------------
+        # aie.memtile_dma blocks (per col).  Cached emits col 0..7
+        # ascending.
+        # ------------------------------------------------------------
+        def _make_memtile_dma_x_col(col):
+            """Emit memtile_dma for cols 0-3 (with X-broadcast chain)."""
+            ml = mem_locks[col]
+            mt = mem_tiles[col]
+            mb = mem_buf[col]
+            @memtile_dma(mt)
+            def _mt_dma(block):
+                # MM2S 0: W-weight broadcast (self-loop, len 16384).
+                # 3D dims: [<size=64, stride=64>, <size=4, stride=4096>,
+                #           <size=64, stride=1>]
+                dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
+                with block[1]:
+                    use_lock(ml["W_ready"], LockAction.AcquireGreaterEqual, value=4)
+                    dma_bd(mb["W"], offset=0, len=16384,
+                           dimensions=[(64, 64), (4, 4096), (64, 1)])
+                    use_lock(ml["W_sem"], LockAction.Release, value=4)
+                    next_bd(block[1])
+                with block[2]:
+                    EndOp()
+                # MM2S 1: C-out ping/pong (len 16384 each).
+                # 3D dims: [<size=32, stride=8>, <size=64, stride=256>,
+                #           <size=8, stride=1>]
+                with block[3]:
+                    dma_start(DMAChannelDir.MM2S, 1, dest=block[4], chain=block[6])
+                with block[4]:
+                    use_lock(ml["C_ping_ready"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["C_ping"], offset=0, len=16384,
+                           dimensions=[(32, 8), (64, 256), (8, 1)])
+                    use_lock(ml["C_ping_sem"], LockAction.Release, value=1)
+                    next_bd(block[5])
+                with block[5]:
+                    use_lock(ml["C_pong_ready"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["C_pong"], offset=0, len=16384,
+                           dimensions=[(32, 8), (64, 256), (8, 1)])
+                    use_lock(ml["C_pong_sem"], LockAction.Release, value=1)
+                    next_bd(block[4])
+                # MM2S 2: X-broadcast ping/pong (len 16384 each).
+                # 4D dims: [<size=8, stride=2048>, <size=8, stride=8>,
+                #           <size=32, stride=64>, <size=8, stride=1>]
+                with block[6]:
+                    dma_start(DMAChannelDir.MM2S, 2, dest=block[7], chain=block[9])
+                with block[7]:
+                    use_lock(ml["X_ping_ready"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["X_ping"], offset=0, len=16384,
+                           dimensions=[(8, 2048), (8, 8), (32, 64), (8, 1)])
+                    use_lock(ml["X_ping_sem"], LockAction.Release, value=1)
+                    next_bd(block[8])
+                with block[8]:
+                    use_lock(ml["X_pong_ready"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["X_pong"], offset=0, len=16384,
+                           dimensions=[(8, 2048), (8, 8), (32, 64), (8, 1)])
+                    use_lock(ml["X_pong_sem"], LockAction.Release, value=1)
+                    next_bd(block[7])
+                # S2MM 0: C-in ping/pong (from compute, len 16384).
+                with block[9]:
+                    dma_start(DMAChannelDir.S2MM, 0, dest=block[10], chain=block[12])
+                with block[10]:
+                    use_lock(ml["C_ping_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["C_ping"], offset=0, len=16384)
+                    use_lock(ml["C_ping_ready"], LockAction.Release, value=1)
+                    next_bd(block[11])
+                with block[11]:
+                    use_lock(ml["C_pong_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["C_pong"], offset=0, len=16384)
+                    use_lock(ml["C_pong_ready"], LockAction.Release, value=1)
+                    next_bd(block[10])
+                # S2MM 1: X-in ping/pong (from shim, len 16384).
+                with block[12]:
+                    dma_start(DMAChannelDir.S2MM, 1, dest=block[13], chain=block[15])
+                with block[13]:
+                    use_lock(ml["X_ping_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["X_ping"], offset=0, len=16384)
+                    use_lock(ml["X_ping_ready"], LockAction.Release, value=1)
+                    next_bd(block[14])
+                with block[14]:
+                    use_lock(ml["X_pong_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["X_pong"], offset=0, len=16384)
+                    use_lock(ml["X_pong_ready"], LockAction.Release, value=1)
+                    next_bd(block[13])
+                # S2MM 2..5: W-weight slice 0..3 (each 1-BD self-loop,
+                # len 4096 -- og's W buf is 16384 elts total, so 4 x 4096
+                # slices; v_matmul's was 32768 elts / 4 = 8192 per slice).
+                with block[15]:
+                    dma_start(DMAChannelDir.S2MM, 2, dest=block[16], chain=block[17])
+                with block[16]:
+                    use_lock(ml["W_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["W"], offset=0, len=4096)
+                    use_lock(ml["W_ready"], LockAction.Release, value=1)
+                    next_bd(block[16])
+                with block[17]:
+                    dma_start(DMAChannelDir.S2MM, 3, dest=block[18], chain=block[19])
+                with block[18]:
+                    use_lock(ml["W_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["W"], offset=4096, len=4096)
+                    use_lock(ml["W_ready"], LockAction.Release, value=1)
+                    next_bd(block[18])
+                with block[19]:
+                    dma_start(DMAChannelDir.S2MM, 4, dest=block[20], chain=block[21])
+                with block[20]:
+                    use_lock(ml["W_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["W"], offset=8192, len=4096)
+                    use_lock(ml["W_ready"], LockAction.Release, value=1)
+                    next_bd(block[20])
+                with block[21]:
+                    dma_start(DMAChannelDir.S2MM, 5, dest=block[22], chain=block[2])
+                with block[22]:
+                    use_lock(ml["W_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["W"], offset=12288, len=4096)
+                    use_lock(ml["W_ready"], LockAction.Release, value=1)
+                    next_bd(block[22])
+
+        def _make_memtile_dma_no_x_col(col):
+            """Emit memtile_dma for cols 4-7 (no X-broadcast chain)."""
+            ml = mem_locks[col]
+            mt = mem_tiles[col]
+            mb = mem_buf[col]
+            @memtile_dma(mt)
+            def _mt_dma(block):
+                # MM2S 0: W-weight broadcast (self-loop, len 16384).
+                dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
+                with block[1]:
+                    use_lock(ml["W_ready"], LockAction.AcquireGreaterEqual, value=4)
+                    dma_bd(mb["W"], offset=0, len=16384,
+                           dimensions=[(64, 64), (4, 4096), (64, 1)])
+                    use_lock(ml["W_sem"], LockAction.Release, value=4)
+                    next_bd(block[1])
+                with block[2]:
+                    EndOp()
+                # MM2S 1: C-out ping/pong.
+                with block[3]:
+                    dma_start(DMAChannelDir.MM2S, 1, dest=block[4], chain=block[6])
+                with block[4]:
+                    use_lock(ml["C_ping_ready"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["C_ping"], offset=0, len=16384,
+                           dimensions=[(32, 8), (64, 256), (8, 1)])
+                    use_lock(ml["C_ping_sem"], LockAction.Release, value=1)
+                    next_bd(block[5])
+                with block[5]:
+                    use_lock(ml["C_pong_ready"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["C_pong"], offset=0, len=16384,
+                           dimensions=[(32, 8), (64, 256), (8, 1)])
+                    use_lock(ml["C_pong_sem"], LockAction.Release, value=1)
+                    next_bd(block[4])
+                # S2MM 0: C-in ping/pong (from compute).
+                with block[6]:
+                    dma_start(DMAChannelDir.S2MM, 0, dest=block[7], chain=block[9])
+                with block[7]:
+                    use_lock(ml["C_ping_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["C_ping"], offset=0, len=16384)
+                    use_lock(ml["C_ping_ready"], LockAction.Release, value=1)
+                    next_bd(block[8])
+                with block[8]:
+                    use_lock(ml["C_pong_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["C_pong"], offset=0, len=16384)
+                    use_lock(ml["C_pong_ready"], LockAction.Release, value=1)
+                    next_bd(block[7])
+                # S2MM 1..4: W-weight slice 0..3.
+                with block[9]:
+                    dma_start(DMAChannelDir.S2MM, 1, dest=block[10], chain=block[11])
+                with block[10]:
+                    use_lock(ml["W_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["W"], offset=0, len=4096)
+                    use_lock(ml["W_ready"], LockAction.Release, value=1)
+                    next_bd(block[10])
+                with block[11]:
+                    dma_start(DMAChannelDir.S2MM, 2, dest=block[12], chain=block[13])
+                with block[12]:
+                    use_lock(ml["W_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["W"], offset=4096, len=4096)
+                    use_lock(ml["W_ready"], LockAction.Release, value=1)
+                    next_bd(block[12])
+                with block[13]:
+                    dma_start(DMAChannelDir.S2MM, 3, dest=block[14], chain=block[15])
+                with block[14]:
+                    use_lock(ml["W_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["W"], offset=8192, len=4096)
+                    use_lock(ml["W_ready"], LockAction.Release, value=1)
+                    next_bd(block[14])
+                with block[15]:
+                    dma_start(DMAChannelDir.S2MM, 4, dest=block[16], chain=block[2])
+                with block[16]:
+                    use_lock(ml["W_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["W"], offset=12288, len=4096)
+                    use_lock(ml["W_ready"], LockAction.Release, value=1)
+                    next_bd(block[16])
+
+        for col in range(N_COLS):
+            if col < 4:
+                _make_memtile_dma_x_col(col)
+            else:
+                _make_memtile_dma_no_x_col(col)
+
+        # ------------------------------------------------------------
+        # Shim allocations.  Cached order (lines 34316-34339):
+        #   8x air_channel_84  S2MM 0 (Y output)
+        #   8x air_channel_78  MM2S 0 (X input)
+        #   4x air_channel_77  MM2S 1 (W weight, cols 0-3)
+        # ------------------------------------------------------------
+        for col in range(N_COLS):
+            shim_dma_allocation(
+                f"air_channel_{_CHAN_OG_Y}_{col}", shim_tiles[col],
+                DMAChannelDir.S2MM, 0)
+        for col in range(N_COLS):
+            shim_dma_allocation(
+                f"air_channel_{_CHAN_OG_X}_{col}", shim_tiles[col],
+                DMAChannelDir.MM2S, 0)
+        for col in range(4):
+            shim_dma_allocation(
+                f"air_channel_{_CHAN_OG_WEIGHT}_{col}", shim_tiles[col],
+                DMAChannelDir.MM2S, 1)
+
+        # ------------------------------------------------------------
+        # Runtime sequence.  og uses arg0=X, arg1=W, arg2=Y.  Output
+        # is 2048x2048 -- 4x bigger than v/k matmul, so each shim
+        # channel fans out into 4 dispatches per col (X: 32 dispatches
+        # total; W: 16 dispatches total).  Y output uses 8 single
+        # dispatches with repeat_count=3 (4 inner iters).
+        #
+        # Cached free order (verified at lines 35233-35288): 8 awaits
+        # (reverse, col 7 -> 0), then 48 frees in reverse-col groups
+        # of 4 (W cols 3 -> 0, then X cols 7 -> 0).
+        # ------------------------------------------------------------
+        @runtime_sequence(*_o_ffn_host_arg_types(),
+                          sym_name="og_matmul_seg_sequence")
+        def _seq(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8,
+                 arg9, arg10, arg11, arg12, arg13, arg14):
+            x_buf = arg0           # 2048x2048 X input  (attn-output residual)
+            w_buf = arg1           # 2048x2048 W weight (O-projection Wo)
+            y_buf = arg2           # 2048x2048 Y output
+
+            x_tasks = []
+            w_tasks = []
+            y_tasks = []
+
+            # 32 X-input tasks (MM2S 0, 4 per col).  BD dims (3D):
+            #   [<size=8, stride=256>, <size=64, stride=2048>,
+            #    <size=256, stride=1>]
+            # Per col c, dispatch d (d in 0..3) offset:
+            #   c * 131072 + d * 1048576
+            for col in range(N_COLS):
+                for d in range(4):
+                    offset = col * 131072 + d * 1048576
+                    t = dma_configure_task_for(
+                        f"air_channel_{_CHAN_OG_X}_{col}",
+                        repeat_count=7)
+                    with bds(t) as bd:
+                        with bd[0]:
+                            dma_bd(x_buf, offset=offset, len=131072,
+                                   dimensions=[(8, 256),
+                                               (64, 2048),
+                                               (256, 1)])
+                            EndOp()
+                    dma_start_task(t)
+                    x_tasks.append(t)
+
+            # 16 W-weight tasks (MM2S 1, 4 per col on cols 0-3).
+            # BD dims (4D):
+            #   [<size=8, stride=256>, <size=8, stride=524288>,
+            #    <size=256, stride=2048>, <size=64, stride=1>]
+            # Per col c, all 4 dispatches use the same offset
+            #   c * 64 (W is row-major 2048x2048, col c gets 64-wide
+            #   horizontal stripe at column-byte-offset col*64*2 = c*128
+            #   ... actually arg1 is bf16 so offset is in elements:
+            #   col*64 elements = col*128 bytes; cached MLIR shows
+            #   offset=0, 64, 128, 192 for cols 0,1,2,3).
+            for col in range(4):
+                for d in range(4):
+                    offset = col * 64
+                    t = dma_configure_task_for(
+                        f"air_channel_{_CHAN_OG_WEIGHT}_{col}",
+                        repeat_count=7)
+                    with bds(t) as bd:
+                        with bd[0]:
+                            dma_bd(w_buf, offset=offset, len=131072,
+                                   dimensions=[(8, 256),
+                                               (8, 524288),
+                                               (256, 2048),
+                                               (64, 1)])
+                            EndOp()
+                    dma_start_task(t)
+                    w_tasks.append(t)
+
+            # 8 Y-output tasks (S2MM 0, 1 per col, issue_token=true,
+            # repeat_count=3).  BD dims (4D):
+            #   [<size=4, stride=1048576>, <size=8, stride=256>,
+            #    <size=64, stride=2048>, <size=256, stride=1>]
+            for col in range(N_COLS):
+                offset = col * 131072
+                t = dma_configure_task_for(
+                    f"air_channel_{_CHAN_OG_Y}_{col}",
+                    issue_token=True, repeat_count=3)
+                with bds(t) as bd:
+                    with bd[0]:
+                        dma_bd(y_buf, offset=offset, len=131072,
+                               dimensions=[(4, 1048576),
+                                           (8, 256),
+                                           (64, 2048),
+                                           (256, 1)])
+                        EndOp()
+                dma_start_task(t)
+                y_tasks.append(t)
+
+            # Cached free/await ordering (lines 35233-35288):
+            #   1. 8 awaits in REVERSE col order (y col 7 -> 0)
+            #   2. 16 W frees in REVERSE col order (cols 3 -> 0, each
+            #      col's 4 dispatches in ASCENDING dispatch order)
+            #   3. 32 X frees in REVERSE col order (cols 7 -> 0, each
+            #      col's 4 dispatches in ASCENDING dispatch order)
+            for t in reversed(y_tasks):
+                dma_await_task(t)
+            for col in reversed(range(4)):
+                for d in range(4):
+                    dma_free_task(w_tasks[col * 4 + d])
+            for col in reversed(range(N_COLS)):
+                for d in range(4):
+                    dma_free_task(x_tasks[col * 4 + d])
+
+
+# ---------------------------------------------------------------------------
 # Dispatcher device emitter.
 #
 # Outer wrapper that fires the 8 inner devices in the cached file's
@@ -1256,12 +1953,12 @@ def build_o_ffn_module(seq_len: int = SEQ_LEN,
                        omit_while_true_loop: bool = False) -> str:
     """Build the prefill o_ffn MLIR module.
 
-    Phase 4.6f: 5 of 9 devices are emitted via placed-IRON --
+    Phase 4.6d (incremental): 6 of 9 devices are emitted via placed-IRON --
     ``rm_weighted_rms_norm_seg``, ``ra_add_seg``, ``fa_add_seg``,
-    ``sw_silu_mul_seg``, plus the outer unnamed dispatcher device.
-    The 4 remaining GEMM devices (``og_matmul_seg``, ``gg_matmul_seg``,
-    ``ug_matmul_seg``, ``dg_matmul_seg``) come from the cached MLIR
-    text via string splice; phases 4.6d/4.6e are deferred.
+    ``sw_silu_mul_seg``, ``og_matmul_seg``, plus the outer unnamed
+    dispatcher device.  The 3 remaining GEMM devices
+    (``gg_matmul_seg``, ``ug_matmul_seg``, ``dg_matmul_seg``) come from
+    the cached MLIR text via string splice; phases 4.6e is deferred.
 
     All dimensions must match the Llama-3.2-1B values; the cached AIR
     layout is shape-specialized.
@@ -1280,25 +1977,26 @@ def build_o_ffn_module(seq_len: int = SEQ_LEN,
         _emit_ra_add_seg()
         _emit_fa_add_seg()
         _emit_sw_silu_mul_seg()
+        _emit_og_matmul_seg()
         _emit_dispatcher_device()
         module = ctx.module
         attach_loop_annotation_to_all_scf_for(module)
 
     # Use ``assume_verified=True`` here -- the dispatcher's
-    # ``aiex.configure`` ops reference the 4 cached GEMM device syms
-    # (``og_matmul_seg``, ``gg_matmul_seg``, ``ug_matmul_seg``,
-    # ``dg_matmul_seg``) which are NOT present in this freshly-emitted
-    # module (they live only in the cached MLIR text and are stitched
-    # back in via ``_splice_device`` below).  Without
-    # ``assume_verified=True`` the verifier flags
-    # "No such device: '@og_matmul_seg'" and the printer falls back to
-    # the generic op form, which breaks the brace-counting
+    # ``aiex.configure`` ops reference the 3 cached GEMM device syms
+    # (``gg_matmul_seg``, ``ug_matmul_seg``, ``dg_matmul_seg``) which
+    # are NOT present in this freshly-emitted module (they live only in
+    # the cached MLIR text and are stitched back in via
+    # ``_splice_device`` below).  Without ``assume_verified=True`` the
+    # verifier flags "No such device: '@gg_matmul_seg'" and the printer
+    # falls back to the generic op form, which breaks the brace-counting
     # ``_extract_*`` helpers.
     placed_text = module.operation.get_asm(assume_verified=True)
     placed_rms = _extract_single_device(placed_text, "rm_weighted_rms_norm_seg")
     placed_ra  = _extract_single_device(placed_text, "ra_add_seg")
     placed_fa  = _extract_single_device(placed_text, "fa_add_seg")
     placed_sw  = _extract_single_device(placed_text, "sw_silu_mul_seg")
+    placed_og  = _extract_single_device(placed_text, "og_matmul_seg")
     placed_dispatcher = _extract_dispatcher_device(placed_text)
 
     # Load the cached prefill MLIR and splice in the placed devices.
@@ -1311,12 +2009,14 @@ def build_o_ffn_module(seq_len: int = SEQ_LEN,
     spliced = _splice_device(spliced, "ra_add_seg", placed_ra)
     spliced = _splice_device(spliced, "fa_add_seg", placed_fa)
     spliced = _splice_device(spliced, "sw_silu_mul_seg", placed_sw)
+    spliced = _splice_device(spliced, "og_matmul_seg", placed_og)
     spliced = _splice_dispatcher_device(spliced, placed_dispatcher)
 
     if verbose:
         print(f"  [o_ffn builder] Spliced placed-IRON rm_weighted_rms_norm_seg "
-              f"+ ra_add_seg + fa_add_seg + sw_silu_mul_seg + dispatcher "
-              f"into cached MLIR ({original_len} -> {len(spliced)} bytes).")
+              f"+ ra_add_seg + fa_add_seg + sw_silu_mul_seg + og_matmul_seg "
+              f"+ dispatcher into cached MLIR ({original_len} -> "
+              f"{len(spliced)} bytes).")
 
     return spliced
 
@@ -1331,10 +2031,10 @@ if __name__ == "__main__":  # pragma: no cover
     parser.add_argument("-o", "--output", help="Output path (default: stdout)",
                         default=None)
     parser.add_argument("--device-only", action="store_true",
-                        help="Emit just the 5 placed devices "
+                        help="Emit just the 6 placed devices "
                              "(rm_weighted_rms_norm_seg, ra_add_seg, "
-                             "fa_add_seg, sw_silu_mul_seg, dispatcher) "
-                             "-- skips cached splice")
+                             "fa_add_seg, sw_silu_mul_seg, og_matmul_seg, "
+                             "dispatcher) -- skips cached splice")
     args = parser.parse_args()
     if args.device_only:
         with mlir_mod_ctx() as ctx:
@@ -1342,10 +2042,11 @@ if __name__ == "__main__":  # pragma: no cover
             _emit_ra_add_seg()
             _emit_fa_add_seg()
             _emit_sw_silu_mul_seg()
+            _emit_og_matmul_seg()
             _emit_dispatcher_device()
             mod = ctx.module
         # See note in build_o_ffn_module() about assume_verified=True:
-        # the dispatcher references 4 GEMM devs not present in this
+        # the dispatcher references 3 GEMM devs not present in this
         # standalone module, so the verifier fails -- skip it.
         text = mod.operation.get_asm(assume_verified=True)
     else:
