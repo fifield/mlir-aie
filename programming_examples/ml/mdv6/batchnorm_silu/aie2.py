@@ -15,7 +15,6 @@ from aie.iron import (
     Runtime,
     Worker,
 )
-from aie.iron.placers import SequentialPlacer
 from aie.iron.device import NPU2Col1
 
 
@@ -127,7 +126,7 @@ def batchnorm_silu_layer_bf16(
         rt.drain(of_output_L2L3.cons(), O, wait=True)
 
     # Place components and generate MLIR module
-    return Program(dev, rt).resolve_program(SequentialPlacer())
+    return Program(dev, rt).resolve_program()
 
 
 # Parse command line arguments

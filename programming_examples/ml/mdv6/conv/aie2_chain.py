@@ -7,7 +7,6 @@ import numpy as np
 import sys
 
 from aie.iron import Kernel, ObjectFifo, Program, Runtime, Worker
-from aie.iron.placers import SequentialPlacer
 from aie.iron.device import NPU2
 from aie.iron.controlflow import range_
 
@@ -81,7 +80,7 @@ def chain_conv1x1(dev, tile_h=8, tile_w=8, ch=16):
         rt.fill(in_fifo.prod(), I)
         rt.drain(out_fifo.cons(), O, wait=True)
 
-    return Program(dev, rt).resolve_program(SequentialPlacer())
+    return Program(dev, rt).resolve_program()
 
 
 if __name__ == "__main__":

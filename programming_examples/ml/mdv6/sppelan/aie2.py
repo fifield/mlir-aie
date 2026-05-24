@@ -17,7 +17,6 @@ from aie.iron import (
     Runtime,
     Worker,
 )
-from aie.iron.placers import SequentialPlacer
 from aie.iron.device import NPU2Col1
 
 
@@ -177,7 +176,7 @@ def sppelan_bf16(
         rt.fill(of_wts.prod(), W)
         rt.drain(of_out.cons(), O, wait=True)
     
-    return Program(dev, rt).resolve_program(SequentialPlacer())
+    return Program(dev, rt).resolve_program()
 
 
 # Parse command line arguments

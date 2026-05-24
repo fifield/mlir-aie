@@ -34,7 +34,6 @@ from aie.iron import (
     Runtime,
     Worker,
 )
-from aie.iron.placers import SequentialPlacer
 from aie.iron.device import NPU2Col1
 from aie.iron.controlflow import range_
 
@@ -199,7 +198,7 @@ def conv_layer_bf16_tiled(
         rt.drain(of_output_tile.cons(), O_tiles, wait=True)
     
     # Generate program
-    return Program(dev, rt).resolve_program(SequentialPlacer())
+    return Program(dev, rt).resolve_program()
 
 
 # Parse command line arguments

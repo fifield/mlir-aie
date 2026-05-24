@@ -37,7 +37,6 @@ from aie.iron import (
     Worker,
     WorkerRuntimeBarrier,
 )
-from aie.iron.placers import SequentialPlacer
 from aie.iron.device import NPU2
 from aie.iron.controlflow import range_
 from aie.helpers.taplib import TensorAccessPattern
@@ -356,7 +355,7 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
             rt.drain(col_out_fifos[col].cons(), O, tap_out,
                      wait=(col == n_cols - 1))
 
-    return Program(dev, rt).resolve_program(SequentialPlacer())
+    return Program(dev, rt).resolve_program()
 
 
 def _parse_args(argv):

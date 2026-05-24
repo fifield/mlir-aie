@@ -5,7 +5,6 @@ import sys
 from aie.iron import (
     Kernel, Buffer, ObjectFifo, Program, Runtime, Worker,
 )
-from aie.iron.placers import SequentialPlacer
 from aie.iron.device import NPU2Col1
 
 
@@ -147,7 +146,7 @@ def conv_fused_packed_bf16(dev, height, width, in_ch, out_ch, kernel_size, strid
         rt.fill(of_weights.prod(), W)
         rt.drain(of_output.cons(), O, wait=True)
 
-    return Program(dev, rt).resolve_program(SequentialPlacer())
+    return Program(dev, rt).resolve_program()
 
 
 if __name__ == "__main__":

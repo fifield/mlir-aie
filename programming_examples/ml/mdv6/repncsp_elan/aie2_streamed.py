@@ -30,7 +30,6 @@ from aie.iron import (
     Runtime,
     Worker,
 )
-from aie.iron.placers import SequentialPlacer
 from aie.iron.device import NPU2Col1
 from aie.iron.controlflow import range_
 
@@ -244,7 +243,7 @@ def repncsp_elan_bf16_streamed(
             rt.fill(of_weights.prod(), W)  # TODO: need offset-based fill
         rt.drain(of_output.cons(), O, wait=True)
 
-    return Program(dev, rt).resolve_program(SequentialPlacer())
+    return Program(dev, rt).resolve_program()
 
 
 # Parse args
