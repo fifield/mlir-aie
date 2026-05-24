@@ -1951,6 +1951,18 @@ _GG_ARG_X = 6                      # 2048x2048 bf16  normed FFN input
 _GG_ARG_W = 7                      # 2048x8192 bf16  Wgate
 _GG_ARG_Y = 8                      # 2048x8192 bf16  gate output
 
+# Channel ids for ug_matmul_seg in the cached IR.
+# Verified at cached o_ffn.npu.air.mlir:16961-16980.
+_CHAN_UG_X      = 83               # MM2S 0 (X input)   on shim_C_0
+_CHAN_UG_WEIGHT = 76               # MM2S 1 (W weight)  on shim_C_0
+_CHAN_UG_Y      = 81               # S2MM 0 (Y output)  on shim_C_0
+
+# Host-arg indices for the @ug_matmul_seg_sequence
+# (verified at cached o_ffn.npu.air.mlir:16981).
+_UG_ARG_X = 6                      # 2048x2048 bf16  normed FFN input
+_UG_ARG_W = 9                      # 2048x8192 bf16  Wup
+_UG_ARG_Y = 10                     # 2048x8192 bf16  up-projection output
+
 
 def _emit_gg_matmul_seg() -> None:
     """Emit the placed-IRON ``@gg_matmul_seg`` device (FFN gate-proj GEMM).
@@ -2561,6 +2573,527 @@ def _emit_gg_matmul_seg() -> None:
 
 
 # ---------------------------------------------------------------------------
+# ug_matmul_seg (FFN up-projection GEMM) -- placed-IRON emit.
+#
+# Structurally byte-identical to ``gg_matmul_seg`` modulo:
+#   * shim channel ids: X=83 (vs gg 86), W=76 (vs gg 85), Y=81 (vs gg 82)
+#   * host arg indices: X=arg6 (same), W=arg9 (vs gg arg7), Y=arg10 (vs gg arg8)
+#   * device sym name : ug_matmul_seg / ug_matmul_seg_sequence
+#
+# Verified by normalized diff of cached ``@ug_matmul_seg`` (lines 9577-17463)
+# vs ``@gg_matmul_seg`` (17464-25350): the only non-cosmetic differences after
+# stripping channel/sym/SSA names are AIR herd_name attributes ("ug_herd_0" vs
+# "gg_herd_0"), which the placed-IRON emit drops (cosmetic AIR metadata only).
+#
+# Reuses the same per-core kernel object as v_matmul/gg_matmul_seg:
+#   ``bf16_gemm_pythoc_M8_N16_K4_AT_bf16out_s64_512_64_256_64_512.o``.
+# No new .o build is required.
+# ---------------------------------------------------------------------------
+def _emit_ug_matmul_seg() -> None:
+    """Emit the placed-IRON ``@ug_matmul_seg`` device (FFN up-proj GEMM).
+
+    Must be called inside an active ``mlir_mod_ctx()``; registers one
+    ``aie.device(npu2) @ug_matmul_seg`` op.  Body is byte-identical (modulo
+    sym/channel names) to ``_emit_gg_matmul_seg``; see that function's
+    docstring for the full structural commentary on tiles, locks, buffers,
+    mem/core/memtile DMA, flows, shim allocations and runtime sequence.
+
+    Host args (verified at cached runtime_sequence @ug_matmul_seg_sequence,
+    o_ffn.npu.air.mlir:16981):
+      arg6  : 2048x2048 bf16   X input  (normed_x from rm_weighted_rms_norm_seg)
+      arg9  : 2048x8192 bf16   W weight (Wup)
+      arg10 : 2048x8192 bf16   Y output (up-projection result)
+    """
+    from aie.dialects import memref as memref_dialect  # noqa: F401
+    from aie.dialects import vector as vector_dialect
+    from aie.extras import types as T
+    from aie.ir import UnitAttr
+
+    @device(AIEDevice.npu2, sym_name="ug_matmul_seg")
+    def _dev():
+        # 8 shim + 8 mem + 32 compute tiles (cols 0..7, rows 2..5).
+        shim_tiles    = [tile(c, 0) for c in range(N_COLS)]
+        mem_tiles     = [tile(c, 1) for c in range(N_COLS)]
+        compute_tiles = {}
+        for col in range(N_COLS):
+            for row in range(2, 6):
+                compute_tiles[(col, row)] = tile(col, row)
+
+        # Locks: same layout as gg.  Mem-tile locks emit order: col 7
+        # first, ..., col 0.  Cols 4-7: 6 locks each (no X buffers);
+        # cols 0-3: 10 locks each (with X ping/pong locks).
+        mem_locks = {}
+        for col in reversed(range(4, N_COLS)):
+            mt = mem_tiles[col]
+            mem_locks[col] = {
+                "C_pong_sem":   lock(mt, lock_id=5, init=1),
+                "C_pong_ready": lock(mt, lock_id=4, init=0),
+                "C_ping_sem":   lock(mt, lock_id=3, init=1),
+                "C_ping_ready": lock(mt, lock_id=2, init=0),
+                "W_sem":        lock(mt, lock_id=1, init=4),
+                "W_ready":      lock(mt, lock_id=0, init=0),
+            }
+        for col in reversed(range(4)):
+            mt = mem_tiles[col]
+            mem_locks[col] = {
+                "X_pong_sem":   lock(mt, lock_id=9, init=1),
+                "X_pong_ready": lock(mt, lock_id=8, init=0),
+                "X_ping_sem":   lock(mt, lock_id=7, init=1),
+                "X_ping_ready": lock(mt, lock_id=6, init=0),
+                "C_pong_sem":   lock(mt, lock_id=5, init=1),
+                "C_pong_ready": lock(mt, lock_id=4, init=0),
+                "C_ping_sem":   lock(mt, lock_id=3, init=1),
+                "C_ping_ready": lock(mt, lock_id=2, init=0),
+                "W_sem":        lock(mt, lock_id=1, init=4),
+                "W_ready":      lock(mt, lock_id=0, init=0),
+            }
+
+        # Compute-tile locks: row-major ascending.
+        core_locks = {}
+        for row in range(2, 6):
+            for col in range(N_COLS):
+                ct = compute_tiles[(col, row)]
+                core_locks[(col, row)] = {
+                    "B_sem":   lock(ct, lock_id=5, init=2),
+                    "B_ready": lock(ct, lock_id=4, init=0),
+                    "A_sem":   lock(ct, lock_id=3, init=2),
+                    "A_ready": lock(ct, lock_id=2, init=0),
+                    "C_done":  lock(ct, lock_id=1, init=1),
+                    "C_full":  lock(ct, lock_id=0, init=0),
+                }
+
+        # Buffers: same shapes/order as gg.
+        BF16_W_L2  = bf16_memref(1, 4, 64, 128, memory_space=1)
+        BF16_CO_L2 = bf16_memref(1, 1, 64,  64, memory_space=1)
+        BF16_XI_L2 = bf16_memref(1, 1, 64, 128, memory_space=1)
+
+        mem_buf = {col: {} for col in range(N_COLS)}
+        for col in range(N_COLS):
+            mem_buf[col]["W"] = buffer(mem_tiles[col], datatype=BF16_W_L2)
+        for col in range(N_COLS):
+            mem_buf[col]["C_ping"] = buffer(mem_tiles[col], datatype=BF16_CO_L2)
+            mem_buf[col]["C_pong"] = buffer(mem_tiles[col], datatype=BF16_CO_L2)
+        for col in range(4):
+            mem_buf[col]["X_ping"] = buffer(mem_tiles[col], datatype=BF16_XI_L2)
+            mem_buf[col]["X_pong"] = buffer(mem_tiles[col], datatype=BF16_XI_L2)
+
+        BF16_C_L1 = bf16_memref(1, 1, 16, 8, 8, 8, memory_space=2)
+        BF16_A_L1 = bf16_memref(1, 1, 4,  8, 8, 8, memory_space=2)
+        BF16_B_L1 = bf16_memref(1, 1, 16, 4, 8, 8, memory_space=2)
+
+        core_buf = {}
+        for row in reversed(range(2, 6)):
+            for col in reversed(range(N_COLS)):
+                ct = compute_tiles[(col, row)]
+                bufs = {}
+                bufs["C"]      = buffer(ct, datatype=BF16_C_L1)
+                bufs["A_pong"] = buffer(ct, datatype=BF16_A_L1)
+                bufs["B_pong"] = buffer(ct, datatype=BF16_B_L1)
+                bufs["A_ping"] = buffer(ct, datatype=BF16_A_L1)
+                bufs["B_ping"] = buffer(ct, datatype=BF16_B_L1)
+                core_buf[(col, row)] = bufs
+
+        # External buffers (opaque AIR metadata; kept for diff parity).
+        # ug shares gg's (2048x2048, 2048x8192, 2048x8192) X/W/Y shapes.
+        external_buffer(bf16_np(EMB_DIM, EMB_DIM),       name="__air_external_buffer")
+        external_buffer(bf16_np(EMB_DIM, HIDDEN_DIM),    name="__air_external_buffer_1")
+        external_buffer(bf16_np(EMB_DIM, HIDDEN_DIM),    name="__air_external_buffer_2")
+
+        # aie.mem blocks per compute tile.  Cached order: row 5 col 7
+        # first, ..., row 2 col 0.  Identical layout to gg.
+        def _make_compute_mem(_ct, _cl, _bufs):
+            @mem(_ct)
+            def _core_mem(block):
+                dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
+                with block[1]:
+                    use_lock(_cl["C_full"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_bufs["C"], offset=0, len=8192,
+                           dimensions=[(64, 8), (16, 512), (8, 1)])
+                    use_lock(_cl["C_done"], LockAction.Release, value=1)
+                    next_bd(block[1])
+                with block[2]:
+                    EndOp()
+                with block[3]:
+                    dma_start(DMAChannelDir.S2MM, 0, dest=block[4], chain=block[6])
+                with block[4]:
+                    use_lock(_cl["A_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_bufs["A_ping"], offset=0, len=2048)
+                    use_lock(_cl["A_ready"], LockAction.Release, value=1)
+                    next_bd(block[5])
+                with block[5]:
+                    use_lock(_cl["A_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_bufs["A_pong"], offset=0, len=2048)
+                    use_lock(_cl["A_ready"], LockAction.Release, value=1)
+                    next_bd(block[4])
+                with block[6]:
+                    dma_start(DMAChannelDir.S2MM, 1, dest=block[7], chain=block[2])
+                with block[7]:
+                    use_lock(_cl["B_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_bufs["B_ping"], offset=0, len=4096)
+                    use_lock(_cl["B_ready"], LockAction.Release, value=1)
+                    next_bd(block[8])
+                with block[8]:
+                    use_lock(_cl["B_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_bufs["B_pong"], offset=0, len=4096)
+                    use_lock(_cl["B_ready"], LockAction.Release, value=1)
+                    next_bd(block[7])
+
+        for row in reversed(range(2, 6)):
+            for col in reversed(range(N_COLS)):
+                _make_compute_mem(compute_tiles[(col, row)],
+                                  core_locks[(col, row)],
+                                  core_buf[(col, row)])
+
+        # External function declaration.  ug shares the v_matmul/gg
+        # bf16_gemm_kernel_bf16out kernel object; no new .o build needed.
+        gemm_fn = external_func(
+            "bf16_gemm_kernel_bf16out",
+            inputs=[BF16_A_L1, BF16_B_L1, BF16_C_L1],
+            link_with="bf16_gemm_pythoc_M8_N16_K4_AT_bf16out_s64_512_64_256_64_512.o",
+        )
+        gemm_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
+
+        # aie.core body per compute tile.  Identical to gg / v_matmul.
+        def _make_compute_core(_ct, _cl, _bufs):
+            @core(_ct)
+            def _core_body():
+                zero_perm = AffineMap.get(
+                    6, 0,
+                    [AffineDimExpr.get(0), AffineDimExpr.get(1),
+                     AffineDimExpr.get(2), AffineDimExpr.get(3),
+                     AffineDimExpr.get(4), AffineDimExpr.get(5)])
+                vec_zero_ty = T.vector(1, 1, 1, 1, 8, 8, T.bf16())
+                np_zero = np.zeros((1, 1, 1, 1, 8, 8), dtype=bfloat16)
+                cst_zero = arith.constant(np_zero, vec_zero_ty)
+                c0_idx = arith.constant(0, T.index())
+
+                for _ in range_(_sys.maxsize):
+                    use_lock(_cl["C_done"], LockAction.AcquireGreaterEqual, value=1)
+                    for m_i in range_(0, GG_MATMUL_C_M, 1):
+                        for n_i in range_(0, GG_MATMUL_C_N, 1):
+                            vector_dialect.transfer_write(
+                                None, cst_zero, _bufs["C"],
+                                [c0_idx, c0_idx, m_i, n_i, c0_idx, c0_idx],
+                                permutation_map=zero_perm,
+                                in_bounds=[True, True, True, True, True, True])
+                    for _k_outer in range_(0, GG_MATMUL_K_OUTER, 1):
+                        use_lock(_cl["A_ready"], LockAction.AcquireGreaterEqual, value=1)
+                        use_lock(_cl["B_ready"], LockAction.AcquireGreaterEqual, value=1)
+                        gemm_fn(_bufs["A_ping"], _bufs["B_ping"], _bufs["C"])
+                        use_lock(_cl["B_sem"], LockAction.Release, value=1)
+                        use_lock(_cl["A_sem"], LockAction.Release, value=1)
+                        use_lock(_cl["A_ready"], LockAction.AcquireGreaterEqual, value=1)
+                        use_lock(_cl["B_ready"], LockAction.AcquireGreaterEqual, value=1)
+                        gemm_fn(_bufs["A_pong"], _bufs["B_pong"], _bufs["C"])
+                        use_lock(_cl["B_sem"], LockAction.Release, value=1)
+                        use_lock(_cl["A_sem"], LockAction.Release, value=1)
+                    use_lock(_cl["C_full"], LockAction.Release, value=1)
+
+        for row in reversed(range(2, 6)):
+            for col in reversed(range(N_COLS)):
+                _make_compute_core(compute_tiles[(col, row)],
+                                   core_locks[(col, row)],
+                                   core_buf[(col, row)])
+
+        # Flows: identical to gg.
+        for col in range(N_COLS):
+            flow(shim_tiles[col], WireBundle.DMA, 0,
+                 mem_tiles[col], WireBundle.DMA, 0)
+        for col in range(4):
+            flow(shim_tiles[col], WireBundle.DMA, 1,
+                 mem_tiles[col], WireBundle.DMA, 1)
+        for col in range(N_COLS):
+            flow(mem_tiles[col], WireBundle.DMA, 0,
+                 shim_tiles[col], WireBundle.DMA, 0)
+        for col in range(N_COLS):
+            for row in range(2, 6):
+                flow(mem_tiles[col], WireBundle.DMA, 1,
+                     compute_tiles[(col, row)], WireBundle.DMA, 0)
+        for row_offset in range(4):
+            for col in range(N_COLS):
+                flow(mem_tiles[row_offset], WireBundle.DMA, 2,
+                     compute_tiles[(col, 2 + row_offset)], WireBundle.DMA, 1)
+        for col in range(4):
+            for row in range(2, 6):
+                flow(compute_tiles[(col, row)], WireBundle.DMA, 0,
+                     mem_tiles[col], WireBundle.DMA, 2 + (row - 2))
+        for col in range(4, N_COLS):
+            for row in range(2, 6):
+                flow(compute_tiles[(col, row)], WireBundle.DMA, 0,
+                     mem_tiles[col], WireBundle.DMA, 1 + (row - 2))
+
+        # memtile_dma blocks per col: cols 0-3 carry the X-broadcast
+        # chain, cols 4-7 do not.  Layouts identical to gg.
+        def _make_memtile_dma_x_col(col):
+            ml = mem_locks[col]
+            mt = mem_tiles[col]
+            mb = mem_buf[col]
+            @memtile_dma(mt)
+            def _mt_dma(block):
+                dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
+                with block[1]:
+                    use_lock(ml["W_ready"], LockAction.AcquireGreaterEqual, value=4)
+                    dma_bd(mb["W"], offset=0, len=32768,
+                           dimensions=[(64, 128), (4, 8192), (128, 1)])
+                    use_lock(ml["W_sem"], LockAction.Release, value=4)
+                    next_bd(block[1])
+                with block[2]:
+                    EndOp()
+                with block[3]:
+                    dma_start(DMAChannelDir.MM2S, 1, dest=block[4], chain=block[6])
+                with block[4]:
+                    use_lock(ml["C_ping_ready"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["C_ping"], offset=0, len=4096,
+                           dimensions=[(8, 8), (64, 64), (8, 1)])
+                    use_lock(ml["C_ping_sem"], LockAction.Release, value=1)
+                    next_bd(block[5])
+                with block[5]:
+                    use_lock(ml["C_pong_ready"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["C_pong"], offset=0, len=4096,
+                           dimensions=[(8, 8), (64, 64), (8, 1)])
+                    use_lock(ml["C_pong_sem"], LockAction.Release, value=1)
+                    next_bd(block[4])
+                with block[6]:
+                    dma_start(DMAChannelDir.MM2S, 2, dest=block[7], chain=block[9])
+                with block[7]:
+                    use_lock(ml["X_ping_ready"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["X_ping"], offset=0, len=8192,
+                           dimensions=[(2, 4096), (16, 8), (32, 128), (8, 1)])
+                    use_lock(ml["X_ping_sem"], LockAction.Release, value=1)
+                    next_bd(block[8])
+                with block[8]:
+                    use_lock(ml["X_pong_ready"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["X_pong"], offset=0, len=8192,
+                           dimensions=[(2, 4096), (16, 8), (32, 128), (8, 1)])
+                    use_lock(ml["X_pong_sem"], LockAction.Release, value=1)
+                    next_bd(block[7])
+                with block[9]:
+                    dma_start(DMAChannelDir.S2MM, 0, dest=block[10], chain=block[12])
+                with block[10]:
+                    use_lock(ml["C_ping_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["C_ping"], offset=0, len=4096)
+                    use_lock(ml["C_ping_ready"], LockAction.Release, value=1)
+                    next_bd(block[11])
+                with block[11]:
+                    use_lock(ml["C_pong_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["C_pong"], offset=0, len=4096)
+                    use_lock(ml["C_pong_ready"], LockAction.Release, value=1)
+                    next_bd(block[10])
+                with block[12]:
+                    dma_start(DMAChannelDir.S2MM, 1, dest=block[13], chain=block[15])
+                with block[13]:
+                    use_lock(ml["X_ping_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["X_ping"], offset=0, len=8192)
+                    use_lock(ml["X_ping_ready"], LockAction.Release, value=1)
+                    next_bd(block[14])
+                with block[14]:
+                    use_lock(ml["X_pong_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["X_pong"], offset=0, len=8192)
+                    use_lock(ml["X_pong_ready"], LockAction.Release, value=1)
+                    next_bd(block[13])
+                with block[15]:
+                    dma_start(DMAChannelDir.S2MM, 2, dest=block[16], chain=block[17])
+                with block[16]:
+                    use_lock(ml["W_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["W"], offset=0, len=8192)
+                    use_lock(ml["W_ready"], LockAction.Release, value=1)
+                    next_bd(block[16])
+                with block[17]:
+                    dma_start(DMAChannelDir.S2MM, 3, dest=block[18], chain=block[19])
+                with block[18]:
+                    use_lock(ml["W_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["W"], offset=8192, len=8192)
+                    use_lock(ml["W_ready"], LockAction.Release, value=1)
+                    next_bd(block[18])
+                with block[19]:
+                    dma_start(DMAChannelDir.S2MM, 4, dest=block[20], chain=block[21])
+                with block[20]:
+                    use_lock(ml["W_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["W"], offset=16384, len=8192)
+                    use_lock(ml["W_ready"], LockAction.Release, value=1)
+                    next_bd(block[20])
+                with block[21]:
+                    dma_start(DMAChannelDir.S2MM, 5, dest=block[22], chain=block[2])
+                with block[22]:
+                    use_lock(ml["W_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["W"], offset=24576, len=8192)
+                    use_lock(ml["W_ready"], LockAction.Release, value=1)
+                    next_bd(block[22])
+
+        def _make_memtile_dma_no_x_col(col):
+            ml = mem_locks[col]
+            mt = mem_tiles[col]
+            mb = mem_buf[col]
+            @memtile_dma(mt)
+            def _mt_dma(block):
+                dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
+                with block[1]:
+                    use_lock(ml["W_ready"], LockAction.AcquireGreaterEqual, value=4)
+                    dma_bd(mb["W"], offset=0, len=32768,
+                           dimensions=[(64, 128), (4, 8192), (128, 1)])
+                    use_lock(ml["W_sem"], LockAction.Release, value=4)
+                    next_bd(block[1])
+                with block[2]:
+                    EndOp()
+                with block[3]:
+                    dma_start(DMAChannelDir.MM2S, 1, dest=block[4], chain=block[6])
+                with block[4]:
+                    use_lock(ml["C_ping_ready"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["C_ping"], offset=0, len=4096,
+                           dimensions=[(8, 8), (64, 64), (8, 1)])
+                    use_lock(ml["C_ping_sem"], LockAction.Release, value=1)
+                    next_bd(block[5])
+                with block[5]:
+                    use_lock(ml["C_pong_ready"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["C_pong"], offset=0, len=4096,
+                           dimensions=[(8, 8), (64, 64), (8, 1)])
+                    use_lock(ml["C_pong_sem"], LockAction.Release, value=1)
+                    next_bd(block[4])
+                with block[6]:
+                    dma_start(DMAChannelDir.S2MM, 0, dest=block[7], chain=block[9])
+                with block[7]:
+                    use_lock(ml["C_ping_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["C_ping"], offset=0, len=4096)
+                    use_lock(ml["C_ping_ready"], LockAction.Release, value=1)
+                    next_bd(block[8])
+                with block[8]:
+                    use_lock(ml["C_pong_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["C_pong"], offset=0, len=4096)
+                    use_lock(ml["C_pong_ready"], LockAction.Release, value=1)
+                    next_bd(block[7])
+                with block[9]:
+                    dma_start(DMAChannelDir.S2MM, 1, dest=block[10], chain=block[11])
+                with block[10]:
+                    use_lock(ml["W_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["W"], offset=0, len=8192)
+                    use_lock(ml["W_ready"], LockAction.Release, value=1)
+                    next_bd(block[10])
+                with block[11]:
+                    dma_start(DMAChannelDir.S2MM, 2, dest=block[12], chain=block[13])
+                with block[12]:
+                    use_lock(ml["W_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["W"], offset=8192, len=8192)
+                    use_lock(ml["W_ready"], LockAction.Release, value=1)
+                    next_bd(block[12])
+                with block[13]:
+                    dma_start(DMAChannelDir.S2MM, 3, dest=block[14], chain=block[15])
+                with block[14]:
+                    use_lock(ml["W_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["W"], offset=16384, len=8192)
+                    use_lock(ml["W_ready"], LockAction.Release, value=1)
+                    next_bd(block[14])
+                with block[15]:
+                    dma_start(DMAChannelDir.S2MM, 4, dest=block[16], chain=block[2])
+                with block[16]:
+                    use_lock(ml["W_sem"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(mb["W"], offset=24576, len=8192)
+                    use_lock(ml["W_ready"], LockAction.Release, value=1)
+                    next_bd(block[16])
+
+        for col in range(N_COLS):
+            if col < 4:
+                _make_memtile_dma_x_col(col)
+            else:
+                _make_memtile_dma_no_x_col(col)
+
+        # Shim allocations.  Cached order (lines 16961-16980):
+        #   8x air_channel_81 S2MM 0 (Y output)
+        #   8x air_channel_83 MM2S 0 (X input)
+        #   4x air_channel_76 MM2S 1 (W weight, cols 0-3)
+        for col in range(N_COLS):
+            shim_dma_allocation(
+                f"air_channel_{_CHAN_UG_Y}_{col}", shim_tiles[col],
+                DMAChannelDir.S2MM, 0)
+        for col in range(N_COLS):
+            shim_dma_allocation(
+                f"air_channel_{_CHAN_UG_X}_{col}", shim_tiles[col],
+                DMAChannelDir.MM2S, 0)
+        for col in range(4):
+            shim_dma_allocation(
+                f"air_channel_{_CHAN_UG_WEIGHT}_{col}", shim_tiles[col],
+                DMAChannelDir.MM2S, 1)
+
+        # Runtime sequence.  ug uses arg6=X, arg9=W, arg10=Y.  BD layouts
+        # and per-col / per-dispatch offsets are identical to gg
+        # (verified at cached lines 16982-17461).  Free/await ordering
+        # (lines 17382-17461) matches gg's: 32 Y awaits col-major
+        # reverse, 16 W frees col-major reverse, 32 X frees col-major
+        # reverse.
+        @runtime_sequence(*_o_ffn_host_arg_types(),
+                          sym_name="ug_matmul_seg_sequence")
+        def _seq(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8,
+                 arg9, arg10, arg11, arg12, arg13, arg14):
+            host_args = (arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7,
+                         arg8, arg9, arg10, arg11, arg12, arg13, arg14)
+            x_buf = host_args[_UG_ARG_X]    # 2048x2048 normed X
+            w_buf = host_args[_UG_ARG_W]    # 2048x8192 Wup
+            y_buf = host_args[_UG_ARG_Y]    # 2048x8192 up-projection output
+
+            x_tasks = []
+            w_tasks = []
+            y_tasks = []
+
+            for col in range(N_COLS):
+                for d in range(4):
+                    offset = col * 131072 + d * 1048576
+                    t = dma_configure_task_for(
+                        f"air_channel_{_CHAN_UG_X}_{col}",
+                        repeat_count=15)
+                    with bds(t) as bd:
+                        with bd[0]:
+                            dma_bd(x_buf, offset=offset, len=131072,
+                                   dimensions=[(32, 64),
+                                               (64, 2048),
+                                               (64, 1)])
+                            EndOp()
+                    dma_start_task(t)
+                    x_tasks.append(t)
+
+            for col in range(4):
+                for d in range(4):
+                    offset = col * 128
+                    t = dma_configure_task_for(
+                        f"air_channel_{_CHAN_UG_WEIGHT}_{col}",
+                        repeat_count=15)
+                    with bds(t) as bd:
+                        with bd[0]:
+                            dma_bd(w_buf, offset=offset, len=262144,
+                                   dimensions=[(16, 512),
+                                               (32, 524288),
+                                               (64, 8192),
+                                               (128, 1)])
+                            EndOp()
+                    dma_start_task(t)
+                    w_tasks.append(t)
+
+            for col in range(N_COLS):
+                for d in range(4):
+                    offset = col * 524288 + d * 4194304
+                    t = dma_configure_task_for(
+                        f"air_channel_{_CHAN_UG_Y}_{col}",
+                        issue_token=True)
+                    with bds(t) as bd:
+                        with bd[0]:
+                            dma_bd(y_buf, offset=offset, len=524288,
+                                   dimensions=[(16, 512),
+                                               (64, 8192),
+                                               (512, 1)])
+                            EndOp()
+                    dma_start_task(t)
+                    y_tasks.append(t)
+
+            for col in reversed(range(N_COLS)):
+                for d in range(4):
+                    dma_await_task(y_tasks[col * 4 + d])
+            for col in reversed(range(4)):
+                for d in range(4):
+                    dma_free_task(w_tasks[col * 4 + d])
+            for col in reversed(range(N_COLS)):
+                for d in range(4):
+                    dma_free_task(x_tasks[col * 4 + d])
+
+
+# ---------------------------------------------------------------------------
 # Dispatcher device emitter.
 #
 # Outer wrapper that fires the 8 inner devices in the cached file's
@@ -2628,12 +3161,12 @@ def build_o_ffn_module(seq_len: int = SEQ_LEN,
                        omit_while_true_loop: bool = False) -> str:
     """Build the prefill o_ffn MLIR module.
 
-    Phase 4.6e (incremental): 7 of 9 devices are emitted via placed-IRON --
+    Phase 4.6f (incremental): 8 of 9 devices are emitted via placed-IRON --
     ``rm_weighted_rms_norm_seg``, ``ra_add_seg``, ``fa_add_seg``,
-    ``sw_silu_mul_seg``, ``og_matmul_seg``, ``gg_matmul_seg``, plus the
-    outer unnamed dispatcher device.  The 2 remaining GEMM devices
-    (``ug_matmul_seg``, ``dg_matmul_seg``) come from the cached MLIR
-    text via string splice; phases 4.6f-g are deferred.
+    ``sw_silu_mul_seg``, ``og_matmul_seg``, ``gg_matmul_seg``,
+    ``ug_matmul_seg``, plus the outer unnamed dispatcher device.  The 1
+    remaining GEMM device (``dg_matmul_seg``) comes from the cached MLIR
+    text via string splice; phase 4.6g is deferred.
 
     All dimensions must match the Llama-3.2-1B values; the cached AIR
     layout is shape-specialized.
@@ -2654,19 +3187,19 @@ def build_o_ffn_module(seq_len: int = SEQ_LEN,
         _emit_sw_silu_mul_seg()
         _emit_og_matmul_seg()
         _emit_gg_matmul_seg()
+        _emit_ug_matmul_seg()
         _emit_dispatcher_device()
         module = ctx.module
         attach_loop_annotation_to_all_scf_for(module)
 
     # Use ``assume_verified=True`` here -- the dispatcher's
-    # ``aiex.configure`` ops reference the 2 cached GEMM device syms
-    # (``ug_matmul_seg``, ``dg_matmul_seg``) which are NOT present in
-    # this freshly-emitted module (they live only in the cached MLIR
-    # text and are stitched back in via ``_splice_device`` below).
-    # Without ``assume_verified=True`` the verifier flags "No such
-    # device: '@ug_matmul_seg'" and the printer falls back to the
-    # generic op form, which breaks the brace-counting ``_extract_*``
-    # helpers.
+    # ``aiex.configure`` ops reference the 1 cached GEMM device sym
+    # (``dg_matmul_seg``) which is NOT present in this freshly-emitted
+    # module (it lives only in the cached MLIR text and is stitched back
+    # in via ``_splice_device`` below).  Without ``assume_verified=True``
+    # the verifier flags "No such device: '@dg_matmul_seg'" and the
+    # printer falls back to the generic op form, which breaks the
+    # brace-counting ``_extract_*`` helpers.
     placed_text = module.operation.get_asm(assume_verified=True)
     placed_rms = _extract_single_device(placed_text, "rm_weighted_rms_norm_seg")
     placed_ra  = _extract_single_device(placed_text, "ra_add_seg")
@@ -2674,6 +3207,7 @@ def build_o_ffn_module(seq_len: int = SEQ_LEN,
     placed_sw  = _extract_single_device(placed_text, "sw_silu_mul_seg")
     placed_og  = _extract_single_device(placed_text, "og_matmul_seg")
     placed_gg  = _extract_single_device(placed_text, "gg_matmul_seg")
+    placed_ug  = _extract_single_device(placed_text, "ug_matmul_seg")
     placed_dispatcher = _extract_dispatcher_device(placed_text)
 
     # Load the cached prefill MLIR and splice in the placed devices.
@@ -2688,13 +3222,14 @@ def build_o_ffn_module(seq_len: int = SEQ_LEN,
     spliced = _splice_device(spliced, "sw_silu_mul_seg", placed_sw)
     spliced = _splice_device(spliced, "og_matmul_seg", placed_og)
     spliced = _splice_device(spliced, "gg_matmul_seg", placed_gg)
+    spliced = _splice_device(spliced, "ug_matmul_seg", placed_ug)
     spliced = _splice_dispatcher_device(spliced, placed_dispatcher)
 
     if verbose:
         print(f"  [o_ffn builder] Spliced placed-IRON rm_weighted_rms_norm_seg "
               f"+ ra_add_seg + fa_add_seg + sw_silu_mul_seg + og_matmul_seg "
-              f"+ gg_matmul_seg + dispatcher into cached MLIR ({original_len} "
-              f"-> {len(spliced)} bytes).")
+              f"+ gg_matmul_seg + ug_matmul_seg + dispatcher into cached MLIR "
+              f"({original_len} -> {len(spliced)} bytes).")
 
     return spliced
 
@@ -2709,11 +3244,11 @@ if __name__ == "__main__":  # pragma: no cover
     parser.add_argument("-o", "--output", help="Output path (default: stdout)",
                         default=None)
     parser.add_argument("--device-only", action="store_true",
-                        help="Emit just the 7 placed devices "
+                        help="Emit just the 8 placed devices "
                              "(rm_weighted_rms_norm_seg, ra_add_seg, "
                              "fa_add_seg, sw_silu_mul_seg, og_matmul_seg, "
-                             "gg_matmul_seg, dispatcher) -- skips cached "
-                             "splice")
+                             "gg_matmul_seg, ug_matmul_seg, dispatcher) -- "
+                             "skips cached splice")
     args = parser.parse_args()
     if args.device_only:
         with mlir_mod_ctx() as ctx:
@@ -2723,10 +3258,11 @@ if __name__ == "__main__":  # pragma: no cover
             _emit_sw_silu_mul_seg()
             _emit_og_matmul_seg()
             _emit_gg_matmul_seg()
+            _emit_ug_matmul_seg()
             _emit_dispatcher_device()
             mod = ctx.module
         # See note in build_o_ffn_module() about assume_verified=True:
-        # the dispatcher references 2 GEMM devs not present in this
+        # the dispatcher references 1 GEMM dev not present in this
         # standalone module, so the verifier fails -- skip it.
         text = mod.operation.get_asm(assume_verified=True)
     else:
