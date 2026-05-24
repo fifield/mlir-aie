@@ -247,7 +247,25 @@ O_FFN_HIDDEN_DIM = 8192
 
 
 def _synth_o_ffn_inputs(seed: int = 0):
-    """Synthetic 15-arg input list matching _o_ffn_host_arg_types."""
+    """Synthetic 15-arg input list matching _o_ffn_host_arg_types.
+
+    Arg layout verified against llama32_1b_prefill.py:306-326:
+      arg0  X  (attention output, og input)            -- random
+      arg1  W  (wo, O-projection weight)               -- random
+      arg2  Y  (og output / ra_add input1)             -- zeros (written by og)
+      arg3  X  (residual base, ra_add input2)          -- random
+      arg4  Y  (ra_add output, rms_norm input)         -- zeros (written by ra_add)
+      arg5  W  (ffn_norm gamma)                        -- random
+      arg6  Y  (rms_norm output, gg/ug X-input)        -- zeros (written by rms_norm)
+      arg7  W  (w_gate)                                -- random
+      arg8  Y  (gate output, silu_mul input1)          -- zeros (written by gg)
+      arg9  W  (w_up)                                  -- random (was zeros — bug!)
+      arg10 Y  (up output, silu_mul input2)            -- zeros (written by ug)
+      arg11 Y  (silu_mul output, dg X-input)           -- zeros (written by sw_silu_mul)
+      arg12 W  (w_down)                                -- random
+      arg13 Y  (dg output, fa_add input1)              -- zeros (written by dg)
+      arg14 ?  (4M-elt scratch / flat work buffer)     -- zeros
+    """
     rng = np.random.default_rng(seed)
 
     def rand_bf16(*shape, scale=0.02):
@@ -255,21 +273,21 @@ def _synth_o_ffn_inputs(seed: int = 0):
         return a.astype(bfloat16)
 
     return [
-        rand_bf16(EMB_DIM, EMB_DIM),                     # arg0  (X input -- og reads this)
-        rand_bf16(EMB_DIM, EMB_DIM),                     # arg1  (W weight -- og reads this)
-        np.zeros((EMB_DIM, EMB_DIM), dtype=bfloat16),    # arg2  (Y output -- og writes here)
-        rand_bf16(EMB_DIM, EMB_DIM),                     # arg3  (residual base, unused by og)
-        np.zeros((EMB_DIM, EMB_DIM), dtype=bfloat16),    # arg4  (ra_add target, unused by og)
-        rand_bf16(EMB_DIM, scale=1.0),                   # arg5  (gamma)
-        np.zeros((EMB_DIM, EMB_DIM), dtype=bfloat16),    # arg6  (rms output, unused by og)
-        rand_bf16(EMB_DIM, O_FFN_HIDDEN_DIM),             # arg7  (Wgate)
-        rand_bf16(EMB_DIM, O_FFN_HIDDEN_DIM),             # arg8  (Wup)
-        np.zeros((EMB_DIM, O_FFN_HIDDEN_DIM), dtype=bfloat16),  # arg9
-        np.zeros((EMB_DIM, O_FFN_HIDDEN_DIM), dtype=bfloat16),  # arg10
-        np.zeros((EMB_DIM, O_FFN_HIDDEN_DIM), dtype=bfloat16),  # arg11
-        rand_bf16(O_FFN_HIDDEN_DIM, EMB_DIM),             # arg12 (Wdown)
-        np.zeros((EMB_DIM, EMB_DIM), dtype=bfloat16),    # arg13
-        np.zeros((SEQ_LEN * 2048,), dtype=bfloat16),     # arg14 (work buffer)
+        rand_bf16(EMB_DIM, EMB_DIM),                     # arg0  X (og input)
+        rand_bf16(EMB_DIM, EMB_DIM),                     # arg1  Wo (og weight)
+        np.zeros((EMB_DIM, EMB_DIM), dtype=bfloat16),    # arg2  og output
+        rand_bf16(EMB_DIM, EMB_DIM),                     # arg3  residual base
+        np.zeros((EMB_DIM, EMB_DIM), dtype=bfloat16),    # arg4  ra_add output
+        rand_bf16(EMB_DIM, scale=1.0),                   # arg5  ffn_norm gamma
+        np.zeros((EMB_DIM, EMB_DIM), dtype=bfloat16),    # arg6  rms_norm output
+        rand_bf16(EMB_DIM, O_FFN_HIDDEN_DIM),             # arg7  W_gate
+        np.zeros((EMB_DIM, O_FFN_HIDDEN_DIM), dtype=bfloat16),  # arg8  gate output
+        rand_bf16(EMB_DIM, O_FFN_HIDDEN_DIM),             # arg9  W_up
+        np.zeros((EMB_DIM, O_FFN_HIDDEN_DIM), dtype=bfloat16),  # arg10 up output
+        np.zeros((EMB_DIM, O_FFN_HIDDEN_DIM), dtype=bfloat16),  # arg11 silu_mul output
+        rand_bf16(O_FFN_HIDDEN_DIM, EMB_DIM),             # arg12 W_down
+        np.zeros((EMB_DIM, EMB_DIM), dtype=bfloat16),    # arg13 dg output
+        np.zeros((SEQ_LEN * 2048,), dtype=bfloat16),     # arg14 scratch
     ]
 
 
