@@ -1230,7 +1230,7 @@ def _emit_matmul_device(
         gemm_fn = external_func(
             "bf16_gemm_kernel_bf16out",
             inputs=[BF16_A_L1, BF16_B_L1, BF16_C_L1],
-            link_with="bf16_gemm_pythoc_M16_N8_K4_AT_bf16out_s64_256_512_64_512_64.o",
+            link_with="bf16_gemm_pythoc_M8_N16_K4_AT_bf16out_s64_512_64_256_64_512.o",
         )
         gemm_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
 

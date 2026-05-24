@@ -34,11 +34,11 @@ _PYTHOC_KERNELS = [
     ("mv_k8192_pythoc.o", "compile_matvec_k8192"),
     ("attn_pythoc.o", "compile_attn"),
     # Phase 4.5c: bf16 GEMM .o consumed by the placed-IRON v_matmul_seg
-    # device (and later k/q_matmul_seg + o_ffn).  Strides reflect the cached
-    # L1 layouts: A is 1x1x16x4x8x8 (K=16, M=4 -- transposed), B is
-    # 1x1x4x8x8x8 (K=4, N=8), C is 1x1x16x8x8x8 (M=16, N=8).  The kernel
-    # walks M_BLOCKS=16, N_BLOCKS=8 over a single K_MICRO=4 inner reduction.
-    ("bf16_gemm_pythoc_M16_N8_K4_AT_bf16out_s64_256_512_64_512_64.o",
+    # device (and later k/q_matmul_seg + o_ffn).  Strides match the cached
+    # contract's actual access pattern (A=X 2048 elts walked M_BLOCKS=8 K=4;
+    # B=W 4096 elts walked N_BLOCKS=16 K=4).  See kernels/build.py for
+    # derivation.
+    ("bf16_gemm_pythoc_M8_N16_K4_AT_bf16out_s64_512_64_256_64_512.o",
      "_compile_bf16_gemm_rms_gemms_rope"),
 ]
 
