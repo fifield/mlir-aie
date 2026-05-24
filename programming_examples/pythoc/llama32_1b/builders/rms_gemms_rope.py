@@ -2071,15 +2071,18 @@ def build_rms_gemms_rope_module(seq_len: int = SEQ_LEN,
                                  verbose: bool = False) -> str:
     """Build the prefill RMS+GEMMS+RoPE MLIR module.
 
-    Phase 4.5e: all 7 devices are emitted via placed-IRON --
+    All 7 devices are emitted from placed-IRON Python:
     ``r_weighted_rms_norm_seg``, ``rk_rope_seg``, ``rq_rope_seg``,
     ``v_matmul_seg``, ``k_matmul_seg``, ``q_matmul_seg``, and the outer
-    unnamed dispatcher.  Only the leading ``module { ... }`` wrapper and
-    inter-device whitespace still come from the cached MLIR via splice;
-    every device body is placed-IRON.
+    unnamed dispatcher.  ``mlir_mod_ctx()`` provides the ``module { ... }``
+    wrapper and ``attach_loop_annotation_to_all_scf_for`` adds the
+    ``#loop_annotation`` attribute (auto-printed at module scope).  No
+    cached MLIR splice -- the returned text is fully placed-IRON.
 
-    All dimensions must match the Llama-3.2-1B values; the cached AIR
-    layout is shape-specialized.
+    All dimensions must match the Llama-3.2-1B values; the placed-IRON
+    emits are shape-specialized to match the AIR-reference cached layout
+    in ``reference_mlir/rms_gemms_rope.npu.air.mlir`` (still used by
+    ``tests/test_v_matmul_oracle.py`` as the bit-exact ground truth).
     """
     if (seq_len, emb_dim, kv_dim, n_heads, n_kv_heads, head_dim) != \
             (SEQ_LEN, EMB_DIM, KV_DIM, N_HEADS, N_KV_HEADS, HEAD_DIM):
@@ -2089,7 +2092,6 @@ def build_rms_gemms_rope_module(seq_len: int = SEQ_LEN,
             f"n_heads={n_heads}, n_kv_heads={n_kv_heads}, head_dim={head_dim}."
         )
 
-    # Build a fresh module containing the placed devices.
     with mlir_mod_ctx() as ctx:
         _emit_r_weighted_rms_norm_seg()
         _emit_rk_rope_seg()
@@ -2101,36 +2103,11 @@ def build_rms_gemms_rope_module(seq_len: int = SEQ_LEN,
         module = ctx.module
         attach_loop_annotation_to_all_scf_for(module)
 
-    placed_text = str(module)
-    placed_rms = _extract_single_device(placed_text, "r_weighted_rms_norm_seg")
-    placed_rk_rope = _extract_single_device(placed_text, "rk_rope_seg")
-    placed_rq_rope = _extract_single_device(placed_text, "rq_rope_seg")
-    placed_v_matmul = _extract_single_device(placed_text, "v_matmul_seg")
-    placed_k_matmul = _extract_single_device(placed_text, "k_matmul_seg")
-    placed_q_matmul = _extract_single_device(placed_text, "q_matmul_seg")
-    placed_dispatcher = _extract_dispatcher_device(placed_text)
-
-    # Load the cached prefill MLIR and splice in the placed devices.
-    project_root = Path(__file__).resolve().parents[1]
-    cached_path = project_root / "reference_mlir" / "rms_gemms_rope.npu.air.mlir"
-    cached_text = cached_path.read_text()
-    original_len = len(cached_text)
-
-    spliced = _splice_device(cached_text, "r_weighted_rms_norm_seg", placed_rms)
-    spliced = _splice_device(spliced, "rk_rope_seg", placed_rk_rope)
-    spliced = _splice_device(spliced, "rq_rope_seg", placed_rq_rope)
-    spliced = _splice_device(spliced, "v_matmul_seg", placed_v_matmul)
-    spliced = _splice_device(spliced, "k_matmul_seg", placed_k_matmul)
-    spliced = _splice_device(spliced, "q_matmul_seg", placed_q_matmul)
-    spliced = _splice_dispatcher_device(spliced, placed_dispatcher)
-
+    text = str(module)
     if verbose:
-        print(f"  [rms_gemms_rope builder] Spliced placed-IRON "
-              f"r_weighted_rms_norm_seg + rk_rope_seg + rq_rope_seg + "
-              f"v/k/q_matmul_seg + dispatcher into cached MLIR "
-              f"({original_len} -> {len(spliced)} bytes).")
-
-    return spliced
+        print(f"  [rms_gemms_rope builder] Emitted pure placed-IRON "
+              f"({len(text)} bytes, 7 devices).")
+    return text
 
 
 # ---------------------------------------------------------------------------
@@ -2142,22 +2119,8 @@ if __name__ == "__main__":  # pragma: no cover
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("-o", "--output", help="Output path (default: stdout)",
                         default=None)
-    parser.add_argument("--device-only", action="store_true",
-                        help="Emit just the placed device, not the spliced module")
     args = parser.parse_args()
-    if args.device_only:
-        with mlir_mod_ctx() as ctx:
-            _emit_r_weighted_rms_norm_seg()
-            _emit_rk_rope_seg()
-            _emit_rq_rope_seg()
-            _emit_v_matmul_seg()
-            _emit_k_matmul_seg()
-            _emit_q_matmul_seg()
-            _emit_dispatcher_device()
-            mod = ctx.module
-        text = str(mod)
-    else:
-        text = build_rms_gemms_rope_module()
+    text = build_rms_gemms_rope_module()
     if args.output:
         with open(args.output, "w") as f:
             f.write(text)
