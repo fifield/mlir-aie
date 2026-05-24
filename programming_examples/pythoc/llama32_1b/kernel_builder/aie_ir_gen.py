@@ -43,20 +43,12 @@ _PLACED_BUILDERS_ENV = "PYTHOC_LLAMA_USE_PLACED_BUILDERS"
 # though it splices 4 GEMM devices from cached MLIR -- the splice is internal
 # to `builders/o_ffn.py` and is transparent to call sites here. Phase 6 AWQ
 # entry points stay cached-only and are not listed.
-#
-# `rms_gemms_rope` is intentionally NOT in the default set: its placed-IRON
-# emit has a known operand/stride bug in `_emit_matmul_device` (V/K/Q GEMMs)
-# that produces garbage tokens. The bug was introduced in Phase 4.5c
-# (v_matmul_seg); see beads PythoC-8ns.13 for the diagnosis + next-session
-# brief. Use `PYTHOC_LLAMA_USE_PLACED_BUILDERS=rms_gemms_rope` (or include
-# it in the explicit list) when investigating the bug. The cached fallback
-# runs by default.
 _DEFAULT_PLACED_BUILDERS = frozenset({
     "lm_head_gemv",    # Phase 4.1
     "flash_attn",      # Phase 4.2
     "rms_gemv_rope",   # Phase 4.3
     "o_gemv_ffn",      # Phase 4.4
-    # rms_gemms_rope -- deferred (see beads PythoC-8ns.13)
+    "rms_gemms_rope",  # Phase 4.5 (v/k/q matmul stride bug fixed)
     "o_ffn",           # Phase 4.6 (5 of 9 devices placed; 4 GEMM devices spliced)
 })
 
