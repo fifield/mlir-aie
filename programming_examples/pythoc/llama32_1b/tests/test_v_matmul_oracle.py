@@ -296,12 +296,16 @@ def main():
                    help="Reuse a previously-compiled cached run (skip recompile + rerun)")
     p.add_argument("--skip-placed", action="store_true")
     p.add_argument("--verbose", action="store_true")
-    p.add_argument("--mode", choices=["v_only", "vkq", "full", "og"],
+    p.add_argument("--mode",
+                   choices=["v_only", "vkq", "full", "og", "gg", "ug", "dg"],
                    default="v_only",
                    help="v_only: splice only @v_matmul_seg; "
                         "vkq: splice v/k/q_matmul_seg; "
                         "full: full placed-IRON rms_gemms_rope (all 7 devices); "
-                        "og: splice only @og_matmul_seg into o_ffn cached MLIR")
+                        "og: splice only @og_matmul_seg into o_ffn cached MLIR; "
+                        "gg: splice only @gg_matmul_seg into o_ffn cached MLIR; "
+                        "ug: splice only @ug_matmul_seg into o_ffn cached MLIR; "
+                        "dg: splice only @dg_matmul_seg into o_ffn cached MLIR")
     args = p.parse_args()
 
     workdir = Path(args.workdir).resolve()
@@ -317,62 +321,77 @@ def main():
           f"(delta {len(placed_text) - len(cached_text):+d})")
 
     # ---------------------------------------------------------------
-    # og mode: diff only the og_matmul output buffer (arg2 of o_ffn).
+    # o_ffn matmul modes (og, gg, ug, dg): diff only the matmul's
+    # output buffer.  Host-arg layout (matches _o_ffn_host_arg_types):
+    #     og_matmul_seg: X=arg0, W=arg1,  Y=arg2  (2048x2048)
+    #     gg_matmul_seg: X=arg6, W=arg7,  Y=arg8  (2048x8192)
+    #     ug_matmul_seg: X=arg6, W=arg9,  Y=arg10 (2048x8192)
+    #     dg_matmul_seg: X=arg11,W=arg12, Y=arg13 (2048x2048)
     # ---------------------------------------------------------------
-    if args.mode == "og":
+    if args.mode in ("og", "gg", "ug", "dg"):
+        # Per-mode output arg index.
+        out_arg_by_mode = {"og": 2, "gg": 8, "ug": 10, "dg": 13}
+        out_arg = out_arg_by_mode[args.mode]
+
         print("[oracle] Generating synthetic o_ffn inputs...")
         inputs_cached = _synth_o_ffn_inputs(seed=args.seed)
         inputs_placed = _synth_o_ffn_inputs(seed=args.seed)
         assert np.array_equal(
             inputs_cached[0].view(np.int16), inputs_placed[0].view(np.int16))
 
-        cached_dir = workdir / "cached_og"
-        placed_dir = workdir / "placed_og"
+        cached_dir = workdir / f"cached_{args.mode}"
+        placed_dir = workdir / f"placed_{args.mode}"
         cached_dir.mkdir(parents=True, exist_ok=True)
         placed_dir.mkdir(parents=True, exist_ok=True)
 
         cached_results = None
         placed_results = None
 
+        # Track the matmul output + a few neighbours for sanity.
+        output_indices = tuple(sorted({2, 4, 6, 8, 10, 11, 13, 14, out_arg}))
+
         if not args.skip_cached:
-            print("\n[oracle] === Run 1: o_ffn CACHED reference ===")
+            print(f"\n[oracle] === Run 1: o_ffn CACHED reference ===")
             cached_results = _run_o_ffn(
-                "o_ffn_cached", cached_text, inputs_cached,
+                f"o_ffn_cached", cached_text, inputs_cached,
                 cache_dir=cached_dir, verbose=args.verbose,
-                output_indices=(2, 4, 6, 11, 13, 14),
+                output_indices=output_indices,
             )
         if not args.skip_placed:
-            print("\n[oracle] === Run 2: o_ffn PLACED-og ===")
+            print(f"\n[oracle] === Run 2: o_ffn PLACED-{args.mode} ===")
             placed_results = _run_o_ffn(
-                "o_ffn_placed_og", placed_text, inputs_placed,
+                f"o_ffn_placed_{args.mode}", placed_text, inputs_placed,
                 cache_dir=placed_dir, verbose=args.verbose,
-                output_indices=(2, 4, 6, 11, 13, 14),
+                output_indices=output_indices,
             )
 
         if cached_results is None or placed_results is None:
             print("[oracle] skipping diffs (a run was skipped)")
             return 0
 
-        print("\n[oracle] === Diff: placed-og vs cached (og output / arg2) ===")
-        og_stats = _stats("og (placed vs cached)",
-                          placed_results[2], cached_results[2])
+        print(f"\n[oracle] === Diff: placed-{args.mode} vs cached "
+              f"({args.mode} output / arg{out_arg}) ===")
+        mm_stats = _stats(f"{args.mode} (placed vs cached)",
+                          placed_results[out_arg], cached_results[out_arg])
 
         # Classification
         print("\n[oracle] === Classification ===")
-        og_corr = og_stats["corr"]
-        og_max = og_stats["max_abs"]
-        if og_max == 0:
-            verdict = "MATCH: placed og == cached og"
-        elif og_corr > 0.99:
-            verdict = f"CLOSE: placed og correlates {og_corr:.4f} (likely numeric noise)"
-        elif placed_results[2].astype(np.float32).std() < 1e-6:
-            verdict = "PLACED og IS ZERO/CONSTANT: kernel may not be writing"
-        elif og_corr > 0:
-            verdict = (f"PARTIAL: corr={og_corr:.4f}, max_abs={og_max:.4f} "
+        mm_corr = mm_stats["corr"]
+        mm_max = mm_stats["max_abs"]
+        if mm_max == 0:
+            verdict = f"MATCH: placed {args.mode} == cached {args.mode}"
+        elif mm_corr > 0.99:
+            verdict = (f"CLOSE: placed {args.mode} correlates {mm_corr:.4f} "
+                       "(likely numeric noise)")
+        elif placed_results[out_arg].astype(np.float32).std() < 1e-6:
+            verdict = (f"PLACED {args.mode} IS ZERO/CONSTANT: kernel may "
+                       "not be writing")
+        elif mm_corr > 0:
+            verdict = (f"PARTIAL: corr={mm_corr:.4f}, max_abs={mm_max:.4f} "
                        "(possible operand/stride bug)")
         else:
-            verdict = (f"DIVERGENT: corr={og_corr:.4f} -- output structurally "
-                       "wrong (operand swap, sign error, scale)")
+            verdict = (f"DIVERGENT: corr={mm_corr:.4f} -- output "
+                       "structurally wrong (operand swap, sign error, scale)")
         print(f"  {verdict}")
         return 0
 
