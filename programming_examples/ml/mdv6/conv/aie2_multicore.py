@@ -23,7 +23,6 @@ from aie.iron import (
     Worker,
     WorkerRuntimeBarrier,
 )
-from aie.iron.placers import SequentialPlacer
 from aie.iron.device import NPU2
 from aie.iron.controlflow import range_
 from aie.helpers.taplib import TensorAccessPattern
@@ -234,7 +233,7 @@ def multicore_conv(dev, tile_h=8, tile_w=8, ic=16, oc=16,
             # output DMA before the runtime sequence frees/reuses tasks.
             rt.drain(col_out_fifos[col].cons(), O, tap_out, wait=True)
 
-    return Program(dev, rt).resolve_program(SequentialPlacer())
+    return Program(dev, rt).resolve_program()
 
 
 def _parse_args(argv):

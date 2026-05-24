@@ -12,7 +12,6 @@ import numpy as np
 import sys
 
 from aie.iron import Kernel, ObjectFifo, Program, Runtime, Worker
-from aie.iron.placers import SequentialPlacer
 from aie.iron.device import NPU2
 from aie.iron.controlflow import range_
 from aie.helpers.taplib import TensorAccessPattern
@@ -136,7 +135,7 @@ def multicore_broadcast_conv1x1(dev, tile_h=8, tile_w=8, ic=16, oc=16, n_cores=2
             rt.drain(col_out_fifos[col].cons(), O, tap_out,
                      wait=(col == n_cols - 1))
 
-    return Program(dev, rt).resolve_program(SequentialPlacer())
+    return Program(dev, rt).resolve_program()
 
 
 if __name__ == "__main__":

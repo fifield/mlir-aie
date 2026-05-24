@@ -5,7 +5,6 @@ import sys
 from aie.iron import (
     Kernel, ObjectFifo, Program, Runtime, Worker,
 )
-from aie.iron.placers import SequentialPlacer
 from aie.iron.device import NPU2
 from aie.iron.controlflow import range_
 
@@ -109,7 +108,7 @@ def conv_tiled_fused_multicore_bf16(dev, input_height, input_width, input_channe
         for c in range(n_cores):
             rt.drain(of_outputs[c].cons(), O, wait=(c == n_cores - 1))
 
-    return Program(dev, rt).resolve_program(SequentialPlacer())
+    return Program(dev, rt).resolve_program()
 
 
 if __name__ == "__main__":

@@ -82,7 +82,6 @@ from aie.iron import (
     Runtime,
     Worker,
 )
-from aie.iron.placers import SequentialPlacer
 from aie.iron.device import NPU2  # full array; NPU2Col1 for single-column
 ```
 
