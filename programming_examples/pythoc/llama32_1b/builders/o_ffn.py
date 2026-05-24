@@ -2,56 +2,39 @@
 # SPDX-License-Identifier: MIT
 """Placed-IRON builder for the llama32_1b prefill o_ffn kernel.
 
-Phase 4.6e scope: 7 of 9 devices are emitted from placed IRON --
-``@rm_weighted_rms_norm_seg`` (4.6a), ``@ra_add_seg`` + ``@fa_add_seg``
-(4.6b), ``@sw_silu_mul_seg`` (4.6c), ``@og_matmul_seg`` (4.6d),
-``@gg_matmul_seg`` (4.6e), and the outer unnamed dispatcher
-``aie.device(npu2)`` that hosts ``aiex.runtime_sequence @o_ffn``
-(4.6f).  The 2 remaining GEMM devices (``ug_matmul_seg``,
-``dg_matmul_seg``) come from the cached ``o_ffn.npu.air.mlir`` text
-via string splice; phases 4.6f-g are deferred.
+All 9 devices are emitted from placed-IRON Python (no cached MLIR splice):
+``@rm_weighted_rms_norm_seg``, ``@ra_add_seg`` + ``@fa_add_seg``,
+``@sw_silu_mul_seg``, ``@og_matmul_seg``, ``@gg_matmul_seg``,
+``@ug_matmul_seg``, ``@dg_matmul_seg``, plus the outer unnamed
+dispatcher ``aie.device(npu2)`` that hosts ``aiex.runtime_sequence
+@o_ffn``.  The cached AIR-emitted MLIR at
+``reference_mlir/o_ffn.npu.air.mlir`` remains as the bit-exact ground
+truth for the per-device oracle in ``tests/test_v_matmul_oracle.py``.
 
-Splice mechanism::
+Device summaries:
 
-    cached_text =
-      aie.device @fa_add_seg { ... }                  <-- REPLACED (4.6b)
-      aie.device @dg_matmul_seg { ... }               <-- cached (deferred)
-      aie.device @sw_silu_mul_seg { ... }             <-- REPLACED (4.6c)
-      aie.device @ug_matmul_seg { ... }               <-- cached (deferred)
-      aie.device @gg_matmul_seg { ... }               <-- REPLACED (4.6e)
-      aie.device @rm_weighted_rms_norm_seg { ... }    <-- REPLACED (4.6a)
-      aie.device @ra_add_seg { ... }                  <-- REPLACED (4.6b)
-      aie.device @og_matmul_seg { ... }               <-- REPLACED (4.6d)
-      aie.device (dispatcher) { ... }                 <-- REPLACED (4.6f)
+* ``rm_weighted_rms_norm_seg`` -- structurally identical to the
+  rms_gemms_rope ``@r_weighted_rms_norm_seg`` (1x8 herd, inline RMSNorm
+  math). See the docstring on ``_emit_rm_weighted_rms_norm_seg`` below.
 
-The cached ``rm_weighted_rms_norm_seg`` (lines 25351-26580 of
-``reference_mlir/o_ffn.npu.air.mlir``, 1230 lines) is structurally
-identical to the rms_gemms_rope ``@r_weighted_rms_norm_seg`` already
-landed by Phase 4.5a; see the docstring on ``_emit_rm_weighted_rms_norm_seg``
-below for details.
+* ``ra_add_seg`` / ``fa_add_seg`` -- 1x8 herd of compute tiles each
+  performing inline ``arith.addf`` over ping-pong 2048xbf16 L1 buffers
+  (6 locks per tile init 2,0,2,0,2,0; 6 ping/pong buffers; 3 DMA
+  channels per col).  Channel ids / host args:
 
-The cached ``ra_add_seg`` (lines 26581-27547, 967 lines) and
-``fa_add_seg`` (lines 11-977, 967 lines) are byte-identical except for
-device sym name, shim channel ids, and runtime_sequence host arg
-indices.  Both implement a 1x8 herd of compute tiles, each performing
-inline ``arith.addf`` over ping-pong 2048xbf16 L1 buffers, with 6 locks
-per tile (all ping-pong: init pattern 2,0,2,0,2,0), 6 buffers per tile
-(2 inputs + output, ping/pong), and 3 DMA channels per col (2 inputs +
-1 output).
+    device          chan_in1  chan_in2  chan_out    in1_arg  in2_arg  out_arg
+    ra_add_seg      16        17        18           arg2     arg3     arg4
+    fa_add_seg      73        74        75           arg13    arg4     arg14
 
-The cached ``sw_silu_mul_seg`` (lines 8753-9576, 824 lines) is a 1x8
-strip of compute tiles, each calling the ``silu_and_mul_bf16``
-PythoC kernel twice per outer iteration (ping/pong) over 4096xbf16 L1
-buffers.  The locks (6 per tile, init pattern 2,0,2,0,2,0) and buffers
-(6 per tile: 3 ping + 3 pong) follow the same layout as the add
-devices.  Inputs: arg8 (gate), arg10 (up); output: arg11 (silu*up).
-Channels: 54 = MM2S 0 (gate), 55 = MM2S 1 (up), 56 = S2MM 0 (out).
+* ``sw_silu_mul_seg`` -- 1x8 strip calling the ``silu_and_mul_bf16``
+  PythoC kernel twice per outer iter over 4096xbf16 L1 buffers.
+  Inputs arg8 (gate), arg10 (up); output arg11. Channels 54/55/56.
 
-Channel ids and host args per add device:
-
-  device          chan_in1  chan_in2  chan_out    in1_arg  in2_arg  out_arg
-  ra_add_seg      16        17        18           arg2     arg3     arg4
-  fa_add_seg      73        74        75           arg13    arg4     arg14
+* ``og`` / ``gg`` / ``ug`` / ``dg`` ``_matmul_seg`` -- bf16 GEMMs
+  calling ``bf16_gemm_kernel_bf16out`` via two PythoC-built .o files
+  (M=8/N=16 for gg/ug, M=8/N=8 for og/dg).  Per-device strides
+  derived from the cached contract's actual L1 access pattern; see
+  ``_emit_{og,gg,ug,dg}_matmul_seg`` docstrings.
 """
 
 from __future__ import annotations
@@ -99,15 +82,10 @@ from aie.ir import AffineDimExpr, AffineMap, InsertionPoint, UnitAttr
 
 from ._emit import attach_loop_annotation_to_all_scf_for, bf16_memref, bf16_np
 
-# Reuse the splice/extract helpers from rms_gemms_rope -- they're
-# device-agnostic (brace-counting parser keyed on the device sym name,
-# or on the unnamed-dispatcher signature).
-from .rms_gemms_rope import (
-    _extract_dispatcher_device,
-    _extract_single_device,
-    _splice_device,
-    _splice_dispatcher_device,
-)
+# build_o_ffn_module no longer splices into cached MLIR -- the 9-device
+# placed-IRON output is the final aiecc input.  The splice/extract
+# helpers from rms_gemms_rope remain exported (kept device-agnostic) for
+# tests/test_v_matmul_oracle.py's per-device isolation modes.
 
 
 # ---------------------------------------------------------------------------
@@ -3843,16 +3821,19 @@ def build_o_ffn_module(seq_len: int = SEQ_LEN,
                        omit_while_true_loop: bool = False) -> str:
     """Build the prefill o_ffn MLIR module.
 
-    Phase 4.6e (final GEMM): all 9 devices are now emitted via placed-IRON --
+    All 9 devices are emitted from placed-IRON Python:
     ``rm_weighted_rms_norm_seg``, ``ra_add_seg``, ``fa_add_seg``,
     ``sw_silu_mul_seg``, ``og_matmul_seg``, ``gg_matmul_seg``,
     ``ug_matmul_seg``, ``dg_matmul_seg``, plus the outer unnamed
-    dispatcher device.  No cached GEMM device remains in the spliced
-    output -- only the file-scope module attributes (e.g. dlti.dl_spec)
-    and any non-device cached content carry over.
+    dispatcher device.  ``mlir_mod_ctx()`` provides the ``module { ... }``
+    wrapper and ``attach_loop_annotation_to_all_scf_for`` adds the
+    ``#loop_annotation`` attribute at module scope.  No cached MLIR
+    splice -- the returned text is fully placed-IRON.
 
-    All dimensions must match the Llama-3.2-1B values; the cached AIR
-    layout is shape-specialized.
+    All dimensions must match the Llama-3.2-1B values; the placed-IRON
+    emits are shape-specialized to match the cached AIR layout in
+    ``reference_mlir/o_ffn.npu.air.mlir`` (used as the bit-exact ground
+    truth by ``tests/test_v_matmul_oracle.py``).
     """
     if (seq_len, emb_dim, hidden_dim) != (SEQ_LEN, EMB_DIM, HIDDEN_DIM):
         raise ValueError(
@@ -3862,7 +3843,6 @@ def build_o_ffn_module(seq_len: int = SEQ_LEN,
         )
     del omit_while_true_loop  # unused (no while-true loop in this device)
 
-    # Build a fresh module containing the placed devices.
     with mlir_mod_ctx() as ctx:
         _emit_rm_weighted_rms_norm_seg()
         _emit_ra_add_seg()
@@ -3876,44 +3856,11 @@ def build_o_ffn_module(seq_len: int = SEQ_LEN,
         module = ctx.module
         attach_loop_annotation_to_all_scf_for(module)
 
-    # All 9 inner devices are now present in the placed module, so the
-    # verifier no longer fails on missing dispatcher targets -- but keep
-    # assume_verified=True for symmetry / cheap printing.
-    placed_text = module.operation.get_asm(assume_verified=True)
-    placed_rms = _extract_single_device(placed_text, "rm_weighted_rms_norm_seg")
-    placed_ra  = _extract_single_device(placed_text, "ra_add_seg")
-    placed_fa  = _extract_single_device(placed_text, "fa_add_seg")
-    placed_sw  = _extract_single_device(placed_text, "sw_silu_mul_seg")
-    placed_og  = _extract_single_device(placed_text, "og_matmul_seg")
-    placed_gg  = _extract_single_device(placed_text, "gg_matmul_seg")
-    placed_ug  = _extract_single_device(placed_text, "ug_matmul_seg")
-    placed_dg  = _extract_single_device(placed_text, "dg_matmul_seg")
-    placed_dispatcher = _extract_dispatcher_device(placed_text)
-
-    # Load the cached prefill MLIR and splice in the placed devices.
-    project_root = Path(__file__).resolve().parents[1]
-    cached_path = project_root / "reference_mlir" / "o_ffn.npu.air.mlir"
-    cached_text = cached_path.read_text()
-    original_len = len(cached_text)
-
-    spliced = _splice_device(cached_text, "rm_weighted_rms_norm_seg", placed_rms)
-    spliced = _splice_device(spliced, "ra_add_seg", placed_ra)
-    spliced = _splice_device(spliced, "fa_add_seg", placed_fa)
-    spliced = _splice_device(spliced, "sw_silu_mul_seg", placed_sw)
-    spliced = _splice_device(spliced, "og_matmul_seg", placed_og)
-    spliced = _splice_device(spliced, "gg_matmul_seg", placed_gg)
-    spliced = _splice_device(spliced, "ug_matmul_seg", placed_ug)
-    spliced = _splice_device(spliced, "dg_matmul_seg", placed_dg)
-    spliced = _splice_dispatcher_device(spliced, placed_dispatcher)
-
+    text = str(module)
     if verbose:
-        print(f"  [o_ffn builder] Spliced placed-IRON rm_weighted_rms_norm_seg "
-              f"+ ra_add_seg + fa_add_seg + sw_silu_mul_seg + og_matmul_seg "
-              f"+ gg_matmul_seg + ug_matmul_seg + dg_matmul_seg + dispatcher "
-              f"into cached MLIR "
-              f"({original_len} -> {len(spliced)} bytes).")
-
-    return spliced
+        print(f"  [o_ffn builder] Emitted pure placed-IRON "
+              f"({len(text)} bytes, 9 devices).")
+    return text
 
 
 # ---------------------------------------------------------------------------
@@ -3925,30 +3872,8 @@ if __name__ == "__main__":  # pragma: no cover
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("-o", "--output", help="Output path (default: stdout)",
                         default=None)
-    parser.add_argument("--device-only", action="store_true",
-                        help="Emit just the 9 placed devices "
-                             "(rm_weighted_rms_norm_seg, ra_add_seg, "
-                             "fa_add_seg, sw_silu_mul_seg, og_matmul_seg, "
-                             "gg_matmul_seg, ug_matmul_seg, dg_matmul_seg, "
-                             "dispatcher) -- skips cached splice")
     args = parser.parse_args()
-    if args.device_only:
-        with mlir_mod_ctx() as ctx:
-            _emit_rm_weighted_rms_norm_seg()
-            _emit_ra_add_seg()
-            _emit_fa_add_seg()
-            _emit_sw_silu_mul_seg()
-            _emit_og_matmul_seg()
-            _emit_gg_matmul_seg()
-            _emit_ug_matmul_seg()
-            _emit_dg_matmul_seg()
-            _emit_dispatcher_device()
-            mod = ctx.module
-        # All 9 devices are present, so the verifier is consistent;
-        # keep assume_verified=True for symmetry with the spliced path.
-        text = mod.operation.get_asm(assume_verified=True)
-    else:
-        text = build_o_ffn_module()
+    text = build_o_ffn_module()
     if args.output:
         with open(args.output, "w") as f:
             f.write(text)
