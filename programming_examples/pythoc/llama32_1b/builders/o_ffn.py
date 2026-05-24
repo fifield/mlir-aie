@@ -97,7 +97,7 @@ from aie.extras.dialects import arith
 from aie.helpers.dialects.scf import _for as range_
 from aie.ir import AffineDimExpr, AffineMap, InsertionPoint, UnitAttr
 
-from ._emit import bf16_memref, bf16_np
+from ._emit import attach_loop_annotation_to_all_scf_for, bf16_memref, bf16_np
 
 # Reuse the splice/extract helpers from rms_gemms_rope -- they're
 # device-agnostic (brace-counting parser keyed on the device sym name,
@@ -1282,6 +1282,7 @@ def build_o_ffn_module(seq_len: int = SEQ_LEN,
         _emit_sw_silu_mul_seg()
         _emit_dispatcher_device()
         module = ctx.module
+        attach_loop_annotation_to_all_scf_for(module)
 
     # Use ``assume_verified=True`` here -- the dispatcher's
     # ``aiex.configure`` ops reference the 4 cached GEMM device syms

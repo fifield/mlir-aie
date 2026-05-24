@@ -107,7 +107,7 @@ from aie.extras.dialects import arith
 from aie.helpers.dialects.scf import _for as range_
 from aie.ir import AffineDimExpr, AffineMap, InsertionPoint, UnitAttr
 
-from ._emit import bf16_memref, bf16_np
+from ._emit import attach_loop_annotation_to_all_scf_for, bf16_memref, bf16_np
 
 
 # ---------------------------------------------------------------------------
@@ -2099,6 +2099,7 @@ def build_rms_gemms_rope_module(seq_len: int = SEQ_LEN,
         _emit_q_matmul_seg()
         _emit_dispatcher_device()
         module = ctx.module
+        attach_loop_annotation_to_all_scf_for(module)
 
     placed_text = str(module)
     placed_rms = _extract_single_device(placed_text, "r_weighted_rms_norm_seg")

@@ -83,7 +83,12 @@ from aie.extras.dialects import arith
 from aie.helpers.dialects.scf import _for as range_
 from aie.ir import InsertionPoint, UnitAttr
 
-from ._emit import bf16_memref, bf16_np, o_gemv_ffn_host_arg_types
+from ._emit import (
+    attach_loop_annotation_to_all_scf_for,
+    bf16_memref,
+    bf16_np,
+    o_gemv_ffn_host_arg_types,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1355,6 +1360,7 @@ def build_o_gemv_ffn_module(emb_dim: int = EMB_DIM,
             output_arg_idx=2, out_rows=EMB_DIM)
         _emit_dispatcher_device()
         module = ctx.module
+        attach_loop_annotation_to_all_scf_for(module)
 
     return str(module)
 

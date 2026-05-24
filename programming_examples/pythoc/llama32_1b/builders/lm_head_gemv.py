@@ -93,6 +93,7 @@ from aie.dialects.aiex import (
     runtime_sequence,
 )
 from aie.extras.context import mlir_mod_ctx
+from ._emit import attach_loop_annotation_to_all_scf_for
 from aie.extras.dialects import arith
 from aie.helpers.dialects.scf import _for as range_
 from aie.ir import (
@@ -596,6 +597,7 @@ def build_lm_head_gemv_module(emb_dim: int = EMB_DIM) -> str:
             _emit_partition_device(idx)
         _emit_dispatcher_device()
         module = ctx.module
+        attach_loop_annotation_to_all_scf_for(module)
 
     return str(module)
 
