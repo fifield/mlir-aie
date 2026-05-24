@@ -6,10 +6,11 @@ incrementally on top of the MLIR-AIR reference at
 Every kernel is now a PythoC `@aie_kernel` function and every AIR
 multi-launch is now a placed-IRON (`aie/aiex`-dialect) Python builder
 that runs by default (`PYTHOC_LLAMA_USE_PLACED_BUILDERS=cached` reverts
-to the cached AIR-emitted MLIR substrate for A/B). One builder
-(`o_ffn`) ships partial: 5 of its 9 devices are on placed-IRON; the 4
-prefill GEMM devices are spliced from cached MLIR — see *Phase 4.6
-status* below.
+to the cached AIR-emitted MLIR substrate for A/B). All 6 builders ship
+with all of their devices on placed-IRON — including `o_ffn`'s 4
+prefill GEMM devices (og/gg/ug/dg) landed in Phase 4.6d/e after the
+v_matmul kernel-stride bug fix in Phase 4.5 unblocked the
+diagnostic approach.
 
 [air-src]: ../../../../mlir-air-llama_awq_impl/programming_examples/llama32_1b_aie
 
@@ -39,7 +40,7 @@ status* below.
 | `builders/o_gemv_ffn.py` | decode (O + FFN) | per-layer decode | ✓ placed-IRON |
 | `builders/flash_attn.py` | prefill flash attention | `llama32_1b_prefill.py` | ✓ placed-IRON |
 | `builders/rms_gemms_rope.py` | prefill (RMSNorm + QKV GEMM + RoPE) | per-layer prefill | ✓ placed-IRON |
-| `builders/o_ffn.py` | prefill (O + FFN with GEMMs) | per-layer prefill | ◐ placed-IRON (5 of 9 devices; 4 GEMM devices internally spliced from cached) |
+| `builders/o_ffn.py` | prefill (O + FFN with GEMMs) | per-layer prefill | ✓ placed-IRON (all 9 devices, incl. og/gg/ug/dg GEMMs landed Phase 4.6d/e) |
 
 `rms_gemms_rope`'s prefill V/K/Q GEMMs originally landed with a kernel
 stride/loop-bound mismatch (kernel built as `M_BLOCKS=16, N_BLOCKS=8`
@@ -50,21 +51,23 @@ the cached contract's `arg1*64 + arg3*512` access pattern; see
 `kernels/build.py::_compile_bf16_gemm_rms_gemms_rope` and
 `tests/test_v_matmul_oracle.py` for the diagnostic harness.
 
-#### Phase 4.6 status (o_ffn partial)
+#### Phase 4.6 status — complete
 
-5 of 9 devices in `o_ffn` are on placed-IRON:
+All 9 devices in `o_ffn` are now placed-IRON:
 `rm_weighted_rms_norm_seg`, `ra_add_seg`, `fa_add_seg`,
-`sw_silu_mul_seg`, and the outer dispatcher. The 4 GEMM devices
-(`og_matmul_seg`, `dg_matmul_seg`, `gg_matmul_seg`, `ug_matmul_seg`)
-are spliced from `reference_mlir/o_ffn.npu.air.mlir` by the builder
-itself — transparent to call sites in `aie_ir_gen.py`. The 4 GEMM
-devices hit the same class of bug as `rms_gemms_rope`'s V/K/Q GEMMs
-(structural-diff-clean / runtime-garbage from a kernel-stride/L1-layout
-mismatch). Now that `rms_gemms_rope` is fixed, the same diagnostic
-approach (see `tests/test_v_matmul_oracle.py`) can be applied to derive
-the correct kernel params for og/dg/gg/ug — they each have different
-K/N shapes from v_matmul so they need their own per-device kernel
-builds.
+`sw_silu_mul_seg`, the outer dispatcher, **plus the 4 GEMM devices
+(`og_matmul_seg`, `gg_matmul_seg`, `ug_matmul_seg`, `dg_matmul_seg`)**
+landed in Phase 4.6d/e using the kernel-stride diagnostic approach
+established by Phase 4.5. Per-device kernel build params + per-device
+splice oracle (`tests/test_v_matmul_oracle.py --mode={og,gg,ug,dg}`)
+verified each device bit-identical vs the cached AIR contract chain.
+
+The 4 GEMMs share two kernel object files (gg/ug reuse the v_matmul
+M=8/N=16 kernel since their per-core body is byte-identical; og/dg
+share a M=8/N=8 kernel that differs only in the host-side outer loop
+count). See `kernels/build.py` for the build helpers and
+`builders/o_ffn.py::_emit_{og,gg,ug,dg}_matmul_seg` for the per-device
+emits.
 
 #### Performance
 
@@ -72,8 +75,8 @@ Real HF weights (`unsloth/Llama-3.2-1B-Instruct`), measured on NPU2:
 
 | Config | Prefill (16 layers, seq=2048) | Decode steady-state |
 |---|---|---|
-| Default (6 placed builders) | ~1.91s | ~8.05 tok/s |
-| All cached (`PYTHOC_LLAMA_USE_PLACED_BUILDERS=cached`) | ~1.92s | ~8.07 tok/s |
+| Default (6 placed builders, all 9 o_ffn devices placed) | ~1.84s | ~8.19 tok/s |
+| All cached (`PYTHOC_LLAMA_USE_PLACED_BUILDERS=cached`) | ~1.92s | ~8.08 tok/s |
 
 Delta within run-to-run noise.
 
@@ -81,9 +84,9 @@ Delta within run-to-run noise.
 
 | Stage | Runs on | Notes |
 |---|---|---|
-| Prefill: RMSNorm + QKV GEMM + RoPE | NPU (cached MLIR + PythoC `rope_pythoc.o` + `bf16_gemm_pythoc_*.o`) | Placed-IRON deferred (see *Deferred* section) |
+| Prefill: RMSNorm + QKV GEMM + RoPE | NPU (placed-IRON + PythoC `rope_pythoc.o` + `bf16_gemm_pythoc_*.o`) | All 7 devices placed-IRON |
 | Prefill: flash attention | NPU (placed-IRON + PythoC `attn_pythoc.o`) | All 32 cores, cascade chain |
-| Prefill: O + FFN | NPU (cached MLIR + PythoC `silu_and_mul_bf16.o`) | 5 of 9 devices on placed-IRON; 4 GEMM devices cached-spliced (1024 inline `vector.contract`) |
+| Prefill: O + FFN | NPU (placed-IRON + PythoC `silu_and_mul_bf16.o` + `bf16_gemm_pythoc_*.o`) | All 9 devices placed-IRON (incl. og/gg/ug/dg GEMMs) |
 | Decode: RMSNorm + QKV GEMV + RoPE | NPU (placed-IRON + PythoC kernels) | per-layer, per-token |
 | Decode: attention compute | **CPU numpy** | LQ=1, dispatch overhead beats NPU GEMV |
 | Decode: O + FFN | NPU (placed-IRON + PythoC kernels) | per-layer, per-token |
@@ -135,14 +138,14 @@ llama32_1b/
 │   ├── o_gemv_ffn.py           # 1377 LOC -- 8-phase decode multi-launch
 │   ├── flash_attn.py           # 1105 LOC -- 32-core 4-stage cascade prefill
 │   ├── rms_gemms_rope.py       # 2164 LOC -- 7-device prefill RMS+QKV-GEMM+RoPE
-│   └── o_ffn.py                # 1356 LOC -- 5/9 devices placed (4 GEMM devs cached-spliced)
+│   └── o_ffn.py                # ~3700 LOC -- all 9 devices placed (incl. og/gg/ug/dg GEMMs)
 ├── reference_mlir/             # cached AIR-emitted aie/aiex MLIR
 │   ├── rms_gemv_rope.npu.air.mlir   # decode (placed-IRON has parity)
 │   ├── o_gemv_ffn.npu.air.mlir      # decode (placed-IRON has parity)
 │   ├── lm_head_gemv.npu.air.mlir    # decode (placed-IRON has parity)
 │   ├── flash_attn.npu.air.mlir      # prefill (placed-IRON has parity)
 │   ├── rms_gemms_rope.npu.air.mlir  # prefill (placed-IRON has parity)
-│   └── o_ffn.npu.air.mlir           # prefill -- 5/9 devices placed; 4 GEMM devs spliced from this
+│   └── o_ffn.npu.air.mlir           # prefill -- ground truth oracle (placed-IRON has parity)
 ├── reference_o/                # EMPTY -- all .o now PythoC-built
 ├── kernel_builder/             # aiecc compile + XRT cache (no aircc at runtime)
 │   ├── aie_compile.py
@@ -274,40 +277,44 @@ rm build_peano/decode_kernel_cache/lm_head_gemv.elf
 make run                                 # rebuilds lm_head_gemv.elf from your edits
 ```
 
-## Deferred: 4 prefill GEMM devices in o_ffn
+## Prefill GEMM diagnostic methodology (Phase 4.5/4.6 lessons)
 
-Phase 4.6's `og_matmul_seg`, `dg_matmul_seg`, `gg_matmul_seg`, and
-`ug_matmul_seg` are spliced from cached MLIR by `builders/o_ffn.py`.
-Three attempts (Phases 4.6d twice and 4.6e once) achieved **exact
-structural op-count parity** vs cached — same tiles, locks (with same
-init values), buffers, flows, memtile_dmas, shim_dma_allocations, and
-runtime_sequence configures — but the runtime produced garbage tokens
-(e.g. `, 0, 0, 10,` instead of `Paris`).
+`rms_gemms_rope`'s V/K/Q GEMMs (Phase 4.5) and `o_ffn`'s 4 GEMM
+devices (Phase 4.6d/e, `og/gg/ug/dg`) all hit the same class of bug
+on first attempts: **structural op-count diff perfect vs cached, but
+runtime produced garbage tokens**. Op-count diff cannot detect that
+the bf16 GEMM kernel's compile-time stride/loop-bound constants are
+inconsistent with how the cached AIR-emitted contract chain walks the
+L1 buffers.
 
-**Root cause was the same class of bug as `rms_gemms_rope::v_matmul_seg`**:
-the GEMM kernel was being built with stride/loop-bound params that
-didn't match how the cached contract walks the L1 buffer. For
-`v_matmul_seg`, the kernel was configured as `M_BLOCKS=16/N_BLOCKS=8`
-but the cached contract actually walks the buffers as `M_BLOCKS=8/
-N_BLOCKS=16` with K-stride 512 (not 256) and N-stride 256 (not 64).
-See `kernels/build.py::_compile_bf16_gemm_rms_gemms_rope` for the
-verified derivation against `reference_mlir/rms_gemms_rope.npu.air.mlir`.
+The fix in each case is to **derive the kernel build params directly
+from the cached contract's `vector.transfer_read` offset expressions**
+(typically `arg_m*64 + arg_k*512` for the LHS, `arg_n*256 + arg_k*64`
+for the RHS, etc.) and to verify bit-exact output via a runtime
+oracle that splices ONE placed device into otherwise-cached MLIR and
+diffs the output buffer element-by-element. The oracle lives at
+`tests/test_v_matmul_oracle.py`; invoke with `--mode={v_only,vkq,
+full,og,gg,ug,dg}`.
 
-`og/dg/gg/ug` each have different K/N tile shapes from v_matmul, so
-they each need a separate kernel build with strides derived from
-their respective cached contract access patterns. The diagnostic
-harness at `tests/test_v_matmul_oracle.py` can be adapted per-device
-(splice ONE device's placed-IRON emit into otherwise-cached
-`o_ffn.npu.air.mlir`, diff the device's output buffer vs all-cached).
+Per-device kernel objects (in `kernels/build.py`):
 
-**Full multi-session brief** lives in beads at `PythoC-8ns.13` (see
-`bd show PythoC-8ns.13` in `~/npu-dev-pythoc/PythoC`).
+| Device(s) | Kernel object | M_BLOCKS / N_BLOCKS / K_MICRO |
+|---|---|---|
+| `v/k/q_matmul_seg`, `gg/ug_matmul_seg` | `bf16_gemm_pythoc_M8_N16_K4_AT_bf16out_s64_512_64_256_64_512.o` | 8 / 16 / 4 |
+| `og/dg_matmul_seg` | `bf16_gemm_pythoc_M8_N8_K4_AT_bf16out_s64_512_64_256_64_512.o` | 8 / 8 / 4 |
 
-The 4 deferred devices being on the cached MLIR substrate is
-end-to-end-equivalent to the pre-Phase-4.6 state for the
-`o_ffn`-portion of prefill. No correctness regression; only the
-"every core's MLIR is emitted from placed-IRON Python" milestone is
-unmet for these 4 devices.
+Both kernels share the same per-call strides (`A_M=64, A_K=512,
+B_K=64, B_N=256, C_M=64, C_N=512`); only the loop bounds differ.
+Devices that share a kernel differ at the dispatch / host-arg /
+shim-channel / runtime-sequence level (e.g. gg vs v_matmul has 4×
+more N-dispatches per core because gg's output is N=8192 vs v's
+N=512). See `builders/o_ffn.py::_emit_{og,gg,ug,dg}_matmul_seg` and
+`builders/rms_gemms_rope.py::_emit_matmul_device` for the
+per-device emit shapes.
+
+Full multi-session brief and resolution notes live in beads at
+`PythoC-8ns.13` (see `bd show PythoC-8ns.13` in
+`~/npu-dev-pythoc/PythoC`).
 
 ## Plan & tracking
 
@@ -322,8 +329,8 @@ unmet for these 4 devices.
   - Phase 4.2: `flash_attn` placed-IRON
   - Phase 4.3: `rms_gemv_rope` placed-IRON
   - Phase 4.4: `o_gemv_ffn` placed-IRON
-  - Phase 4.5 (a→e): `rms_gemms_rope` placed-IRON, 7 of 7 devices
-  - Phase 4.6 (a→c, f): `o_ffn` placed-IRON, 5 of 9 devices; 4 GEMM devices deferred (see *Deferred* above)
+  - Phase 4.5 (a→e): `rms_gemms_rope` placed-IRON, 7 of 7 devices (V/K/Q GEMM stride fix landed post-4.5e)
+  - Phase 4.6 (a→f): `o_ffn` placed-IRON, all 9 of 9 devices (og/gg/ug/dg GEMMs landed Phase 4.6d/e via per-device kernel-stride derivation)
   - Phase 6: AWQ uint4 path (deferred)
 - Defaults: placed-IRON for every shipped builder. Override with
   `PYTHOC_LLAMA_USE_PLACED_BUILDERS=cached` to A/B against the cached
