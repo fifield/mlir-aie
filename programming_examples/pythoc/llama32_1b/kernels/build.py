@@ -414,6 +414,71 @@ def _compile_bf16_gemm_rms_gemms_rope(
     )
 
 
+def _compile_bf16_gemm_og_o_ffn(
+    output_dir: Optional[str] = None, verbose: bool = False
+) -> Path:
+    """Compile the bf16 GEMM .o consumed by the placed-IRON og_matmul_seg device.
+
+    `og_matmul_seg` is the O-projection GEMM of the o_ffn prefill block.
+    Its per-core C tile is **64x64** (half the per-core C of v/k/q matmul),
+    matching the cached AIR IR in
+    ``reference_mlir/o_ffn.npu.air.mlir`` (device begins at line 27548).
+
+    Per-core L1 buffer shapes derived from the cached compute-tile mem
+    block (e.g. ``aie.mem(%tile_0_2)`` at line 34031) and per-tile buffer
+    declarations:
+
+      * buf_C : memref<1x1x8x8x8x8 xbf16, 2>     (4096 elts; was 8192 for v)
+      * buf_A : memref<1x1x4x8x8x8 xbf16, 2>     (2048 elts; same as v)
+      * buf_B : memref<1x1x8x4x8x8 xbf16, 2>     (2048 elts; was 4096 for v)
+
+    The cached AIR-emitted core body walks these buffers as a nested
+    8 outer (arg0) x 4 inner step=2 (arg1) loop (= 32 ping/pong pairs =
+    64 inline contract iterations).  Each contract iteration reads:
+
+      * A: 64-elt slices at offsets ``arg2*64 + arg3*64`` walking by
+        +512 every K step (4 micro-K iters per call) -- so kernel
+        ``A_M=64``, ``A_K=512`` over an outer M loop of size **8**.
+      * B: 64-elt slices at offsets ``arg3*256 + arg2*64`` walking by
+        +64 every K step (4 micro-K iters per call) -- so kernel
+        ``B_N=256``, ``B_K=64`` over an outer N loop of size **8**.
+      * C: 64-elt micro-tiles at offsets ``arg2*512 + arg3*64``, so
+        kernel ``C_M=64``, ``C_N=512`` (same as v_matmul's strides on
+        a `1x1x8x8x8x8` buf).
+
+    M_BLOCKS=N_BLOCKS=8 because the C buffer's outer (M,N) extent is
+    (8,8) -- the kernel must walk that exact 8x8 grid of 8x8 micro-tiles
+    per call, accumulating K_MICRO=4 micro-K slices into each.
+
+    These strides differ from `_compile_bf16_gemm_rms_gemms_rope` (which
+    bakes the v/k/q matmul's M_BLOCKS=8, N_BLOCKS=16 contract loop) only
+    in N_BLOCKS (8 instead of 16): the per-call K depth is identical
+    (4 micro-K slices) and the per-element strides match (A: 64/512,
+    B: 64/256, C: 64/512) because both v_matmul and og_matmul write into
+    a `1x1xMxNx8x8` buf where N==C's inner dim equals 8 (not 16) on og.
+
+    Output .o symbol is ``bf16_gemm_kernel_bf16out`` (bf16-out variant:
+    C is held as bf16 in L1, extf-on-load / truncf-on-store around an
+    f32 register accumulator).  Compiled name:
+    ``bf16_gemm_pythoc_M8_N8_K4_AT_bf16out_s64_512_64_256_64_512.o``.
+    """
+    return compile_bf16_gemm(
+        M_BLOCKS=8,
+        N_BLOCKS=8,
+        K_MICRO=4,
+        A_layout_transposed=True,
+        c_dtype="bf16",
+        A_M_STRIDE=64,
+        A_K_STRIDE=512,
+        B_K_STRIDE=64,
+        B_N_STRIDE=256,
+        C_M_STRIDE=64,
+        C_N_STRIDE=512,
+        output_dir=output_dir,
+        verbose=verbose,
+    )
+
+
 def compile_rope(output_dir: Optional[str] = None, verbose: bool = False) -> Path:
     """Compile kernels/rope.py -> rope_pythoc.o for aiecc linking.
 
