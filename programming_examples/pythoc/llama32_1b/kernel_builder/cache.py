@@ -46,10 +46,12 @@ _LINK_OBJS = [
     # Phase 4.5c: bf16 GEMM .o for the prefill v_matmul_seg (and later
     # k_matmul_seg / q_matmul_seg / o_ffn devices, all of which use the same
     # 128x64 C tile with K_MICRO=4 and bf16-out L1 layout).  Symbol inside is
-    # `bf16_gemm_kernel_bf16out`.  Strides reflect the cached L1 layouts:
-    # buf_A is 1x1x16x4x8x8 (K=16, M=4), buf_B is 1x1x4x8x8x8 (K=4, N=8),
-    # buf_C is 1x1x16x8x8x8 (M=16, N=8) walked at M_BLOCKS=16, N_BLOCKS=8.
-    "bf16_gemm_pythoc_M16_N8_K4_AT_bf16out_s64_256_512_64_512_64.o",
+    # `bf16_gemm_kernel_bf16out`.  Strides match the CACHED contract's actual
+    # access pattern: A=X (2048 elts, walked M=8, K=4 at A_M=64, A_K=512);
+    # B=W (4096 elts, walked N=16, K=4 at B_N=256, B_K=64); C (8192 elts,
+    # C_M=64, C_N=512).  See kernels/build.py::_compile_bf16_gemm_rms_gemms_rope
+    # for the derivation (matches reference_mlir/rms_gemms_rope.npu.air.mlir).
+    "bf16_gemm_pythoc_M8_N16_K4_AT_bf16out_s64_512_64_256_64_512.o",
 ]
 
 

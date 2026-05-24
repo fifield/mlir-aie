@@ -373,29 +373,42 @@ def _compile_bf16_gemm_rms_gemms_rope(
 ) -> Path:
     """Compile the bf16 GEMM .o consumed by the placed-IRON v_matmul_seg device.
 
-    The (M_BLOCKS, N_BLOCKS, K_MICRO) loop bounds (16, 8, 4) walk one full
-    128x64 C tile (= 16 8x8 m-blocks x 8 8x8 n-blocks) over a single K=4
-    micro-reduction.  Strides reference the cached prefill MLIR's L1 layout:
-      * buf_A is 1x1x16x4x8x8 (K_outer=16, M_outer=4)        -> A_M=64, A_K=256
-      * buf_B is 1x1x4x8x8x8  (K_outer=4,  N_outer=8)        -> B_K=512, B_N=64
-      * buf_C is 1x1x16x8x8x8 (M_outer=16, N_outer=8)        -> C_M=512, C_N=64
+    Strides match the CACHED AIR-emitted contract chain's access pattern in
+    `reference_mlir/rms_gemms_rope.npu.air.mlir` (verified empirically against
+    the cached output via tests/test_v_matmul_oracle.py):
+
+      * a_buf = compute buf_A = X data, shape 1x1x4x8x8x8 (2048 elts).
+        Cached reads at offset (arg_m * 64 + arg_k * 512), so kernel uses
+        A_M=64, A_K=512, with M_BLOCKS=8 (= cached's outer arg1, range 8 with
+        2x2 reg blocking).
+      * b_buf = compute buf_B = W data, shape 1x1x16x4x8x8 (4096 elts).
+        Cached reads at offset (arg_n * 256 + arg_k * 64), so kernel uses
+        B_N=256, B_K=64, with N_BLOCKS=16 (= cached's outer arg2, range 16).
+      * c_buf = buf_C, shape 1x1x16x8x8x8 (8192 elts).  Cached writes at
+        offset (arg_n * 512 + arg_m * 64), so C_M=64, C_N=512.
+
+    These strides differ from the M_BLOCKS=16/N_BLOCKS=8 configuration that
+    was used in Phase 4.5c through 2026-05-23: that produced runtime garbage
+    (corr=0.007 vs cached) because the kernel walked a_buf as if it were
+    4096 elts (M=16 outer) when the actual buffer is 2048 elts (M=8 outer),
+    and walked b_buf with K and N strides swapped.  Beads PythoC-8ns.13.
 
     Symbol inside is ``bf16_gemm_kernel_bf16out`` (bf16-out variant: C is held
     as bf16 in L1, extf-on-load / truncf-on-store around an f32 register
     accumulator).
     """
     return compile_bf16_gemm(
-        M_BLOCKS=16,
-        N_BLOCKS=8,
+        M_BLOCKS=8,
+        N_BLOCKS=16,
         K_MICRO=4,
         A_layout_transposed=True,
         c_dtype="bf16",
         A_M_STRIDE=64,
-        A_K_STRIDE=256,
-        B_K_STRIDE=512,
-        B_N_STRIDE=64,
-        C_M_STRIDE=512,
-        C_N_STRIDE=64,
+        A_K_STRIDE=512,
+        B_K_STRIDE=64,
+        B_N_STRIDE=256,
+        C_M_STRIDE=64,
+        C_N_STRIDE=512,
         output_dir=output_dir,
         verbose=verbose,
     )
