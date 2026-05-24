@@ -86,6 +86,7 @@ from aie.dialects.aiex import (
 )
 from aie.extras import types as T
 from aie.extras.context import mlir_mod_ctx
+from ._emit import attach_loop_annotation_to_all_scf_for
 from aie.extras.dialects import arith
 from aie.helpers.dialects.scf import _for as range_
 from aie.ir import AffineDimExpr, AffineMap, InsertionPoint, MemRefType
@@ -1083,6 +1084,7 @@ def build_flash_attn_module(
         _emit_attn_seg_device(q_host_ty, k_host_ty, v_host_ty, out_host_ty)
         _emit_dispatcher_device(q_host_ty, k_host_ty, v_host_ty, out_host_ty)
         module = ctx.module
+        attach_loop_annotation_to_all_scf_for(module)
 
     return str(module)
 
