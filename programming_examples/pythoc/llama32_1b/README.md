@@ -30,18 +30,26 @@ status* below.
 
 `reference_o/` is empty — no `.cc`-built `.o` left in the project.
 
-### Placed-IRON builders — 5 of 6 done
+### Placed-IRON builders — 5 of 6 enabled by default
 
-| Builder | Phase | Used by | Status |
+| Builder | Phase | Used by | Default |
 |---|---|---|---|
-| `builders/lm_head_gemv.py` | decode (final logits) | `llama32_1b_decode.py` | ✓ Phase 4.1 |
-| `builders/rms_gemv_rope.py` | decode (RMSNorm + QKV GEMV + RoPE) | per-layer decode | ✓ Phase 4.3 |
-| `builders/o_gemv_ffn.py` | decode (O + FFN) | per-layer decode | ✓ Phase 4.4 |
-| `builders/flash_attn.py` | prefill flash attention | `llama32_1b_prefill.py` | ✓ Phase 4.2 |
-| `builders/rms_gemms_rope.py` | prefill (RMSNorm + QKV GEMM + RoPE) | per-layer prefill | ✓ Phase 4.5 |
-| `builders/o_ffn.py` | prefill (O + FFN with GEMMs) | per-layer prefill | ◐ Phase 4.6 (5 of 9 devices placed; 4 GEMM devices deferred via cached-splice) |
+| `builders/lm_head_gemv.py` | decode (final logits) | `llama32_1b_decode.py` | ✓ placed-IRON |
+| `builders/rms_gemv_rope.py` | decode (RMSNorm + QKV GEMV + RoPE) | per-layer decode | ✓ placed-IRON |
+| `builders/o_gemv_ffn.py` | decode (O + FFN) | per-layer decode | ✓ placed-IRON |
+| `builders/flash_attn.py` | prefill flash attention | `llama32_1b_prefill.py` | ✓ placed-IRON |
+| `builders/rms_gemms_rope.py` | prefill (RMSNorm + QKV GEMM + RoPE) | per-layer prefill | ☐ **cached** (see *Deferred* below) |
+| `builders/o_ffn.py` | prefill (O + FFN with GEMMs) | per-layer prefill | ◐ placed-IRON (5 of 9 devices; 4 GEMM devices internally spliced from cached) |
 
-#### Phase 4.6 status (partial)
+`rms_gemms_rope`'s placed-IRON emit has a known GEMM operand/stride bug
+introduced in Phase 4.5c — it produces garbage tokens on real-HF
+prompts, so it's not in the default placed-IRON set. The cached fallback
+is bit-equivalent to the AIR-tree reference and runs by default. Set
+`PYTHOC_LLAMA_USE_PLACED_BUILDERS=rms_gemms_rope` (or include it in the
+explicit allowlist) to opt in when investigating the bug. See *Deferred*
+below.
+
+#### Phase 4.6 status (o_ffn partial)
 
 5 of 9 devices in `o_ffn` are on placed-IRON:
 `rm_weighted_rms_norm_seg`, `ra_add_seg`, `fa_add_seg`,
@@ -49,31 +57,27 @@ status* below.
 (`og_matmul_seg`, `dg_matmul_seg`, `gg_matmul_seg`, `ug_matmul_seg`)
 are spliced from `reference_mlir/o_ffn.npu.air.mlir` by the builder
 itself — transparent to call sites in `aie_ir_gen.py`. The 4 GEMM
-devices hit a real wall in two attempts (Phases 4.6d + 4.6e):
-structural diff vs cached was perfect, but runtime produced garbage
-output. Common factor is dispatch fan-out × `^bb1` re-entry count
-(8-16× higher than `rms_gemms_rope::v_matmul_seg`, which works); root
-cause is likely in L2/shim DMA streaming behavior that the
-`func.call @bf16_gemm_kernel_bf16out` substitution doesn't preserve.
-Deferred pending AIR source-of-truth analysis or an inline-emit
-approach.
+devices hit a real wall in two attempts (Phases 4.6d + 4.6e) — same
+underlying class of bug as `rms_gemms_rope`'s GEMM emit; deferred
+pending the root-cause fix.
 
 #### Performance
 
-Real HF weights (`unsloth/Llama-3.2-1B-Instruct`), measured on NPU2:
+Real HF weights (`unsloth/Llama-3.2-1B-Instruct`), measured on NPU2 at
+the current default (5 placed builders + `rms_gemms_rope` cached):
 
 | Config | Prefill (16 layers, seq=2048) | Decode steady-state |
 |---|---|---|
-| Cached (`=cached`) | 1.93s (~118ms/layer) | 7.86 tok/s |
-| Placed-IRON (default) | 1.94s (~118ms/layer) | 7.82 tok/s |
+| Default (5 placed + rms_gemms_rope cached) | ~1.94s | ~7.8 tok/s |
+| All cached (`PYTHOC_LLAMA_USE_PLACED_BUILDERS=cached`) | ~1.93s | ~7.86 tok/s |
 
-Delta within run-to-run noise — placed-IRON is performance-neutral.
+Delta within run-to-run noise.
 
 ### Where each part of the pipeline runs
 
 | Stage | Runs on | Notes |
 |---|---|---|
-| Prefill: RMSNorm + QKV GEMM + RoPE | NPU (placed-IRON + PythoC `rope_pythoc.o` + `bf16_gemm_pythoc_*.o`) | All 7 devices on placed-IRON |
+| Prefill: RMSNorm + QKV GEMM + RoPE | NPU (cached MLIR + PythoC `rope_pythoc.o` + `bf16_gemm_pythoc_*.o`) | Placed-IRON deferred (see *Deferred* section) |
 | Prefill: flash attention | NPU (placed-IRON + PythoC `attn_pythoc.o`) | All 32 cores, cascade chain |
 | Prefill: O + FFN | NPU (cached MLIR + PythoC `silu_and_mul_bf16.o`) | 5 of 9 devices on placed-IRON; 4 GEMM devices cached-spliced (1024 inline `vector.contract`) |
 | Decode: RMSNorm + QKV GEMV + RoPE | NPU (placed-IRON + PythoC kernels) | per-layer, per-token |
