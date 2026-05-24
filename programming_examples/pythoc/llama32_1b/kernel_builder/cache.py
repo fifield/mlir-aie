@@ -52,6 +52,14 @@ _LINK_OBJS = [
     # C_M=64, C_N=512).  See kernels/build.py::_compile_bf16_gemm_rms_gemms_rope
     # for the derivation (matches reference_mlir/rms_gemms_rope.npu.air.mlir).
     "bf16_gemm_pythoc_M8_N16_K4_AT_bf16out_s64_512_64_256_64_512.o",
+    # Phase 4.6d: bf16 GEMM .o for the prefill og_matmul_seg (O-projection
+    # of o_ffn).  Per-core C tile shrinks to 64x64 (vs v_matmul's 128x64),
+    # so N_BLOCKS goes from 16 to 8; strides remain unchanged (A_M=64,
+    # A_K=512, B_K=64, B_N=256, C_M=64, C_N=512).  Symbol inside is
+    # `bf16_gemm_kernel_bf16out` (same as the rms_gemms_rope variant -- a
+    # distinct .o is required only because the loop-bound constants
+    # (M_BLOCKS, N_BLOCKS) are baked into the generated kernel code).
+    "bf16_gemm_pythoc_M8_N8_K4_AT_bf16out_s64_512_64_256_64_512.o",
 ]
 
 

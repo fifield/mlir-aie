@@ -40,6 +40,12 @@ _PYTHOC_KERNELS = [
     # derivation.
     ("bf16_gemm_pythoc_M8_N16_K4_AT_bf16out_s64_512_64_256_64_512.o",
      "_compile_bf16_gemm_rms_gemms_rope"),
+    # Phase 4.6d: bf16 GEMM .o consumed by the placed-IRON og_matmul_seg
+    # device (O-projection of o_ffn).  N_BLOCKS halves from 16 to 8 because
+    # the og C buffer is `1x1x8x8x8x8` (vs v_matmul's `1x1x16x8x8x8`);
+    # strides remain identical.  See kernels/build.py for derivation.
+    ("bf16_gemm_pythoc_M8_N8_K4_AT_bf16out_s64_512_64_256_64_512.o",
+     "_compile_bf16_gemm_og_o_ffn"),
 ]
 
 
