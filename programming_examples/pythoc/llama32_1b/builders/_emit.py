@@ -135,3 +135,33 @@ def rms_gemv_rope_host_arg_types(emb_dim: int = 2048, kv_dim: int = 512):
         bf16_np(emb_dim),
         bf16_np(kv_dim),
     ]
+
+
+def attach_loop_annotation_to_all_scf_for(module):
+    """Walk ``module`` and attach ``loop_annotation = #llvm.loop_annotation<mustProgress = true>``
+    to every ``scf.for`` op.
+
+    The cached AIR-emitted MLIR puts this annotation on every ``scf.for``
+    (via aircc's lowering pipeline).  Without it, aiecc's downstream
+    lowering produces a broken ELF that emits garbage tokens.  Our
+    placed-IRON builders use ``aie.helpers.dialects.scf._for`` (re-exported
+    as ``range_``) which doesn't attach the annotation, so we walk the
+    module ourselves before serializing to text.
+
+    Must be called inside an active ``mlir_mod_ctx()`` (the
+    ``Attribute.parse`` call needs the same context as ``module``).
+    """
+    from aie.ir import Attribute
+
+    annot = Attribute.parse("#llvm.loop_annotation<mustProgress = true>")
+
+    def walk(op):
+        if op.operation.name == "scf.for":
+            op.operation.attributes["loop_annotation"] = annot
+        for region in op.regions:
+            for block in region:
+                for sub in block:
+                    walk(sub)
+
+    for op in module.body:
+        walk(op)

@@ -80,7 +80,12 @@ from aie.extras.dialects import arith
 from aie.helpers.dialects.scf import _for as range_
 from aie.ir import InsertionPoint, UnitAttr
 
-from ._emit import bf16_memref, bf16_np, rms_gemv_rope_host_arg_types
+from ._emit import (
+    attach_loop_annotation_to_all_scf_for,
+    bf16_memref,
+    bf16_np,
+    rms_gemv_rope_host_arg_types,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -861,6 +866,7 @@ def build_rms_gemv_rope_module(emb_dim: int = EMB_DIM,
         _emit_r_rms_seg()
         _emit_dispatcher_device()
         module = ctx.module
+        attach_loop_annotation_to_all_scf_for(module)
 
     return str(module)
 
