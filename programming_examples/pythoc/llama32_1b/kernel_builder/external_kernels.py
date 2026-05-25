@@ -13,9 +13,11 @@ at which point the cached MLIR is patched to `link_with = "<kernel>.o"` to
 pick up the PythoC build instead.
 """
 
+import os
 from pathlib import Path
 
 _BUILD_DIR = Path(__file__).resolve().parent.parent / "reference_o"
+
 
 # Object files still on the AIR reference (no PythoC port yet) -- staged
 # from reference_o/ into CWD so aiecc's link step finds them. As kernels
@@ -46,6 +48,14 @@ _PYTHOC_KERNELS = [
     # strides remain identical.  See kernels/build.py for derivation.
     ("bf16_gemm_pythoc_M8_N8_K4_AT_bf16out_s64_512_64_256_64_512.o",
      "_compile_bf16_gemm_og_o_ffn"),
+    # Phase 6 (Stage 2): packed-uint4 AWQ kernels.  Each .py kernel uses
+    # the scalar per-nibble decode path; vectorization is deferred.
+    ("awq_mv_pythoc.o", "compile_awq_mv"),
+    ("awq_mv_k8192_pythoc.o", "compile_awq_mv_k8192"),
+    ("awq_gemv_k2048_m32_g128_vecdeq_pythoc.o",
+     "compile_awq_gemv_k2048_m32_g128_vecdeq"),
+    ("awq_gemv_k8192_m8_g128_vecdeq_pythoc.o",
+     "compile_awq_gemv_k8192_m8_g128_vecdeq"),
 ]
 
 
@@ -100,13 +110,36 @@ def compile_all_external_kernels(head_dim=64):
 
 
 # ---------------------------------------------------------------------------
-# AWQ helpers (Phase 6 - deferred). Kept here so the AWQ runtime imports
-# don't break; raise on first use.
+# Packed-uint4 AWQ kernels (Stage 2 PythoC ports).
+#
+# The fused-decode kernels (awq_mv_pythoc.o, awq_mv_k8192_pythoc.o) are
+# registered in `_PYTHOC_KERNELS` above and compiled by `_stage_required_objs`
+# without a wrapper here.  The standalone GEMV is dim-specialized at runtime:
+# `compile_awq_gemv(k, m, group_size, variant)` dispatches to the matching
+# `compile_awq_gemv_k{K}_m{M}_g{G}_{variant}` helper in kernels/build.py.
 # ---------------------------------------------------------------------------
 
 
-def awq_gemv_object_name(k, m, group_size, *, variant="scalar"):
-    """Return the dimension-specialized packed-AWQ GEMV object filename."""
+_AWQ_GEMV_VARIANTS = {"vecdeq"}
+
+
+def _validate_awq_gemv_variant(variant):
+    variant = str(variant)
+    if variant not in _AWQ_GEMV_VARIANTS:
+        raise ValueError(
+            f"Unsupported AWQ GEMV variant {variant!r}; expected one of {sorted(_AWQ_GEMV_VARIANTS)}"
+        )
+    return variant
+
+
+def awq_gemv_object_name(k, m, group_size, *, variant="vecdeq"):
+    """Return the dimension-specialized packed-AWQ GEMV object filename.
+
+    The ``_pythoc`` suffix mirrors the other PythoC-built ``.o`` outputs
+    (mv_pythoc.o, attn_pythoc.o, rope_pythoc.o, ...). Stage 2 ports only
+    the ``vecdeq`` variant; scalar can be added later if a smoke test
+    requires it.
+    """
     k = int(k); m = int(m); group_size = int(group_size)
     if k <= 0 or m <= 0 or group_size <= 0:
         raise ValueError(f"AWQ GEMV dimensions must be positive: k={k}, m={m}, g={group_size}")
@@ -114,14 +147,40 @@ def awq_gemv_object_name(k, m, group_size, *, variant="scalar"):
         raise ValueError(f"AWQ GEMV K must be even for uint4 packing, got {k}")
     if k % group_size != 0:
         raise ValueError(f"AWQ GEMV K={k} must be divisible by group_size={group_size}")
-    return f"awq_gemv_k{k}_m{m}_g{group_size}_{variant}.o"
+    variant = _validate_awq_gemv_variant(variant)
+    return f"awq_gemv_k{k}_m{m}_g{group_size}_{variant}_pythoc.o"
 
 
-def compile_awq_gemv(k, m, group_size, *, variant="scalar", force=False):
-    raise NotImplementedError(
-        "AWQ uint4 GEMV is deferred to Phase 6 of the PythoC port. "
-        "Drop the AWQ runtime path (--awq-decode-experimental) until then."
-    )
+def compile_awq_gemv(k, m, group_size, *, variant="vecdeq", force=False):
+    """Compile the dim-specialized packed-uint4 AWQ GEMV PythoC kernel.
+
+    Dispatches to ``kernels.build.compile_awq_gemv_k{K}_m{M}_g{G}_{variant}``
+    for the requested shape.  Each shape has its own .py source (one ELF
+    per shape) because the standalone GEMV bakes K/M/GROUP_SIZE as
+    Python-source constants -- see the kernels/awq_gemv_*_vecdeq.py files
+    and the Stage-2 plan rationale.
+
+    Raises ``NotImplementedError`` for shapes that haven't been ported yet.
+    """
+    del force  # the PythoC compile path is idempotent; CWD is the cache
+    k = int(k); m = int(m); group_size = int(group_size)
+    variant = _validate_awq_gemv_variant(variant)
+    output = awq_gemv_object_name(k, m, group_size, variant=variant)
+    helper_name = f"compile_awq_gemv_k{k}_m{m}_g{group_size}_{variant}"
+
+    import importlib
+    kb = importlib.import_module("kernels.build")
+    if not hasattr(kb, helper_name):
+        raise NotImplementedError(
+            f"PythoC AWQ GEMV shape (K={k}, M={m}, group_size={group_size}, "
+            f"variant={variant!r}) not implemented. Add "
+            f"kernels/awq_gemv_k{k}_m{m}_g{group_size}_{variant}.py and "
+            f"a matching {helper_name}(output_dir, verbose) helper in "
+            f"kernels/build.py."
+        )
+    helper = getattr(kb, helper_name)
+    helper(output_dir=os.getcwd(), verbose=False)
+    return output
 
 
 def compile_silu_and_mul(): _stage_required_objs()
@@ -130,5 +189,3 @@ def compile_attn_npu2(head_dim=64): del head_dim; _stage_required_objs()
 def compile_attn_decode_npu2(head_dim=64): del head_dim; _stage_required_objs()
 def compile_mv(tile_m=8): del tile_m; _stage_required_objs()
 def compile_mv_k8192(): _stage_required_objs()
-def compile_awq_mv(group_size=128, tile_m=8): raise NotImplementedError("AWQ deferred to Phase 6")
-def compile_awq_mv_k8192(group_size=128, tile_m=2): raise NotImplementedError("AWQ deferred to Phase 6")
