@@ -8,15 +8,17 @@ These tests compile and execute tiny AWQ GEMV kernels on the NPU. They are
 skipped by default so normal unit-test runs do not require hardware.
 Set RUN_AWQ_NPU_SMOKE=1 to enable.
 
-Stage-1 note: the K=8 / K=16, M=4, group=4 shapes below are intentionally NOT
-in the awq_impl cached-MLIR set (which only ships the model shapes
-k=2048 m=32 g=128 and k=8192 m=8 g=128). They are kept here as the original
-hand-checked correctness cases because the C++-compile path in
-`kernel_builder/external_kernels.py::compile_awq_gemv` accepts any (K, M, G);
-the runtime will compile-on-demand via `awq_gemv_builder.build_awq_gemv_ir`
-(aircc lowering) on first call. Stage 2 retires the C++/AIR path; at that
-point either the smoke shapes must be retargeted to a representative model
-shape, or PythoC dim-specialized clones for these tiny shapes must be added.
+Phase 6 Stage 4 note: the K=8 / K=16, M=4, group=4 shapes below were originally
+hand-checked correctness cases run through the AIR-tree compile-on-demand path.
+After Stage 4 deleted the AIR-tree builder, the runtime requires a matching
+PythoC dim-specialized clone under ``kernels/awq_gemv_k{K}_m{M}_g{G}_vecdeq.py``
+(plus a ``compile_awq_gemv_*`` helper in ``kernels/build.py``) for each shape.
+Without those, the placed-IRON builder will emit valid MLIR but the kernel `.o`
+won't exist and the run will fail at the ELF link step.
+
+To re-enable, either add the tiny-shape PythoC clones, or retarget the cases
+to one of the two model shapes already shipped: ``k=2048, m=32, g=128`` or
+``k=8192, m=8, g=128`` (see ``reference_mlir/awq_gemv_*_vecdeq.npu.air.mlir``).
 """
 
 from __future__ import annotations

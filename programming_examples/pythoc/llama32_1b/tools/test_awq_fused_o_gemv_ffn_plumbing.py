@@ -2,7 +2,16 @@
 # Copyright (C) 2026, Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Smoke tests for packed-AWQ matvec and fused O+FFN plumbing."""
+"""Smoke tests for packed-AWQ fused O+FFN plumbing.
+
+After Phase 6 Stage 4, the AIR-tree builders (`kernel_builder.awq_matvec`,
+`kernel_builder.o_gemv_ffn_awq_stitched`) and the temporary Peano-clang
+`.cc` compile machinery are deleted. These tests now verify only the
+remaining stable surfaces: backend-preset naming, placed-IRON builder
+output, and runtime ABI shape.
+
+End-to-end correctness is exercised by `make hf-gate QUANT=awq`.
+"""
 
 from __future__ import annotations
 
@@ -14,45 +23,28 @@ _EXAMPLE_DIR = os.path.dirname(_SCRIPT_DIR)
 sys.path.insert(0, _EXAMPLE_DIR)
 
 
-def test_awq_matvec_builder_matches_bf16_gemv_tiled_abi_shape():
-    from kernel_builder.awq_matvec import build_module
+def test_placed_o_gemv_ffn_awq_emits_correct_link_with_and_external_funcs():
+    """Phase 6 / Stage 3: placed-IRON builder emits the fused module
+    with the right link_with and external-func references for both the
+    K=2048 (og/gg/ug) and K=8192 (dg) AWQ matvec kernels.
+    """
+    from builders.o_gemv_ffn_awq import build_o_gemv_ffn_awq_module
 
-    text = str(build_module(m=128, k=128, group_size=32, tile_m=8, m_input=4, herd_m=8))
-    assert "func.func @awq_matvec" in text
+    text = build_o_gemv_ffn_awq_module(emb_dim=2048, hidden_dim=8192)
+    # External function declarations for the AWQ kernels.
     assert "awq_matvec_vectorized_u4_bf16" in text
     assert "awq_linalg_fill_bf16" in text
-    assert 'link_with = "awq_mv.o"' in text
-    assert "memref<128x64xui8>" in text
-    assert "memref<128x8xbf16>" in text
-    assert "memref<128xbf16>" in text
-    assert text.count("air.launch") == 1
-    assert text.count("air.herd") == 1
-
-
-def test_fused_awq_o_gemv_ffn_uses_one_public_func_and_eight_launches():
-    from kernel_builder.o_gemv_ffn_awq_stitched import build_o_gemv_ffn_awq_module
-
-    text = str(
-        build_o_gemv_ffn_awq_module(
-            emb_dim=128,
-            hidden_dim=512,
-            group_size=32,
-            tile_m=8,
-            m_input=4,
-            down_tile_m=2,
-            down_m_input=1,
-            herd_m=8,
-        )
-    )
-    assert "func.func @o_gemv_ffn_awq" in text
-    assert text.count("air.launch") == 8
-    assert 'link_with = "awq_mv.o"' in text
-    assert 'link_with = "awq_mv_k8192.o"' in text
     assert "dg_awq_matvec_vectorized_u4_bf16" in text
-    assert "memref<128x64xui8>" in text
-    assert "memref<512x64xui8>" in text
-    assert "memref<128x256xui8>" in text
-    assert "memref<128x32xbf16>" in text
+    assert "dg_awq_linalg_fill_bf16" in text
+    # link_with on the four GEMV devices points at the PythoC `.o` outputs.
+    assert 'link_with = "awq_mv_pythoc.o"' in text
+    assert 'link_with = "awq_mv_k8192_pythoc.o"' in text
+    # Combined-row ABI memref shapes (group_size=128 baked).
+    # emb_dim=2048: K/2 + 4*(K/group_size) = 1024 + 64 = 1088
+    # hidden_dim=8192: 4096 + 256 = 4352
+    assert "memref<2048x1088xui8>" in text   # wo_w (og)
+    assert "memref<8192x1088xui8>" in text   # wgate_w / wup_w (gg, ug)
+    assert "memref<2048x4352xui8>" in text   # wdown_w (dg)
 
 
 def test_awq_o_gemv_ffn_backend_name_is_distinct():
@@ -60,26 +52,6 @@ def test_awq_o_gemv_ffn_backend_name_is_distinct():
 
     assert OGF_AWQ_BACKEND["instance_name"] == "o_gemv_ffn_awq"
     assert OGF_AWQ_BACKEND["instance_name"] != "o_gemv_ffn"
-
-
-def test_awq_mv_external_compile_helpers_use_distinct_objects(monkeypatch):
-    from kernel_builder import external_kernels
-
-    calls = []
-
-    def fake_compile(src_path, output_name, extra_flags=None, force=False):
-        calls.append((str(src_path), output_name, list(extra_flags or []), force))
-
-    monkeypatch.setattr(external_kernels, "_compile_kernel", fake_compile)
-    external_kernels.compile_awq_mv(group_size=128, tile_m=8)
-    external_kernels.compile_awq_mv_k8192(group_size=128, tile_m=2)
-
-    assert calls[0][1] == "awq_mv.o"
-    assert "-DDIM_M_OUTPUT=8" in calls[0][2]
-    assert calls[1][1] == "awq_mv_k8192.o"
-    assert "-DDIM_M_OUTPUT=2" in calls[1][2]
-    assert "-DAWQ_MATVEC_FN=dg_awq_matvec_vectorized_u4_bf16" in calls[1][2]
-    assert "-DAWQ_LINALG_FILL_FN=dg_awq_linalg_fill_bf16" in calls[1][2]
 
 
 def test_fused_awq_runtime_uses_single_xrt_call_with_packed_args():

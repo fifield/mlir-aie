@@ -28,7 +28,7 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 _EXAMPLE_DIR = _SCRIPT_DIR.parent
 sys.path.insert(0, str(_EXAMPLE_DIR))
 
-from kernel_builder.awq_gemv_builder import build_awq_gemv_ir  # noqa: E402
+from kernel_builder.aie_ir_gen import build_awq_gemv_ir  # noqa: E402
 from kernel_builder.cache import KernelCache  # noqa: E402
 from llama32_1b_awq_runtime import awq_gemv_npu, awq_gemv_npu_tiled  # noqa: E402
 from llama32_1b_weights import AwqLinear, awq_gemv_cpu_reference  # noqa: E402
@@ -215,7 +215,7 @@ def main():
     parser.add_argument("--row-start", type=int, default=0)
     parser.add_argument("--atol", type=float, default=0.75)
     parser.add_argument("--probe-full-compile", action="store_true")
-    parser.add_argument("--variant", choices=["scalar", "vecdeq"], default="scalar")
+    parser.add_argument("--variant", choices=["vecdeq"], default="vecdeq")
     args = parser.parse_args()
 
     cache = KernelCache(cache_dir=args.cache_dir, verbose=False)
