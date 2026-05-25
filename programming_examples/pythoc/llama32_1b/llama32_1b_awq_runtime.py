@@ -14,8 +14,9 @@ from __future__ import annotations
 import numpy as np
 from ml_dtypes import bfloat16
 
-from kernel_builder.awq_gemv_builder import awq_gemv_kernel_name, build_awq_gemv_ir
+from kernel_builder.aie_ir_gen import build_awq_gemv_ir
 from kernel_builder.backend_presets import AWQ_GEMV_BACKEND, OGF_AWQ_BACKEND
+from kernel_builder.external_kernels import awq_gemv_kernel_name
 from llama32_1b_weights import AwqLinear
 
 
