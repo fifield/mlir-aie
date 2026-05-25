@@ -40,7 +40,7 @@ def _validate_awq_gemv_inputs(x_bf16, awq: AwqLinear) -> np.ndarray:
     return x
 
 
-def _ensure_awq_gemv_compiled(cache, name: str, k: int, m: int, group_size: int, *, variant: str = "scalar") -> None:
+def _ensure_awq_gemv_compiled(cache, name: str, k: int, m: int, group_size: int, *, variant: str = "vecdeq") -> None:
     """Compile an AWQ GEMV kernel unless this cache already has it."""
     if name in getattr(cache, "artifacts", {}):
         return
@@ -51,7 +51,7 @@ def _ensure_awq_gemv_compiled(cache, name: str, k: int, m: int, group_size: int,
     )
 
 
-def awq_gemv_npu(cache, x_bf16, awq: AwqLinear, *, variant: str = "scalar") -> np.ndarray:
+def awq_gemv_npu(cache, x_bf16, awq: AwqLinear, *, variant: str = "vecdeq") -> np.ndarray:
     """Run one direct packed uint4 AWQ GEMV on NPU.
 
     Args:
@@ -84,7 +84,7 @@ def awq_gemv_npu(cache, x_bf16, awq: AwqLinear, *, variant: str = "scalar") -> n
     return np.asarray(results[3], dtype=bfloat16).reshape(awq.m)
 
 
-def awq_gemv_npu_tiled(cache, x_bf16, awq: AwqLinear, *, tile_m: int, variant: str = "scalar") -> np.ndarray:
+def awq_gemv_npu_tiled(cache, x_bf16, awq: AwqLinear, *, tile_m: int, variant: str = "vecdeq") -> np.ndarray:
     """Run a full packed-AWQ GEMV by chunking output rows into NPU tiles.
 
     This covers full model-sized projections with the current correctness-first
@@ -129,18 +129,24 @@ def awq_combined_weight(awq: AwqLinear) -> np.ndarray:
 
 
 def _ensure_o_gemv_ffn_awq_compiled(cache, emb_dim: int, hidden_dim: int, group_size: int) -> None:
-    """Compile the fused packed-AWQ O+FFN decode kernel unless cached."""
+    """Compile the fused packed-AWQ O+FFN decode kernel unless cached.
+
+    The PythoC AWQ kernels (awq_mv_pythoc.o, awq_mv_k8192_pythoc.o) are
+    registered in ``kernel_builder.external_kernels._PYTHOC_KERNELS`` and
+    compiled lazily by ``_stage_required_objs`` during cache.compile_and_cache.
+    GROUP_SIZE=128 is baked into the kernel sources; runtime-variable
+    group_size is no longer supported (matches the AIR-tree convention
+    where group_size was a -D macro at compile time).
+    """
+    del group_size  # baked into kernels/awq_mv.py (GROUP_SIZE: i32 = 128)
     name = "o_gemv_ffn_awq"
     if name in getattr(cache, "artifacts", {}):
         return
-    from kernel_builder.external_kernels import compile_awq_mv, compile_awq_mv_k8192
     from kernel_builder.aie_ir_gen import build_o_gemv_ffn_awq_ir
 
-    compile_awq_mv(group_size=group_size, tile_m=8)
-    compile_awq_mv_k8192(group_size=group_size, tile_m=2)
     cache.compile_and_cache(
         name,
-        build_o_gemv_ffn_awq_ir(emb_dim, hidden_dim, group_size=group_size),
+        build_o_gemv_ffn_awq_ir(emb_dim, hidden_dim, group_size=128),
         OGF_AWQ_BACKEND["instance_name"],
     )
 

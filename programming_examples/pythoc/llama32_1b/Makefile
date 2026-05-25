@@ -43,7 +43,15 @@ MODEL    ?= instruct
 WEIGHTS ?= hf
 QUANT ?= bf16
 AWQ_WEIGHTS ?=
-AWQ_DECODE_EXPERIMENTAL ?= 0
+# AWQ_DECODE_EXPERIMENTAL default flips with QUANT: NPU AWQ decode is the
+# default for --quant awq now that Phase 6 lands the PythoC awq_mv kernel
+# + placed-IRON o_gemv_ffn_awq builder. Set =0 to fall back to the legacy
+# CPU-dequant -> BF16-kernels path.
+ifeq ($(QUANT),awq)
+  AWQ_DECODE_EXPERIMENTAL ?= 1
+else
+  AWQ_DECODE_EXPERIMENTAL ?= 0
+endif
 
 # HF repo (or local dir) to load weights+tokenizer from. Defaults to the
 # unsloth non-gated mirror so `make run` and `make hf-gate` work out of
@@ -95,8 +103,8 @@ help:
 	@echo ""
 	@echo "More targets:"
 	@echo "  make verify           With CPU reference verification"
-	@echo "  make run-awq          Run AIE/NPU pipeline with repacked AWQ weights"
-	@echo "  make run-awq-experimental  Opt-in packed-AWQ NPU decode o_proj+FFN path"
+	@echo "  make run-awq          Run AIE/NPU pipeline with repacked AWQ weights (NPU AWQ decode is default for QUANT=awq)"
+	@echo "  make run-awq-experimental  [alias] same as run-awq with AWQ_DECODE_EXPERIMENTAL=1 (default for QUANT=awq)"
 	@echo "  make profile-awq      Profile AIE/NPU pipeline with repacked AWQ weights"
 	@echo "  make verify-awq       Verify AIE/NPU pipeline with repacked AWQ weights"
 	@echo ""
@@ -115,7 +123,7 @@ help:
 	@echo "  QUANT=bf16|awq        Weight format (default: bf16)"
 	@echo "  AWQ_WEIGHTS=/path     Repacked AWQ model dir for QUANT=awq"
 	@echo "  HF_MODEL_ID=repo|dir  Override BF16 HF repo/local dir"
-	@echo "  AWQ_DECODE_EXPERIMENTAL=1  Use experimental packed-AWQ decode projections"
+	@echo "  AWQ_DECODE_EXPERIMENTAL=0|1  NPU AWQ decode projections (defaults to 1 for QUANT=awq, 0 otherwise)"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make run N_TOKENS=50"
@@ -196,7 +204,7 @@ snapshot: ensure-cache
 # The gate reads HF_MODEL_ID from the environment (default
 # unsloth/Llama-3.2-1B-Instruct) so it works without HF auth.
 hf-gate: ensure-cache
-	HF_MODEL_ID=$(HF_MODEL_ID_Q) python3 -m pytest $(srcdir)/tests/test_hf_answer_gate.py -v -s
+	HF_MODEL_ID=$(HF_MODEL_ID_Q) HF_GATE_QUANT=$(QUANT) HF_GATE_AWQ_WEIGHTS=$(AWQ_WEIGHTS_Q) python3 -m pytest $(srcdir)/tests/test_hf_answer_gate.py -v -s
 
 all: compile profile
 

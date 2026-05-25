@@ -30,7 +30,7 @@ def test_awq_matvec_builder_matches_bf16_gemv_tiled_abi_shape():
 
 
 def test_fused_awq_o_gemv_ffn_uses_one_public_func_and_eight_launches():
-    from multi_launch_builder.o_gemv_ffn_awq_multi import build_o_gemv_ffn_awq_module
+    from kernel_builder.o_gemv_ffn_awq_stitched import build_o_gemv_ffn_awq_module
 
     text = str(
         build_o_gemv_ffn_awq_module(
@@ -138,10 +138,16 @@ def test_fused_awq_runtime_uses_single_xrt_call_with_packed_args():
     assert len(cache.calls) == 1
     args, kwargs = cache.calls[0]
     assert args[0] == "o_gemv_ffn_awq"
-    assert len(args[2:]) == 19
-    assert args[2].shape == (emb_dim, emb_dim // 2)
-    assert args[3].shape == (emb_dim, 2 * (emb_dim // group_size))
-    assert args[17].shape == (emb_dim, hidden_dim // 2)
-    assert args[18].shape == (emb_dim, 2 * (hidden_dim // group_size))
-    assert kwargs["output_indices"] == [18]
+    # Current AWQ runtime ABI (llama32_1b_awq_runtime.py:201-223): 15 positional
+    # args after (name, backend) -- one combined uint8 weight buffer per AWQ
+    # GEMV (wo_w, wgate_w, wup_w, wdown_w) instead of the earlier separate
+    # (qweight, params) pair.  output_indices=[14] (was [18] under the 19-arg ABI).
+    assert len(args[2:]) == 15
+    # arg index 2 is wo_w (combined uint8 weight buffer: K/2 qbytes + 4*groups param bytes)
+    expected_wo_cols = emb_dim // 2 + 4 * (emb_dim // group_size)
+    expected_wdown_cols = hidden_dim // 2 + 4 * (hidden_dim // group_size)
+    assert args[2].shape == (emb_dim, expected_wo_cols)
+    # arg index 14 is wdown_w (combined uint8 weight for the down projection)
+    assert args[14].shape == (emb_dim, expected_wdown_cols)
+    assert kwargs["output_indices"] == [14]
     assert kwargs["bo_key"] == "o_gemv_ffn_awq_L3"
