@@ -356,6 +356,14 @@ def compile_pythoc_source(
                 accumulate,
                 accum_to_vector,
                 replicate_4x,
+                extract_v4bfloat16_broadcast_to_v32bfloat16,
+                extract_v8bfloat16_broadcast_to_v32bfloat16,
+                T16_32x2_lo,
+                T16_32x2_hi,
+                T16_8x4,
+                T16_4x8,
+                T16_16x2,
+                T16_2x16,
             )
             from pythoc.aie.loop_hints import prepare_for_pipelining, loop_range
             from pythoc.aie.profiling import event0, event1
@@ -417,6 +425,16 @@ def compile_pythoc_source(
                     "write_tm": write_tm,
                     "struct": struct,
                     "range": range,  # Add Python's built-in range for standard loop syntax
+                    # AIE API bf16 mmul<4,8,8> emulation helpers (aie2p)
+                    "extract_v4bfloat16_broadcast_to_v32bfloat16": extract_v4bfloat16_broadcast_to_v32bfloat16,
+                    "extract_v8bfloat16_broadcast_to_v32bfloat16": extract_v8bfloat16_broadcast_to_v32bfloat16,
+                    # AIE2P bfloat16 shuffle-mode constants
+                    "T16_32x2_lo": T16_32x2_lo,
+                    "T16_32x2_hi": T16_32x2_hi,
+                    "T16_8x4": T16_8x4,
+                    "T16_4x8": T16_4x8,
+                    "T16_16x2": T16_16x2,
+                    "T16_2x16": T16_2x16,
                 }
             )
         except ImportError as e:
