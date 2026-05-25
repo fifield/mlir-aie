@@ -14,32 +14,48 @@ Used by the fused o_gemv_ffn_awq decode kernel for the down-projection
 kernels/awq_mv.py; the only differences are the `dg_` symbol prefix
 and DIM_M_OUTPUT=2 (which only affects the linalg_fill helper).
 
-Mirrors the kernels/matvec_k8192.py clone pattern (DIM_M_OUTPUT=2 instead
-of 8 so the fill helper writes 2 bf16 elements instead of 8).
+Mirrors the kernels/matvec_k8192.py clone pattern.  Inner loop is the
+**vectorized Fix2Float chain** (see kernels/awq_mv.py docstring for the
+trick and the AIE-API origin).
 """
 
 from aie.iron.pythoc import aie_kernel
 
-from pythoc import bf16, f32, i32, ptr, u8, u32, void
+from pythoc import bf16, f32, i16, i32, ptr, u8, u32, void
 
-from pythoc.aie import set_ctrl_reg  # noqa: F401
+from pythoc.aie import (  # noqa: F401
+    set_ctrl_reg,
+    I512_I512_ACC1024_bf_msc_conf,
+    I512_I512_ACC1024_bf_mac_conf,
+    v32accfloat_to_v32bf16,
+    unpack_I512_I8_I4,
+)
+from pythoc.aie import (
+    aie_vector,
+    broadcast,
+    load_v,
+    unpack_unsigned,
+    vector_add,
+    vector_cast,
+    vector_extract,
+    vector_mul,
+    vector_sub,
+    zeros,
+)
 
 
 GROUP_SIZE: i32 = 128
 DIM_M_OUTPUT: i32 = 2  # K=8192 down-projection writes 2 bf16 per call
 
+# Fix2Float magic constants (see kernels/awq_mv.py docstring).
+MAGIC_L_I32: i32
+MAGIC_L_BF: bf16
+CONF_BF16_MAC: i32
+
 
 @aie_kernel
 def dg_awq_linalg_fill_bf16(zero: bf16, c_out: ptr[bf16, True]) -> void:
-    """Zero DIM_M_OUTPUT=2 bf16 elements at `c_out`.
-
-    The .cc compiled with DIM_M_OUTPUT=2 writes 2 scalar stores
-    (vector store width 32 > buffer length 2 falls into the scalar
-    remainder branch). Mirror with two scalar stores.
-
-    Defined FIRST so compile_pythoc_source picks it up as a helper of
-    `dg_awq_matvec_vectorized_u4_bf16`; both symbols land in one .o.
-    """
+    """Zero DIM_M_OUTPUT=2 bf16 elements at `c_out`."""
     c_out[0] = zero
     c_out[1] = zero
 
@@ -53,11 +69,9 @@ def dg_awq_matvec_vectorized_u4_bf16(
     x_in: ptr[bf16, True],
     c_out: ptr[bf16, True],
 ) -> void:
-    """Same math as kernels/awq_mv.py::awq_matvec_vectorized_u4_bf16,
-    only the symbol name differs (dg_* for down-projection).
-
-    See kernels/awq_mv.py for the combined-row ABI details and the
-    scalar-fallback rationale.
+    """Same math/structure as kernels/awq_mv.py::awq_matvec_vectorized_u4_bf16,
+    only the symbol name differs (``dg_*`` for the FFN down-projection).
+    See kernels/awq_mv.py for the Fix2Float trick details.
     """
     set_ctrl_reg(1, 12)
 
@@ -67,11 +81,18 @@ def dg_awq_matvec_vectorized_u4_bf16(
     params_bytes_per_row: u32 = u32(4) * groups
     row_stride_bytes: u32 = packed_per_row + params_bytes_per_row
 
+    chunks_per_group: u32 = packed_per_group / u32(32)
+
+    magic_acc32: aie_vector[i32, 32] = broadcast(i32, 32, MAGIC_L_I32)
+    magic_bf: aie_vector[bf16, 32] = broadcast(bf16, 32, MAGIC_L_BF)
+    ones_bf: aie_vector[bf16, 32] = broadcast(bf16, 32, bf16(1.0))
+
     p_c: ptr[bf16] = c_out + row_offset
 
     row: u32 = u32(0)
     while row < m:
-        acc: f32 = f32(0.0)
+        acc_lo: aie_vector[f32, 32] = zeros(f32, 32)
+        acc_hi: aie_vector[f32, 32] = zeros(f32, 32)
 
         row_base: ptr[u8] = combined_in + row * row_stride_bytes
         q_row: ptr[u8] = row_base
@@ -79,31 +100,70 @@ def dg_awq_matvec_vectorized_u4_bf16(
 
         group: u32 = u32(0)
         while group < groups:
-            scale: f32 = f32(p_row[0])
-            zero: f32 = f32(p_row[1])
+            scale_s: bf16 = p_row[0]
+            zero_s: bf16 = p_row[1]
+            scale_v: aie_vector[bf16, 32] = broadcast(bf16, 32, scale_s)
+            zero_v: aie_vector[bf16, 32] = broadcast(bf16, 32, zero_s)
 
             x_group_offset: u32 = group * u32(GROUP_SIZE)
             q_group_offset: u32 = group * packed_per_group
 
-            pair: u32 = u32(0)
-            while pair < packed_per_group:
-                packed: u8 = q_row[q_group_offset + pair]
-                q_even: f32 = f32(packed & u8(15))
-                q_odd: f32 = f32((packed >> u8(4)) & u8(15))
+            chunk: u32 = u32(0)
+            while chunk < chunks_per_group:
+                q_chunk: aie_vector[u8, 32] = load_v(
+                    q_row + q_group_offset + chunk * u32(32), 32
+                )
+                nibbles: aie_vector[u8, 64] = unpack_I512_I8_I4(q_chunk, i32(0))
+                nib_lo: aie_vector[u8, 32] = vector_extract(nibbles, 0, 32)
+                nib_hi: aie_vector[u8, 32] = vector_extract(nibbles, 32, 32)
 
-                w_even: f32 = (q_even - zero) * scale
-                w_odd: f32 = (q_odd - zero) * scale
+                lo_i16: aie_vector[i16, 32] = unpack_unsigned(nib_lo, i16)
+                hi_i16: aie_vector[i16, 32] = unpack_unsigned(nib_hi, i16)
+                lo_i32: aie_vector[i32, 32] = unpack_unsigned(lo_i16, i32)
+                hi_i32: aie_vector[i32, 32] = unpack_unsigned(hi_i16, i32)
 
-                x_even: f32 = f32(x_in[x_group_offset + u32(2) * pair])
-                x_odd: f32 = f32(x_in[x_group_offset + u32(2) * pair + u32(1)])
+                sum_lo_i32: aie_vector[i32, 32] = vector_add(lo_i32, magic_acc32)
+                sum_lo_acc: aie_vector[f32, 32] = vector_cast(sum_lo_i32, f32, 32)
+                w_lo_acc: aie_vector[f32, 32] = I512_I512_ACC1024_bf_msc_conf(
+                    magic_bf, ones_bf, sum_lo_acc, CONF_BF16_MAC
+                )
+                w_lo_bf: aie_vector[bf16, 32] = v32accfloat_to_v32bf16(w_lo_acc)
 
-                acc = acc + x_even * w_even
-                acc = acc + x_odd * w_odd
+                sum_hi_i32: aie_vector[i32, 32] = vector_add(hi_i32, magic_acc32)
+                sum_hi_acc: aie_vector[f32, 32] = vector_cast(sum_hi_i32, f32, 32)
+                w_hi_acc: aie_vector[f32, 32] = I512_I512_ACC1024_bf_msc_conf(
+                    magic_bf, ones_bf, sum_hi_acc, CONF_BF16_MAC
+                )
+                w_hi_bf: aie_vector[bf16, 32] = v32accfloat_to_v32bf16(w_hi_acc)
 
-                pair = pair + u32(1)
+                w_lo_dq: aie_vector[bf16, 32] = vector_mul(
+                    vector_sub(w_lo_bf, zero_v), scale_v
+                )
+                w_hi_dq: aie_vector[bf16, 32] = vector_mul(
+                    vector_sub(w_hi_bf, zero_v), scale_v
+                )
+
+                x_lo: aie_vector[bf16, 32] = load_v(
+                    x_in + x_group_offset + chunk * u32(64), 32
+                )
+                x_hi: aie_vector[bf16, 32] = load_v(
+                    x_in + x_group_offset + chunk * u32(64) + u32(32), 32
+                )
+
+                acc_lo = I512_I512_ACC1024_bf_mac_conf(
+                    x_lo, w_lo_dq, acc_lo, CONF_BF16_MAC
+                )
+                acc_hi = I512_I512_ACC1024_bf_mac_conf(
+                    x_hi, w_hi_dq, acc_hi, CONF_BF16_MAC
+                )
+
+                chunk = chunk + u32(1)
 
             p_row = p_row + u32(2)
             group = group + u32(1)
 
-        p_c[row] = bf16(acc)
+        from pythoc.aie import reduce_add  # noqa: F401
+        s_lo: f32 = reduce_add(acc_lo)
+        s_hi: f32 = reduce_add(acc_hi)
+        p_c[row] = bf16(s_lo + s_hi)
         row = row + u32(1)

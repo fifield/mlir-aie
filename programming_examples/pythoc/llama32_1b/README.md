@@ -80,14 +80,21 @@ Real HF weights (`unsloth/Llama-3.2-1B-Instruct`), measured on NPU2:
 |---|---|---|
 | BF16 default (6 placed builders, all 9 o_ffn devices placed) | ~1.84s | ~8.19 tok/s |
 | BF16 all cached (`PYTHOC_LLAMA_USE_PLACED_BUILDERS=cached`) | ~1.92s | ~8.08 tok/s |
-| AWQ (Phase 6, scalar per-nibble dequant) | ~1.85s | ~0.06 tok/s (scalar bottleneck) |
+| AWQ vectorized (Fix2Float dequant) | ~1.89s | ~6.43 tok/s (155 ms/token) |
+| AWQ scalar per-nibble (pre-vectorization, kept for reference) | ~1.85s | ~0.06 tok/s (16952 ms/token) |
 
-BF16 delta within run-to-run noise. AWQ decode is currently 100× slower
-than BF16 because the uint4→bf16 inner loop runs scalar-per-nibble — the
-vectorized path needs a PythoC `bitcast_acc32_to_accfloat` op that
-doesn't exist yet (Stage 0 Subtask B option 2, deferred). AWQ
-correctness verified by `make hf-gate QUANT=awq` (same token output as
-BF16 for the "Paris" prompt).
+AWQ decode is now within ~22% of BF16 perf, ~110× faster than the
+scalar per-nibble baseline.  The uint4→bf16 inner loop uses the
+AIE-API Fix2Float magic-number reinterpret trick
+(aie_api/detail/aie2p/elementary.hpp:51-58): unpack u4 nibbles to u8,
+zero-extend to acc32 via UPS, integer-add the magic constant
+`0x4b010000` per lane, bitcast acc32 → accfloat, then subtract the
+magic in bf16 space via the `bf_msc_conf(magic_bf, 1.0, acc, conf=60)`
+hardware multiply-subtract (folds the float-subtract into a MAC unit).
+The `<32 x f32>` fadd/fsub vector ops don't legalize on AIE2P GISel;
+the MSC trick avoids that.  AWQ correctness verified by
+`make hf-gate QUANT=awq` (bit-identical tokens to scalar + BF16 for
+the "Paris" prompt).
 
 #### Phase 6 status — complete
 
