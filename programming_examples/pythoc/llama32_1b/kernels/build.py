@@ -501,3 +501,145 @@ def compile_rope(output_dir: Optional[str] = None, verbose: bool = False) -> Pat
         dst = dst_dir / "rope_pythoc.o"
         shutil.copy2(produced, dst)
         return dst
+
+
+# ---------------------------------------------------------------------------
+# Packed-uint4 AWQ kernel builders (Stage 2).
+#
+# Each helper mirrors compile_matvec / compile_matvec_k8192 above; the
+# kernels themselves use the SCALAR per-nibble decode path (the vectorized
+# uint4 -> bf16 chain requires a PythoC bitcast op that doesn't exist yet,
+# per the Stage-0 receipts).  ``set_ctrl_reg(1, 12)`` is the only lazy
+# intrinsic needed inside the AWQ kernels (no MAC intrinsics in the scalar
+# fallback path, so conf=60 doesn't apply here).
+# ---------------------------------------------------------------------------
+
+
+def compile_awq_mv(output_dir: Optional[str] = None, verbose: bool = False) -> Path:
+    """Compile kernels/awq_mv.py -> awq_mv_pythoc.o.
+
+    Fused-decode AWQ matvec with runtime m/k/row_offset and combined-row
+    ABI.  Source has two @aie_kernel functions; the helper
+    (``awq_linalg_fill_bf16``) is defined FIRST so compile_pythoc_source
+    picks it up via helper_nodes while compiling the named entry
+    ``awq_matvec_vectorized_u4_bf16``.  Both symbols land in one .o.
+
+    Module-level constants (``GROUP_SIZE``, ``DIM_M_OUTPUT``) are
+    referenced inside the kernel bodies, so they must be seeded via
+    ``extra_globals`` -- the PythoC AST walker only auto-imports its
+    hard-coded list.
+    """
+    import shutil, tempfile
+    from pythoc.aie import set_ctrl_reg
+    extras = {
+        "set_ctrl_reg": set_ctrl_reg,
+        "GROUP_SIZE": 128,
+        "DIM_M_OUTPUT": 8,
+    }
+    with tempfile.TemporaryDirectory(prefix="awq_mv_pythoc_") as tmp:
+        produced = compile_pythoc_source(
+            source_code=_read("awq_mv.py"),
+            function_name="awq_matvec_vectorized_u4_bf16",
+            target_arch="aie2p",
+            output_dir=tmp,
+            verbose=verbose,
+            extra_globals=extras,
+        )
+        dst_dir = Path(output_dir) if output_dir else Path.cwd()
+        dst = dst_dir / "awq_mv_pythoc.o"
+        shutil.copy2(produced, dst)
+        return dst
+
+
+def compile_awq_mv_k8192(output_dir: Optional[str] = None, verbose: bool = False) -> Path:
+    """Compile kernels/awq_mv_k8192.py -> awq_mv_k8192_pythoc.o.
+
+    Same shape as compile_awq_mv but with the FFN down-projection symbol
+    names (``dg_awq_matvec_vectorized_u4_bf16``,
+    ``dg_awq_linalg_fill_bf16``) and DIM_M_OUTPUT=2.
+    """
+    import shutil, tempfile
+    from pythoc.aie import set_ctrl_reg
+    extras = {
+        "set_ctrl_reg": set_ctrl_reg,
+        "GROUP_SIZE": 128,
+        "DIM_M_OUTPUT": 2,
+    }
+    with tempfile.TemporaryDirectory(prefix="awq_mv_k8192_pythoc_") as tmp:
+        produced = compile_pythoc_source(
+            source_code=_read("awq_mv_k8192.py"),
+            function_name="dg_awq_matvec_vectorized_u4_bf16",
+            target_arch="aie2p",
+            output_dir=tmp,
+            verbose=verbose,
+            extra_globals=extras,
+        )
+        dst_dir = Path(output_dir) if output_dir else Path.cwd()
+        dst = dst_dir / "awq_mv_k8192_pythoc.o"
+        shutil.copy2(produced, dst)
+        return dst
+
+
+def compile_awq_gemv_k2048_m32_g128_vecdeq(
+    output_dir: Optional[str] = None, verbose: bool = False
+) -> Path:
+    """Compile kernels/awq_gemv_k2048_m32_g128_vecdeq.py ->
+    awq_gemv_k2048_m32_g128_vecdeq_pythoc.o.
+
+    Standalone dim-specialized AWQ GEMV (K=2048, M=32, GS=128).  The
+    symbol inside is ``awq_gemv_u4_bf16`` -- this is the same name used
+    by the K=8192/M=8 variant (different ELF, can't co-link).  Each
+    cached MLIR points at its own ``.o`` via ``link_with``.
+    """
+    import shutil, tempfile
+    from pythoc.aie import set_ctrl_reg
+    extras = {
+        "set_ctrl_reg": set_ctrl_reg,
+        "K": 2048,
+        "M": 32,
+        "GROUP_SIZE": 128,
+    }
+    with tempfile.TemporaryDirectory(prefix="awq_gemv_k2048_m32_g128_vecdeq_") as tmp:
+        produced = compile_pythoc_source(
+            source_code=_read("awq_gemv_k2048_m32_g128_vecdeq.py"),
+            function_name="awq_gemv_u4_bf16",
+            target_arch="aie2p",
+            output_dir=tmp,
+            verbose=verbose,
+            extra_globals=extras,
+        )
+        dst_dir = Path(output_dir) if output_dir else Path.cwd()
+        dst = dst_dir / "awq_gemv_k2048_m32_g128_vecdeq_pythoc.o"
+        shutil.copy2(produced, dst)
+        return dst
+
+
+def compile_awq_gemv_k8192_m8_g128_vecdeq(
+    output_dir: Optional[str] = None, verbose: bool = False
+) -> Path:
+    """Compile kernels/awq_gemv_k8192_m8_g128_vecdeq.py ->
+    awq_gemv_k8192_m8_g128_vecdeq_pythoc.o.
+
+    Standalone dim-specialized AWQ GEMV (K=8192, M=8, GS=128).
+    """
+    import shutil, tempfile
+    from pythoc.aie import set_ctrl_reg
+    extras = {
+        "set_ctrl_reg": set_ctrl_reg,
+        "K": 8192,
+        "M": 8,
+        "GROUP_SIZE": 128,
+    }
+    with tempfile.TemporaryDirectory(prefix="awq_gemv_k8192_m8_g128_vecdeq_") as tmp:
+        produced = compile_pythoc_source(
+            source_code=_read("awq_gemv_k8192_m8_g128_vecdeq.py"),
+            function_name="awq_gemv_u4_bf16",
+            target_arch="aie2p",
+            output_dir=tmp,
+            verbose=verbose,
+            extra_globals=extras,
+        )
+        dst_dir = Path(output_dir) if output_dir else Path.cwd()
+        dst = dst_dir / "awq_gemv_k8192_m8_g128_vecdeq_pythoc.o"
+        shutil.copy2(produced, dst)
+        return dst

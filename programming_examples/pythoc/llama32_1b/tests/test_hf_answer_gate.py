@@ -42,6 +42,13 @@ N_TOKENS = 10
 EXPECTED_FIRST_N_DECODE = 10
 EXPECTED_SUBSTRING = "paris"  # case-insensitive
 
+# Phase 6 / Stage 3 Subtask D: parameterize the gate on QUANT so that
+# `make hf-gate QUANT=awq` exercises the AWQ NPU decode path.
+# Defaults to bf16 (the original Phase 4 gate). For QUANT=awq, the caller
+# must supply HF_GATE_AWQ_WEIGHTS pointing at a repacked AWQ model dir.
+HF_GATE_QUANT = os.environ.get("HF_GATE_QUANT", "bf16")
+HF_GATE_AWQ_WEIGHTS = os.environ.get("HF_GATE_AWQ_WEIGHTS", "")
+
 # Regex for the per-token log line emitted by --profile mode.
 RE_TOKEN = re.compile(r"^\s*Token\s+(\d+):\s*id=(\d+),\s*time=(\d+)ms")
 
@@ -119,10 +126,18 @@ def test_hf_answer_gate_paris():
         "--n-tokens", str(N_TOKENS),
         "--profile",
         "--prompt", PROMPT,
-        "--quant", "bf16",
+        "--quant", HF_GATE_QUANT,
         "--model", "instruct",
         "--hf-model-id", HF_MODEL,
     ]
+    if HF_GATE_QUANT == "awq":
+        if not HF_GATE_AWQ_WEIGHTS:
+            pytest.skip(
+                "HF_GATE_QUANT=awq requires HF_GATE_AWQ_WEIGHTS=<path> "
+                "(set via `make hf-gate QUANT=awq AWQ_WEIGHTS=...`)"
+            )
+        cmd += ["--awq-weights", HF_GATE_AWQ_WEIGHTS,
+                "--awq-decode-experimental"]
 
     env = os.environ.copy()
     pip_peano = "/home/jfifield/npu-dev-air/venv/lib/python3.12/site-packages/llvm-aie"
