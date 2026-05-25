@@ -128,7 +128,6 @@ def test_hf_answer_gate_paris():
         "--prompt", PROMPT,
         "--quant", HF_GATE_QUANT,
         "--model", "instruct",
-        "--hf-model-id", HF_MODEL,
     ]
     if HF_GATE_QUANT == "awq":
         if not HF_GATE_AWQ_WEIGHTS:
@@ -136,8 +135,12 @@ def test_hf_answer_gate_paris():
                 "HF_GATE_QUANT=awq requires HF_GATE_AWQ_WEIGHTS=<path> "
                 "(set via `make hf-gate QUANT=awq AWQ_WEIGHTS=...`)"
             )
+        # inference.py rejects `--hf-model-id` with `--quant awq`
+        # (tokenizer is loaded from the AWQ-weights dir instead).
         cmd += ["--awq-weights", HF_GATE_AWQ_WEIGHTS,
                 "--awq-decode-experimental"]
+    else:
+        cmd += ["--hf-model-id", HF_MODEL]
 
     env = os.environ.copy()
     pip_peano = "/home/jfifield/npu-dev-air/venv/lib/python3.12/site-packages/llvm-aie"
@@ -160,7 +163,9 @@ def test_hf_answer_gate_paris():
         f"Last 2KB:\n{proc.stdout[-2000:]}"
     )
 
-    tok = AutoTokenizer.from_pretrained(HF_MODEL)
+    # For AWQ mode the AWQ-weights dir ships its own tokenizer; otherwise use HF.
+    tokenizer_src = HF_GATE_AWQ_WEIGHTS if HF_GATE_QUANT == "awq" else HF_MODEL
+    tok = AutoTokenizer.from_pretrained(tokenizer_src)
     head = token_ids[:EXPECTED_FIRST_N_DECODE]
     text = tok.decode(head, skip_special_tokens=True)
     print(f"\n[hf-gate] first {len(head)} decode tokens -> {head}")
