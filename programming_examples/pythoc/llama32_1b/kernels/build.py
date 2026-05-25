@@ -530,11 +530,42 @@ def compile_awq_mv(output_dir: Optional[str] = None, verbose: bool = False) -> P
     hard-coded list.
     """
     import shutil, tempfile
-    from pythoc.aie import set_ctrl_reg
+    import ml_dtypes
+    from pythoc.aie import (
+        set_ctrl_reg,
+        I512_I512_ACC1024_bf_msc_conf,
+        I512_I512_ACC1024_bf_mac_conf,
+        v32accfloat_to_v32bf16,
+        reduce_add,
+        unpack_unsigned,
+        unpack_I512_I8_I4,
+        vector_add,
+        vector_sub,
+        vector_mul,
+        vector_cast,
+        vector_extract,
+        broadcast,
+    )
     extras = {
         "set_ctrl_reg": set_ctrl_reg,
+        "I512_I512_ACC1024_bf_msc_conf": I512_I512_ACC1024_bf_msc_conf,
+        "I512_I512_ACC1024_bf_mac_conf": I512_I512_ACC1024_bf_mac_conf,
+        "v32accfloat_to_v32bf16": v32accfloat_to_v32bf16,
+        "reduce_add": reduce_add,
+        "unpack_unsigned": unpack_unsigned,
+        "unpack_I512_I8_I4": unpack_I512_I8_I4,
+        "vector_add": vector_add,
+        "vector_sub": vector_sub,
+        "vector_mul": vector_mul,
+        "vector_cast": vector_cast,
+        "vector_extract": vector_extract,
+        "broadcast": broadcast,
         "GROUP_SIZE": 128,
         "DIM_M_OUTPUT": 8,
+        # Fix2Float magic constants (see kernels/awq_mv.py docstring).
+        "MAGIC_L_I32": 0x4b010000,
+        "MAGIC_L_BF": ml_dtypes.bfloat16(8454144.0),
+        "CONF_BF16_MAC": 60,
     }
     with tempfile.TemporaryDirectory(prefix="awq_mv_pythoc_") as tmp:
         produced = compile_pythoc_source(
@@ -559,11 +590,41 @@ def compile_awq_mv_k8192(output_dir: Optional[str] = None, verbose: bool = False
     ``dg_awq_linalg_fill_bf16``) and DIM_M_OUTPUT=2.
     """
     import shutil, tempfile
-    from pythoc.aie import set_ctrl_reg
+    import ml_dtypes
+    from pythoc.aie import (
+        set_ctrl_reg,
+        I512_I512_ACC1024_bf_msc_conf,
+        I512_I512_ACC1024_bf_mac_conf,
+        v32accfloat_to_v32bf16,
+        reduce_add,
+        unpack_unsigned,
+        unpack_I512_I8_I4,
+        vector_add,
+        vector_sub,
+        vector_mul,
+        vector_cast,
+        vector_extract,
+        broadcast,
+    )
     extras = {
         "set_ctrl_reg": set_ctrl_reg,
+        "I512_I512_ACC1024_bf_msc_conf": I512_I512_ACC1024_bf_msc_conf,
+        "I512_I512_ACC1024_bf_mac_conf": I512_I512_ACC1024_bf_mac_conf,
+        "v32accfloat_to_v32bf16": v32accfloat_to_v32bf16,
+        "reduce_add": reduce_add,
+        "unpack_unsigned": unpack_unsigned,
+        "unpack_I512_I8_I4": unpack_I512_I8_I4,
+        "vector_add": vector_add,
+        "vector_sub": vector_sub,
+        "vector_mul": vector_mul,
+        "vector_cast": vector_cast,
+        "vector_extract": vector_extract,
+        "broadcast": broadcast,
         "GROUP_SIZE": 128,
         "DIM_M_OUTPUT": 2,
+        "MAGIC_L_I32": 0x4b010000,
+        "MAGIC_L_BF": ml_dtypes.bfloat16(8454144.0),
+        "CONF_BF16_MAC": 60,
     }
     with tempfile.TemporaryDirectory(prefix="awq_mv_k8192_pythoc_") as tmp:
         produced = compile_pythoc_source(
