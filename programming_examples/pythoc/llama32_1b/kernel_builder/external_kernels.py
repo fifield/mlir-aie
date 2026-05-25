@@ -132,13 +132,12 @@ def _validate_awq_gemv_variant(variant):
     return variant
 
 
-def awq_gemv_object_name(k, m, group_size, *, variant="vecdeq"):
-    """Return the dimension-specialized packed-AWQ GEMV object filename.
+def awq_gemv_kernel_name(k, m, group_size, *, variant="vecdeq"):
+    """Return the dimension-specialized packed-AWQ GEMV kernel name (no .o).
 
-    The ``_pythoc`` suffix mirrors the other PythoC-built ``.o`` outputs
-    (mv_pythoc.o, attn_pythoc.o, rope_pythoc.o, ...). Stage 2 ports only
-    the ``vecdeq`` variant; scalar can be added later if a smoke test
-    requires it.
+    Used as both the cache entry name (``<name>.npu.air.mlir`` /
+    ``<name>.elf``) and as the prefix for the corresponding object file
+    (``<name>_pythoc.o`` -- see ``awq_gemv_object_name``).
     """
     k = int(k); m = int(m); group_size = int(group_size)
     if k <= 0 or m <= 0 or group_size <= 0:
@@ -148,7 +147,18 @@ def awq_gemv_object_name(k, m, group_size, *, variant="vecdeq"):
     if k % group_size != 0:
         raise ValueError(f"AWQ GEMV K={k} must be divisible by group_size={group_size}")
     variant = _validate_awq_gemv_variant(variant)
-    return f"awq_gemv_k{k}_m{m}_g{group_size}_{variant}_pythoc.o"
+    return f"awq_gemv_k{k}_m{m}_g{group_size}_{variant}"
+
+
+def awq_gemv_object_name(k, m, group_size, *, variant="vecdeq"):
+    """Return the dimension-specialized packed-AWQ GEMV object filename.
+
+    The ``_pythoc`` suffix mirrors the other PythoC-built ``.o`` outputs
+    (mv_pythoc.o, attn_pythoc.o, rope_pythoc.o, ...). Stage 2 ports only
+    the ``vecdeq`` variant; scalar can be added later if a smoke test
+    requires it.
+    """
+    return f"{awq_gemv_kernel_name(k, m, group_size, variant=variant)}_pythoc.o"
 
 
 def compile_awq_gemv(k, m, group_size, *, variant="vecdeq", force=False):

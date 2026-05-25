@@ -27,11 +27,12 @@ diagnostic approach.
 | matvec (BF16 GEMV K=8192) | o_gemv_ffn (FFN down) | `kernels/matvec_k8192.py` | `mv_k8192_pythoc.o` ✓ |
 | Flash-attention primitives (19) | flash_attn | `kernels/attn.py` | `attn_pythoc.o` ✓ |
 | BF16 GEMM (prefill matmuls) | rms_gemms_rope (v_matmul), o_ffn | `kernels/bf16_gemm.py` | `bf16_gemm_pythoc_M16_N8_K4_AT_bf16out_*.o` ✓ |
-| AWQ uint4 GEMV | (AWQ path) | ☐ Phase 6 deferred | — |
+| AWQ uint4 matvec (fused decode, runtime m/k) | o_gemv_ffn_awq | `kernels/awq_mv.py` + `kernels/awq_mv_k8192.py` | `awq_mv_pythoc.o`, `awq_mv_k8192_pythoc.o` ✓ |
+| AWQ uint4 GEMV (standalone, dim-specialized) | awq_matvec | `kernels/awq_gemv_k{2048_m32,8192_m8}_g128_vecdeq.py` | `awq_gemv_k{2048_m32,8192_m8}_g128_vecdeq_pythoc.o` ✓ |
 
 `reference_o/` is empty — no `.cc`-built `.o` left in the project.
 
-### Placed-IRON builders — 6 of 6 enabled by default
+### Placed-IRON builders — 8 of 8 enabled by default
 
 | Builder | Phase | Used by | Default |
 |---|---|---|---|
@@ -41,6 +42,8 @@ diagnostic approach.
 | `builders/flash_attn.py` | prefill flash attention | `llama32_1b_prefill.py` | ✓ placed-IRON |
 | `builders/rms_gemms_rope.py` | prefill (RMSNorm + QKV GEMM + RoPE) | per-layer prefill | ✓ placed-IRON |
 | `builders/o_ffn.py` | prefill (O + FFN with GEMMs) | per-layer prefill | ✓ placed-IRON (all 9 devices, incl. og/gg/ug/dg GEMMs landed Phase 4.6d/e) |
+| `builders/o_gemv_ffn_awq.py` | decode (O + FFN, packed-AWQ) | `o_gemv_ffn_awq_npu` (when `--quant awq`) | ✓ placed-IRON (Phase 6 Stage 3) |
+| `builders/awq_matvec.py` | standalone AWQ GEMV | `awq_gemv_npu`, `awq_gemv_npu_tiled` | ✓ placed-IRON (Phase 6 Stage 3) |
 
 `rms_gemms_rope`'s prefill V/K/Q GEMMs originally landed with a kernel
 stride/loop-bound mismatch (kernel built as `M_BLOCKS=16, N_BLOCKS=8`
@@ -75,10 +78,33 @@ Real HF weights (`unsloth/Llama-3.2-1B-Instruct`), measured on NPU2:
 
 | Config | Prefill (16 layers, seq=2048) | Decode steady-state |
 |---|---|---|
-| Default (6 placed builders, all 9 o_ffn devices placed) | ~1.84s | ~8.19 tok/s |
-| All cached (`PYTHOC_LLAMA_USE_PLACED_BUILDERS=cached`) | ~1.92s | ~8.08 tok/s |
+| BF16 default (6 placed builders, all 9 o_ffn devices placed) | ~1.84s | ~8.19 tok/s |
+| BF16 all cached (`PYTHOC_LLAMA_USE_PLACED_BUILDERS=cached`) | ~1.92s | ~8.08 tok/s |
+| AWQ (Phase 6, scalar per-nibble dequant) | ~1.85s | ~0.06 tok/s (scalar bottleneck) |
 
-Delta within run-to-run noise.
+BF16 delta within run-to-run noise. AWQ decode is currently 100× slower
+than BF16 because the uint4→bf16 inner loop runs scalar-per-nibble — the
+vectorized path needs a PythoC `bitcast_acc32_to_accfloat` op that
+doesn't exist yet (Stage 0 Subtask B option 2, deferred). AWQ
+correctness verified by `make hf-gate QUANT=awq` (same token output as
+BF16 for the "Paris" prompt).
+
+#### Phase 6 status — complete
+
+AWQ uint4 decode path lands end-to-end:
+- PythoC kernels (`kernels/awq_mv.py`, `awq_mv_k8192.py`, dim-specialized
+  `awq_gemv_k{K}_m{M}_g{G}_vecdeq.py`) replace the C++ `awq_mv.cc` /
+  `awq_gemv.cc` from the awq_impl branch.
+- Placed-IRON builders (`builders/o_gemv_ffn_awq.py`,
+  `builders/awq_matvec.py`) replace the AIR-tree `awq_matvec.py` /
+  `awq_gemv_builder.py` stitchers.
+- All scaffolding (.cc + AIR builders + multi-launch stitcher) deleted
+  in Stage 4. Cached MLIR retained as A/B fallback via
+  `PYTHOC_LLAMA_USE_PLACED_BUILDERS=cached`.
+- Default-on: `make run-awq` automatically routes through NPU AWQ
+  decode (was opt-in via `AWQ_DECODE_EXPERIMENTAL=1` pre-Phase 6).
+- HF-gate AWQ + BF16 no-regression + A/B cached fallback all green on
+  real `unsloth/Llama-3.2-1B-Instruct` AWQ weights.
 
 ### Where each part of the pipeline runs
 
@@ -331,7 +357,8 @@ Full multi-session brief and resolution notes live in beads at
   - Phase 4.4: `o_gemv_ffn` placed-IRON
   - Phase 4.5 (a→e): `rms_gemms_rope` placed-IRON, 7 of 7 devices (V/K/Q GEMM stride fix landed post-4.5e)
   - Phase 4.6 (a→f): `o_ffn` placed-IRON, all 9 of 9 devices (og/gg/ug/dg GEMMs landed Phase 4.6d/e via per-device kernel-stride derivation)
-  - Phase 6: AWQ uint4 path (deferred)
+  - Phase 6 (Stages 0-4): AWQ uint4 path -- PythoC kernels +
+    placed-IRON builders, default-on for `--quant awq`. HF-gate green.
 - Defaults: placed-IRON for every shipped builder. Override with
   `PYTHOC_LLAMA_USE_PLACED_BUILDERS=cached` to A/B against the cached
   MLIR substrate.
