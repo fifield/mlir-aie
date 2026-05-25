@@ -1,0 +1,1426 @@
+# Copyright (C) 2026, Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+"""Placed-IRON builder for the llama32_1b ``o_gemv_ffn_awq`` decode kernel.
+
+This is the Stage-3 AWQ counterpart of ``builders/o_gemv_ffn.py``. The 8
+fused-decode launches are identical in topology; the 4 GEMV launches
+(og, gg, ug, dg) swap their BF16 weight DMAs for packed-uint4 + groupwise
+parameter (AWQ) weight DMAs and call AWQ external kernels:
+
+    og/gg/ug:  awq_matvec_vectorized_u4_bf16 + awq_linalg_fill_bf16
+               link_with "awq_mv_pythoc.o"
+               weight memref: ui8[M, K/2 + 4*(K/group_size)]   (K=2048, row=1088)
+    dg     :  dg_awq_matvec_vectorized_u4_bf16 + dg_awq_linalg_fill_bf16
+               link_with "awq_mv_k8192_pythoc.o"
+               weight memref: ui8[M, K/2 + 4*(K/group_size)]   (K=8192, row=4352)
+
+The 4 non-GEMV launches (a1 add, rm rms, sw silu_mul, a2 add) are
+structurally unchanged from the BF16 sibling. We copy those helpers here
+rather than importing them because they hardcode the BF16
+``o_gemv_ffn_host_arg_types()`` host signature — and the AWQ dispatcher
+needs ``memref<2048x1088xui8>`` / ``memref<8192x1088xui8>`` /
+``memref<2048x4352xui8>`` for the four AWQ weight args (0, 7, 9, 12).
+See the report from the subagent for details on this copy-vs-reuse
+trade-off.
+
+References:
+  * ``reference_mlir/o_gemv_ffn_awq.npu.air.mlir`` — ground truth (7,964 lines).
+  * ``builders/o_gemv_ffn.py`` — BF16 sibling template.
+  * ``kernels/awq_mv.py``, ``kernels/awq_mv_k8192.py`` — external kernel ABI.
+  * ``llama32_1b_awq_runtime.py`` lines 204-228 — runtime arg order +
+    output_indices / static_input_indices / intermediate_indices.
+"""
+
+from __future__ import annotations
+
+from typing import Dict, List
+
+import numpy as np
+from ml_dtypes import bfloat16
+
+from aie.dialects.aie import (
+    AIEDevice,
+    DMAChannelDir,
+    LockAction,
+    WireBundle,
+    buffer,
+    core,
+    device,
+    dma_bd,
+    dma_start,
+    external_buffer,
+    external_func,
+    flow,
+    lock,
+    mem,
+    memtile_dma,
+    next_bd,
+    shim_dma_allocation,
+    tile,
+    use_lock,
+)
+from aie.dialects.aiex import (
+    EndOp,
+    bds,
+    dma_await_task,
+    dma_configure_task_for,
+    dma_free_task,
+    dma_start_task,
+    runtime_sequence,
+)
+from aie.extras.context import mlir_mod_ctx
+from aie.extras.dialects import arith
+from aie.helpers.dialects.scf import _for as range_
+from aie.ir import InsertionPoint, UnitAttr
+
+from ._emit import (
+    attach_loop_annotation_to_all_scf_for,
+    bf16_memref,
+    bf16_np,
+)
+
+
+# ---------------------------------------------------------------------------
+# Constants matching the cached AWQ AIR-stitched IR for Llama-3.2-1B.
+# ---------------------------------------------------------------------------
+EMB_DIM = 2048      # model hidden size
+HIDDEN_DIM = 8192   # FFN hidden size
+GROUP_SIZE = 128    # AWQ group size baked into kernels/awq_mv.py
+N_COLS = 8          # 8 compute columns in the matvec herd
+K_TILE = 4          # inner K tiling factor for the K=2048 AWQ matvec
+M_TILE = 8          # rows processed per K=2048 matvec call
+
+# Down-projection (K=8192) tiling.
+K_TILE_K8192 = 1    # inner K factor for the K=8192 matvec
+M_TILE_K8192 = 2    # rows processed per K=8192 matvec call
+
+# Inline-add per-tile chunk size (256 bf16 elements).
+ADD_CHUNK = 256
+
+# SwiGLU per-tile buffer size.
+SWIGLU_CHUNK = 1024
+
+# Per-segment kernel object filenames.
+KO_AWQ_MV = "awq_mv_pythoc.o"
+KO_AWQ_MV_K8192 = "awq_mv_k8192_pythoc.o"
+KO_SWIGLU = "silu_and_mul_bf16.o"
+KO_RMS = "rms_norm_2048_bf16.o"
+
+
+def _combined_row_bytes(k: int, group_size: int = GROUP_SIZE) -> int:
+    """Bytes per AWQ row: K/2 packed uint4 + 4*(K/group_size) param bytes."""
+    return k // 2 + 4 * (k // group_size)
+
+
+# ---------------------------------------------------------------------------
+# Channel-number map (verbatim from cached
+# reference_mlir/o_gemv_ffn_awq.npu.air.mlir shim_dma_allocations).
+# Note: AWQ-tree channel numbers are different from BF16-tree numbers.
+# ---------------------------------------------------------------------------
+_CHANNELS: Dict[str, Dict[str, object]] = {
+    # Phase 1: OG AWQ GEMV (out_rows=2048, awq_mv_pythoc.o)
+    "og_awq_matvec_0":   {"weight_base": 33, "out_base": 32, "input": 1},
+    # Phase 2: Residual add 1 (inline 256-elt herd)
+    "a1_eltwise_add_seg": {"in0": 5, "in1": 6, "out": 7},
+    # Phase 3: FFN RMSNorm (single tile)
+    "rm_rms_seg":         {"in0": 8, "in1": 9, "out": 10},
+    # Phase 4: GG AWQ GEMV (out_rows=8192, awq_mv_pythoc.o)
+    "gg_awq_matvec_0":   {"weight_base": 36, "out_base": 35, "input": 12},
+    # Phase 5: UG AWQ GEMV (out_rows=8192, awq_mv_pythoc.o)
+    "ug_awq_matvec_0":   {"weight_base": 39, "out_base": 34, "input": 17},
+    # Phase 6: SwiGLU (8 tiles, 1024-elt buffers)
+    "sw_silu_mul_seg":    {"in0": 21, "in1": 22, "out": 23},
+    # Phase 7: DG AWQ GEMV (out_rows=2048, K=8192, awq_mv_k8192_pythoc.o)
+    "dg_awq_matvec_0":   {"weight_base": 38, "out_base": 37, "input": 25},
+    # Phase 8: Residual add 2 (inline 256-elt herd)
+    "a2_eltwise_add_seg": {"in0": 29, "in1": 30, "out": 31},
+}
+
+
+# ---------------------------------------------------------------------------
+# 15-arg host signature for the AWQ dispatcher and every segment.
+# ARG ORDER (matches llama32_1b_awq_runtime.py:204-220):
+#   0  : memref<emb_dim x row2048 x ui8>     wo_w (AWQ packed)
+#   1  : memref<emb_dim x bf16>              attn_out
+#   2  : memref<emb_dim x bf16>              proj_buf
+#   3  : memref<emb_dim x bf16>              x_residual
+#   4  : memref<emb_dim x bf16>              res1_buf
+#   5  : memref<emb_dim x bf16>              ffn_norm
+#   6  : memref<emb_dim x bf16>              normed2_buf
+#   7  : memref<hidden_dim x row2048 x ui8>  wgate_w (AWQ packed)
+#   8  : memref<hidden_dim x bf16>           gate_buf
+#   9  : memref<hidden_dim x row2048 x ui8>  wup_w (AWQ packed)
+#  10  : memref<hidden_dim x bf16>           up_buf
+#  11  : memref<hidden_dim x bf16>           swiglu_buf
+#  12  : memref<emb_dim x row8192 x ui8>     wdown_w (AWQ packed, K=8192)
+#  13  : memref<emb_dim x bf16>              down_buf
+#  14  : memref<emb_dim x bf16>              output_buf
+# ---------------------------------------------------------------------------
+def _awq_host_arg_types(emb_dim: int = EMB_DIM,
+                        hidden_dim: int = HIDDEN_DIM,
+                        group_size: int = GROUP_SIZE) -> List:
+    row2048 = _combined_row_bytes(emb_dim, group_size)        # 1088
+    row8192 = _combined_row_bytes(hidden_dim, group_size)     # 4352
+    u8 = np.uint8
+    return [
+        np.ndarray[(emb_dim, row2048), np.dtype[u8]],       #  0 wo_w
+        bf16_np(emb_dim),                                    #  1 attn_out
+        bf16_np(emb_dim),                                    #  2 proj_buf
+        bf16_np(emb_dim),                                    #  3 x_residual
+        bf16_np(emb_dim),                                    #  4 res1_buf
+        bf16_np(emb_dim),                                    #  5 ffn_norm
+        bf16_np(emb_dim),                                    #  6 normed2_buf
+        np.ndarray[(hidden_dim, row2048), np.dtype[u8]],    #  7 wgate_w
+        bf16_np(hidden_dim),                                 #  8 gate_buf
+        np.ndarray[(hidden_dim, row2048), np.dtype[u8]],    #  9 wup_w
+        bf16_np(hidden_dim),                                 # 10 up_buf
+        bf16_np(hidden_dim),                                 # 11 swiglu_buf
+        np.ndarray[(emb_dim, row8192), np.dtype[u8]],       # 12 wdown_w
+        bf16_np(emb_dim),                                    # 13 down_buf
+        bf16_np(emb_dim),                                    # 14 output_buf
+    ]
+
+
+# ---------------------------------------------------------------------------
+# external_buffer triples emitted per device. AIR uses these as opaque
+# metadata; aiecc treats them as references. We mirror the order/shapes
+# the cached MLIR uses so the structural diff stays minimal.
+# ``shapes`` is a list of (shape_tuple, dtype) pairs. dtype is "bf16" or "ui8".
+# ---------------------------------------------------------------------------
+def _emit_external_buffers(*shapes_with_dtype):
+    names = ["__air_external_buffer", "__air_external_buffer_1",
+             "__air_external_buffer_2"]
+    for nm, (shp, dt) in zip(names, shapes_with_dtype):
+        if dt == "bf16":
+            ty = bf16_np(*shp)
+        elif dt == "ui8":
+            ty = np.ndarray[shp, np.dtype[np.uint8]]
+        else:
+            raise ValueError(f"unknown dtype {dt}")
+        external_buffer(ty, name=nm)
+
+
+def _emit_external_buffers_bf16(*shapes):
+    """Backward-compatible helper for all-bf16 external buffer triples."""
+    _emit_external_buffers(*[(s, "bf16") for s in shapes])
+
+
+# ---------------------------------------------------------------------------
+# AWQ GEMV matvec segment (K=2048, awq_mv_pythoc.o). Shared by og, gg, ug.
+# Structurally identical to BF16 matvec_seg_k2048 except weight buffer
+# memrefs are packed uint8 with row width = combined_row_bytes(K=2048) = 1088.
+# ---------------------------------------------------------------------------
+def _emit_awq_matvec_seg_k2048(sym: str, weight_arg_idx: int, input_arg_idx: int,
+                                output_arg_idx: int, out_rows: int,
+                                group_size: int = GROUP_SIZE) -> None:
+    """Emit an AWQ [8,1] matvec herd device with K=2048.
+
+    ``out_rows``  -- 2048 (O proj) or 8192 (gate/up projections).
+    n_outer = out_rows // 1024. Each outer iteration delivers 1024 rows
+    across the 8 columns (128 per column).
+    """
+    chans = _CHANNELS[sym]
+    assert out_rows % 1024 == 0, "out_rows must be multiple of 1024"
+    n_outer = out_rows // 1024
+
+    row_bytes = _combined_row_bytes(EMB_DIM, group_size)    # 1088
+    # Output DMA shape per col: 128 elts arranged as (16,64),(8,1).
+    y_dims = [(16, 64), (8, 1)]
+    y_len = 128
+    x_repeat_count = 31
+    # Weight DMA shape per col task: 16 mini-rows of 16 chunks of 544 bytes
+    # = 139264 bytes = 8 rows * 1088 bytes * 16 mem-tile cycles.
+    w_dims = [(16, 69632), (16, 544), (544, 1)]
+    w_len = 16 * 16 * 544  # 139264
+    weight_col_stride = M_TILE * row_bytes              # 8 * 1088 = 8704
+    weight_outer_stride = 1024 * row_bytes              # 1024 * 1088 = 1_114_112
+    output_col_stride = M_TILE                          # 8
+    output_outer_stride = 1024
+
+    @device(AIEDevice.npu2, sym_name=sym)
+    def _dev():
+        shim_tiles = [tile(c, 0) for c in range(N_COLS)]
+        mem_tiles = [tile(c, 1) for c in range(N_COLS)]
+        compute_tiles = [tile(c, 2) for c in range(N_COLS)]
+
+        # Mem tile locks (4 ids 3..0, AIR descending col order).
+        mem_locks = {}
+        for col in reversed(range(N_COLS)):
+            mt = mem_tiles[col]
+            mem_locks[col] = {
+                "w_dma_done": lock(mt, lock_id=3, init=1),
+                "w_ready":    lock(mt, lock_id=2, init=0),
+                "y_done":     lock(mt, lock_id=1, init=1),
+                "y_ready":    lock(mt, lock_id=0, init=0),
+            }
+
+        # Compute tile locks (6 ids 5..0, ascending col).
+        core_locks = {}
+        for col in range(N_COLS):
+            ct = compute_tiles[col]
+            core_locks[col] = {
+                "w_avail": lock(ct, lock_id=5, init=1),
+                "w_ready": lock(ct, lock_id=4, init=0),
+                "x_avail": lock(ct, lock_id=3, init=1),
+                "x_ready": lock(ct, lock_id=2, init=0),
+                "y_done":  lock(ct, lock_id=1, init=1),
+                "y_full":  lock(ct, lock_id=0, init=0),
+            }
+
+        # Buffer types.
+        from aie.ir import MemRefType, IntegerAttr, IntegerType
+        from aie.extras import types as T
+        def _ui8_memref(*shape, memory_space=None):
+            ms = None
+            if memory_space is not None:
+                ms = IntegerAttr.get(
+                    IntegerType.get_signless(32), memory_space)
+            return MemRefType.get(list(shape), T.ui8(), None, ms)
+
+        _W_L1_TY = _ui8_memref(K_TILE, row_bytes, memory_space=2)
+        _X_L1_TY = bf16_memref(EMB_DIM, memory_space=2)
+        _Y_L1_TY = bf16_memref(M_TILE, memory_space=2)
+        _W_L2_TY = _ui8_memref(1, M_TILE, row_bytes, memory_space=1)
+        _Y_L2_TY = bf16_memref(1, M_TILE, memory_space=1)
+
+        # Mem tile buffers (descending col order to match AIR emit).
+        mem_buf_w = {}
+        mem_buf_y = {}
+        for col in reversed(range(N_COLS)):
+            mem_buf_w[col] = buffer(mem_tiles[col], datatype=_W_L2_TY)
+        for col in reversed(range(N_COLS)):
+            mem_buf_y[col] = buffer(mem_tiles[col], datatype=_Y_L2_TY)
+
+        core_buf_y = {}
+        core_buf_w = {}
+        core_buf_x = {}
+        for col in reversed(range(N_COLS)):
+            core_buf_y[col] = buffer(compute_tiles[col], datatype=_Y_L1_TY)
+            core_buf_w[col] = buffer(compute_tiles[col], datatype=_W_L1_TY)
+            core_buf_x[col] = buffer(compute_tiles[col], datatype=_X_L1_TY)
+
+        # External buffers: weight (M, row_bytes) ui8, input (K,) bf16,
+        # output (M,) bf16.  Order matches cached MLIR.
+        _emit_external_buffers(
+            ((out_rows, row_bytes), "ui8"),
+            ((EMB_DIM,), "bf16"),
+            ((out_rows,), "bf16"),
+        )
+
+        # Declare external_funcs.
+        from ml_dtypes import bfloat16 as _bf16
+        fill_fn = external_func(
+            "awq_linalg_fill_bf16",
+            inputs=[_bf16, _Y_L1_TY],
+            link_with=KO_AWQ_MV,
+        )
+        fill_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
+        matvec_fn = external_func(
+            "awq_matvec_vectorized_u4_bf16",
+            inputs=[np.int32, np.int32, np.int32, _W_L1_TY, _X_L1_TY, _Y_L1_TY],
+            link_with=KO_AWQ_MV,
+        )
+        matvec_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
+
+        # Compute tile mem + core blocks (descending col).
+        for col in reversed(range(N_COLS)):
+            ct_op = compute_tiles[col]
+            cl = core_locks[col]
+            y_buf = core_buf_y[col]
+            w_buf = core_buf_w[col]
+            x_buf = core_buf_x[col]
+
+            def _make_core_mem(_ct, _cl, _yb, _wb, _xb):
+                @mem(_ct)
+                def _core_mem(block):
+                    dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
+                    with block[1]:
+                        use_lock(_cl["y_full"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_yb, offset=0, len=M_TILE)
+                        use_lock(_cl["y_done"], LockAction.Release, value=1)
+                        next_bd(block[1])
+                    with block[2]:
+                        EndOp()
+                    with block[3]:
+                        dma_start(DMAChannelDir.S2MM, 0, dest=block[4], chain=block[5])
+                    with block[4]:
+                        use_lock(_cl["x_avail"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_xb, offset=0, len=EMB_DIM)
+                        use_lock(_cl["x_ready"], LockAction.Release, value=1)
+                        next_bd(block[4])
+                    with block[5]:
+                        dma_start(DMAChannelDir.S2MM, 1, dest=block[6], chain=block[2])
+                    with block[6]:
+                        use_lock(_cl["w_avail"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_wb, offset=0, len=K_TILE * row_bytes)
+                        use_lock(_cl["w_ready"], LockAction.Release, value=1)
+                        next_bd(block[6])
+            _make_core_mem(ct_op, cl, y_buf, w_buf, x_buf)
+
+            def _make_core_body(_ct, _cl, _yb, _wb, _xb):
+                import sys as _sys
+                from aie.extras.dialects.arith import index_cast
+
+                @core(_ct)
+                def _core_body():
+                    k_total = arith.constant(EMB_DIM, T.i32())
+                    k_tile_c = arith.constant(K_TILE, T.i32())
+                    zero_bf16 = arith.constant(0.0, T.bf16())
+                    for _ in range_(_sys.maxsize):
+                        use_lock(_cl["y_done"], LockAction.AcquireGreaterEqual, value=1)
+                        fill_fn(zero_bf16, _yb)
+                        for k_idx in range_(0, M_TILE, K_TILE):
+                            k_i32 = index_cast(k_idx, to=T.i32())
+                            use_lock(_cl["x_ready"], LockAction.AcquireGreaterEqual, value=1)
+                            use_lock(_cl["w_ready"], LockAction.AcquireGreaterEqual, value=1)
+                            matvec_fn(k_tile_c, k_total, k_i32, _wb, _xb, _yb)
+                            use_lock(_cl["x_avail"], LockAction.Release, value=1)
+                            use_lock(_cl["w_avail"], LockAction.Release, value=1)
+                        use_lock(_cl["y_full"], LockAction.Release, value=1)
+            _make_core_body(ct_op, cl, y_buf, w_buf, x_buf)
+
+        # Flows (shim<->mem; shim->compute(input); mem<->compute).
+        for col in range(N_COLS):
+            flow(shim_tiles[col], WireBundle.DMA, 0, mem_tiles[col], WireBundle.DMA, 0)
+        for col in range(N_COLS):
+            flow(shim_tiles[0], WireBundle.DMA, 1, compute_tiles[col], WireBundle.DMA, 0)
+        for col in range(N_COLS):
+            flow(mem_tiles[col], WireBundle.DMA, 0, shim_tiles[col], WireBundle.DMA, 0)
+        for col in range(N_COLS):
+            flow(mem_tiles[col], WireBundle.DMA, 1, compute_tiles[col], WireBundle.DMA, 1)
+        for col in range(N_COLS):
+            flow(compute_tiles[col], WireBundle.DMA, 0, mem_tiles[col], WireBundle.DMA, 1)
+
+        # Mem tile DMAs (ascending col).
+        def _make_memtile_dma(_col, _ml, _w, _y):
+            @memtile_dma(mem_tiles[_col])
+            def _mt(block):
+                dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
+                with block[1]:
+                    use_lock(_ml["y_ready"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_y, offset=0, len=M_TILE)
+                    use_lock(_ml["y_done"], LockAction.Release, value=1)
+                    next_bd(block[1])
+                with block[2]:
+                    EndOp()
+                with block[3]:
+                    dma_start(DMAChannelDir.MM2S, 1, dest=block[4], chain=block[5])
+                with block[4]:
+                    use_lock(_ml["w_ready"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_w, offset=0, len=M_TILE * row_bytes)
+                    use_lock(_ml["w_dma_done"], LockAction.Release, value=1)
+                    next_bd(block[4])
+                with block[5]:
+                    dma_start(DMAChannelDir.S2MM, 0, dest=block[6], chain=block[7])
+                with block[6]:
+                    use_lock(_ml["w_dma_done"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_w, offset=0, len=M_TILE * row_bytes)
+                    use_lock(_ml["w_ready"], LockAction.Release, value=1)
+                    next_bd(block[6])
+                with block[7]:
+                    dma_start(DMAChannelDir.S2MM, 1, dest=block[8], chain=block[2])
+                with block[8]:
+                    use_lock(_ml["y_done"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_y, offset=0, len=M_TILE)
+                    use_lock(_ml["y_ready"], LockAction.Release, value=1)
+                    next_bd(block[8])
+        for col in range(N_COLS):
+            _make_memtile_dma(col, mem_locks[col], mem_buf_w[col], mem_buf_y[col])
+
+        # Shim DMA allocations.
+        out_base = chans["out_base"]
+        weight_base = chans["weight_base"]
+        input_chan = chans["input"]
+        for col in range(N_COLS):
+            shim_dma_allocation(
+                f"air_channel_{out_base}_{col}",
+                shim_tiles[col],
+                DMAChannelDir.S2MM,
+                0,
+            )
+        for col in range(N_COLS):
+            shim_dma_allocation(
+                f"air_channel_{weight_base}_{col}",
+                shim_tiles[col],
+                DMAChannelDir.MM2S,
+                0,
+            )
+        shim_dma_allocation(
+            f"air_channel_{input_chan}",
+            shim_tiles[0],
+            DMAChannelDir.MM2S,
+            1,
+        )
+
+        # Runtime sequence.
+        @runtime_sequence(*_awq_host_arg_types(group_size=group_size),
+                          sym_name=f"{sym}_sequence")
+        def _seq(*args):
+            arg_w = args[weight_arg_idx]
+            arg_x = args[input_arg_idx]
+            arg_y = args[output_arg_idx]
+            for outer in range(n_outer):
+                weight_tasks = []
+                for col in range(N_COLS):
+                    t = dma_configure_task_for(
+                        f"air_channel_{weight_base}_{col}",
+                    )
+                    with bds(t) as bd:
+                        with bd[0]:
+                            dma_bd(
+                                arg_w,
+                                offset=outer * weight_outer_stride + col * weight_col_stride,
+                                len=w_len,
+                                dimensions=w_dims,
+                            )
+                            EndOp()
+                    dma_start_task(t)
+                    weight_tasks.append(t)
+
+                x_task = dma_configure_task_for(
+                    f"air_channel_{input_chan}",
+                    repeat_count=x_repeat_count,
+                )
+                with bds(x_task) as bd:
+                    with bd[0]:
+                        dma_bd(
+                            arg_x,
+                            offset=0,
+                            len=EMB_DIM,
+                            dimensions=[(4, 512), (512, 1)],
+                        )
+                        EndOp()
+                dma_start_task(x_task)
+
+                out_tasks = []
+                for col in range(N_COLS):
+                    t = dma_configure_task_for(
+                        f"air_channel_{out_base}_{col}",
+                        issue_token=True,
+                    )
+                    with bds(t) as bd:
+                        with bd[0]:
+                            dma_bd(
+                                arg_y,
+                                offset=outer * output_outer_stride + col * output_col_stride,
+                                len=y_len,
+                                dimensions=y_dims,
+                            )
+                            EndOp()
+                    dma_start_task(t)
+                    out_tasks.append(t)
+
+                for t in reversed(out_tasks):
+                    dma_await_task(t)
+                dma_free_task(x_task)
+                for t in reversed(weight_tasks):
+                    dma_free_task(t)
+
+
+# ---------------------------------------------------------------------------
+# AWQ GEMV matvec segment (K=8192, awq_mv_k8192_pythoc.o) -- Down projection.
+# Compute tile: M_TILE_K8192=2 output rows per call, K_TILE_K8192=1 inner k.
+# Weight L1 buffer: 1 row of row_bytes=4352 ui8.
+# Output rows = EMB_DIM = 2048 across 8 outer iters
+#   (each outer covers 256 rows = 8 cols * 32 elts).
+# ---------------------------------------------------------------------------
+def _emit_awq_matvec_seg_k8192(sym: str, weight_arg_idx: int,
+                                input_arg_idx: int, output_arg_idx: int,
+                                group_size: int = GROUP_SIZE) -> None:
+    """K=8192 down-projection AWQ matvec [8,1] herd, awq_mv_k8192_pythoc.o.
+
+    Output rows: 2048 across 8 outer iters (each outer covers 256 rows =
+    8 cols * 32 elts each).  Weight has same access pattern as K=2048
+    case in elements (w_dims=[(16,69632),(16,544),(544,1)], len=139264),
+    but the down-projection's weight memref has row_bytes=4352 and
+    outer stride 256 rows * 4352 = 1_114_112.
+    """
+    chans = _CHANNELS[sym]
+    out_rows = EMB_DIM
+    n_outer = out_rows // 256  # 8
+
+    row_bytes = _combined_row_bytes(HIDDEN_DIM, group_size)    # 4352
+    y_dims = [(16, 16), (2, 1)]
+    y_len = 32
+    x_repeat_count = 31
+    x_dims = [(16, 512), (512, 1)]
+    x_len = HIDDEN_DIM
+    # Per-col weight task: 16 mini-rows of 16 chunks of 544 bytes = 139264.
+    # That matches the K=2048 K-block size in bytes (1088/4) -- structurally
+    # the mem tile cycles 16 times per outer iter for each of 16 sub-chunks.
+    w_dims = [(16, 69632), (16, 544), (544, 1)]
+    w_len = 16 * 16 * 544  # 139264
+    weight_col_stride = M_TILE_K8192 * row_bytes              # 2*4352 = 8704
+    weight_outer_stride = 256 * row_bytes                     # 256*4352 = 1_114_112
+    output_col_stride = M_TILE_K8192                          # 2
+    output_outer_stride = 256
+
+    @device(AIEDevice.npu2, sym_name=sym)
+    def _dev():
+        shim_tiles = [tile(c, 0) for c in range(N_COLS)]
+        mem_tiles = [tile(c, 1) for c in range(N_COLS)]
+        compute_tiles = [tile(c, 2) for c in range(N_COLS)]
+
+        mem_locks = {}
+        for col in reversed(range(N_COLS)):
+            mt = mem_tiles[col]
+            mem_locks[col] = {
+                "w_dma_done": lock(mt, lock_id=3, init=1),
+                "w_ready":    lock(mt, lock_id=2, init=0),
+                "y_done":     lock(mt, lock_id=1, init=1),
+                "y_ready":    lock(mt, lock_id=0, init=0),
+            }
+
+        core_locks = {}
+        for col in range(N_COLS):
+            ct = compute_tiles[col]
+            core_locks[col] = {
+                "w_avail": lock(ct, lock_id=5, init=1),
+                "w_ready": lock(ct, lock_id=4, init=0),
+                "x_avail": lock(ct, lock_id=3, init=1),
+                "x_ready": lock(ct, lock_id=2, init=0),
+                "y_done":  lock(ct, lock_id=1, init=1),
+                "y_full":  lock(ct, lock_id=0, init=0),
+            }
+
+        # Buffer types (K=8192 variant).
+        from aie.ir import MemRefType, IntegerAttr, IntegerType
+        from aie.extras import types as T
+        def _ui8_memref(*shape, memory_space=None):
+            ms = None
+            if memory_space is not None:
+                ms = IntegerAttr.get(
+                    IntegerType.get_signless(32), memory_space)
+            return MemRefType.get(list(shape), T.ui8(), None, ms)
+
+        _W_L1_TY = _ui8_memref(K_TILE_K8192, row_bytes, memory_space=2)
+        _X_L1_TY = bf16_memref(HIDDEN_DIM, memory_space=2)
+        _Y_L1_TY = bf16_memref(M_TILE_K8192, memory_space=2)
+        _W_L2_TY = _ui8_memref(1, M_TILE_K8192, row_bytes, memory_space=1)
+        _Y_L2_TY = bf16_memref(1, M_TILE_K8192, memory_space=1)
+
+        mem_buf_w = {}
+        mem_buf_y = {}
+        for col in reversed(range(N_COLS)):
+            mem_buf_w[col] = buffer(mem_tiles[col], datatype=_W_L2_TY)
+        for col in reversed(range(N_COLS)):
+            mem_buf_y[col] = buffer(mem_tiles[col], datatype=_Y_L2_TY)
+
+        core_buf_y = {}
+        core_buf_w = {}
+        core_buf_x = {}
+        for col in reversed(range(N_COLS)):
+            core_buf_y[col] = buffer(compute_tiles[col], datatype=_Y_L1_TY)
+            core_buf_w[col] = buffer(compute_tiles[col], datatype=_W_L1_TY)
+            core_buf_x[col] = buffer(compute_tiles[col], datatype=_X_L1_TY)
+
+        # External buffers: weight (EMB_DIM, row_bytes) ui8, input
+        # (HIDDEN_DIM,) bf16, output (EMB_DIM,) bf16.
+        _emit_external_buffers(
+            ((EMB_DIM, row_bytes), "ui8"),
+            ((HIDDEN_DIM,), "bf16"),
+            ((EMB_DIM,), "bf16"),
+        )
+
+        from ml_dtypes import bfloat16 as _bf16
+        fill_fn = external_func(
+            "dg_awq_linalg_fill_bf16",
+            inputs=[_bf16, _Y_L1_TY],
+            link_with=KO_AWQ_MV_K8192,
+        )
+        fill_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
+        matvec_fn = external_func(
+            "dg_awq_matvec_vectorized_u4_bf16",
+            inputs=[np.int32, np.int32, np.int32, _W_L1_TY, _X_L1_TY, _Y_L1_TY],
+            link_with=KO_AWQ_MV_K8192,
+        )
+        matvec_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
+
+        for col in reversed(range(N_COLS)):
+            ct_op = compute_tiles[col]
+            cl = core_locks[col]
+            y_buf = core_buf_y[col]
+            w_buf = core_buf_w[col]
+            x_buf = core_buf_x[col]
+
+            def _make_core_mem(_ct, _cl, _yb, _wb, _xb):
+                @mem(_ct)
+                def _core_mem(block):
+                    dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
+                    with block[1]:
+                        use_lock(_cl["y_full"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_yb, offset=0, len=M_TILE_K8192)
+                        use_lock(_cl["y_done"], LockAction.Release, value=1)
+                        next_bd(block[1])
+                    with block[2]:
+                        EndOp()
+                    with block[3]:
+                        dma_start(DMAChannelDir.S2MM, 0, dest=block[4], chain=block[5])
+                    with block[4]:
+                        use_lock(_cl["x_avail"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_xb, offset=0, len=HIDDEN_DIM)
+                        use_lock(_cl["x_ready"], LockAction.Release, value=1)
+                        next_bd(block[4])
+                    with block[5]:
+                        dma_start(DMAChannelDir.S2MM, 1, dest=block[6], chain=block[2])
+                    with block[6]:
+                        use_lock(_cl["w_avail"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_wb, offset=0, len=K_TILE_K8192 * row_bytes)
+                        use_lock(_cl["w_ready"], LockAction.Release, value=1)
+                        next_bd(block[6])
+            _make_core_mem(ct_op, cl, y_buf, w_buf, x_buf)
+
+            def _make_core_body(_ct, _cl, _yb, _wb, _xb):
+                import sys as _sys
+                from aie.extras.dialects.arith import index_cast
+
+                @core(_ct)
+                def _core_body():
+                    k_total = arith.constant(HIDDEN_DIM, T.i32())
+                    k_tile_c = arith.constant(K_TILE_K8192, T.i32())
+                    zero_bf16 = arith.constant(0.0, T.bf16())
+                    for _ in range_(_sys.maxsize):
+                        use_lock(_cl["y_done"], LockAction.AcquireGreaterEqual, value=1)
+                        fill_fn(zero_bf16, _yb)
+                        for k_idx in range_(0, M_TILE_K8192, K_TILE_K8192):
+                            k_i32 = index_cast(k_idx, to=T.i32())
+                            use_lock(_cl["x_ready"], LockAction.AcquireGreaterEqual, value=1)
+                            use_lock(_cl["w_ready"], LockAction.AcquireGreaterEqual, value=1)
+                            matvec_fn(k_tile_c, k_total, k_i32, _wb, _xb, _yb)
+                            use_lock(_cl["x_avail"], LockAction.Release, value=1)
+                            use_lock(_cl["w_avail"], LockAction.Release, value=1)
+                        use_lock(_cl["y_full"], LockAction.Release, value=1)
+            _make_core_body(ct_op, cl, y_buf, w_buf, x_buf)
+
+        for col in range(N_COLS):
+            flow(shim_tiles[col], WireBundle.DMA, 0, mem_tiles[col], WireBundle.DMA, 0)
+        for col in range(N_COLS):
+            flow(shim_tiles[0], WireBundle.DMA, 1, compute_tiles[col], WireBundle.DMA, 0)
+        for col in range(N_COLS):
+            flow(mem_tiles[col], WireBundle.DMA, 0, shim_tiles[col], WireBundle.DMA, 0)
+        for col in range(N_COLS):
+            flow(mem_tiles[col], WireBundle.DMA, 1, compute_tiles[col], WireBundle.DMA, 1)
+        for col in range(N_COLS):
+            flow(compute_tiles[col], WireBundle.DMA, 0, mem_tiles[col], WireBundle.DMA, 1)
+
+        def _make_memtile_dma(_col, _ml, _w, _y):
+            @memtile_dma(mem_tiles[_col])
+            def _mt(block):
+                dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
+                with block[1]:
+                    use_lock(_ml["y_ready"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_y, offset=0, len=M_TILE_K8192)
+                    use_lock(_ml["y_done"], LockAction.Release, value=1)
+                    next_bd(block[1])
+                with block[2]:
+                    EndOp()
+                with block[3]:
+                    dma_start(DMAChannelDir.MM2S, 1, dest=block[4], chain=block[5])
+                with block[4]:
+                    use_lock(_ml["w_ready"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_w, offset=0, len=M_TILE_K8192 * row_bytes)
+                    use_lock(_ml["w_dma_done"], LockAction.Release, value=1)
+                    next_bd(block[4])
+                with block[5]:
+                    dma_start(DMAChannelDir.S2MM, 0, dest=block[6], chain=block[7])
+                with block[6]:
+                    use_lock(_ml["w_dma_done"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_w, offset=0, len=M_TILE_K8192 * row_bytes)
+                    use_lock(_ml["w_ready"], LockAction.Release, value=1)
+                    next_bd(block[6])
+                with block[7]:
+                    dma_start(DMAChannelDir.S2MM, 1, dest=block[8], chain=block[2])
+                with block[8]:
+                    use_lock(_ml["y_done"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_y, offset=0, len=M_TILE_K8192)
+                    use_lock(_ml["y_ready"], LockAction.Release, value=1)
+                    next_bd(block[8])
+        for col in range(N_COLS):
+            _make_memtile_dma(col, mem_locks[col], mem_buf_w[col], mem_buf_y[col])
+
+        out_base = chans["out_base"]
+        weight_base = chans["weight_base"]
+        input_chan = chans["input"]
+        for col in range(N_COLS):
+            shim_dma_allocation(
+                f"air_channel_{out_base}_{col}",
+                shim_tiles[col],
+                DMAChannelDir.S2MM,
+                0,
+            )
+        for col in range(N_COLS):
+            shim_dma_allocation(
+                f"air_channel_{weight_base}_{col}",
+                shim_tiles[col],
+                DMAChannelDir.MM2S,
+                0,
+            )
+        shim_dma_allocation(
+            f"air_channel_{input_chan}",
+            shim_tiles[0],
+            DMAChannelDir.MM2S,
+            1,
+        )
+
+        @runtime_sequence(*_awq_host_arg_types(group_size=group_size),
+                          sym_name=f"{sym}_sequence")
+        def _seq(*args):
+            arg_w = args[weight_arg_idx]
+            arg_x = args[input_arg_idx]
+            arg_y = args[output_arg_idx]
+            for outer in range(n_outer):
+                weight_tasks = []
+                for col in range(N_COLS):
+                    t = dma_configure_task_for(
+                        f"air_channel_{weight_base}_{col}",
+                    )
+                    with bds(t) as bd:
+                        with bd[0]:
+                            dma_bd(
+                                arg_w,
+                                offset=outer * weight_outer_stride + col * weight_col_stride,
+                                len=w_len,
+                                dimensions=w_dims,
+                            )
+                            EndOp()
+                    dma_start_task(t)
+                    weight_tasks.append(t)
+
+                x_task = dma_configure_task_for(
+                    f"air_channel_{input_chan}",
+                    repeat_count=x_repeat_count,
+                )
+                with bds(x_task) as bd:
+                    with bd[0]:
+                        dma_bd(
+                            arg_x,
+                            offset=0,
+                            len=x_len,
+                            dimensions=x_dims,
+                        )
+                        EndOp()
+                dma_start_task(x_task)
+
+                out_tasks = []
+                for col in range(N_COLS):
+                    t = dma_configure_task_for(
+                        f"air_channel_{out_base}_{col}",
+                        issue_token=True,
+                    )
+                    with bds(t) as bd:
+                        with bd[0]:
+                            dma_bd(
+                                arg_y,
+                                offset=outer * output_outer_stride + col * output_col_stride,
+                                len=y_len,
+                                dimensions=y_dims,
+                            )
+                            EndOp()
+                    dma_start_task(t)
+                    out_tasks.append(t)
+
+                for t in reversed(out_tasks):
+                    dma_await_task(t)
+                dma_free_task(x_task)
+                for t in reversed(weight_tasks):
+                    dma_free_task(t)
+
+
+# ---------------------------------------------------------------------------
+# Eltwise-add segment (inline arith.addf, no link_with).
+# Structurally identical to the BF16 sibling's helper -- the dispatcher's
+# host arg types just need to be the AWQ 15-arg signature.
+# ---------------------------------------------------------------------------
+def _emit_eltwise_add_seg(sym: str, in0_arg_idx: int, in1_arg_idx: int,
+                          out_arg_idx: int, group_size: int = GROUP_SIZE) -> None:
+    chans = _CHANNELS[sym]
+
+    @device(AIEDevice.npu2, sym_name=sym)
+    def _dev():
+        shim_tiles = [tile(c, 0) for c in range(N_COLS)]
+        compute_tiles = [tile(c, 2) for c in range(N_COLS)]
+
+        core_locks = {}
+        for col in range(N_COLS):
+            ct = compute_tiles[col]
+            core_locks[col] = {
+                "in2_avail": lock(ct, lock_id=5, init=1),
+                "in2_ready": lock(ct, lock_id=4, init=0),
+                "in1_avail": lock(ct, lock_id=3, init=1),
+                "in1_ready": lock(ct, lock_id=2, init=0),
+                "out_done":  lock(ct, lock_id=1, init=1),
+                "out_full":  lock(ct, lock_id=0, init=0),
+            }
+
+        _BUF_TY = bf16_memref(ADD_CHUNK, memory_space=2)
+
+        core_buf_out = {}
+        core_buf_in2 = {}
+        core_buf_in1 = {}
+        for col in reversed(range(N_COLS)):
+            core_buf_out[col] = buffer(compute_tiles[col], datatype=_BUF_TY)
+            core_buf_in2[col] = buffer(compute_tiles[col], datatype=_BUF_TY)
+            core_buf_in1[col] = buffer(compute_tiles[col], datatype=_BUF_TY)
+
+        _emit_external_buffers_bf16((EMB_DIM,), (EMB_DIM,), (EMB_DIM,))
+
+        from aie.dialects import memref, vector
+        from aie.extras import types as T
+        from aie.ir import AffineMap, AffineDimExpr
+
+        for col in reversed(range(N_COLS)):
+            ct_op = compute_tiles[col]
+            cl = core_locks[col]
+            buf_out = core_buf_out[col]
+            buf_in2 = core_buf_in2[col]
+            buf_in1 = core_buf_in1[col]
+
+            def _make_core_mem(_ct, _cl, _bo, _b2, _b1):
+                @mem(_ct)
+                def _core_mem(block):
+                    dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
+                    with block[1]:
+                        use_lock(_cl["out_full"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_bo, offset=0, len=ADD_CHUNK)
+                        use_lock(_cl["out_done"], LockAction.Release, value=1)
+                        next_bd(block[1])
+                    with block[2]:
+                        EndOp()
+                    with block[3]:
+                        dma_start(DMAChannelDir.S2MM, 0, dest=block[4], chain=block[5])
+                    with block[4]:
+                        use_lock(_cl["in1_avail"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_b1, offset=0, len=ADD_CHUNK)
+                        use_lock(_cl["in1_ready"], LockAction.Release, value=1)
+                        next_bd(block[4])
+                    with block[5]:
+                        dma_start(DMAChannelDir.S2MM, 1, dest=block[6], chain=block[2])
+                    with block[6]:
+                        use_lock(_cl["in2_avail"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_b2, offset=0, len=ADD_CHUNK)
+                        use_lock(_cl["in2_ready"], LockAction.Release, value=1)
+                        next_bd(block[6])
+            _make_core_mem(ct_op, cl, buf_out, buf_in2, buf_in1)
+
+            def _make_core_body(_ct, _cl, _bo, _b2, _b1):
+                import sys as _sys
+
+                @core(_ct)
+                def _core_body():
+                    zero_bf16 = arith.constant(0.0, T.bf16())
+                    c0 = arith.constant(0, T.index())
+                    perm = AffineMap.get(1, 0, [AffineDimExpr.get(0)])
+                    vec_ty = T.vector(16, T.bf16())
+                    for _ in range_(_sys.maxsize):
+                        use_lock(_cl["in1_ready"], LockAction.AcquireGreaterEqual, value=1)
+                        use_lock(_cl["in2_ready"], LockAction.AcquireGreaterEqual, value=1)
+                        use_lock(_cl["out_done"], LockAction.AcquireGreaterEqual, value=1)
+                        for i in range_(0, ADD_CHUNK, 16):
+                            sub1 = memref.subview(_b1, [i], [16], [1])
+                            sub2 = memref.subview(_b2, [i], [16], [1])
+                            subo = memref.subview(_bo, [i], [16], [1])
+                            v1 = vector.transfer_read(
+                                vec_ty, sub1, [c0],
+                                permutation_map=perm, padding=zero_bf16,
+                                in_bounds=[True])
+                            v2 = vector.transfer_read(
+                                vec_ty, sub2, [c0],
+                                permutation_map=perm, padding=zero_bf16,
+                                in_bounds=[True])
+                            vsum = arith.addf(v1, v2)
+                            vector.transfer_write(
+                                None, vsum, subo, [c0],
+                                permutation_map=perm, in_bounds=[True])
+                        use_lock(_cl["in1_avail"], LockAction.Release, value=1)
+                        use_lock(_cl["in2_avail"], LockAction.Release, value=1)
+                        use_lock(_cl["out_full"], LockAction.Release, value=1)
+            _make_core_body(ct_op, cl, buf_out, buf_in2, buf_in1)
+
+        for col in range(N_COLS):
+            flow(shim_tiles[col], WireBundle.DMA, 0, compute_tiles[col], WireBundle.DMA, 0)
+        for col in range(N_COLS):
+            flow(shim_tiles[col], WireBundle.DMA, 1, compute_tiles[col], WireBundle.DMA, 1)
+        for col in range(N_COLS):
+            flow(compute_tiles[col], WireBundle.DMA, 0, shim_tiles[col], WireBundle.DMA, 0)
+
+        out_chan = chans["out"]
+        in0_chan = chans["in0"]
+        in1_chan = chans["in1"]
+        for col in range(N_COLS):
+            shim_dma_allocation(
+                f"air_channel_{out_chan}_{col}",
+                shim_tiles[col],
+                DMAChannelDir.S2MM,
+                0,
+            )
+        for col in range(N_COLS):
+            shim_dma_allocation(
+                f"air_channel_{in0_chan}_{col}",
+                shim_tiles[col],
+                DMAChannelDir.MM2S,
+                0,
+            )
+        for col in range(N_COLS):
+            shim_dma_allocation(
+                f"air_channel_{in1_chan}_{col}",
+                shim_tiles[col],
+                DMAChannelDir.MM2S,
+                1,
+            )
+
+        @runtime_sequence(*_awq_host_arg_types(group_size=group_size),
+                          sym_name=f"{sym}_sequence")
+        def _seq(*args):
+            arg_in1 = args[in0_arg_idx]
+            arg_in2 = args[in1_arg_idx]
+            arg_out = args[out_arg_idx]
+            in1_tasks = []
+            for col in range(N_COLS):
+                t = dma_configure_task_for(f"air_channel_{in0_chan}_{col}")
+                with bds(t) as bd:
+                    with bd[0]:
+                        dma_bd(
+                            arg_in1,
+                            offset=col * ADD_CHUNK,
+                            len=ADD_CHUNK,
+                            dimensions=[(ADD_CHUNK, 1)],
+                        )
+                        EndOp()
+                dma_start_task(t)
+                in1_tasks.append(t)
+            in2_tasks = []
+            for col in range(N_COLS):
+                t = dma_configure_task_for(f"air_channel_{in1_chan}_{col}")
+                with bds(t) as bd:
+                    with bd[0]:
+                        dma_bd(
+                            arg_in2,
+                            offset=col * ADD_CHUNK,
+                            len=ADD_CHUNK,
+                            dimensions=[(ADD_CHUNK, 1)],
+                        )
+                        EndOp()
+                dma_start_task(t)
+                in2_tasks.append(t)
+            out_tasks = []
+            for col in range(N_COLS):
+                t = dma_configure_task_for(
+                    f"air_channel_{out_chan}_{col}",
+                    issue_token=True,
+                )
+                with bds(t) as bd:
+                    with bd[0]:
+                        dma_bd(
+                            arg_out,
+                            offset=col * ADD_CHUNK,
+                            len=ADD_CHUNK,
+                            dimensions=[(ADD_CHUNK, 1)],
+                        )
+                        EndOp()
+                dma_start_task(t)
+                out_tasks.append(t)
+
+            for t in reversed(out_tasks):
+                dma_await_task(t)
+            for t in reversed(in2_tasks):
+                dma_free_task(t)
+            for t in reversed(in1_tasks):
+                dma_free_task(t)
+
+
+# ---------------------------------------------------------------------------
+# RMSNorm segment (single compute tile, external rms_norm kernel).
+# Identical to BF16 sibling apart from the AWQ 15-arg dispatcher signature.
+# ---------------------------------------------------------------------------
+def _emit_rm_rms_seg(group_size: int = GROUP_SIZE) -> None:
+    sym = "rm_rms_seg"
+    chans = _CHANNELS[sym]
+
+    @device(AIEDevice.npu2, sym_name=sym)
+    def _dev():
+        shim = tile(0, 0)
+        ct = tile(0, 2)
+
+        lk5 = lock(ct, lock_id=5, init=1)
+        lk4 = lock(ct, lock_id=4, init=0)
+        lk3 = lock(ct, lock_id=3, init=1)
+        lk2 = lock(ct, lock_id=2, init=0)
+        lk1 = lock(ct, lock_id=1, init=1)
+        lk0 = lock(ct, lock_id=0, init=0)
+
+        _BF16_2048_L1 = bf16_memref(EMB_DIM, memory_space=2)
+        _BF16_16_L1 = bf16_memref(16, memory_space=2)
+        buf_x = buffer(ct, datatype=_BF16_2048_L1)
+        buf_y = buffer(ct, datatype=_BF16_2048_L1)
+        buf_w = buffer(ct, datatype=_BF16_2048_L1)
+        buf_s = buffer(ct, datatype=_BF16_16_L1)
+
+        _emit_external_buffers_bf16((EMB_DIM,), (EMB_DIM,), (EMB_DIM,))
+
+        @mem(ct)
+        def _core_mem(block):
+            dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
+            with block[1]:
+                use_lock(lk0, LockAction.AcquireGreaterEqual, value=1)
+                dma_bd(buf_y, offset=0, len=EMB_DIM)
+                use_lock(lk1, LockAction.Release, value=1)
+                next_bd(block[1])
+            with block[2]:
+                EndOp()
+            with block[3]:
+                dma_start(DMAChannelDir.S2MM, 0, dest=block[4], chain=block[5])
+            with block[4]:
+                use_lock(lk3, LockAction.AcquireGreaterEqual, value=1)
+                dma_bd(buf_w, offset=0, len=EMB_DIM)
+                use_lock(lk2, LockAction.Release, value=1)
+                next_bd(block[4])
+            with block[5]:
+                dma_start(DMAChannelDir.S2MM, 1, dest=block[6], chain=block[2])
+            with block[6]:
+                use_lock(lk5, LockAction.AcquireGreaterEqual, value=1)
+                dma_bd(buf_x, offset=0, len=EMB_DIM)
+                use_lock(lk4, LockAction.Release, value=1)
+                next_bd(block[6])
+
+        from aie.extras import types as T
+
+        rms_fn = external_func(
+            "rms_norm_2048_bf16",
+            inputs=[_BF16_2048_L1, _BF16_2048_L1, _BF16_2048_L1, _BF16_16_L1],
+            link_with=KO_RMS,
+        )
+        rms_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
+
+        import sys as _sys
+
+        @core(ct)
+        def _core_body():
+            for _ in range_(_sys.maxsize):
+                use_lock(lk1, LockAction.AcquireGreaterEqual, value=1)
+                use_lock(lk2, LockAction.AcquireGreaterEqual, value=1)
+                use_lock(lk4, LockAction.AcquireGreaterEqual, value=1)
+                rms_fn(buf_x, buf_w, buf_y, buf_s)
+                use_lock(lk5, LockAction.Release, value=1)
+                use_lock(lk0, LockAction.Release, value=1)
+                use_lock(lk3, LockAction.Release, value=1)
+
+        flow(shim, WireBundle.DMA, 0, ct, WireBundle.DMA, 0)
+        flow(shim, WireBundle.DMA, 1, ct, WireBundle.DMA, 1)
+        flow(ct, WireBundle.DMA, 0, shim, WireBundle.DMA, 0)
+
+        shim_dma_allocation(f"air_channel_{chans['out']}", shim, DMAChannelDir.S2MM, 0)
+        shim_dma_allocation(f"air_channel_{chans['in0']}", shim, DMAChannelDir.MM2S, 0)
+        shim_dma_allocation(f"air_channel_{chans['in1']}", shim, DMAChannelDir.MM2S, 1)
+
+        @runtime_sequence(*_awq_host_arg_types(group_size=group_size),
+                          sym_name=f"{sym}_sequence")
+        def _seq(*args):
+            arg_w = args[5]
+            arg_x = args[4]
+            arg_y = args[6]
+            t_w = dma_configure_task_for(f"air_channel_{chans['in0']}")
+            with bds(t_w) as bd:
+                with bd[0]:
+                    dma_bd(arg_w, offset=0, len=EMB_DIM,
+                           dimensions=[(4, 512), (512, 1)])
+                    EndOp()
+            dma_start_task(t_w)
+            t_x = dma_configure_task_for(f"air_channel_{chans['in1']}")
+            with bds(t_x) as bd:
+                with bd[0]:
+                    dma_bd(arg_x, offset=0, len=EMB_DIM,
+                           dimensions=[(4, 512), (512, 1)])
+                    EndOp()
+            dma_start_task(t_x)
+            t_y = dma_configure_task_for(f"air_channel_{chans['out']}", issue_token=True)
+            with bds(t_y) as bd:
+                with bd[0]:
+                    dma_bd(arg_y, offset=0, len=EMB_DIM,
+                           dimensions=[(4, 512), (512, 1)])
+                    EndOp()
+            dma_start_task(t_y)
+            dma_await_task(t_y)
+            dma_free_task(t_w)
+            dma_free_task(t_x)
+
+
+# ---------------------------------------------------------------------------
+# SwiGLU segment.  Same as BF16 sibling apart from dispatcher arg types.
+# ---------------------------------------------------------------------------
+def _emit_sw_silu_mul_seg(group_size: int = GROUP_SIZE) -> None:
+    sym = "sw_silu_mul_seg"
+    chans = _CHANNELS[sym]
+
+    @device(AIEDevice.npu2, sym_name=sym)
+    def _dev():
+        shim_tiles = [tile(c, 0) for c in range(N_COLS)]
+        compute_tiles = [tile(c, 2) for c in range(N_COLS)]
+
+        core_locks = {}
+        for col in range(N_COLS):
+            ct = compute_tiles[col]
+            core_locks[col] = {
+                "in2_avail": lock(ct, lock_id=5, init=1),
+                "in2_ready": lock(ct, lock_id=4, init=0),
+                "in1_avail": lock(ct, lock_id=3, init=1),
+                "in1_ready": lock(ct, lock_id=2, init=0),
+                "out_done":  lock(ct, lock_id=1, init=1),
+                "out_full":  lock(ct, lock_id=0, init=0),
+            }
+
+        _BUF_TY = bf16_memref(SWIGLU_CHUNK, memory_space=2)
+
+        core_buf_out = {}
+        core_buf_in2 = {}
+        core_buf_in1 = {}
+        for col in reversed(range(N_COLS)):
+            core_buf_out[col] = buffer(compute_tiles[col], datatype=_BUF_TY)
+            core_buf_in2[col] = buffer(compute_tiles[col], datatype=_BUF_TY)
+            core_buf_in1[col] = buffer(compute_tiles[col], datatype=_BUF_TY)
+
+        _emit_external_buffers_bf16((HIDDEN_DIM,), (HIDDEN_DIM,), (HIDDEN_DIM,))
+
+        from aie.extras import types as T
+        silu_fn = external_func(
+            "silu_and_mul_bf16",
+            inputs=[_BUF_TY, _BUF_TY, _BUF_TY, np.int32],
+            link_with=KO_SWIGLU,
+        )
+        silu_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
+
+        for col in reversed(range(N_COLS)):
+            ct_op = compute_tiles[col]
+            cl = core_locks[col]
+            buf_out = core_buf_out[col]
+            buf_in2 = core_buf_in2[col]
+            buf_in1 = core_buf_in1[col]
+
+            def _make_core_mem(_ct, _cl, _bo, _b2, _b1):
+                @mem(_ct)
+                def _core_mem(block):
+                    dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
+                    with block[1]:
+                        use_lock(_cl["out_full"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_bo, offset=0, len=SWIGLU_CHUNK)
+                        use_lock(_cl["out_done"], LockAction.Release, value=1)
+                        next_bd(block[1])
+                    with block[2]:
+                        EndOp()
+                    with block[3]:
+                        dma_start(DMAChannelDir.S2MM, 0, dest=block[4], chain=block[5])
+                    with block[4]:
+                        use_lock(_cl["in1_avail"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_b1, offset=0, len=SWIGLU_CHUNK)
+                        use_lock(_cl["in1_ready"], LockAction.Release, value=1)
+                        next_bd(block[4])
+                    with block[5]:
+                        dma_start(DMAChannelDir.S2MM, 1, dest=block[6], chain=block[2])
+                    with block[6]:
+                        use_lock(_cl["in2_avail"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_b2, offset=0, len=SWIGLU_CHUNK)
+                        use_lock(_cl["in2_ready"], LockAction.Release, value=1)
+                        next_bd(block[6])
+            _make_core_mem(ct_op, cl, buf_out, buf_in2, buf_in1)
+
+            def _make_core_body(_ct, _cl, _bo, _b2, _b1):
+                import sys as _sys
+
+                @core(_ct)
+                def _core_body():
+                    n_c = arith.constant(SWIGLU_CHUNK, T.i32())
+                    for _ in range_(_sys.maxsize):
+                        use_lock(_cl["in1_ready"], LockAction.AcquireGreaterEqual, value=1)
+                        use_lock(_cl["in2_ready"], LockAction.AcquireGreaterEqual, value=1)
+                        use_lock(_cl["out_done"], LockAction.AcquireGreaterEqual, value=1)
+                        silu_fn(_b1, _b2, _bo, n_c)
+                        use_lock(_cl["in1_avail"], LockAction.Release, value=1)
+                        use_lock(_cl["in2_avail"], LockAction.Release, value=1)
+                        use_lock(_cl["out_full"], LockAction.Release, value=1)
+            _make_core_body(ct_op, cl, buf_out, buf_in2, buf_in1)
+
+        for col in range(N_COLS):
+            flow(shim_tiles[col], WireBundle.DMA, 0, compute_tiles[col], WireBundle.DMA, 0)
+        for col in range(N_COLS):
+            flow(shim_tiles[col], WireBundle.DMA, 1, compute_tiles[col], WireBundle.DMA, 1)
+        for col in range(N_COLS):
+            flow(compute_tiles[col], WireBundle.DMA, 0, shim_tiles[col], WireBundle.DMA, 0)
+
+        out_chan = chans["out"]
+        in0_chan = chans["in0"]
+        in1_chan = chans["in1"]
+        for col in range(N_COLS):
+            shim_dma_allocation(f"air_channel_{out_chan}_{col}",
+                                shim_tiles[col], DMAChannelDir.S2MM, 0)
+        for col in range(N_COLS):
+            shim_dma_allocation(f"air_channel_{in0_chan}_{col}",
+                                shim_tiles[col], DMAChannelDir.MM2S, 0)
+        for col in range(N_COLS):
+            shim_dma_allocation(f"air_channel_{in1_chan}_{col}",
+                                shim_tiles[col], DMAChannelDir.MM2S, 1)
+
+        @runtime_sequence(*_awq_host_arg_types(group_size=group_size),
+                          sym_name=f"{sym}_sequence")
+        def _seq(*args):
+            arg_gate = args[8]
+            arg_up = args[10]
+            arg_out = args[11]
+            in1_tasks = []
+            for col in range(N_COLS):
+                t = dma_configure_task_for(f"air_channel_{in0_chan}_{col}")
+                with bds(t) as bd:
+                    with bd[0]:
+                        dma_bd(
+                            arg_gate,
+                            offset=col * SWIGLU_CHUNK,
+                            len=SWIGLU_CHUNK,
+                            dimensions=[(2, 512), (512, 1)],
+                        )
+                        EndOp()
+                dma_start_task(t)
+                in1_tasks.append(t)
+            in2_tasks = []
+            for col in range(N_COLS):
+                t = dma_configure_task_for(f"air_channel_{in1_chan}_{col}")
+                with bds(t) as bd:
+                    with bd[0]:
+                        dma_bd(
+                            arg_up,
+                            offset=col * SWIGLU_CHUNK,
+                            len=SWIGLU_CHUNK,
+                            dimensions=[(2, 512), (512, 1)],
+                        )
+                        EndOp()
+                dma_start_task(t)
+                in2_tasks.append(t)
+            out_tasks = []
+            for col in range(N_COLS):
+                t = dma_configure_task_for(
+                    f"air_channel_{out_chan}_{col}",
+                    issue_token=True,
+                )
+                with bds(t) as bd:
+                    with bd[0]:
+                        dma_bd(
+                            arg_out,
+                            offset=col * SWIGLU_CHUNK,
+                            len=SWIGLU_CHUNK,
+                            dimensions=[(2, 512), (512, 1)],
+                        )
+                        EndOp()
+                dma_start_task(t)
+                out_tasks.append(t)
+
+            for t in reversed(out_tasks):
+                dma_await_task(t)
+            for t in reversed(in2_tasks):
+                dma_free_task(t)
+            for t in reversed(in1_tasks):
+                dma_free_task(t)
+
+
+# ---------------------------------------------------------------------------
+# Dispatcher device emitter.
+# ---------------------------------------------------------------------------
+def _emit_dispatcher_device(group_size: int = GROUP_SIZE) -> None:
+    """Emit the unnamed top-level dispatcher device.
+
+    Fires the 8 segments in pipeline order:
+        og -> a1 -> rm -> gg -> ug -> sw -> dg -> a2.
+    All segments share the AWQ 15-arg host signature.
+    """
+    from aie.dialects._aiex_ops_gen import ConfigureOp, RunOp
+
+    @device(AIEDevice.npu2)
+    def _dispatcher():
+        @runtime_sequence(
+            *_awq_host_arg_types(group_size=group_size),
+            sym_name="o_gemv_ffn_awq",
+        )
+        def _outer(*args):
+            for sym in ("og_awq_matvec_0", "a1_eltwise_add_seg",
+                        "rm_rms_seg", "gg_awq_matvec_0",
+                        "ug_awq_matvec_0", "sw_silu_mul_seg",
+                        "dg_awq_matvec_0", "a2_eltwise_add_seg"):
+                cfg = ConfigureOp(symbol=sym)
+                blk = cfg.body.blocks.append()
+                with InsertionPoint(blk):
+                    RunOp(
+                        runtime_sequence_symbol=f"{sym}_sequence",
+                        args=list(args),
+                    )
+
+
+# ---------------------------------------------------------------------------
+# Public entry point.
+# ---------------------------------------------------------------------------
+def build_o_gemv_ffn_awq_module(emb_dim: int = EMB_DIM,
+                                hidden_dim: int = HIDDEN_DIM,
+                                *, group_size: int = GROUP_SIZE,
+                                verbose: bool = False) -> str:
+    """Build the ``o_gemv_ffn_awq`` ``aie/aiex``-dialect module.
+
+    Both dimensions are fixed to the Llama-3.2-1B values (the cached AIR
+    layout is shape-specialized). ``group_size`` is baked into the AWQ
+    kernels at Stage 2 (default 128); changing it requires updating
+    ``kernels/awq_mv.py`` first.
+    """
+    if emb_dim != EMB_DIM or hidden_dim != HIDDEN_DIM:
+        raise ValueError(
+            f"o_gemv_ffn_awq builder is fixed to emb_dim={EMB_DIM}, "
+            f"hidden_dim={HIDDEN_DIM}; got emb_dim={emb_dim}, "
+            f"hidden_dim={hidden_dim}."
+        )
+    if group_size != GROUP_SIZE:
+        raise ValueError(
+            f"o_gemv_ffn_awq builder is fixed to group_size={GROUP_SIZE}; "
+            f"got {group_size}. Re-baking requires updating "
+            f"kernels/awq_mv.py."
+        )
+    del verbose  # currently unused
+
+    with mlir_mod_ctx() as ctx:
+        # AIR emit order is reverse pipeline order:
+        # a2, dg, sw, ug, gg, rm, a1, og, then dispatcher.
+        _emit_eltwise_add_seg(
+            "a2_eltwise_add_seg", in0_arg_idx=13, in1_arg_idx=4, out_arg_idx=14,
+            group_size=group_size)
+        _emit_awq_matvec_seg_k8192(
+            "dg_awq_matvec_0", weight_arg_idx=12, input_arg_idx=11,
+            output_arg_idx=13, group_size=group_size)
+        _emit_sw_silu_mul_seg(group_size=group_size)
+        _emit_awq_matvec_seg_k2048(
+            "ug_awq_matvec_0", weight_arg_idx=9, input_arg_idx=6,
+            output_arg_idx=10, out_rows=HIDDEN_DIM, group_size=group_size)
+        _emit_awq_matvec_seg_k2048(
+            "gg_awq_matvec_0", weight_arg_idx=7, input_arg_idx=6,
+            output_arg_idx=8, out_rows=HIDDEN_DIM, group_size=group_size)
+        _emit_rm_rms_seg(group_size=group_size)
+        _emit_eltwise_add_seg(
+            "a1_eltwise_add_seg", in0_arg_idx=2, in1_arg_idx=3, out_arg_idx=4,
+            group_size=group_size)
+        _emit_awq_matvec_seg_k2048(
+            "og_awq_matvec_0", weight_arg_idx=0, input_arg_idx=1,
+            output_arg_idx=2, out_rows=EMB_DIM, group_size=group_size)
+        _emit_dispatcher_device(group_size=group_size)
+        module = ctx.module
+        attach_loop_annotation_to_all_scf_for(module)
+
+    return str(module)
+
+
+# ---------------------------------------------------------------------------
+# CLI -- emit the module to stdout (useful for diffing vs cached MLIR).
+# ---------------------------------------------------------------------------
+if __name__ == "__main__":  # pragma: no cover
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("-o", "--output", help="Output path (default: stdout)",
+                        default=None)
+    args = parser.parse_args()
+    text = build_o_gemv_ffn_awq_module()
+    if args.output:
+        with open(args.output, "w") as f:
+            f.write(text)
+    else:
+        print(text)
