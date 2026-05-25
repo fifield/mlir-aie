@@ -17,126 +17,16 @@ substrate for two reasons:
   2. Setting `PYTHOC_LLAMA_USE_PLACED_BUILDERS=cached` forces every builder
      onto the cached path -- useful for A/B regression-testing.
 
-The AIR-tree counterpart of this file runs aircc on multi_launch_builder
-modules to harvest post-stitched `npu.air.mlir`; the pythoc tree never
-invokes aircc at compile time.
+The pythoc tree never invokes aircc at compile time; Phase 6 Stage 4
+removed the last aircc shell-out (the AIR-tree AWQ-builder fallback).
 """
 
 import os
-import shutil
-import subprocess
 import sys
-import tempfile
-import time
 from pathlib import Path
-from typing import Optional
 
 _REFERENCE_DIR = Path(__file__).resolve().parent.parent / "reference_mlir"
 
-
-# ---------------------------------------------------------------------------
-# Stage 1 AWQ scaffolding: aircc shell-out for compile-on-demand AIR module
-# lowering.  Stage 2 retires the AIR-tree path entirely; this whole block
-# goes away then.
-# ---------------------------------------------------------------------------
-
-
-def _resolve_peano_dir() -> str:
-    p = os.environ.get("PEANO_INSTALL_DIR", "")
-    if p:
-        return p
-    raise RuntimeError("PEANO_INSTALL_DIR is not set")
-
-
-_LINK_OBJS = [
-    "silu_and_mul.o", "rope.o", "attn.o", "attn_npu2.o",
-    "mv.o", "mv_k8192.o", "attn_decode_npu2.o",
-    "awq_mv.o", "awq_mv_k8192.o",
-]
-
-
-def lower_air_to_npu_air_mlir(
-    air_module_text: str,
-    *,
-    device: str = "npu2",
-    num_cols: int = 8,
-    omit_while_true_loop: bool = False,
-    omit_pingpong: Optional[str] = None,
-    runtime_loop_tiling_sizes=(),
-    use_lock_race_condition_fix: bool = False,
-    workdir: Optional[str] = None,
-    verbose: bool = False,
-) -> str:
-    """Run AIR passes via aircc and return the post-stitched npu.air.mlir text.
-
-    Used by the AIR-tree AWQ builders (`awq_gemv_builder`, `awq_matvec`) that
-    we copied in as Stage-1 scaffolding so compile-on-demand smoke-test shapes
-    still work. Stage 2 replaces this with PythoC + placed-IRON and removes
-    the function.
-    """
-    aircc_exe = shutil.which("aircc")
-    if not aircc_exe:
-        raise RuntimeError("aircc not found on PATH")
-
-    work = Path(workdir or tempfile.mkdtemp(prefix="air_lower_"))
-    work.mkdir(parents=True, exist_ok=True)
-
-    cwd = Path.cwd()
-    staged = set()
-    for obj_name in _LINK_OBJS:
-        src = cwd / obj_name
-        if src.exists():
-            shutil.copy2(src, work / obj_name)
-            staged.add(src.resolve())
-    for src in sorted(cwd.glob("awq_gemv_*.o")):
-        if src.resolve() not in staged:
-            shutil.copy2(src, work / src.name)
-
-    air_path = work / "air.mlir"
-    air_path.write_text(air_module_text)
-
-    cmd = [
-        aircc_exe,
-        "--device", device,
-        "--output-format", "elf",
-        "--elf-name", "aie.elf",
-        f"--tmpdir={work}",
-        f"--peano={_resolve_peano_dir()}",
-        "--no-xchesscc",
-        "--no-xbridge",
-    ]
-    if num_cols:
-        cmd += [f"--num-cols={num_cols}"]
-    if omit_while_true_loop:
-        cmd += ["--omit-while-true-loop"]
-    if omit_pingpong is not None:
-        pp = "all" if omit_pingpong is True else str(omit_pingpong)
-        cmd += [f"--omit-ping-pong-transform={pp}"]
-    for s in runtime_loop_tiling_sizes:
-        cmd += [f"--air-runtime-loop-tiling-sizes={s}"]
-    if use_lock_race_condition_fix:
-        cmd += ["--use-lock-race-condition-fix"]
-    if verbose:
-        cmd += ["-v"]
-    cmd.append(str(air_path))
-
-    if verbose:
-        print(f"  [aircc lowering] {' '.join(cmd)}")
-    t0 = time.time()
-    proc = subprocess.run(cmd, cwd=str(work), capture_output=True, text=True)
-    dt = time.time() - t0
-
-    npu_path = work / "npu.air.mlir"
-    if not npu_path.exists():
-        msg = proc.stderr or proc.stdout
-        raise RuntimeError(
-            f"aircc lowering produced no npu.air.mlir in {dt:.1f}s "
-            f"(returncode={proc.returncode}):\n{msg}"
-        )
-    if verbose and proc.returncode != 0:
-        print(f"  [aircc] backend step failed but IR was recovered; "
-              f"returncode={proc.returncode}")
-    return npu_path.read_text()
 
 # Override which builders use the placed-IRON Python path vs the cached
 # `reference_mlir/<name>.npu.air.mlir` substrate. Default (env unset): every
@@ -315,14 +205,14 @@ def build_o_gemv_ffn_awq_ir(emb_dim, hidden_dim, *, group_size=128, verbose=Fals
     return _load_cached("o_gemv_ffn_awq")
 
 
-def build_awq_gemv_ir(k, m, group_size, *, variant="scalar", verbose=False):
+def build_awq_gemv_ir(k, m, group_size, *, variant="vecdeq", verbose=False):
     """Packed uint4 AWQ GEMV primitive.
 
-    Stage 3 wires this through the placed-IRON builder gate. When
-    ``awq_matvec`` is enabled (the default), emit the module directly
-    from ``builders/awq_matvec.py``. Otherwise prefer cached MLIR; if
-    no cached file exists for the requested shape, fall back to the
-    AIR-tree ``awq_gemv_builder.build_awq_gemv_ir`` for compile-on-demand.
+    Phase 6: emits aie/aiex dialect from ``builders/awq_matvec.py``
+    (placed-IRON, default).  Force ``PYTHOC_LLAMA_USE_PLACED_BUILDERS=cached``
+    to fall back to the seeded ``reference_mlir/<name>.npu.air.mlir``.
+    Only the ``vecdeq`` variant is supported after Stage 4 cleanup --
+    the AIR-tree builder that produced scalar IR was deleted.
     """
     if _placed_builder_enabled("awq_matvec"):
         _ensure_builders_on_path()
@@ -339,18 +229,13 @@ def build_awq_gemv_ir(k, m, group_size, *, variant="scalar", verbose=False):
 
     cache_name = f"awq_gemv_k{int(k)}_m{int(m)}_g{int(group_size)}_{variant}"
     cache_path = _REFERENCE_DIR / f"{cache_name}.npu.air.mlir"
-    if cache_path.exists():
-        if verbose:
-            print(f"  [aie_ir_gen] Using cached MLIR for {cache_name}")
-        return cache_path.read_text()
-    # Fallback: AIR-tree builder for compile-on-demand (smoke tests, new shapes).
-    try:
-        from kernel_builder.awq_gemv_builder import build_awq_gemv_ir as _build
-    except ImportError as exc:
+    if not cache_path.exists():
         raise FileNotFoundError(
-            f"No cached MLIR for {cache_name} at {cache_path}, and "
-            f"awq_gemv_builder is not importable: {exc}"
-        ) from exc
+            f"No cached MLIR for {cache_name} at {cache_path}. "
+            "Either seed reference_mlir/ for this shape or unset "
+            "PYTHOC_LLAMA_USE_PLACED_BUILDERS=cached so the placed-IRON "
+            "builder handles it."
+        )
     if verbose:
-        print(f"  [aie_ir_gen] Building AWQ GEMV IR on demand for {cache_name}")
-    return str(_build(k=k, m=m, group_size=group_size, variant=variant))
+        print(f"  [aie_ir_gen] Using cached MLIR for {cache_name}")
+    return cache_path.read_text()
