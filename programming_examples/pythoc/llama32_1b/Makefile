@@ -95,7 +95,7 @@ endif
 PREFILL_MANIFEST := $(BUILD_DIR)/prefill_kernel_cache/manifest.json
 DECODE_MANIFEST  := $(BUILD_DIR)/decode_kernel_cache/manifest.json
 
-.PHONY: help compile ensure-cache run profile verify chat check-awq-weights run-awq run-awq-experimental profile-awq verify-awq test-awq-gemv test-awq-gemv-npu snapshot hf-gate clean
+.PHONY: help compile ensure-cache run profile verify chat trace check-awq-weights run-awq run-awq-experimental profile-awq verify-awq test-awq-gemv test-awq-gemv-npu snapshot hf-gate clean
 
 help:
 	@echo "============================================================"
@@ -194,6 +194,25 @@ test-awq-gemv-npu:
 chat: ensure-cache
 	cd $(BUILD_DIR) && python3 $(srcdir)/llama32_1b_inference.py \
 		--run-only --interactive --n-tokens $(N_TOKENS) --model $(MODEL) $(WEIGHTS_FLAG) $(HF_MODEL_FLAG) $(QUANT_FLAG) $(AWQ_DECODE_EXPERIMENTAL_FLAG)
+
+# AIE event-trace capture: instrument exactly one decode kernel with
+# aie.utils.trace.configure_trace/start_trace before aiecc, then run inference
+# and dump trace bytes to <BUILD>/decode_kernel_cache/trace/.
+# Required: KERNEL, SUBDEVICE, COL, ROW. Example:
+#   make trace KERNEL=rms_gemv_rope SUBDEVICE=v_matvec_bf16_0 COL=0 ROW=2 \
+#       N_TOKENS=2 PROMPT=hi
+TRACE_SIZE ?= 8388608
+TRACE_TARGET := $(KERNEL):$(SUBDEVICE):$(COL):$(ROW)
+
+trace: ensure-cache
+	@if [ -z "$(KERNEL)" ] || [ -z "$(SUBDEVICE)" ] || [ -z "$(COL)" ] || [ -z "$(ROW)" ]; then \
+	    echo "ERROR: set KERNEL, SUBDEVICE, COL, ROW. e.g. make trace KERNEL=rms_gemv_rope SUBDEVICE=v_matvec_bf16_0 COL=0 ROW=2"; \
+	    exit 2; \
+	fi
+	cd $(BUILD_DIR) && python3 $(srcdir)/llama32_1b_inference.py \
+		--n-tokens $(N_TOKENS) --prompt "$(PROMPT)" --model $(MODEL) \
+		--trace $(TRACE_TARGET) --trace-size $(TRACE_SIZE) \
+		$(WEIGHTS_FLAG) $(HF_MODEL_FLAG) $(QUANT_FLAG) $(AWQ_DECODE_EXPERIMENTAL_FLAG)
 
 # ---------------------------------------------------------------------------
 # Per-phase metrics harness (tests/test_phase_snapshot.py).
