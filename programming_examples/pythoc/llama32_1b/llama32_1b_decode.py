@@ -25,6 +25,7 @@ from llama32_1b_weights import LlamaConfig
 from kernel_builder.cache import KernelCache
 from kernel_builder.backend_presets import (
     RGR_BACKEND,
+    RGR_AWQ_BACKEND,
     OGF_BACKEND,
     LM_GEMV_BACKEND,
 )
@@ -178,15 +179,27 @@ def run_decode_block(
         )
 
     # --- Call 1: rms_gemv_rope (6 launches, 13 args) ---
-    # RMSNorm + Q/K/V GEMV + RoPE Q + RoPE K
+    # RMSNorm + Q/K/V GEMV + RoPE Q + RoPE K.  When awq_layer_weights is
+    # provided, dispatch to the AWQ variant which reads packed-uint4
+    # qweight+params for Q/K/V instead of bf16 weight matrices.
     x_in = x_bf16.flatten().astype(bfloat16)
     w_norm = layer_weights.attn_norm.reshape(emb_dim).astype(bfloat16)
     normed_buf = np.zeros(emb_dim, dtype=bfloat16)
-    wq = layer_weights._wq_t
+    if awq_layer_weights is not None:
+        from llama32_1b_awq_runtime import awq_combined_weight
+        wq = awq_combined_weight(awq_layer_weights.wq)
+        wk = awq_combined_weight(awq_layer_weights.wk)
+        wv = awq_combined_weight(awq_layer_weights.wv)
+        rgr_kernel = "rms_gemv_rope_awq"
+        rgr_backend = RGR_AWQ_BACKEND
+    else:
+        wq = layer_weights._wq_t
+        wk = layer_weights._wk_t
+        wv = layer_weights._wv_t
+        rgr_kernel = "rms_gemv_rope"
+        rgr_backend = RGR_BACKEND
     q_buf = np.zeros(emb_dim, dtype=bfloat16)
-    wk = layer_weights._wk_t
     k_buf = np.zeros(kv_dim, dtype=bfloat16)
-    wv = layer_weights._wv_t
     v_buf = np.zeros(kv_dim, dtype=bfloat16)
 
     # RoPE LUT for current position
@@ -197,8 +210,8 @@ def run_decode_block(
     k_roped_buf = np.zeros(kv_dim, dtype=bfloat16)
 
     results = _run(
-        "rms_gemv_rope",
-        RGR_BACKEND,
+        rgr_kernel,
+        rgr_backend,
         x_in,  # arg0
         w_norm,  # arg1
         normed_buf,  # arg2 (intermediate)
