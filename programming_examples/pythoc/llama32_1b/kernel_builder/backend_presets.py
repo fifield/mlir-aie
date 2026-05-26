@@ -71,6 +71,15 @@ LM_GEMV_BACKEND = {
     **GEMV_K2048_BACKEND,
 }
 
+# Packed-AWQ LM head GEMV.  Same 8-partition shape as LM_GEMV_BACKEND but
+# different cache instance name so AWQ vs BF16 ELFs don't share the
+# manifest.
+LM_GEMV_AWQ_BACKEND = {
+    "output_format": "elf",
+    "instance_name": "lm_head_gemv_awq",
+    **GEMV_K2048_BACKEND,
+}
+
 # Packed uint4 AWQ GEMV primitive. Keep instance/cache naming distinct from all
 # BF16 GEMV kernels so experimental AWQ artifacts cannot overwrite manifests for
 # rms_gemv_rope, o_gemv_ffn, or lm_head_gemv.

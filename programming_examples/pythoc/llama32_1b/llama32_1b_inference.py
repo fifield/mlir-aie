@@ -52,6 +52,7 @@ from kernel_builder.cache import KernelCache
 from kernel_builder.external_kernels import compile_all_external_kernels
 from kernel_builder.backend_presets import (
     LM_GEMV_BACKEND,
+    LM_GEMV_AWQ_BACKEND,
     RGR_BACKEND,
     OGF_BACKEND,
 )
@@ -128,6 +129,37 @@ class Session:
 # Decode LM Head constants
 _LM_N_PART = 16384
 _LM_N_PARTITIONS = 8
+# AWQ packed-row layout for lm_head_gemv_awq: each row is
+# [qweight (K/2 = 1024 bytes)] [params (4 * K/group_size = 64 bytes)]
+# = 1088 uint8 bytes per row.  Must match builders/lm_head_gemv_awq.py.
+_LM_AWQ_ROW_BYTES = 2048 // 2 + 4 * (2048 // 128)  # 1088
+
+
+def _build_lm_head_awq_partitions(awq_lm_head, n_partitions=_LM_N_PARTITIONS,
+                                   n_part_rows=_LM_N_PART):
+    """Convert weights.awq_lm_head (AwqLinear) into n_partitions combined-row
+    uint8 buffers of shape (n_part_rows, _LM_AWQ_ROW_BYTES).
+
+    Combined row layout: [qweight_bytes (K/2)] [params_bytes (4 * groups)]
+    -- matches awq_combined_weight() in llama32_1b_awq_runtime.py.
+    Last partition is zero-padded if vocab_size < n_partitions * n_part_rows.
+    """
+    from llama32_1b_awq_runtime import awq_combined_weight
+    combined = awq_combined_weight(awq_lm_head)  # (vocab_size, row_bytes)
+    vocab_size = awq_lm_head.m
+    row_bytes = combined.shape[1]
+    assert row_bytes == _LM_AWQ_ROW_BYTES, (
+        f"AWQ lm_head combined-row bytes {row_bytes} != "
+        f"expected {_LM_AWQ_ROW_BYTES}"
+    )
+    parts = []
+    for p in range(n_partitions):
+        n_start = p * n_part_rows
+        n_end = min(n_start + n_part_rows, vocab_size)
+        w = np.zeros((n_part_rows, row_bytes), dtype=np.uint8)
+        w[: n_end - n_start, :] = combined[n_start:n_end]
+        parts.append(np.ascontiguousarray(w))
+    return parts
 
 
 # ---------------------------------------------------------------------------
@@ -216,7 +248,10 @@ def prepare_runtime(
     # 5. Pre-load decode weights into per-layer BOs
     #    (lm_head_gemv 8-partition weights here are also reused by prefill's
     #    last-token projection — refactored from full-seq GEMM for ~150 ms savings)
-    _preload_decode_weights(decode_cache, weights, config)
+    _preload_decode_weights(
+        decode_cache, weights, config,
+        awq_lm_head=awq_decode_experimental and getattr(weights, "awq_lm_head", None) is not None,
+    )
 
     # 5b. AWQ experimental path: also preload fused o_gemv_ffn_awq weights per layer
     if awq_decode_experimental and getattr(weights, "awq_layers", None):
@@ -230,12 +265,19 @@ def prepare_runtime(
     print(f"  Runtime prepared in {t_prep:.1f}s")
 
 
-def _preload_decode_weights(decode_cache, weights, config):
+def _preload_decode_weights(decode_cache, weights, config, *, awq_lm_head=False):
     """Pre-load all decode transformer block weights into per-layer BOs.
 
     Mirrors the preloading pattern from llama32_1b_decode.py: writes all weight
     data once before timing starts. During inference, static_input_indices
     skips weight re-writes.
+
+    When ``awq_lm_head=True`` and ``weights.awq_lm_head`` is populated, the
+    LM-head GEMV path is preloaded as ``lm_head_gemv_awq`` with packed-uint4
+    combined-row buffers instead of bf16 weights.  Sets
+    ``weights._lm_weight_parts_gemv_awq`` and an
+    ``weights._lm_head_awq_active`` sentinel that the prefill last-token /
+    decode loop dispatch on.
     """
     if hasattr(weights, "_decode_weights_preloaded_to_bos"):
         return
@@ -304,30 +346,59 @@ def _preload_decode_weights(decode_cache, weights, config):
             bo_key=f"o_gemv_ffn_L{layer_idx}",
         )
 
-    # LM Head GEMV weights (8 partitions)
-    weights._lm_weight_parts_gemv = []
-    for p in range(_LM_N_PARTITIONS):
-        n_start = p * _LM_N_PART
-        n_end = min(n_start + _LM_N_PART, vocab_size)
-        w = np.zeros((_LM_N_PART, emb_dim), dtype=bfloat16)
-        w[: n_end - n_start, :] = np.ascontiguousarray(
-            weights.lm_head[n_start:n_end, :]
-        ).astype(bfloat16)
-        weights._lm_weight_parts_gemv.append(w)
-
-    # Pre-load LM Head GEMV BOs
-    lm_inputs = [np.zeros(emb_dim, dtype=bfloat16)]
-    for p in range(_LM_N_PARTITIONS):
-        lm_inputs.append(weights._lm_weight_parts_gemv[p])
-        lm_inputs.append(np.zeros(_LM_N_PART, dtype=bfloat16))
-    decode_cache.load_and_run(
-        "lm_head_gemv",
-        LM_GEMV_BACKEND,
-        *lm_inputs,
-        output_indices=[2 + 2 * p for p in range(_LM_N_PARTITIONS)],
-        static_input_indices={1 + 2 * p for p in range(_LM_N_PARTITIONS)},
-        intermediate_indices={2 + 2 * p for p in range(_LM_N_PARTITIONS)},
-    )
+    # LM Head GEMV weights (8 partitions).  Route to packed-AWQ when
+    # `awq_lm_head=True` and weights.awq_lm_head is populated.
+    if awq_lm_head and getattr(weights, "awq_lm_head", None) is not None:
+        # Lazy-compile the AWQ LM head ELF on first preload (parallels
+        # o_gemv_ffn_awq -- compile-only doesn't know about quant yet).
+        if "lm_head_gemv_awq" not in getattr(decode_cache, "artifacts", {}):
+            from kernel_builder import aie_ir_gen
+            decode_cache.compile_and_cache(
+                "lm_head_gemv_awq",
+                aie_ir_gen.build_lm_head_gemv_awq_ir(
+                    emb_dim, verbose=getattr(decode_cache, "verbose", False)
+                ),
+                instance_name="lm_head_gemv_awq",
+            )
+        weights._lm_weight_parts_gemv_awq = _build_lm_head_awq_partitions(
+            weights.awq_lm_head
+        )
+        weights._lm_head_awq_active = True
+        lm_inputs = [np.zeros(emb_dim, dtype=bfloat16)]
+        for p in range(_LM_N_PARTITIONS):
+            lm_inputs.append(weights._lm_weight_parts_gemv_awq[p])
+            lm_inputs.append(np.zeros(_LM_N_PART, dtype=bfloat16))
+        decode_cache.load_and_run(
+            "lm_head_gemv_awq",
+            LM_GEMV_AWQ_BACKEND,
+            *lm_inputs,
+            output_indices=[2 + 2 * p for p in range(_LM_N_PARTITIONS)],
+            static_input_indices={1 + 2 * p for p in range(_LM_N_PARTITIONS)},
+            intermediate_indices={2 + 2 * p for p in range(_LM_N_PARTITIONS)},
+        )
+    else:
+        weights._lm_head_awq_active = False
+        weights._lm_weight_parts_gemv = []
+        for p in range(_LM_N_PARTITIONS):
+            n_start = p * _LM_N_PART
+            n_end = min(n_start + _LM_N_PART, vocab_size)
+            w = np.zeros((_LM_N_PART, emb_dim), dtype=bfloat16)
+            w[: n_end - n_start, :] = np.ascontiguousarray(
+                weights.lm_head[n_start:n_end, :]
+            ).astype(bfloat16)
+            weights._lm_weight_parts_gemv.append(w)
+        lm_inputs = [np.zeros(emb_dim, dtype=bfloat16)]
+        for p in range(_LM_N_PARTITIONS):
+            lm_inputs.append(weights._lm_weight_parts_gemv[p])
+            lm_inputs.append(np.zeros(_LM_N_PART, dtype=bfloat16))
+        decode_cache.load_and_run(
+            "lm_head_gemv",
+            LM_GEMV_BACKEND,
+            *lm_inputs,
+            output_indices=[2 + 2 * p for p in range(_LM_N_PARTITIONS)],
+            static_input_indices={1 + 2 * p for p in range(_LM_N_PARTITIONS)},
+            intermediate_indices={2 + 2 * p for p in range(_LM_N_PARTITIONS)},
+        )
 
     weights._decode_weights_preloaded_to_bos = True
     total_mb = (
@@ -480,14 +551,19 @@ def run_npu_prefill(
         _rms_norm(last_hidden, weights.final_norm).flatten().astype(bfloat16)
     )
 
-    # NPU LM Head GEMV — reuse the decode-cache 8-partition GEMV ELF
+    # NPU LM Head GEMV — reuse the decode-cache 8-partition GEMV ELF.
+    # AWQ-active path uses lm_head_gemv_awq with packed uint8 weights.
+    _lm_awq = getattr(weights, "_lm_head_awq_active", False)
     lm_inputs = [last_normed_bf16]
     for p in range(_LM_N_PARTITIONS):
-        lm_inputs.append(weights._lm_weight_parts_gemv[p])
+        if _lm_awq:
+            lm_inputs.append(weights._lm_weight_parts_gemv_awq[p])
+        else:
+            lm_inputs.append(weights._lm_weight_parts_gemv[p])
         lm_inputs.append(np.zeros(_LM_N_PART, dtype=bfloat16))
     results = decode_cache.load_and_run(
-        "lm_head_gemv",
-        LM_GEMV_BACKEND,
+        "lm_head_gemv_awq" if _lm_awq else "lm_head_gemv",
+        LM_GEMV_AWQ_BACKEND if _lm_awq else LM_GEMV_BACKEND,
         *lm_inputs,
         output_indices=[2 + 2 * p for p in range(_LM_N_PARTITIONS)],
         static_input_indices={1 + 2 * p for p in range(_LM_N_PARTITIONS)},
@@ -664,17 +740,22 @@ def generate(
             weights.final_norm.astype(np.float32),
         )
 
-        # LM Head (NPU -- 8-partition GEMV, single XRT call)
+        # LM Head (NPU -- 8-partition GEMV, single XRT call).
+        # AWQ-active path: lm_head_gemv_awq with packed uint8 weights.
+        _lm_awq = getattr(weights, "_lm_head_awq_active", False)
         x_lm = x_normed.flatten().astype(bfloat16)
         lm_inputs = [x_lm]
         lm_output_indices = []
         for p in range(_LM_N_PARTITIONS):
-            lm_inputs.append(weights._lm_weight_parts_gemv[p])
+            if _lm_awq:
+                lm_inputs.append(weights._lm_weight_parts_gemv_awq[p])
+            else:
+                lm_inputs.append(weights._lm_weight_parts_gemv[p])
             lm_inputs.append(np.zeros(_LM_N_PART, dtype=bfloat16))
             lm_output_indices.append(2 + 2 * p)
         lm_results = decode_cache.load_and_run(
-            "lm_head_gemv",
-            LM_GEMV_BACKEND,
+            "lm_head_gemv_awq" if _lm_awq else "lm_head_gemv",
+            LM_GEMV_AWQ_BACKEND if _lm_awq else LM_GEMV_BACKEND,
             *lm_inputs,
             output_indices=lm_output_indices,
             static_input_indices={1 + 2 * p for p in range(_LM_N_PARTITIONS)},
