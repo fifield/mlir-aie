@@ -71,6 +71,15 @@ LM_GEMV_BACKEND = {
     **GEMV_K2048_BACKEND,
 }
 
+# Packed-AWQ RMS + Q/K/V GEMV + RoPE decode kernel.  Same 6-segment shape as
+# RGR_BACKEND but distinct cache instance_name so AWQ vs BF16 ELFs don't
+# share the manifest.
+RGR_AWQ_BACKEND = {
+    "output_format": "elf",
+    "instance_name": "rms_gemv_rope_awq",
+    **GEMV_K2048_BACKEND,
+}
+
 # Packed-AWQ LM head GEMV.  Same 8-partition shape as LM_GEMV_BACKEND but
 # different cache instance name so AWQ vs BF16 ELFs don't share the
 # manifest.

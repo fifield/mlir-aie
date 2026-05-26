@@ -419,28 +419,77 @@ def _preload_decode_weights(decode_cache, weights, config, *, awq_lm_head=False)
 
 
 def _preload_decode_weights_awq(decode_cache, weights, config):
-    """Preload fused packed-AWQ o_gemv_ffn_awq per-layer BOs.
+    """Preload fused packed-AWQ o_gemv_ffn_awq + rms_gemv_rope_awq per-layer BOs.
 
-    First call per layer compiles the AWQ ELF (lazy) and uploads the combined
-    qweight+params buffers for o/gate/up/down + the ffn_norm. Subsequent decode
-    calls hit `o_gemv_ffn_awq_L{i}` and skip the static writes via
+    First call per layer compiles the AWQ ELFs (lazy) and uploads the
+    combined qweight+params buffers for q/k/v (rms_gemv_rope_awq) and
+    o/gate/up/down (o_gemv_ffn_awq) + the attn/ffn norms.  Subsequent
+    decode calls hit per-layer BO keys and skip static writes via
     static_input_indices.
     """
-    from llama32_1b_awq_runtime import o_gemv_ffn_awq_npu
+    from llama32_1b_awq_runtime import o_gemv_ffn_awq_npu, awq_combined_weight
+    from kernel_builder.backend_presets import RGR_AWQ_BACKEND
+    from kernel_builder import aie_ir_gen as _aig
 
     if getattr(weights, "_awq_decode_weights_preloaded_to_bos", False):
         return
 
     emb_dim = config.emb_dim
     hidden_dim = config.hidden_dim
+    n_heads = config.n_heads
+    n_kv_heads = config.n_kv_heads
+    head_dim = config.head_dim
+    kv_dim = n_kv_heads * head_dim
 
     print("  Pre-loading AWQ experimental decode weights into per-layer BOs...")
     dummy_attn = np.zeros(emb_dim, dtype=bfloat16)
     dummy_x = np.zeros(emb_dim, dtype=bfloat16)
 
+    # Lazy-compile the AWQ rms_gemv_rope ELF on first preload.
+    if "rms_gemv_rope_awq" not in getattr(decode_cache, "artifacts", {}):
+        decode_cache.compile_and_cache(
+            "rms_gemv_rope_awq",
+            _aig.build_rms_gemv_rope_awq_ir(
+                emb_dim, kv_dim, n_heads, n_kv_heads, head_dim,
+                verbose=getattr(decode_cache, "verbose", False),
+            ),
+            instance_name="rms_gemv_rope_awq",
+        )
+
+    rope_lut_q_dummy = np.zeros(n_heads * head_dim, dtype=bfloat16)
+    rope_lut_k_dummy = np.zeros(n_kv_heads * head_dim, dtype=bfloat16)
+
     for layer_idx in range(config.n_layers):
         lw = weights.layers[layer_idx]
         awq = weights.awq_layers[layer_idx]
+
+        # rms_gemv_rope_awq: combined-row q/k/v weight buffers.
+        wq_awq = awq_combined_weight(awq.wq)   # (emb_dim, 1088) ui8
+        wk_awq = awq_combined_weight(awq.wk)   # (kv_dim, 1088) ui8
+        wv_awq = awq_combined_weight(awq.wv)   # (kv_dim, 1088) ui8
+        decode_cache.load_and_run(
+            "rms_gemv_rope_awq",
+            RGR_AWQ_BACKEND,
+            np.zeros(emb_dim, dtype=bfloat16),         # arg0 x_in
+            lw.attn_norm.reshape(emb_dim).astype(bfloat16),  # arg1 norm_w (static)
+            np.zeros(emb_dim, dtype=bfloat16),         # arg2 normed (intermediate)
+            wq_awq,                                     # arg3 wq (static)
+            np.zeros(emb_dim, dtype=bfloat16),         # arg4 q (intermediate)
+            wk_awq,                                     # arg5 wk (static)
+            np.zeros(kv_dim, dtype=bfloat16),          # arg6 k (intermediate)
+            wv_awq,                                     # arg7 wv (static)
+            np.zeros(kv_dim, dtype=bfloat16),          # arg8 v (output)
+            rope_lut_q_dummy,                           # arg9 lut_q
+            rope_lut_k_dummy,                           # arg10 lut_k
+            np.zeros(emb_dim, dtype=bfloat16),         # arg11 q_roped (output)
+            np.zeros(kv_dim, dtype=bfloat16),          # arg12 k_roped (output)
+            output_indices=[8, 11, 12],
+            static_input_indices={1, 3, 5, 7},
+            intermediate_indices={2, 4, 6, 8, 11, 12},
+            bo_key=f"rms_gemv_rope_awq_L{layer_idx}",
+        )
+
+        # o_gemv_ffn_awq
         o_gemv_ffn_awq_npu(
             decode_cache,
             dummy_attn,

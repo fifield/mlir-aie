@@ -53,6 +53,7 @@ _DEFAULT_PLACED_BUILDERS = frozenset({
     "o_gemv_ffn_awq",  # Phase 6 -- fused AWQ uint4 O+FFN decode (Stage 3 Subtask A)
     "awq_matvec",      # Phase 6 -- standalone AWQ GEMV (dim-specialized)
     "lm_head_gemv_awq", # Phase 6 -- packed-AWQ LM head GEMV (8 partitions)
+    "rms_gemv_rope_awq", # Phase 6 -- packed-AWQ Q/K/V GEMV + RMS + RoPE decode
 })
 
 
@@ -182,6 +183,29 @@ def build_lm_head_gemv_ir(emb_dim, *, verbose=False):
         return build_lm_head_gemv_module(emb_dim=emb_dim)
     del verbose
     return _load_cached("lm_head_gemv")
+
+
+def build_rms_gemv_rope_awq_ir(emb_dim, kv_dim, n_heads, n_kv_heads, head_dim,
+                                *, group_size=128, verbose=False):
+    """Packed-AWQ RMS + Q/K/V GEMV + RoPE decode IR.
+
+    Same 6-segment topology as ``rms_gemv_rope`` but Q/K/V GEMVs read
+    packed-uint4 AWQ weight matrices and call ``awq_mv_pythoc.o``.
+    RMSNorm and RoPE stay BF16.
+    """
+    if _placed_builder_enabled("rms_gemv_rope_awq"):
+        _ensure_builders_on_path()
+        from builders.rms_gemv_rope_awq import build_rms_gemv_rope_awq_module
+        if verbose:
+            print(f"  [aie_ir_gen] Using placed-IRON builder for rms_gemv_rope_awq "
+                  f"(emb_dim={emb_dim}, kv_dim={kv_dim}, group_size={group_size})")
+        return build_rms_gemv_rope_awq_module(
+            emb_dim=emb_dim, kv_dim=kv_dim,
+            n_heads=n_heads, n_kv_heads=n_kv_heads, head_dim=head_dim,
+            group_size=group_size,
+        )
+    del emb_dim, kv_dim, n_heads, n_kv_heads, head_dim, group_size, verbose
+    return _load_cached("rms_gemv_rope_awq")
 
 
 def build_lm_head_gemv_awq_ir(emb_dim, *, verbose=False):
