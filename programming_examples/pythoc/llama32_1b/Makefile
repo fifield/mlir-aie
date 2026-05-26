@@ -75,7 +75,14 @@ else
   QUANT_FLAG := --quant bf16
 endif
 ifneq ($(HF_MODEL_ID),)
+ifeq ($(QUANT),awq)
+  # --hf-model-id is rejected when --quant awq (tokenizer is loaded from
+  # the repacked AWQ dir).  Suppress the flag so `make profile-awq` etc.
+  # work with the default HF_MODEL_ID still set.
+  HF_MODEL_FLAG :=
+else
   HF_MODEL_FLAG := --hf-model-id $(HF_MODEL_ID_Q)
+endif
 else
   HF_MODEL_FLAG :=
 endif
