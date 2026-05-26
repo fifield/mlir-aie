@@ -21,11 +21,13 @@ import json
 import shutil
 import time
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 from ml_dtypes import bfloat16
 
 from .aie_compile import AIECompileArtifact, compile_aie_to_elf
+from .aie_trace_capture import TraceState, TraceTarget
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +223,8 @@ class _XRTRunner:
 class KernelCache:
     MANIFEST_FILE = "manifest.json"
 
-    def __init__(self, cache_dir=None, verbose=False, profiler=None):
+    def __init__(self, cache_dir=None, verbose=False, profiler=None,
+                 trace_target: Optional[TraceTarget] = None):
         if cache_dir is None:
             cache_dir = Path(__file__).resolve().parent / "kernel_cache"
         self.cache_dir = Path(cache_dir)
@@ -231,6 +234,13 @@ class KernelCache:
         self.artifacts = {}  # name -> AIECompileArtifact
         self._loaded = {}    # name -> _XRTRunner
         self._cached_bos = {}
+        # Trace: when set, exactly one kernel (`trace_target.kernel`) is
+        # instrumented at compile time and its last BO is over-allocated at
+        # load time. Trace bytes from each launch are appended to trace_state.
+        self.trace_target = trace_target
+        self.trace_state = (
+            TraceState(target=trace_target) if trace_target is not None else None
+        )
 
     def _log(self, msg):
         if self.verbose:
@@ -249,14 +259,55 @@ class KernelCache:
             instance_name: function symbol that becomes the XRT kernel
                 identifier (`main:<instance_name>`).
         """
+        # Trace mode is meant to be iterative. Reuse cached non-target kernels
+        # so a `make trace` after a `make compile` only rebuilds the target.
+        elf_path = self.cache_dir / f"{name}.elf"
+        if (self.trace_target is not None
+                and name != self.trace_target.kernel
+                and elf_path.exists()):
+            self.artifacts[name] = AIECompileArtifact(
+                output_binary=str(elf_path),
+                kernel=f"main:{instance_name}",
+                insts=None,
+            )
+            print(f"  Reusing cached {name}.elf (not trace target)")
+            return
+
         self._log(f"Compiling {name}...")
         t0 = time.time()
 
-        # Save the IR text alongside the cached ELF for inspection / editing.
+        # Trace: rewrite the IR for the single targeted kernel before aiecc.
+        if self.trace_target is not None and name == self.trace_target.kernel:
+            from .aie_trace_instrument import instrument_ir_for_trace_subprocess
+            self._log(
+                f"  Instrumenting {name} for trace on sub_device="
+                f"{self.trace_target.sub_device} tile=({self.trace_target.col},"
+                f"{self.trace_target.row}) trace_size="
+                f"{self.trace_target.trace_size}"
+            )
+            ir_text, trace_info = instrument_ir_for_trace_subprocess(
+                ir_text,
+                sub_device=self.trace_target.sub_device,
+                col=self.trace_target.col,
+                row=self.trace_target.row,
+                trace_size=self.trace_target.trace_size,
+            )
+            (self.cache_dir / f"{name}.trace.json").write_text(
+                json.dumps(trace_info, indent=2)
+            )
+            if self.trace_state is not None:
+                self.trace_state.info = trace_info
+            print(
+                f"  [trace] {name}: instrumented "
+                f"{self.trace_target.sub_device}@({self.trace_target.col},"
+                f"{self.trace_target.row}) "
+                f"event_markers={'yes' if trace_info['event_markers_inserted'] else 'no'}"
+            )
+
+        # Save the (possibly instrumented) IR alongside the cached ELF.
         mlir_cached = self.cache_dir / f"{name}.npu.air.mlir"
         mlir_cached.write_text(ir_text)
 
-        elf_path = self.cache_dir / f"{name}.elf"
         artifact = compile_aie_to_elf(
             ir_text,
             instance_name=instance_name,
@@ -265,6 +316,15 @@ class KernelCache:
             verbose=self.verbose,
             extra_object_files=_link_obj_paths(),
         )
+        # aiecc also drops `input_with_addresses.mlir` (the post-lowering form
+        # with aiex.npu.write32 ops) in workdir; copy it next to the ELF so
+        # parse_trace can consume it. Best-effort; non-fatal if missing.
+        try:
+            lowered = self.cache_dir / f".{name}.work" / "input_with_addresses.mlir"
+            if lowered.exists():
+                shutil.copy2(lowered, self.cache_dir / f"{name}.aie.mlir")
+        except Exception:
+            pass
         dt = time.time() - t0
         self.profiler.record_compile(name, dt)
         self.artifacts[name] = artifact
@@ -361,9 +421,27 @@ class KernelCache:
         static_indices = set(static_input_indices or [])
         intermediate_set = set(intermediate_indices or [])
 
+        is_trace_kernel = (
+            self.trace_target is not None and name == self.trace_target.kernel
+        )
+        trace_extra = (
+            self.trace_target.trace_size * 4 if is_trace_kernel else 0
+        )
+
         first_call = _bo_key not in self._cached_bos
         if first_call:
-            bos = [xrt.ext.bo(runner.device, s) for s in sizes_in_bytes]
+            last_i = len(sizes_in_bytes) - 1
+            bos = []
+            for i, s in enumerate(sizes_in_bytes):
+                if is_trace_kernel and i == last_i:
+                    # Over-allocate the last BO by trace_size*4 (mlir-aie
+                    # test.py:182 workaround); the trace bytes get appended
+                    # right after the user's nbytes. xrt.ext.kernel requires
+                    # xrt.ext.bo (mixing with plain xrt.bo hangs the kernel).
+                    bo = xrt.ext.bo(runner.device, s + trace_extra)
+                else:
+                    bo = xrt.ext.bo(runner.device, s)
+                bos.append(bo)
             self._cached_bos[_bo_key] = bos
             self._log(f"Allocated {len(bos)} BOs for {_bo_key}")
 
@@ -406,6 +484,9 @@ class KernelCache:
                 readback_set = {len(inputs) - 1}
             else:
                 readback_set = set(output_indices)
+            # Ensure the trace-bearing BO is synced too.
+            if is_trace_kernel:
+                readback_set = readback_set | {len(inputs) - 1}
             for idx in readback_set:
                 bos[idx].sync(xrt.xclBOSyncDirection.XCL_BO_SYNC_BO_FROM_DEVICE)
             results = tuple(
@@ -420,6 +501,18 @@ class KernelCache:
                 )
                 for i, s in enumerate(sizes_in_bytes)
             )
+            if is_trace_kernel and self.trace_state is not None:
+                last_i = len(inputs) - 1
+                nbytes = sizes_in_bytes[last_i]
+                trace_size = self.trace_target.trace_size
+                mv = bos[last_i].map()
+                # Slice the trace_size bytes that follow the user's output.
+                trace_buf = bytes(
+                    np.frombuffer(
+                        mv, dtype=np.uint8, count=nbytes + trace_size
+                    )[nbytes : nbytes + trace_size]
+                )
+                self.trace_state.append(trace_buf)
             t_read_ms = (time.perf_counter() - t_read) * 1000
 
         duration = time.time() - t0
