@@ -39,7 +39,6 @@ from pythoc.aie import (
     vector_cast,
     vector_extract,
     vector_mul,
-    vector_sub,
     zeros,
 )
 
@@ -102,62 +101,88 @@ def dg_awq_matvec_vectorized_u4_bf16(
         while group < groups:
             scale_s: bf16 = p_row[0]
             zero_s: bf16 = p_row[1]
+            zs_s: bf16 = scale_s * zero_s
             scale_v: aie_vector[bf16, 32] = broadcast(bf16, 32, scale_s)
-            zero_v: aie_vector[bf16, 32] = broadcast(bf16, 32, zero_s)
+            zs_v: aie_vector[bf16, 32] = broadcast(bf16, 32, zs_s)
 
             x_group_offset: u32 = group * u32(GROUP_SIZE)
             q_group_offset: u32 = group * packed_per_group
 
-            chunk: u32 = u32(0)
-            while chunk < chunks_per_group:
-                q_chunk: aie_vector[u8, 32] = load_v(
-                    q_row + q_group_offset + chunk * u32(32), 32
-                )
-                nibbles: aie_vector[u8, 64] = unpack_I512_I8_I4(q_chunk, i32(0))
-                nib_lo: aie_vector[u8, 32] = vector_extract(nibbles, 0, 32)
-                nib_hi: aie_vector[u8, 32] = vector_extract(nibbles, 32, 32)
+            # === Chunk 0 ===
+            q_chunk0: aie_vector[u8, 32] = load_v(q_row + q_group_offset, 32)
+            nibbles0: aie_vector[u8, 64] = unpack_I512_I8_I4(q_chunk0, i32(0))
+            nib_lo0: aie_vector[u8, 32] = vector_extract(nibbles0, 0, 32)
+            nib_hi0: aie_vector[u8, 32] = vector_extract(nibbles0, 32, 32)
+            lo_i16_0: aie_vector[i16, 32] = unpack_unsigned(nib_lo0, i16)
+            hi_i16_0: aie_vector[i16, 32] = unpack_unsigned(nib_hi0, i16)
+            lo_i32_0: aie_vector[i32, 32] = unpack_unsigned(lo_i16_0, i32)
+            hi_i32_0: aie_vector[i32, 32] = unpack_unsigned(hi_i16_0, i32)
+            sum_lo_i32_0: aie_vector[i32, 32] = vector_add(lo_i32_0, magic_acc32)
+            sum_hi_i32_0: aie_vector[i32, 32] = vector_add(hi_i32_0, magic_acc32)
+            sum_lo_acc_0: aie_vector[f32, 32] = vector_cast(sum_lo_i32_0, f32, 32)
+            sum_hi_acc_0: aie_vector[f32, 32] = vector_cast(sum_hi_i32_0, f32, 32)
+            w_lo_acc_0: aie_vector[f32, 32] = I512_I512_ACC1024_bf_msc_conf(
+                magic_bf, ones_bf, sum_lo_acc_0, CONF_BF16_MAC
+            )
+            w_hi_acc_0: aie_vector[f32, 32] = I512_I512_ACC1024_bf_msc_conf(
+                magic_bf, ones_bf, sum_hi_acc_0, CONF_BF16_MAC
+            )
+            w_lo_bf_0: aie_vector[bf16, 32] = v32accfloat_to_v32bf16(w_lo_acc_0)
+            w_hi_bf_0: aie_vector[bf16, 32] = v32accfloat_to_v32bf16(w_hi_acc_0)
+            w_lo_s_0: aie_vector[bf16, 32] = vector_mul(w_lo_bf_0, scale_v)
+            w_hi_s_0: aie_vector[bf16, 32] = vector_mul(w_hi_bf_0, scale_v)
+            x_lo_0: aie_vector[bf16, 32] = load_v(x_in + x_group_offset, 32)
+            x_hi_0: aie_vector[bf16, 32] = load_v(x_in + x_group_offset + u32(32), 32)
+            acc_lo = I512_I512_ACC1024_bf_mac_conf(
+                x_lo_0, w_lo_s_0, acc_lo, CONF_BF16_MAC
+            )
+            acc_lo = I512_I512_ACC1024_bf_msc_conf(
+                x_lo_0, zs_v, acc_lo, CONF_BF16_MAC
+            )
+            acc_hi = I512_I512_ACC1024_bf_mac_conf(
+                x_hi_0, w_hi_s_0, acc_hi, CONF_BF16_MAC
+            )
+            acc_hi = I512_I512_ACC1024_bf_msc_conf(
+                x_hi_0, zs_v, acc_hi, CONF_BF16_MAC
+            )
 
-                lo_i16: aie_vector[i16, 32] = unpack_unsigned(nib_lo, i16)
-                hi_i16: aie_vector[i16, 32] = unpack_unsigned(nib_hi, i16)
-                lo_i32: aie_vector[i32, 32] = unpack_unsigned(lo_i16, i32)
-                hi_i32: aie_vector[i32, 32] = unpack_unsigned(hi_i16, i32)
-
-                sum_lo_i32: aie_vector[i32, 32] = vector_add(lo_i32, magic_acc32)
-                sum_lo_acc: aie_vector[f32, 32] = vector_cast(sum_lo_i32, f32, 32)
-                w_lo_acc: aie_vector[f32, 32] = I512_I512_ACC1024_bf_msc_conf(
-                    magic_bf, ones_bf, sum_lo_acc, CONF_BF16_MAC
-                )
-                w_lo_bf: aie_vector[bf16, 32] = v32accfloat_to_v32bf16(w_lo_acc)
-
-                sum_hi_i32: aie_vector[i32, 32] = vector_add(hi_i32, magic_acc32)
-                sum_hi_acc: aie_vector[f32, 32] = vector_cast(sum_hi_i32, f32, 32)
-                w_hi_acc: aie_vector[f32, 32] = I512_I512_ACC1024_bf_msc_conf(
-                    magic_bf, ones_bf, sum_hi_acc, CONF_BF16_MAC
-                )
-                w_hi_bf: aie_vector[bf16, 32] = v32accfloat_to_v32bf16(w_hi_acc)
-
-                w_lo_dq: aie_vector[bf16, 32] = vector_mul(
-                    vector_sub(w_lo_bf, zero_v), scale_v
-                )
-                w_hi_dq: aie_vector[bf16, 32] = vector_mul(
-                    vector_sub(w_hi_bf, zero_v), scale_v
-                )
-
-                x_lo: aie_vector[bf16, 32] = load_v(
-                    x_in + x_group_offset + chunk * u32(64), 32
-                )
-                x_hi: aie_vector[bf16, 32] = load_v(
-                    x_in + x_group_offset + chunk * u32(64) + u32(32), 32
-                )
-
-                acc_lo = I512_I512_ACC1024_bf_mac_conf(
-                    x_lo, w_lo_dq, acc_lo, CONF_BF16_MAC
-                )
-                acc_hi = I512_I512_ACC1024_bf_mac_conf(
-                    x_hi, w_hi_dq, acc_hi, CONF_BF16_MAC
-                )
-
-                chunk = chunk + u32(1)
+            # === Chunk 1 ===
+            q_chunk1: aie_vector[u8, 32] = load_v(q_row + q_group_offset + u32(32), 32)
+            nibbles1: aie_vector[u8, 64] = unpack_I512_I8_I4(q_chunk1, i32(0))
+            nib_lo1: aie_vector[u8, 32] = vector_extract(nibbles1, 0, 32)
+            nib_hi1: aie_vector[u8, 32] = vector_extract(nibbles1, 32, 32)
+            lo_i16_1: aie_vector[i16, 32] = unpack_unsigned(nib_lo1, i16)
+            hi_i16_1: aie_vector[i16, 32] = unpack_unsigned(nib_hi1, i16)
+            lo_i32_1: aie_vector[i32, 32] = unpack_unsigned(lo_i16_1, i32)
+            hi_i32_1: aie_vector[i32, 32] = unpack_unsigned(hi_i16_1, i32)
+            sum_lo_i32_1: aie_vector[i32, 32] = vector_add(lo_i32_1, magic_acc32)
+            sum_hi_i32_1: aie_vector[i32, 32] = vector_add(hi_i32_1, magic_acc32)
+            sum_lo_acc_1: aie_vector[f32, 32] = vector_cast(sum_lo_i32_1, f32, 32)
+            sum_hi_acc_1: aie_vector[f32, 32] = vector_cast(sum_hi_i32_1, f32, 32)
+            w_lo_acc_1: aie_vector[f32, 32] = I512_I512_ACC1024_bf_msc_conf(
+                magic_bf, ones_bf, sum_lo_acc_1, CONF_BF16_MAC
+            )
+            w_hi_acc_1: aie_vector[f32, 32] = I512_I512_ACC1024_bf_msc_conf(
+                magic_bf, ones_bf, sum_hi_acc_1, CONF_BF16_MAC
+            )
+            w_lo_bf_1: aie_vector[bf16, 32] = v32accfloat_to_v32bf16(w_lo_acc_1)
+            w_hi_bf_1: aie_vector[bf16, 32] = v32accfloat_to_v32bf16(w_hi_acc_1)
+            w_lo_s_1: aie_vector[bf16, 32] = vector_mul(w_lo_bf_1, scale_v)
+            w_hi_s_1: aie_vector[bf16, 32] = vector_mul(w_hi_bf_1, scale_v)
+            x_lo_1: aie_vector[bf16, 32] = load_v(x_in + x_group_offset + u32(64), 32)
+            x_hi_1: aie_vector[bf16, 32] = load_v(x_in + x_group_offset + u32(96), 32)
+            acc_lo = I512_I512_ACC1024_bf_mac_conf(
+                x_lo_1, w_lo_s_1, acc_lo, CONF_BF16_MAC
+            )
+            acc_lo = I512_I512_ACC1024_bf_msc_conf(
+                x_lo_1, zs_v, acc_lo, CONF_BF16_MAC
+            )
+            acc_hi = I512_I512_ACC1024_bf_mac_conf(
+                x_hi_1, w_hi_s_1, acc_hi, CONF_BF16_MAC
+            )
+            acc_hi = I512_I512_ACC1024_bf_msc_conf(
+                x_hi_1, zs_v, acc_hi, CONF_BF16_MAC
+            )
 
             p_row = p_row + u32(2)
             group = group + u32(1)
