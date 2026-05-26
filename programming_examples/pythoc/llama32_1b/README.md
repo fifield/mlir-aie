@@ -32,7 +32,7 @@ diagnostic approach.
 
 `reference_o/` is empty — no `.cc`-built `.o` left in the project.
 
-### Placed-IRON builders — 9 of 9 enabled by default
+### Placed-IRON builders — 10 of 10 enabled by default
 
 | Builder | Phase | Used by | Default |
 |---|---|---|---|
@@ -45,6 +45,7 @@ diagnostic approach.
 | `builders/o_gemv_ffn_awq.py` | decode (O + FFN, packed-AWQ) | `o_gemv_ffn_awq_npu` (when `--quant awq`) | ✓ placed-IRON (Phase 6 Stage 3) |
 | `builders/awq_matvec.py` | standalone AWQ GEMV | `awq_gemv_npu`, `awq_gemv_npu_tiled` | ✓ placed-IRON (Phase 6 Stage 3) |
 | `builders/lm_head_gemv_awq.py` | decode (final logits, packed-AWQ) | LM head when `--quant awq` | ✓ placed-IRON (Phase 6 follow-up) |
+| `builders/rms_gemv_rope_awq.py` | decode (RMSNorm + Q/K/V GEMV + RoPE, packed-AWQ) | per-layer decode when `--quant awq` | ✓ placed-IRON (Phase 6 follow-up) |
 
 `rms_gemms_rope`'s prefill V/K/Q GEMMs originally landed with a kernel
 stride/loop-bound mismatch (kernel built as `M_BLOCKS=16, N_BLOCKS=8`

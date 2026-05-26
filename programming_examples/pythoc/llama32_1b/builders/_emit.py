@@ -100,6 +100,37 @@ def o_gemv_ffn_host_arg_types(emb_dim: int = 2048, hidden_dim: int = 8192):
     ]
 
 
+def rms_gemv_rope_awq_host_arg_types(emb_dim: int = 2048, kv_dim: int = 512,
+                                     group_size: int = 128):
+    """Return the 13 host arg type specs for ``rms_gemv_rope_awq``.
+
+    Same layout as ``rms_gemv_rope_host_arg_types`` except args 3/5/7 (the
+    Q/K/V weight matrices) are packed-AWQ ``uint8[M, K/2 + 4*groups]`` rows
+    instead of ``bf16[M, K]`` rows.  RMSNorm + RoPE inputs/outputs stay bf16.
+
+    Combined-row layout per output row: ``[qweight bytes (K/2)] [params
+    bytes (4 * K/group_size)]``  --  matches ``awq_combined_weight()`` in
+    ``llama32_1b_awq_runtime.py``.
+    """
+    row_bytes = emb_dim // 2 + 4 * (emb_dim // group_size)  # 1088 for K=2048
+    u8 = np.uint8
+    return [
+        bf16_np(emb_dim),                                       # arg0
+        bf16_np(emb_dim),                                       # arg1
+        bf16_np(emb_dim),                                       # arg2
+        np.ndarray[(emb_dim, row_bytes), np.dtype[u8]],         # arg3 wq AWQ
+        bf16_np(emb_dim),                                       # arg4
+        np.ndarray[(kv_dim, row_bytes), np.dtype[u8]],          # arg5 wk AWQ
+        bf16_np(kv_dim),                                        # arg6
+        np.ndarray[(kv_dim, row_bytes), np.dtype[u8]],          # arg7 wv AWQ
+        bf16_np(kv_dim),                                        # arg8
+        bf16_np(emb_dim),                                       # arg9
+        bf16_np(kv_dim),                                        # arg10
+        bf16_np(emb_dim),                                       # arg11
+        bf16_np(kv_dim),                                        # arg12
+    ]
+
+
 def rms_gemv_rope_host_arg_types(emb_dim: int = 2048, kv_dim: int = 512):
     """Return the 13 host arg ``np.ndarray`` type specs in order.
 
