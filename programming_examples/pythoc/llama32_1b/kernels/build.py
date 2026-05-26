@@ -159,7 +159,12 @@ def compile_matvec_k8192(output_dir: Optional[str] = None, verbose: bool = False
     names (`dg_matvec_vectorized_bf16_bf16`, `dg_linalg_fill_bf16`).
     """
     import shutil, tempfile
-    from pythoc.aie import I512_I512_ACC1024_bf_mac_conf, reduce_add
+    from pythoc.aie import (
+        I1024_I1024_ACC2048_bf_mac_conf,
+        loop_range,
+        prepare_for_pipelining,
+        reduce_add_reassoc,
+    )
     with tempfile.TemporaryDirectory(prefix="mv_k8192_pythoc_") as tmp:
         produced = compile_pythoc_source(
             source_code=_read("matvec_k8192.py"),
@@ -168,8 +173,10 @@ def compile_matvec_k8192(output_dir: Optional[str] = None, verbose: bool = False
             output_dir=tmp,
             verbose=verbose,
             extra_globals={
-                "I512_I512_ACC1024_bf_mac_conf": I512_I512_ACC1024_bf_mac_conf,
-                "reduce_add": reduce_add,
+                "I1024_I1024_ACC2048_bf_mac_conf": I1024_I1024_ACC2048_bf_mac_conf,
+                "loop_range": loop_range,
+                "prepare_for_pipelining": prepare_for_pipelining,
+                "reduce_add_reassoc": reduce_add_reassoc,
             },
         )
         dst_dir = Path(output_dir) if output_dir else Path.cwd()
@@ -188,7 +195,12 @@ def compile_matvec(output_dir: Optional[str] = None, verbose: bool = False) -> P
     reference_o/mv.o is preserved.
     """
     import shutil, tempfile
-    from pythoc.aie import I512_I512_ACC1024_bf_mac_conf, reduce_add
+    from pythoc.aie import (
+        I1024_I1024_ACC2048_bf_mac_conf,
+        loop_range,
+        prepare_for_pipelining,
+        reduce_add_reassoc,
+    )
 
     with tempfile.TemporaryDirectory(prefix="mv_pythoc_") as tmp:
         produced = compile_pythoc_source(
@@ -198,8 +210,10 @@ def compile_matvec(output_dir: Optional[str] = None, verbose: bool = False) -> P
             output_dir=tmp,
             verbose=verbose,
             extra_globals={
-                "I512_I512_ACC1024_bf_mac_conf": I512_I512_ACC1024_bf_mac_conf,
-                "reduce_add": reduce_add,
+                "I1024_I1024_ACC2048_bf_mac_conf": I1024_I1024_ACC2048_bf_mac_conf,
+                "loop_range": loop_range,
+                "prepare_for_pipelining": prepare_for_pipelining,
+                "reduce_add_reassoc": reduce_add_reassoc,
             },
         )
         dst_dir = Path(output_dir) if output_dir else Path.cwd()
@@ -534,9 +548,10 @@ def compile_awq_mv(output_dir: Optional[str] = None, verbose: bool = False) -> P
     from pythoc.aie import (
         set_ctrl_reg,
         I512_I512_ACC1024_bf_msc_conf,
-        I512_I512_ACC1024_bf_mac_conf,
+        I1024_I1024_ACC2048_bf_mac_conf,
+        I1024_I1024_ACC2048_bf_msc_conf,
         v32accfloat_to_v32bf16,
-        reduce_add,
+        reduce_add_reassoc,
         unpack_unsigned,
         unpack_I512_I8_I4,
         vector_add,
@@ -544,14 +559,17 @@ def compile_awq_mv(output_dir: Optional[str] = None, verbose: bool = False) -> P
         vector_cast,
         vector_extract,
         broadcast,
+        concat,
+        loop_range,
         prepare_for_pipelining,
     )
     extras = {
         "set_ctrl_reg": set_ctrl_reg,
         "I512_I512_ACC1024_bf_msc_conf": I512_I512_ACC1024_bf_msc_conf,
-        "I512_I512_ACC1024_bf_mac_conf": I512_I512_ACC1024_bf_mac_conf,
+        "I1024_I1024_ACC2048_bf_mac_conf": I1024_I1024_ACC2048_bf_mac_conf,
+        "I1024_I1024_ACC2048_bf_msc_conf": I1024_I1024_ACC2048_bf_msc_conf,
         "v32accfloat_to_v32bf16": v32accfloat_to_v32bf16,
-        "reduce_add": reduce_add,
+        "reduce_add_reassoc": reduce_add_reassoc,
         "unpack_unsigned": unpack_unsigned,
         "unpack_I512_I8_I4": unpack_I512_I8_I4,
         "vector_add": vector_add,
@@ -559,6 +577,8 @@ def compile_awq_mv(output_dir: Optional[str] = None, verbose: bool = False) -> P
         "vector_cast": vector_cast,
         "vector_extract": vector_extract,
         "broadcast": broadcast,
+        "concat": concat,
+        "loop_range": loop_range,
         "prepare_for_pipelining": prepare_for_pipelining,
         "GROUP_SIZE": 128,
         "DIM_M_OUTPUT": 8,
@@ -594,9 +614,10 @@ def compile_awq_mv_k8192(output_dir: Optional[str] = None, verbose: bool = False
     from pythoc.aie import (
         set_ctrl_reg,
         I512_I512_ACC1024_bf_msc_conf,
-        I512_I512_ACC1024_bf_mac_conf,
+        I1024_I1024_ACC2048_bf_mac_conf,
+        I1024_I1024_ACC2048_bf_msc_conf,
         v32accfloat_to_v32bf16,
-        reduce_add,
+        reduce_add_reassoc,
         unpack_unsigned,
         unpack_I512_I8_I4,
         vector_add,
@@ -604,13 +625,17 @@ def compile_awq_mv_k8192(output_dir: Optional[str] = None, verbose: bool = False
         vector_cast,
         vector_extract,
         broadcast,
+        concat,
+        loop_range,
+        prepare_for_pipelining,
     )
     extras = {
         "set_ctrl_reg": set_ctrl_reg,
         "I512_I512_ACC1024_bf_msc_conf": I512_I512_ACC1024_bf_msc_conf,
-        "I512_I512_ACC1024_bf_mac_conf": I512_I512_ACC1024_bf_mac_conf,
+        "I1024_I1024_ACC2048_bf_mac_conf": I1024_I1024_ACC2048_bf_mac_conf,
+        "I1024_I1024_ACC2048_bf_msc_conf": I1024_I1024_ACC2048_bf_msc_conf,
         "v32accfloat_to_v32bf16": v32accfloat_to_v32bf16,
-        "reduce_add": reduce_add,
+        "reduce_add_reassoc": reduce_add_reassoc,
         "unpack_unsigned": unpack_unsigned,
         "unpack_I512_I8_I4": unpack_I512_I8_I4,
         "vector_add": vector_add,
@@ -618,6 +643,9 @@ def compile_awq_mv_k8192(output_dir: Optional[str] = None, verbose: bool = False
         "vector_cast": vector_cast,
         "vector_extract": vector_extract,
         "broadcast": broadcast,
+        "concat": concat,
+        "loop_range": loop_range,
+        "prepare_for_pipelining": prepare_for_pipelining,
         "GROUP_SIZE": 128,
         "DIM_M_OUTPUT": 2,
         "MAGIC_L_I32": 0x4b010000,
