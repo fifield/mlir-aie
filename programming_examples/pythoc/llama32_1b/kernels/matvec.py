@@ -29,13 +29,15 @@ from pythoc import bf16, f32, i32, ptr, u32, void
 from pythoc.aie import (
     aie_vector,
     load_v,
-    reduce_add,
+    loop_range,
+    prepare_for_pipelining,
+    reduce_add_reassoc,
     store_v,
     zeros,
 )
 
 # Lazy AIE2P intrinsic.
-from pythoc.aie import I512_I512_ACC1024_bf_mac_conf  # noqa: F401
+from pythoc.aie import I1024_I1024_ACC2048_bf_mac_conf  # noqa: F401
 
 
 # Output-row count for the zero-fill helper. Matches `-DDIM_M_OUTPUT=8`
@@ -66,10 +68,10 @@ def matvec_vectorized_bf16_bf16(
     b: ptr[bf16, True],
     c: ptr[bf16, True],
 ) -> void:
-    r: u32 = u32(32)
-    # conf=60 selects per-lane bf16 MAC on AIE2P (matches the .cc's
-    # aie::mac<accfloat, 32>). conf=0 has different sub-element semantics
-    # and silently produces wrong dot products. attn.py uses the same value.
+    r: u32 = u32(64)
+    # conf=60 selects per-lane bf16 MAC on AIE2P. Matches air's
+    # aie::mac<accfloat, 64> which lowers to one I1024 MAC per iteration
+    # (vs two I512 MACs the 32-lane form needs), doubling K-throughput.
     conf: i32 = i32(60)
 
     p_c: ptr[bf16] = c + row_offset
@@ -77,20 +79,26 @@ def matvec_vectorized_bf16_bf16(
 
     i: u32 = u32(0)
     while i < m:
-        acc: aie_vector[f32, 32] = zeros(f32, 32)
+        acc: aie_vector[f32, 64] = zeros(f32, 64)
         p_a: ptr[bf16] = p_a_row
         p_b: ptr[bf16] = b
         j: u32 = u32(0)
-        while j < k:
-            a_v: aie_vector[bf16, 32] = load_v(p_a, 32)
-            b_v: aie_vector[bf16, 32] = load_v(p_b, 32)
-            acc = I512_I512_ACC1024_bf_mac_conf(a_v, b_v, acc, conf)
-            p_a = p_a + r
-            p_b = p_b + r
-            j = j + r
+        # K=2048, r=64 -> 32 inner iters in practice. Loop hints unlock
+        # peano's zero-overhead `lc/le` hardware loop + software pipelining;
+        # without them pythoc emits a manual ltu+jnz counter that costs
+        # ~3 cycles/iter on top of the MAC.
+        with prepare_for_pipelining():
+            with loop_range(32):
+                while j < k:
+                    a_v: aie_vector[bf16, 64] = load_v(p_a, 64)
+                    b_v: aie_vector[bf16, 64] = load_v(p_b, 64)
+                    acc = I1024_I1024_ACC2048_bf_mac_conf(a_v, b_v, acc, conf)
+                    p_a = p_a + r
+                    p_b = p_b + r
+                    j = j + r
 
         # Horizontal sum in f32, truncate to bf16 only at the final store.
-        s: f32 = reduce_add(acc)
+        s: f32 = reduce_add_reassoc(acc)
         p_c[0] = bf16(s)
 
         p_c = p_c + u32(1)

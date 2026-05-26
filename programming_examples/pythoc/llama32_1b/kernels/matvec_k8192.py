@@ -21,11 +21,13 @@ from pythoc import bf16, f32, i32, ptr, u32, void
 from pythoc.aie import (
     aie_vector,
     load_v,
-    reduce_add,
+    loop_range,
+    prepare_for_pipelining,
+    reduce_add_reassoc,
     zeros,
 )
 
-from pythoc.aie import I512_I512_ACC1024_bf_mac_conf  # noqa: F401
+from pythoc.aie import I1024_I1024_ACC2048_bf_mac_conf  # noqa: F401
 
 
 @aie_kernel
@@ -52,7 +54,7 @@ def dg_matvec_vectorized_bf16_bf16(
     b: ptr[bf16, True],
     c: ptr[bf16, True],
 ) -> void:
-    r: u32 = u32(32)
+    r: u32 = u32(64)
     conf: i32 = i32(60)  # per-lane bf16 MAC; same as kernels/matvec.py
 
     p_c: ptr[bf16] = c + row_offset
@@ -60,19 +62,23 @@ def dg_matvec_vectorized_bf16_bf16(
 
     i: u32 = u32(0)
     while i < m:
-        acc: aie_vector[f32, 32] = zeros(f32, 32)
+        acc: aie_vector[f32, 64] = zeros(f32, 64)
         p_a: ptr[bf16] = p_a_row
         p_b: ptr[bf16] = b
         j: u32 = u32(0)
-        while j < k:
-            a_v: aie_vector[bf16, 32] = load_v(p_a, 32)
-            b_v: aie_vector[bf16, 32] = load_v(p_b, 32)
-            acc = I512_I512_ACC1024_bf_mac_conf(a_v, b_v, acc, conf)
-            p_a = p_a + r
-            p_b = p_b + r
-            j = j + r
+        # K=8192, r=64 -> 128 inner iters. See kernels/matvec.py for why
+        # the loop hints + 64-lane MAC matter for peano codegen.
+        with prepare_for_pipelining():
+            with loop_range(128):
+                while j < k:
+                    a_v: aie_vector[bf16, 64] = load_v(p_a, 64)
+                    b_v: aie_vector[bf16, 64] = load_v(p_b, 64)
+                    acc = I1024_I1024_ACC2048_bf_mac_conf(a_v, b_v, acc, conf)
+                    p_a = p_a + r
+                    p_b = p_b + r
+                    j = j + r
 
-        s: f32 = reduce_add(acc)
+        s: f32 = reduce_add_reassoc(acc)
         p_c[0] = bf16(s)
 
         p_c = p_c + u32(1)
