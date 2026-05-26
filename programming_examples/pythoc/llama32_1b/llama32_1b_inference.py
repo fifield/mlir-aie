@@ -863,8 +863,24 @@ def build_session(args) -> Session:
     config = LlamaConfig()
     seq_len = 2048
 
-    prefill_cache = KernelCache("prefill_kernel_cache", verbose=args.verbose)
-    decode_cache = KernelCache("decode_kernel_cache", verbose=args.verbose)
+    trace_target = None
+    if getattr(args, "trace", None):
+        from kernel_builder.aie_trace_capture import parse_trace_spec
+        trace_target = parse_trace_spec(args.trace)
+        trace_target.trace_size = args.trace_size
+        print(
+            f"[trace] target: kernel={trace_target.kernel} "
+            f"sub_device={trace_target.sub_device} "
+            f"tile=({trace_target.col},{trace_target.row}) "
+            f"trace_size={trace_target.trace_size}"
+        )
+
+    prefill_cache = KernelCache(
+        "prefill_kernel_cache", verbose=args.verbose, trace_target=trace_target,
+    )
+    decode_cache = KernelCache(
+        "decode_kernel_cache", verbose=args.verbose, trace_target=trace_target,
+    )
 
     if not args.run_only:
         print("Compiling prefill kernels...")
@@ -1158,6 +1174,24 @@ if __name__ == "__main__":
             "but run o_proj+FFN projections with direct packed-AWQ NPU GEMV tiles."
         ),
     )
+    parser.add_argument(
+        "--trace",
+        type=str,
+        default=None,
+        metavar="KERNEL:SUB_DEVICE:COL:ROW",
+        help="Instrument one decode kernel with AIE hardware trace. "
+        "Format: KERNEL:SUB_DEVICE:COL:ROW (e.g. "
+        "rms_gemv_rope:v_matvec_bf16_0:0:2). The chosen kernel is recompiled "
+        "with trace ops; other kernels reuse their cached ELFs. Trace bytes "
+        "from each launch land in trace/ next to the decode cache.",
+    )
+    parser.add_argument(
+        "--trace-size",
+        type=int,
+        default=8 * 1024 * 1024,
+        help="Trace buffer size in bytes (default 8 MiB). The last BO of "
+        "the instrumented kernel is over-allocated by 4x this size.",
+    )
     args = parser.parse_args()
 
     if args.synthetic_weights and args.interactive:
@@ -1196,6 +1230,18 @@ if __name__ == "__main__":
 
     session = build_session(args)
 
+    def _flush_trace():
+        for cache in (session.prefill_cache, session.decode_cache):
+            ts = getattr(cache, "trace_state", None)
+            if ts is None or not ts.launches:
+                continue
+            meta = ts.flush(cache.cache_dir)
+            print(
+                f"[trace] wrote {meta['launches']} launches, "
+                f"{meta['nonzero_words']} nonzero / {meta['total_words']} "
+                f"uint32 words to {cache.cache_dir / 'trace'}"
+            )
+
     if args.interactive:
         repl_loop(session, args)
     elif args.synthetic_weights:
@@ -1228,3 +1274,5 @@ if __name__ == "__main__":
             cpu_attn=args.cpu_attn,
         )
         _print_one_shot_output(session, args.prompt, generated, prompt_len_actual)
+
+    _flush_trace()
