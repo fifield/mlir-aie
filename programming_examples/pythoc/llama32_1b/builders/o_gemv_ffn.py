@@ -509,7 +509,8 @@ def _emit_matvec_seg_k2048(sym: str, weight_arg_idx: int, input_arg_idx: int,
 # 8 cols cover 256 elts per outer, output_col_stride = M_TILE_K8192 = 2.
 # ---------------------------------------------------------------------------
 def _emit_matvec_seg_k8192(sym: str, weight_arg_idx: int, input_arg_idx: int,
-                           output_arg_idx: int, pingpong_w: bool = False) -> None:
+                           output_arg_idx: int, pingpong_w: bool = False,
+                           pingpong_w_l2: bool = False) -> None:
     """K=8192 down-projection matvec [8,1] herd, mv_k8192_pythoc.o.
 
     Output rows: 2048 across 8 outer iters (each outer covers 256 rows =
@@ -523,6 +524,14 @@ def _emit_matvec_seg_k8192(sym: str, weight_arg_idx: int, input_arg_idx: int,
     tiles before any compute drains. The inner K-loop is unrolled
     (M_TILE_K8192/K_TILE_K8192=2, so 2 iters) -- iter 0 reads wb0,
     iter 1 reads wb1.
+
+    ``pingpong_w_l2=True`` does the same one level up: doubles the
+    memtile W buffer (L2 has 512 KB per tile vs L1's 64 KB, so capacity
+    is never the constraint here), splits both memtile BD chains
+    (S2MM ch 0 shim->L2 fill, MM2S ch 1 L2->L1 drain) into 2-BD rings,
+    and raises ``w_dma_done`` to init=2. This is the natural follow-on
+    to ``pingpong_w`` -- without it the L1 ping-pong saturates against
+    a single-slot L2 (visible as starv1 rising on the L1 trace).
     """
     chans = _CHANNELS[sym]
     out_rows = EMB_DIM
@@ -561,10 +570,11 @@ def _emit_matvec_seg_k8192(sym: str, weight_arg_idx: int, input_arg_idx: int,
         compute_tiles = [tile(c, 2) for c in range(N_COLS)]
 
         mem_locks = {}
+        _w_dma_done_init = 2 if pingpong_w_l2 else 1
         for col in reversed(range(N_COLS)):
             mt = mem_tiles[col]
             mem_locks[col] = {
-                "w_dma_done": lock(mt, lock_id=3, init=1),
+                "w_dma_done": lock(mt, lock_id=3, init=_w_dma_done_init),
                 "w_ready":    lock(mt, lock_id=2, init=0),
                 "y_done":     lock(mt, lock_id=1, init=1),
                 "y_ready":    lock(mt, lock_id=0, init=0),
@@ -591,9 +601,12 @@ def _emit_matvec_seg_k8192(sym: str, weight_arg_idx: int, input_arg_idx: int,
         _Y_L2_TY = bf16_memref(1, M_TILE_K8192, memory_space=1)
 
         mem_buf_w = {}
+        mem_buf_w1 = {}  # only when pingpong_w_l2
         mem_buf_y = {}
         for col in reversed(range(N_COLS)):
             mem_buf_w[col] = buffer(mem_tiles[col], datatype=_W_L2_TY)
+            if pingpong_w_l2:
+                mem_buf_w1[col] = buffer(mem_tiles[col], datatype=_W_L2_TY)
         for col in reversed(range(N_COLS)):
             mem_buf_y[col] = buffer(mem_tiles[col], datatype=_Y_L2_TY)
 
@@ -732,7 +745,7 @@ def _emit_matvec_seg_k8192(sym: str, weight_arg_idx: int, input_arg_idx: int,
         for col in range(N_COLS):
             flow(compute_tiles[col], WireBundle.DMA, 0, mem_tiles[col], WireBundle.DMA, 1)
 
-        def _make_memtile_dma(_col, _ml, _w, _y):
+        def _make_memtile_dma(_col, _ml, _w, _w1, _y):
             @memtile_dma(mem_tiles[_col])
             def _mt(block):
                 dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
@@ -745,18 +758,48 @@ def _emit_matvec_seg_k8192(sym: str, weight_arg_idx: int, input_arg_idx: int,
                     EndOp()
                 with block[3]:
                     dma_start(DMAChannelDir.MM2S, 1, dest=block[4], chain=block[5])
-                with block[4]:
-                    use_lock(_ml["w_ready"], LockAction.AcquireGreaterEqual, value=1)
-                    dma_bd(_w, offset=0, len=M_TILE_K8192 * HIDDEN_DIM)
-                    use_lock(_ml["w_dma_done"], LockAction.Release, value=1)
-                    next_bd(block[4])
-                with block[5]:
-                    dma_start(DMAChannelDir.S2MM, 0, dest=block[6], chain=block[7])
-                with block[6]:
-                    use_lock(_ml["w_dma_done"], LockAction.AcquireGreaterEqual, value=1)
-                    dma_bd(_w, offset=0, len=M_TILE_K8192 * HIDDEN_DIM)
-                    use_lock(_ml["w_ready"], LockAction.Release, value=1)
-                    next_bd(block[6])
+                if _w1 is None:
+                    # MM2S ch 1 (L2 -> L1 stream): single BD looping on itself.
+                    with block[4]:
+                        use_lock(_ml["w_ready"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_w, offset=0, len=M_TILE_K8192 * HIDDEN_DIM)
+                        use_lock(_ml["w_dma_done"], LockAction.Release, value=1)
+                        next_bd(block[4])
+                    with block[5]:
+                        dma_start(DMAChannelDir.S2MM, 0, dest=block[6], chain=block[7])
+                    # S2MM ch 0 (shim -> L2 fill): single BD looping on itself.
+                    with block[6]:
+                        use_lock(_ml["w_dma_done"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_w, offset=0, len=M_TILE_K8192 * HIDDEN_DIM)
+                        use_lock(_ml["w_ready"], LockAction.Release, value=1)
+                        next_bd(block[6])
+                else:
+                    # L2 ping-pong: 2-BD rings on both MM2S ch 1 (L2->L1) and
+                    # S2MM ch 0 (shim->L2), alternating w0 / w1. With
+                    # w_dma_done init=2, the shim can stage two L2 tiles
+                    # before any are drained to L1.
+                    with block[4]:
+                        use_lock(_ml["w_ready"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_w, offset=0, len=M_TILE_K8192 * HIDDEN_DIM)
+                        use_lock(_ml["w_dma_done"], LockAction.Release, value=1)
+                        next_bd(block[9])
+                    with block[9]:
+                        use_lock(_ml["w_ready"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_w1, offset=0, len=M_TILE_K8192 * HIDDEN_DIM)
+                        use_lock(_ml["w_dma_done"], LockAction.Release, value=1)
+                        next_bd(block[4])
+                    with block[5]:
+                        dma_start(DMAChannelDir.S2MM, 0, dest=block[6], chain=block[7])
+                    with block[6]:
+                        use_lock(_ml["w_dma_done"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_w, offset=0, len=M_TILE_K8192 * HIDDEN_DIM)
+                        use_lock(_ml["w_ready"], LockAction.Release, value=1)
+                        next_bd(block[10])
+                    with block[10]:
+                        use_lock(_ml["w_dma_done"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_w1, offset=0, len=M_TILE_K8192 * HIDDEN_DIM)
+                        use_lock(_ml["w_ready"], LockAction.Release, value=1)
+                        next_bd(block[6])
                 with block[7]:
                     dma_start(DMAChannelDir.S2MM, 1, dest=block[8], chain=block[2])
                 with block[8]:
@@ -765,7 +808,8 @@ def _emit_matvec_seg_k8192(sym: str, weight_arg_idx: int, input_arg_idx: int,
                     use_lock(_ml["y_ready"], LockAction.Release, value=1)
                     next_bd(block[8])
         for col in range(N_COLS):
-            _make_memtile_dma(col, mem_locks[col], mem_buf_w[col], mem_buf_y[col])
+            _make_memtile_dma(col, mem_locks[col], mem_buf_w[col],
+                              mem_buf_w1.get(col), mem_buf_y[col])
 
         out_base = chans["out_base"]
         weight_base = chans["weight_base"]
@@ -1436,11 +1480,12 @@ def build_o_gemv_ffn_module(emb_dim: int = EMB_DIM,
             "a2_eltwise_add_seg", in0_arg_idx=13, in1_arg_idx=4, out_arg_idx=14)
         _emit_matvec_seg_k8192(
             "dg_matvec_bf16_0", weight_arg_idx=12, input_arg_idx=11,
-            output_arg_idx=13)  # pingpong_w intentionally off:
-        # dg's L1 is already at the 64 KB cap with one W buffer
-        # (yb 1 KB + wb 16 KB + xb 16 KB + slack), so doubling W
-        # would have nowhere to go. Ping-pong has to happen at the
-        # L2 memtile for the K=8192 path, not at L1.
+            output_arg_idx=13, pingpong_w_l2=True)
+        # pingpong_w (L1) intentionally off: dg's L1 is already at the
+        # 64 KB cap with one W buffer (yb 1 KB + wb 16 KB + xb 16 KB +
+        # slack), so doubling W has nowhere to go. We ping-pong at L2
+        # instead -- memtile L2 has 512 KB to spare for the second W
+        # slot (32 KB).
         _emit_sw_silu_mul_seg()
         _emit_matvec_seg_k2048(
             "ug_matvec_bf16_0", weight_arg_idx=9, input_arg_idx=6,
