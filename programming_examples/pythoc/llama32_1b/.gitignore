@@ -6,8 +6,13 @@ build_chess/
 *.o
 !reference_o/*.o
 
-# Root .gitignore has `build*` which would skip our PythoC kernels/build.py.
+# Root .gitignore has `build*` which would skip our PythoC kernels/build.py
+# and the placed-IRON builders/ dir.  The `!` rules must un-ignore the
+# directory first, then the file, otherwise files inside an ignored dir
+# cannot be un-ignored.
 !kernels/build.py
+!builders/
+!builders/*.py
 
 # AWQ model dir (not source-controlled)
 awq_repacked/

@@ -52,6 +52,7 @@ _DEFAULT_PLACED_BUILDERS = frozenset({
     "o_ffn",           # Phase 4.6 (5 of 9 devices placed; 4 GEMM devices spliced)
     "o_gemv_ffn_awq",  # Phase 6 -- fused AWQ uint4 O+FFN decode (Stage 3 Subtask A)
     "awq_matvec",      # Phase 6 -- standalone AWQ GEMV (dim-specialized)
+    "lm_head_gemv_awq", # Phase 6 -- packed-AWQ LM head GEMV (8 partitions)
 })
 
 
@@ -181,6 +182,24 @@ def build_lm_head_gemv_ir(emb_dim, *, verbose=False):
         return build_lm_head_gemv_module(emb_dim=emb_dim)
     del verbose
     return _load_cached("lm_head_gemv")
+
+
+def build_lm_head_gemv_awq_ir(emb_dim, *, verbose=False):
+    """Packed-AWQ LM head GEMV IR.
+
+    8 partitions, each handling 16384 rows of the 128256-row vocab matrix
+    via packed-uint4 weights (ui8[16384, K/2 + 4*groups]) + scale/zero
+    params interleaved per group.  Calls into ``awq_mv_pythoc.o``.
+    """
+    if _placed_builder_enabled("lm_head_gemv_awq"):
+        _ensure_builders_on_path()
+        from builders.lm_head_gemv_awq import build_lm_head_gemv_awq_module
+        if verbose:
+            print(f"  [aie_ir_gen] Using placed-IRON builder for lm_head_gemv_awq "
+                  f"(emb_dim={emb_dim})")
+        return build_lm_head_gemv_awq_module(emb_dim=emb_dim)
+    del verbose
+    return _load_cached("lm_head_gemv_awq")
 
 
 def build_o_gemv_ffn_awq_ir(emb_dim, hidden_dim, *, group_size=128, verbose=False):
