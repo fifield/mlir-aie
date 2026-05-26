@@ -78,23 +78,44 @@ Real HF weights (`unsloth/Llama-3.2-1B-Instruct`), measured on NPU2:
 
 | Config | Prefill (16 layers, seq=2048) | Decode steady-state |
 |---|---|---|
-| BF16 default (6 placed builders, all 9 o_ffn devices placed) | ~1.84s | ~8.19 tok/s |
+| BF16 default (6 placed builders, all 9 o_ffn devices placed) | ~1.84s | ~8.19 tok/s (122 ms/token) |
 | BF16 all cached (`PYTHOC_LLAMA_USE_PLACED_BUILDERS=cached`) | ~1.92s | ~8.08 tok/s |
-| AWQ vectorized (Fix2Float dequant) | ~1.89s | ~6.43 tok/s (155 ms/token) |
-| AWQ scalar per-nibble (pre-vectorization, kept for reference) | ~1.85s | ~0.06 tok/s (16952 ms/token) |
+| AWQ chunk-unrolled + fused-MAC dequant (current) | ~1.89s | ~8.22 tok/s (122 ms/token) |
+| AWQ pre-optimization (chunk-looped, sub+mul dequant) | ~1.89s | ~6.43 tok/s (155 ms/token) |
+| AWQ scalar per-nibble (kept for reference) | ~1.85s | ~0.06 tok/s (16952 ms/token) |
 
-AWQ decode is now within ~22% of BF16 perf, ~110× faster than the
-scalar per-nibble baseline.  The uint4→bf16 inner loop uses the
-AIE-API Fix2Float magic-number reinterpret trick
-(aie_api/detail/aie2p/elementary.hpp:51-58): unpack u4 nibbles to u8,
-zero-extend to acc32 via UPS, integer-add the magic constant
-`0x4b010000` per lane, bitcast acc32 → accfloat, then subtract the
-magic in bf16 space via the `bf_msc_conf(magic_bf, 1.0, acc, conf=60)`
-hardware multiply-subtract (folds the float-subtract into a MAC unit).
-The `<32 x f32>` fadd/fsub vector ops don't legalize on AIE2P GISel;
-the MSC trick avoids that.  AWQ correctness verified by
-`make hf-gate QUANT=awq` (bit-identical tokens to scalar + BF16 for
-the "Paris" prompt).
+AWQ decode is now **at BF16 parity** (~122 ms/token, 8.22 tok/s).  Two
+follow-on optimizations on top of the Fix2Float vectorization landed
+the gap to zero:
+
+* **Chunk-loop unroll** — `chunks_per_group=2` for GROUP_SIZE=128 is a
+  compile-time constant, so the inner 2-iter chunk loop is fully
+  inlined into the per-group body.  The pipeliner can't pipeline a
+  2-iter loop (prologue+epilogue dominate), so inlining halves the
+  per-group bundle count by removing the loop branch / phi / re-init
+  overhead.  The per-group basic block goes from ~112 to ~60 bundles.
+  Group-loop pipelining via `prepare_for_pipelining()` is *not*
+  applied — the 4-acc unrolling needed to break the MAC accumulator
+  recurrence triggers register-spill miscompiles on AIE2P, so we keep
+  2 accumulators and let the existing scheduling work.
+* **MAC+MSC math fusion** — replace `(w_bf - zero) * scale` (vsub +
+  vmul + an accfloat<->bf16 round-trip per chunk-half) with
+  `w_scaled = w_bf * scale; acc = mac(x, w_scaled); acc = msc(x, zs)`
+  where `zs = zero * scale` is precomputed per group (scalar bf16,
+  broadcast to 32-lane).  The mac+msc pair keeps everything in
+  accfloat without intermediate bf16 conversions, saving the
+  conversion latency.
+
+The uint4→bf16 inner loop still uses the AIE-API Fix2Float
+magic-number reinterpret trick (aie_api/detail/aie2p/elementary.hpp:51-58):
+unpack u4 nibbles to u8, zero-extend to acc32 via UPS, integer-add
+the magic constant `0x4b010000` per lane, bitcast acc32 → accfloat,
+then subtract the magic in bf16 space via the
+`bf_msc_conf(magic_bf, 1.0, acc, conf=60)` hardware multiply-subtract
+(folds the float-subtract into a MAC unit).  The `<32 x f32>`
+fadd/fsub vector ops don't legalize on AIE2P GISel; the MSC trick
+avoids that.  AWQ correctness verified by `make hf-gate QUANT=awq`
+(decodes to "The capital of France is Paris.").
 
 #### Phase 6 status — complete
 
