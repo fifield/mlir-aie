@@ -526,7 +526,8 @@ def _emit_awq_matvec_seg_k2048(sym: str, weight_arg_idx: int, input_arg_idx: int
 # ---------------------------------------------------------------------------
 def _emit_awq_matvec_seg_k8192(sym: str, weight_arg_idx: int,
                                 input_arg_idx: int, output_arg_idx: int,
-                                group_size: int = GROUP_SIZE) -> None:
+                                group_size: int = GROUP_SIZE,
+                                pingpong_x: bool = False) -> None:
     """K=8192 down-projection AWQ matvec [8,1] herd, awq_mv_k8192_pythoc.o.
 
     Output rows: 2048 across 8 outer iters (each outer covers 256 rows =
@@ -534,6 +535,19 @@ def _emit_awq_matvec_seg_k8192(sym: str, weight_arg_idx: int,
     case in elements (w_dims=[(16,69632),(16,544),(544,1)], len=139264),
     but the down-projection's weight memref has row_bytes=4352 and
     outer stride 256 rows * 4352 = 1_114_112.
+
+    ``pingpong_x=True`` doubles the L1 X buffer (~16 KB each: AWQ dg's X
+    is HIDDEN_DIM=8192 bf16 == 16 KB), turns the X DMA BD chain into a
+    2-BD ring (xb0/xb1 alternating), and raises ``x_avail`` to init=2.
+    The K-loop (M_TILE_K8192/K_TILE_K8192 = 2 iters) is unrolled so iter
+    0 reads xb0 and iter 1 reads xb1. L1 footprint after enable:
+    W 4.25 KB + 2*X 32 KB + Y 4 B ~= 36 KB, fits in the 64 KB cap.
+
+    Rationale: the kernel-local trace shows X (per BD) is 4x bigger than
+    W (16 KB vs 4.25 KB) on the AWQ K=8192 path -- X is the dominant
+    DMA cost. W ping-pong on AWQ moved starv0 (X) the wrong direction
+    because the two channels share upstream bandwidth; tackling X
+    directly is the higher-leverage move.
     """
     chans = _CHANNELS[sym]
     out_rows = EMB_DIM
@@ -572,12 +586,13 @@ def _emit_awq_matvec_seg_k8192(sym: str, weight_arg_idx: int,
             }
 
         core_locks = {}
+        _x_avail_init = 2 if pingpong_x else 1
         for col in range(N_COLS):
             ct = compute_tiles[col]
             core_locks[col] = {
                 "w_avail": lock(ct, lock_id=5, init=1),
                 "w_ready": lock(ct, lock_id=4, init=0),
-                "x_avail": lock(ct, lock_id=3, init=1),
+                "x_avail": lock(ct, lock_id=3, init=_x_avail_init),
                 "x_ready": lock(ct, lock_id=2, init=0),
                 "y_done":  lock(ct, lock_id=1, init=1),
                 "y_full":  lock(ct, lock_id=0, init=0),
@@ -609,10 +624,13 @@ def _emit_awq_matvec_seg_k8192(sym: str, weight_arg_idx: int,
         core_buf_y = {}
         core_buf_w = {}
         core_buf_x = {}
+        core_buf_x1 = {}  # only when pingpong_x
         for col in reversed(range(N_COLS)):
             core_buf_y[col] = buffer(compute_tiles[col], datatype=_Y_L1_TY)
             core_buf_w[col] = buffer(compute_tiles[col], datatype=_W_L1_TY)
             core_buf_x[col] = buffer(compute_tiles[col], datatype=_X_L1_TY)
+            if pingpong_x:
+                core_buf_x1[col] = buffer(compute_tiles[col], datatype=_X_L1_TY)
 
         # External buffers: weight (EMB_DIM, row_bytes) ui8, input
         # (HIDDEN_DIM,) bf16, output (EMB_DIM,) bf16.
@@ -642,8 +660,9 @@ def _emit_awq_matvec_seg_k8192(sym: str, weight_arg_idx: int,
             y_buf = core_buf_y[col]
             w_buf = core_buf_w[col]
             x_buf = core_buf_x[col]
+            x_buf1 = core_buf_x1.get(col)  # None unless pingpong_x
 
-            def _make_core_mem(_ct, _cl, _yb, _wb, _xb):
+            def _make_core_mem(_ct, _cl, _yb, _wb, _xb, _xb1):
                 @mem(_ct)
                 def _core_mem(block):
                     dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
@@ -656,11 +675,24 @@ def _emit_awq_matvec_seg_k8192(sym: str, weight_arg_idx: int,
                         EndOp()
                     with block[3]:
                         dma_start(DMAChannelDir.S2MM, 0, dest=block[4], chain=block[5])
-                    with block[4]:
-                        use_lock(_cl["x_avail"], LockAction.AcquireGreaterEqual, value=1)
-                        dma_bd(_xb, offset=0, len=HIDDEN_DIM)
-                        use_lock(_cl["x_ready"], LockAction.Release, value=1)
-                        next_bd(block[4])
+                    if _xb1 is None:
+                        with block[4]:
+                            use_lock(_cl["x_avail"], LockAction.AcquireGreaterEqual, value=1)
+                            dma_bd(_xb, offset=0, len=HIDDEN_DIM)
+                            use_lock(_cl["x_ready"], LockAction.Release, value=1)
+                            next_bd(block[4])
+                    else:
+                        # X ping-pong: 2-BD ring writing xb0 then xb1.
+                        with block[4]:
+                            use_lock(_cl["x_avail"], LockAction.AcquireGreaterEqual, value=1)
+                            dma_bd(_xb, offset=0, len=HIDDEN_DIM)
+                            use_lock(_cl["x_ready"], LockAction.Release, value=1)
+                            next_bd(block[9])
+                        with block[9]:
+                            use_lock(_cl["x_avail"], LockAction.AcquireGreaterEqual, value=1)
+                            dma_bd(_xb1, offset=0, len=HIDDEN_DIM)
+                            use_lock(_cl["x_ready"], LockAction.Release, value=1)
+                            next_bd(block[4])
                     with block[5]:
                         dma_start(DMAChannelDir.S2MM, 1, dest=block[6], chain=block[2])
                     with block[6]:
@@ -668,9 +700,9 @@ def _emit_awq_matvec_seg_k8192(sym: str, weight_arg_idx: int,
                         dma_bd(_wb, offset=0, len=K_TILE_K8192 * row_bytes)
                         use_lock(_cl["w_ready"], LockAction.Release, value=1)
                         next_bd(block[6])
-            _make_core_mem(ct_op, cl, y_buf, w_buf, x_buf)
+            _make_core_mem(ct_op, cl, y_buf, w_buf, x_buf, x_buf1)
 
-            def _make_core_body(_ct, _cl, _yb, _wb, _xb):
+            def _make_core_body(_ct, _cl, _yb, _wb, _xb, _xb1):
                 import sys as _sys
                 from aie.extras.dialects.arith import index_cast
 
@@ -682,15 +714,39 @@ def _emit_awq_matvec_seg_k8192(sym: str, weight_arg_idx: int,
                     for _ in range_(_sys.maxsize):
                         use_lock(_cl["y_done"], LockAction.AcquireGreaterEqual, value=1)
                         fill_fn(zero_bf16, _yb)
-                        for k_idx in range_(0, M_TILE_K8192, K_TILE_K8192):
-                            k_i32 = index_cast(k_idx, to=T.i32())
+                        if _xb1 is None:
+                            for k_idx in range_(0, M_TILE_K8192, K_TILE_K8192):
+                                k_i32 = index_cast(k_idx, to=T.i32())
+                                use_lock(_cl["x_ready"], LockAction.AcquireGreaterEqual, value=1)
+                                use_lock(_cl["w_ready"], LockAction.AcquireGreaterEqual, value=1)
+                                matvec_fn(k_tile_c, k_total, k_i32, _wb, _xb, _yb)
+                                use_lock(_cl["x_avail"], LockAction.Release, value=1)
+                                use_lock(_cl["w_avail"], LockAction.Release, value=1)
+                        else:
+                            # X ping-pong: unroll 2 K-iters, K-iter 0 reads
+                            # xb0, K-iter 1 reads xb1. M_TILE_K8192/K_TILE_K8192
+                            # must be 2.
+                            assert M_TILE_K8192 // K_TILE_K8192 == 2, (
+                                f"X pingpong unroll assumes M_TILE_K8192/"
+                                f"K_TILE_K8192==2, got "
+                                f"{M_TILE_K8192}/{K_TILE_K8192}"
+                            )
+                            k_i32_0 = arith.constant(0, T.i32())
+                            k_i32_1 = arith.constant(K_TILE_K8192, T.i32())
+                            # K-iter 0: xb0
                             use_lock(_cl["x_ready"], LockAction.AcquireGreaterEqual, value=1)
                             use_lock(_cl["w_ready"], LockAction.AcquireGreaterEqual, value=1)
-                            matvec_fn(k_tile_c, k_total, k_i32, _wb, _xb, _yb)
+                            matvec_fn(k_tile_c, k_total, k_i32_0, _wb, _xb, _yb)
+                            use_lock(_cl["x_avail"], LockAction.Release, value=1)
+                            use_lock(_cl["w_avail"], LockAction.Release, value=1)
+                            # K-iter 1: xb1
+                            use_lock(_cl["x_ready"], LockAction.AcquireGreaterEqual, value=1)
+                            use_lock(_cl["w_ready"], LockAction.AcquireGreaterEqual, value=1)
+                            matvec_fn(k_tile_c, k_total, k_i32_1, _wb, _xb1, _yb)
                             use_lock(_cl["x_avail"], LockAction.Release, value=1)
                             use_lock(_cl["w_avail"], LockAction.Release, value=1)
                         use_lock(_cl["y_full"], LockAction.Release, value=1)
-            _make_core_body(ct_op, cl, y_buf, w_buf, x_buf)
+            _make_core_body(ct_op, cl, y_buf, w_buf, x_buf, x_buf1)
 
         for col in range(N_COLS):
             flow(shim_tiles[col], WireBundle.DMA, 0, mem_tiles[col], WireBundle.DMA, 0)
@@ -1386,7 +1442,7 @@ def build_o_gemv_ffn_awq_module(emb_dim: int = EMB_DIM,
             group_size=group_size)
         _emit_awq_matvec_seg_k8192(
             "dg_awq_matvec_0", weight_arg_idx=12, input_arg_idx=11,
-            output_arg_idx=13, group_size=group_size)
+            output_arg_idx=13, group_size=group_size, pingpong_x=True)
         _emit_sw_silu_mul_seg(group_size=group_size)
         _emit_awq_matvec_seg_k2048(
             "ug_awq_matvec_0", weight_arg_idx=9, input_arg_idx=6,
