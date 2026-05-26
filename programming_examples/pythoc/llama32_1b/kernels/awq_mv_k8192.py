@@ -29,7 +29,7 @@ from pythoc.aie import (  # noqa: F401
     I1024_I1024_ACC2048_bf_mac_conf,
     I1024_I1024_ACC2048_bf_msc_conf,
     v32accfloat_to_v32bf16,
-    unpack_I512_I8_I4,
+    unpack_I1024_I8_I4,
 )
 from pythoc.aie import (
     aie_vector,
@@ -116,13 +116,18 @@ def dg_awq_matvec_vectorized_u4_bf16(
                     x_group_offset: u32 = group * u32(GROUP_SIZE)
                     q_group_offset: u32 = group * packed_per_group
 
+                    # Wide unpack: 64 packed bytes -> 128 nibbles per group
+                    # (see kernels/awq_mv.py for the rationale).
+                    q_packed: aie_vector[u8, 64] = load_v(q_row + q_group_offset, 64)
+                    nibbles_all: aie_vector[u8, 128] = unpack_I1024_I8_I4(q_packed, i32(0))
+                    nib_0: aie_vector[u8, 32] = vector_extract(nibbles_all, 0, 32)
+                    nib_1: aie_vector[u8, 32] = vector_extract(nibbles_all, 32, 32)
+                    nib_2: aie_vector[u8, 32] = vector_extract(nibbles_all, 64, 32)
+                    nib_3: aie_vector[u8, 32] = vector_extract(nibbles_all, 96, 32)
+
                     # === Chunk 0 ===
-                    q_chunk0: aie_vector[u8, 32] = load_v(q_row + q_group_offset, 32)
-                    nibbles0: aie_vector[u8, 64] = unpack_I512_I8_I4(q_chunk0, i32(0))
-                    nib_lo0: aie_vector[u8, 32] = vector_extract(nibbles0, 0, 32)
-                    nib_hi0: aie_vector[u8, 32] = vector_extract(nibbles0, 32, 32)
-                    lo_i16_0: aie_vector[i16, 32] = unpack_unsigned(nib_lo0, i16)
-                    hi_i16_0: aie_vector[i16, 32] = unpack_unsigned(nib_hi0, i16)
+                    lo_i16_0: aie_vector[i16, 32] = unpack_unsigned(nib_0, i16)
+                    hi_i16_0: aie_vector[i16, 32] = unpack_unsigned(nib_1, i16)
                     lo_i32_0: aie_vector[i32, 32] = unpack_unsigned(lo_i16_0, i32)
                     hi_i32_0: aie_vector[i32, 32] = unpack_unsigned(hi_i16_0, i32)
                     sum_lo_i32_0: aie_vector[i32, 32] = vector_add(lo_i32_0, magic_acc32)
@@ -149,12 +154,8 @@ def dg_awq_matvec_vectorized_u4_bf16(
                     )
 
                     # === Chunk 1 ===
-                    q_chunk1: aie_vector[u8, 32] = load_v(q_row + q_group_offset + u32(32), 32)
-                    nibbles1: aie_vector[u8, 64] = unpack_I512_I8_I4(q_chunk1, i32(0))
-                    nib_lo1: aie_vector[u8, 32] = vector_extract(nibbles1, 0, 32)
-                    nib_hi1: aie_vector[u8, 32] = vector_extract(nibbles1, 32, 32)
-                    lo_i16_1: aie_vector[i16, 32] = unpack_unsigned(nib_lo1, i16)
-                    hi_i16_1: aie_vector[i16, 32] = unpack_unsigned(nib_hi1, i16)
+                    lo_i16_1: aie_vector[i16, 32] = unpack_unsigned(nib_2, i16)
+                    hi_i16_1: aie_vector[i16, 32] = unpack_unsigned(nib_3, i16)
                     lo_i32_1: aie_vector[i32, 32] = unpack_unsigned(lo_i16_1, i32)
                     hi_i32_1: aie_vector[i32, 32] = unpack_unsigned(hi_i16_1, i32)
                     sum_lo_i32_1: aie_vector[i32, 32] = vector_add(lo_i32_1, magic_acc32)
