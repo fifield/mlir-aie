@@ -91,8 +91,12 @@ K_TILE = 4          # inner K tiling factor for the K=2048 AWQ matvec
 M_TILE = 8          # rows processed per K=2048 matvec call
 
 # Down-projection (K=8192) tiling.
-K_TILE_K8192 = 1    # inner K factor for the K=8192 matvec
+K_TILE_K8192 = 2    # inner K factor for the K=8192 matvec
 M_TILE_K8192 = 2    # rows processed per K=8192 matvec call
+# K_TILE_K8192 = M_TILE_K8192 => K-loop is a single iter (no looping).
+# This removes the per-K-iter lock cycle, at the cost of 2x the per-call
+# work (matvec_fn processes 2 output rows instead of 1) and 2x the W L1
+# tile size (8.5 KB instead of 4.25 KB). L1 still has plenty of headroom.
 
 # Inline-add per-tile chunk size (256 bf16 elements).
 ADD_CHUNK = 256
@@ -1442,7 +1446,13 @@ def build_o_gemv_ffn_awq_module(emb_dim: int = EMB_DIM,
             group_size=group_size)
         _emit_awq_matvec_seg_k8192(
             "dg_awq_matvec_0", weight_arg_idx=12, input_arg_idx=11,
-            output_arg_idx=13, group_size=group_size, pingpong_x=True)
+            output_arg_idx=13, group_size=group_size)
+        # pingpong_x intentionally off: K_TILE_K8192=2 collapses the K-loop
+        # to a single iter, so there's nothing for X PP to hide behind. A/B
+        # vs the prior X PP committed state showed tied tok/sec (9.40 vs
+        # 9.41 median) but K_TILE=2 uses ~11 KB less L1, has half the BD
+        # count, and drops starv0 from 23% to 5%. infra for pingpong_x is
+        # still plumbed in case a future config wants K_TILE_K8192=1 again.
         _emit_sw_silu_mul_seg(group_size=group_size)
         _emit_awq_matvec_seg_k2048(
             "ug_awq_matvec_0", weight_arg_idx=9, input_arg_idx=6,
