@@ -87,8 +87,10 @@ EMB_DIM = 2048      # model hidden size
 HIDDEN_DIM = 8192   # FFN hidden size
 GROUP_SIZE = 128    # AWQ group size baked into kernels/awq_mv.py
 N_COLS = 8          # 8 compute columns in the matvec herd
-K_TILE = 4          # inner K tiling factor for the K=2048 AWQ matvec
+K_TILE = 8          # inner K tiling factor for the K=2048 AWQ matvec
 M_TILE = 8          # rows processed per K=2048 matvec call
+# K_TILE = M_TILE => K-loop is a single iter. See rms_gemv_rope_awq.py
+# for the rationale; mirrors the K_TILE_K8192=2 change on dg AWQ.
 
 # Down-projection (K=8192) tiling.
 K_TILE_K8192 = 2    # inner K factor for the K=8192 matvec

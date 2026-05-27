@@ -103,8 +103,13 @@ EMB_DIM = 2048      # model hidden size
 KV_DIM = 512        # n_kv_heads * head_dim = 8 * 64
 HEAD_DIM = 64       # per-head dimension (RoPE chunk size)
 N_COLS = 8          # 8 compute columns in the matvec herd
-K_TILE = 4          # inner K tiling factor for the matvec kernel
+K_TILE = 8          # inner K tiling factor for the matvec kernel
 M_TILE = 8          # rows processed per matvec call
+# K_TILE = M_TILE => K-loop is a single iter. Doubling K_TILE from the
+# original 4 grows the W L1 tile from 4.25 KB to 8.5 KB but halves the
+# per-K-iter lock acquire/release cycle count, the BD setup overhead,
+# and the K-loop prolog. L1 still has plenty of headroom (~12 KB used
+# total vs 64 KB cap). Mirrors the K_TILE_K8192=2 change on dg AWQ.
 
 # AWQ row layout: K/2 packed uint4 bytes + 4 bytes per group of params.
 GROUP_SIZE = 128
@@ -410,7 +415,8 @@ def _emit_rope_seg(sym: str, x_arg_idx: int, freqs_arg_idx: int,
 #   - per-col output stride and input repeat count
 # ---------------------------------------------------------------------------
 def _emit_awq_matvec_seg(sym: str, weight_arg_idx: int, output_arg_idx: int,
-                          out_rows: int) -> None:
+                          out_rows: int, pingpong_w: bool = False,
+                          pingpong_w_l2: bool = False) -> None:
     """Emit one AWQ q/k/v matvec segment device.
 
     Q variant (out_rows=EMB_DIM=2048): n_outer=2, output 128 elts/col/outer
@@ -422,6 +428,16 @@ def _emit_awq_matvec_seg(sym: str, weight_arg_idx: int, output_arg_idx: int,
     (69632 bytes per task). Mini-row outer stride is 69632 = 64 source rows
     of 1088 bytes -- the same striped row pattern as the BF16 K/V variant,
     just AWQ-bytes-per-element instead of bf16 elements.
+
+    ``pingpong_w=True`` doubles the L1 W buffer (~4.25 KB each for the AWQ
+    ui8-packed slab, vs 16 KB bf16) and turns the W DMA into a 2-BD ring;
+    ``w_avail`` becomes init=2. The K_TILE-step inner loop is unrolled
+    (M_TILE/K_TILE=2). See builders/rms_gemv_rope.py for the rationale.
+
+    ``pingpong_w_l2=True`` does the same one hop upstream: doubles the
+    memtile L2 W buffer (~8.5 KB each), splits both memtile chains into
+    2-BD rings, and raises ``w_dma_done`` to init=2. The two flags are
+    independent; combining both gives a 2-deep pipeline shim->L2->L1.
     """
     chans = _CHANNELS[sym]
     row_bytes = ROW_BYTES  # 1088
@@ -460,10 +476,11 @@ def _emit_awq_matvec_seg(sym: str, weight_arg_idx: int, output_arg_idx: int,
 
         # Mem tile locks (descending col).
         mem_locks = {}
+        _w_dma_done_init = 2 if pingpong_w_l2 else 1
         for col in reversed(range(N_COLS)):
             mt = mem_tiles[col]
             mem_locks[col] = {
-                "w_dma_done": lock(mt, lock_id=3, init=1),
+                "w_dma_done": lock(mt, lock_id=3, init=_w_dma_done_init),
                 "w_ready":    lock(mt, lock_id=2, init=0),
                 "y_done":     lock(mt, lock_id=1, init=1),
                 "y_ready":    lock(mt, lock_id=0, init=0),
@@ -471,10 +488,11 @@ def _emit_awq_matvec_seg(sym: str, weight_arg_idx: int, output_arg_idx: int,
 
         # Compute tile locks (ascending col).
         core_locks = {}
+        _w_avail_init = 2 if pingpong_w else 1
         for col in range(N_COLS):
             ct = compute_tiles[col]
             core_locks[col] = {
-                "w_avail": lock(ct, lock_id=5, init=1),
+                "w_avail": lock(ct, lock_id=5, init=_w_avail_init),
                 "w_ready": lock(ct, lock_id=4, init=0),
                 "x_avail": lock(ct, lock_id=3, init=1),
                 "x_ready": lock(ct, lock_id=2, init=0),
@@ -501,18 +519,24 @@ def _emit_awq_matvec_seg(sym: str, weight_arg_idx: int, output_arg_idx: int,
 
         # Mem tile buffers (descending col).
         mem_buf_w = {}
+        mem_buf_w1 = {}  # only when pingpong_w_l2
         mem_buf_y = {}
         for col in reversed(range(N_COLS)):
             mem_buf_w[col] = buffer(mem_tiles[col], datatype=_W_L2_TY)
+            if pingpong_w_l2:
+                mem_buf_w1[col] = buffer(mem_tiles[col], datatype=_W_L2_TY)
         for col in reversed(range(N_COLS)):
             mem_buf_y[col] = buffer(mem_tiles[col], datatype=_Y_L2_TY)
 
         core_buf_y = {}
         core_buf_w = {}
+        core_buf_w1 = {}  # only when pingpong_w
         core_buf_x = {}
         for col in reversed(range(N_COLS)):
             core_buf_y[col] = buffer(compute_tiles[col], datatype=_Y_L1_TY)
             core_buf_w[col] = buffer(compute_tiles[col], datatype=_W_L1_TY)
+            if pingpong_w:
+                core_buf_w1[col] = buffer(compute_tiles[col], datatype=_W_L1_TY)
             core_buf_x[col] = buffer(compute_tiles[col], datatype=_X_L1_TY)
 
         # External buffers: weight (out_rows, row_bytes) ui8, input (K,) bf16,
@@ -542,9 +566,10 @@ def _emit_awq_matvec_seg(sym: str, weight_arg_idx: int, output_arg_idx: int,
             cl = core_locks[col]
             y_buf = core_buf_y[col]
             w_buf = core_buf_w[col]
+            w_buf1 = core_buf_w1.get(col)  # None unless pingpong_w
             x_buf = core_buf_x[col]
 
-            def _make_core_mem(_ct, _cl, _yb, _wb, _xb):
+            def _make_core_mem(_ct, _cl, _yb, _wb, _xb, _wb1):
                 @mem(_ct)
                 def _core_mem(block):
                     dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
@@ -564,14 +589,27 @@ def _emit_awq_matvec_seg(sym: str, weight_arg_idx: int, output_arg_idx: int,
                         next_bd(block[4])
                     with block[5]:
                         dma_start(DMAChannelDir.S2MM, 1, dest=block[6], chain=block[2])
-                    with block[6]:
-                        use_lock(_cl["w_avail"], LockAction.AcquireGreaterEqual, value=1)
-                        dma_bd(_wb, offset=0, len=K_TILE * row_bytes)
-                        use_lock(_cl["w_ready"], LockAction.Release, value=1)
-                        next_bd(block[6])
-            _make_core_mem(ct_op, cl, y_buf, w_buf, x_buf)
+                    if _wb1 is None:
+                        with block[6]:
+                            use_lock(_cl["w_avail"], LockAction.AcquireGreaterEqual, value=1)
+                            dma_bd(_wb, offset=0, len=K_TILE * row_bytes)
+                            use_lock(_cl["w_ready"], LockAction.Release, value=1)
+                            next_bd(block[6])
+                    else:
+                        # L1 ping-pong: 2-BD ring writing wb0 then wb1.
+                        with block[6]:
+                            use_lock(_cl["w_avail"], LockAction.AcquireGreaterEqual, value=1)
+                            dma_bd(_wb, offset=0, len=K_TILE * row_bytes)
+                            use_lock(_cl["w_ready"], LockAction.Release, value=1)
+                            next_bd(block[7])
+                        with block[7]:
+                            use_lock(_cl["w_avail"], LockAction.AcquireGreaterEqual, value=1)
+                            dma_bd(_wb1, offset=0, len=K_TILE * row_bytes)
+                            use_lock(_cl["w_ready"], LockAction.Release, value=1)
+                            next_bd(block[6])
+            _make_core_mem(ct_op, cl, y_buf, w_buf, x_buf, w_buf1)
 
-            def _make_core_body(_ct, _cl, _yb, _wb, _xb):
+            def _make_core_body(_ct, _cl, _yb, _wb, _xb, _wb1):
                 import sys as _sys
                 from aie.extras.dialects.arith import index_cast
 
@@ -583,15 +621,34 @@ def _emit_awq_matvec_seg(sym: str, weight_arg_idx: int, output_arg_idx: int,
                     for _ in range_(_sys.maxsize):
                         use_lock(_cl["y_done"], LockAction.AcquireGreaterEqual, value=1)
                         fill_fn(zero_bf16, _yb)
-                        for k_idx in range_(0, M_TILE, K_TILE):
-                            k_i32 = index_cast(k_idx, to=T.i32())
+                        if _wb1 is None:
+                            for k_idx in range_(0, M_TILE, K_TILE):
+                                k_i32 = index_cast(k_idx, to=T.i32())
+                                use_lock(_cl["x_ready"], LockAction.AcquireGreaterEqual, value=1)
+                                use_lock(_cl["w_ready"], LockAction.AcquireGreaterEqual, value=1)
+                                matvec_fn(k_tile_c, k_total, k_i32, _wb, _xb, _yb)
+                                use_lock(_cl["x_avail"], LockAction.Release, value=1)
+                                use_lock(_cl["w_avail"], LockAction.Release, value=1)
+                        else:
+                            # Ping-pong: M_TILE/K_TILE must be 2.
+                            assert M_TILE // K_TILE == 2, (
+                                f"pingpong unroll assumes M_TILE/K_TILE==2, "
+                                f"got {M_TILE}/{K_TILE}"
+                            )
+                            k_i32_0 = arith.constant(0, T.i32())
+                            k_i32_1 = arith.constant(K_TILE, T.i32())
                             use_lock(_cl["x_ready"], LockAction.AcquireGreaterEqual, value=1)
                             use_lock(_cl["w_ready"], LockAction.AcquireGreaterEqual, value=1)
-                            matvec_fn(k_tile_c, k_total, k_i32, _wb, _xb, _yb)
+                            matvec_fn(k_tile_c, k_total, k_i32_0, _wb, _xb, _yb)
+                            use_lock(_cl["x_avail"], LockAction.Release, value=1)
+                            use_lock(_cl["w_avail"], LockAction.Release, value=1)
+                            use_lock(_cl["x_ready"], LockAction.AcquireGreaterEqual, value=1)
+                            use_lock(_cl["w_ready"], LockAction.AcquireGreaterEqual, value=1)
+                            matvec_fn(k_tile_c, k_total, k_i32_1, _wb1, _xb, _yb)
                             use_lock(_cl["x_avail"], LockAction.Release, value=1)
                             use_lock(_cl["w_avail"], LockAction.Release, value=1)
                         use_lock(_cl["y_full"], LockAction.Release, value=1)
-            _make_core_body(ct_op, cl, y_buf, w_buf, x_buf)
+            _make_core_body(ct_op, cl, y_buf, w_buf, x_buf, w_buf1)
 
         # Flows.
         for col in range(N_COLS):
@@ -606,7 +663,7 @@ def _emit_awq_matvec_seg(sym: str, weight_arg_idx: int, output_arg_idx: int,
             flow(compute_tiles[col], WireBundle.DMA, 0, mem_tiles[col], WireBundle.DMA, 1)
 
         # Mem tile DMAs (ascending col).
-        def _make_memtile_dma(_col, _ml, _w, _y):
+        def _make_memtile_dma(_col, _ml, _w, _w1, _y):
             @memtile_dma(mem_tiles[_col])
             def _mt(block):
                 dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
@@ -619,18 +676,44 @@ def _emit_awq_matvec_seg(sym: str, weight_arg_idx: int, output_arg_idx: int,
                     EndOp()
                 with block[3]:
                     dma_start(DMAChannelDir.MM2S, 1, dest=block[4], chain=block[5])
-                with block[4]:
-                    use_lock(_ml["w_ready"], LockAction.AcquireGreaterEqual, value=1)
-                    dma_bd(_w, offset=0, len=M_TILE * row_bytes)
-                    use_lock(_ml["w_dma_done"], LockAction.Release, value=1)
-                    next_bd(block[4])
-                with block[5]:
-                    dma_start(DMAChannelDir.S2MM, 0, dest=block[6], chain=block[7])
-                with block[6]:
-                    use_lock(_ml["w_dma_done"], LockAction.AcquireGreaterEqual, value=1)
-                    dma_bd(_w, offset=0, len=M_TILE * row_bytes)
-                    use_lock(_ml["w_ready"], LockAction.Release, value=1)
-                    next_bd(block[6])
+                if _w1 is None:
+                    with block[4]:
+                        use_lock(_ml["w_ready"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_w, offset=0, len=M_TILE * row_bytes)
+                        use_lock(_ml["w_dma_done"], LockAction.Release, value=1)
+                        next_bd(block[4])
+                    with block[5]:
+                        dma_start(DMAChannelDir.S2MM, 0, dest=block[6], chain=block[7])
+                    with block[6]:
+                        use_lock(_ml["w_dma_done"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_w, offset=0, len=M_TILE * row_bytes)
+                        use_lock(_ml["w_ready"], LockAction.Release, value=1)
+                        next_bd(block[6])
+                else:
+                    # L2 ping-pong: 2-BD rings on both MM2S ch 1 (L2->L1)
+                    # and S2MM ch 0 (shim->L2).
+                    with block[4]:
+                        use_lock(_ml["w_ready"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_w, offset=0, len=M_TILE * row_bytes)
+                        use_lock(_ml["w_dma_done"], LockAction.Release, value=1)
+                        next_bd(block[9])
+                    with block[9]:
+                        use_lock(_ml["w_ready"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_w1, offset=0, len=M_TILE * row_bytes)
+                        use_lock(_ml["w_dma_done"], LockAction.Release, value=1)
+                        next_bd(block[4])
+                    with block[5]:
+                        dma_start(DMAChannelDir.S2MM, 0, dest=block[6], chain=block[7])
+                    with block[6]:
+                        use_lock(_ml["w_dma_done"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_w, offset=0, len=M_TILE * row_bytes)
+                        use_lock(_ml["w_ready"], LockAction.Release, value=1)
+                        next_bd(block[10])
+                    with block[10]:
+                        use_lock(_ml["w_dma_done"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_w1, offset=0, len=M_TILE * row_bytes)
+                        use_lock(_ml["w_ready"], LockAction.Release, value=1)
+                        next_bd(block[6])
                 with block[7]:
                     dma_start(DMAChannelDir.S2MM, 1, dest=block[8], chain=block[2])
                 with block[8]:
@@ -639,7 +722,8 @@ def _emit_awq_matvec_seg(sym: str, weight_arg_idx: int, output_arg_idx: int,
                     use_lock(_ml["y_ready"], LockAction.Release, value=1)
                     next_bd(block[8])
         for col in range(N_COLS):
-            _make_memtile_dma(col, mem_locks[col], mem_buf_w[col], mem_buf_y[col])
+            _make_memtile_dma(col, mem_locks[col], mem_buf_w[col],
+                              mem_buf_w1.get(col), mem_buf_y[col])
 
         # Shim allocations.
         out_base = chans["out_base"]
@@ -805,6 +889,11 @@ def build_rms_gemv_rope_awq_module(emb_dim: int = EMB_DIM,
         _emit_awq_matvec_seg("v_matvec_awq_bf16_0",
                               weight_arg_idx=7, output_arg_idx=8,
                               out_rows=KV_DIM)
+        # pingpong_w / pingpong_w_l2 plumbed but off: prior trace showed
+        # AWQ V kernel is not lock-stall-bound enough for W PP to claim
+        # back cycles (lock_stall ~23%, span +2% when PP'd). K_TILE=8 is
+        # the bigger-tile alternative; with M_TILE/K_TILE=1, PP can't be
+        # enabled here anyway (unroll requires M/K==2).
         _emit_awq_matvec_seg("k_matvec_awq_bf16_0",
                               weight_arg_idx=5, output_arg_idx=6,
                               out_rows=KV_DIM)
