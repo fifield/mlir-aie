@@ -97,12 +97,14 @@ from ._emit import (
 EMB_DIM = 2048      # model hidden size
 HIDDEN_DIM = 8192   # FFN hidden size
 N_COLS = 8          # 8 compute columns in the matvec herd
-K_TILE = 4          # inner K tiling factor for the K=2048 matvec
+K_TILE = 8          # inner K tiling factor for the K=2048 matvec
 M_TILE = 8          # rows processed per K=2048 matvec call
+# K_TILE = M_TILE => K-loop is single iter. See rms_gemv_rope.py.
 
 # Down-projection (K=8192) tiling.
-K_TILE_K8192 = 1    # inner K factor for the K=8192 matvec
+K_TILE_K8192 = 2    # inner K factor for the K=8192 matvec
 M_TILE_K8192 = 2    # rows processed per K=8192 matvec call
+# K_TILE_K8192 = M_TILE_K8192 => K-loop is single iter.
 
 # Inline-add per-tile chunk size (256 bf16 elements).
 ADD_CHUNK = 256
@@ -1498,7 +1500,8 @@ def build_o_gemv_ffn_module(emb_dim: int = EMB_DIM,
             "a1_eltwise_add_seg", in0_arg_idx=2, in1_arg_idx=3, out_arg_idx=4)
         _emit_matvec_seg_k2048(
             "og_matvec_bf16_0", weight_arg_idx=0, input_arg_idx=1,
-            output_arg_idx=2, out_rows=EMB_DIM, pingpong_w=True)
+            output_arg_idx=2, out_rows=EMB_DIM)
+        # pingpong_w off for K_TILE=8 experiment (see rms_gemv_rope.py).
         _emit_dispatcher_device()
         module = ctx.module
         attach_loop_annotation_to_all_scf_for(module)
