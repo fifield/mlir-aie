@@ -43,7 +43,7 @@ Currently active across both paths:
 | rms_gemv_rope | v_matvec_bf16_0 | W L1 pp | `6cfb1db03` |
 | o_gemv_ffn | og_matvec_bf16_0 | W L1 pp | `c0396143b` |
 | o_gemv_ffn | dg_matvec_bf16_0 | W L2 pp | `bb8ddd4ab` |
-| o_gemv_ffn_awq | dg_awq_matvec_0 | **K_TILE_K8192 = 2** (bigger tile) | `2fe7155a0` |
+| o_gemv_ffn_awq | dg_awq_matvec_0 | **K_TILE_K8192 = 2** (bigger tile) | `b9d5a515d` |
 
 Everything else is single-buffered at both L1 and L2.
 
