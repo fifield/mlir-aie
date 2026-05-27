@@ -25,12 +25,12 @@ AXI stream switch. "L2 X" rows are intentionally absent.
 
 | Kernel | Sub-device | K | W L1 | W L2 | X L1 | W L1 pp | W L2 pp | X L1 pp |
 |---|---|---|---|---|---|---|---|---|
-| rms_gemv_rope_awq | v_matvec_awq_bf16_0 | 2048 | 4.25 KB | 8.5 KB | 4 KB | off | off | off |
-| rms_gemv_rope_awq | k_matvec_awq_bf16_0 | 2048 | 4.25 KB | 8.5 KB | 4 KB | off | off | off |
-| rms_gemv_rope_awq | q_matvec_awq_bf16_0 | 2048 | 4.25 KB | 8.5 KB | 4 KB | off | off | off |
-| o_gemv_ffn_awq | og_awq_matvec_0 (O-proj) | 2048 | 4.25 KB | 8.5 KB | 4 KB | off | off | off |
-| o_gemv_ffn_awq | gg_awq_matvec_0 (gate) | 2048 | 4.25 KB | 8.5 KB | 4 KB | off | off | off |
-| o_gemv_ffn_awq | ug_awq_matvec_0 (up) | 2048 | 4.25 KB | 8.5 KB | 4 KB | off | off | off |
+| rms_gemv_rope_awq | v_matvec_awq_bf16_0 | 2048 | **8.5 KB** (K_TILE=8) | **8.5 KB** | 4 KB | off | off | off |
+| rms_gemv_rope_awq | k_matvec_awq_bf16_0 | 2048 | **8.5 KB** (K_TILE=8) | **8.5 KB** | 4 KB | off | off | off |
+| rms_gemv_rope_awq | q_matvec_awq_bf16_0 | 2048 | **8.5 KB** (K_TILE=8) | **8.5 KB** | 4 KB | off | off | off |
+| o_gemv_ffn_awq | og_awq_matvec_0 (O-proj) | 2048 | **8.5 KB** (K_TILE=8) | **8.5 KB** | 4 KB | off | off | off |
+| o_gemv_ffn_awq | gg_awq_matvec_0 (gate) | 2048 | **8.5 KB** (K_TILE=8) | **8.5 KB** | 4 KB | off | off | off |
+| o_gemv_ffn_awq | ug_awq_matvec_0 (up) | 2048 | **8.5 KB** (K_TILE=8) | **8.5 KB** | 4 KB | off | off | off |
 | o_gemv_ffn_awq | **dg_awq_matvec_0** (down) | 8192 | **8.5 KB** (K_TILE=2) | **17 KB** (M_TILE=2 × 8.5 KB) | 16 KB | off (infra not plumbed) | off (infra not plumbed) | off (replaced by K_TILE=2) |
 | lm_head_gemv_awq | LM head AWQ | 2048 | 4.25 KB | 8.5 KB | 4 KB | off | off | off |
 
@@ -44,6 +44,7 @@ Currently active across both paths:
 | o_gemv_ffn | og_matvec_bf16_0 | W L1 pp | `c0396143b` |
 | o_gemv_ffn | dg_matvec_bf16_0 | W L2 pp | `bb8ddd4ab` |
 | o_gemv_ffn_awq | dg_awq_matvec_0 | **K_TILE_K8192 = 2** (bigger tile) | `b9d5a515d` |
+| rms_gemv_rope_awq, o_gemv_ffn_awq (K=2048) | V/Q/K, og/gg/ug | **K_TILE = 8** (bigger tile) | `09b583ea6` |
 
 Everything else is single-buffered at both L1 and L2.
 
