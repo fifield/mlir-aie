@@ -533,7 +533,8 @@ def _emit_awq_matvec_seg_k2048(sym: str, weight_arg_idx: int, input_arg_idx: int
 def _emit_awq_matvec_seg_k8192(sym: str, weight_arg_idx: int,
                                 input_arg_idx: int, output_arg_idx: int,
                                 group_size: int = GROUP_SIZE,
-                                pingpong_x: bool = False) -> None:
+                                pingpong_x: bool = False,
+                                pingpong_w_l2: bool = False) -> None:
     """K=8192 down-projection AWQ matvec [8,1] herd, awq_mv_k8192_pythoc.o.
 
     Output rows: 2048 across 8 outer iters (each outer covers 256 rows =
@@ -554,6 +555,12 @@ def _emit_awq_matvec_seg_k8192(sym: str, weight_arg_idx: int,
     DMA cost. W ping-pong on AWQ moved starv0 (X) the wrong direction
     because the two channels share upstream bandwidth; tackling X
     directly is the higher-leverage move.
+
+    ``pingpong_w_l2=True`` doubles the L2 memtile W buffer (8.5 KB each
+    for AWQ K=8192), splits both memtile chains (S2MM ch 0 shim->L2 and
+    MM2S ch 1 L2->L1) into 2-BD rings, and raises ``w_dma_done`` to
+    init=2. Same pattern as the BF16 dg L2 W PP (commit bb8ddd4ab).
+    Independent of pingpong_x; both can be enabled together.
     """
     chans = _CHANNELS[sym]
     out_rows = EMB_DIM
@@ -582,10 +589,11 @@ def _emit_awq_matvec_seg_k8192(sym: str, weight_arg_idx: int,
         compute_tiles = [tile(c, 2) for c in range(N_COLS)]
 
         mem_locks = {}
+        _w_dma_done_init = 2 if pingpong_w_l2 else 1
         for col in reversed(range(N_COLS)):
             mt = mem_tiles[col]
             mem_locks[col] = {
-                "w_dma_done": lock(mt, lock_id=3, init=1),
+                "w_dma_done": lock(mt, lock_id=3, init=_w_dma_done_init),
                 "w_ready":    lock(mt, lock_id=2, init=0),
                 "y_done":     lock(mt, lock_id=1, init=1),
                 "y_ready":    lock(mt, lock_id=0, init=0),
@@ -621,9 +629,12 @@ def _emit_awq_matvec_seg_k8192(sym: str, weight_arg_idx: int,
         _Y_L2_TY = bf16_memref(1, M_TILE_K8192, memory_space=1)
 
         mem_buf_w = {}
+        mem_buf_w1 = {}  # only when pingpong_w_l2
         mem_buf_y = {}
         for col in reversed(range(N_COLS)):
             mem_buf_w[col] = buffer(mem_tiles[col], datatype=_W_L2_TY)
+            if pingpong_w_l2:
+                mem_buf_w1[col] = buffer(mem_tiles[col], datatype=_W_L2_TY)
         for col in reversed(range(N_COLS)):
             mem_buf_y[col] = buffer(mem_tiles[col], datatype=_Y_L2_TY)
 
@@ -765,7 +776,7 @@ def _emit_awq_matvec_seg_k8192(sym: str, weight_arg_idx: int,
         for col in range(N_COLS):
             flow(compute_tiles[col], WireBundle.DMA, 0, mem_tiles[col], WireBundle.DMA, 1)
 
-        def _make_memtile_dma(_col, _ml, _w, _y):
+        def _make_memtile_dma(_col, _ml, _w, _w1, _y):
             @memtile_dma(mem_tiles[_col])
             def _mt(block):
                 dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
@@ -778,18 +789,44 @@ def _emit_awq_matvec_seg_k8192(sym: str, weight_arg_idx: int,
                     EndOp()
                 with block[3]:
                     dma_start(DMAChannelDir.MM2S, 1, dest=block[4], chain=block[5])
-                with block[4]:
-                    use_lock(_ml["w_ready"], LockAction.AcquireGreaterEqual, value=1)
-                    dma_bd(_w, offset=0, len=M_TILE_K8192 * row_bytes)
-                    use_lock(_ml["w_dma_done"], LockAction.Release, value=1)
-                    next_bd(block[4])
-                with block[5]:
-                    dma_start(DMAChannelDir.S2MM, 0, dest=block[6], chain=block[7])
-                with block[6]:
-                    use_lock(_ml["w_dma_done"], LockAction.AcquireGreaterEqual, value=1)
-                    dma_bd(_w, offset=0, len=M_TILE_K8192 * row_bytes)
-                    use_lock(_ml["w_ready"], LockAction.Release, value=1)
-                    next_bd(block[6])
+                if _w1 is None:
+                    with block[4]:
+                        use_lock(_ml["w_ready"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_w, offset=0, len=M_TILE_K8192 * row_bytes)
+                        use_lock(_ml["w_dma_done"], LockAction.Release, value=1)
+                        next_bd(block[4])
+                    with block[5]:
+                        dma_start(DMAChannelDir.S2MM, 0, dest=block[6], chain=block[7])
+                    with block[6]:
+                        use_lock(_ml["w_dma_done"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_w, offset=0, len=M_TILE_K8192 * row_bytes)
+                        use_lock(_ml["w_ready"], LockAction.Release, value=1)
+                        next_bd(block[6])
+                else:
+                    # L2 W ping-pong: 2-BD rings on both MM2S ch 1
+                    # (L2->L1) and S2MM ch 0 (shim->L2).
+                    with block[4]:
+                        use_lock(_ml["w_ready"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_w, offset=0, len=M_TILE_K8192 * row_bytes)
+                        use_lock(_ml["w_dma_done"], LockAction.Release, value=1)
+                        next_bd(block[9])
+                    with block[9]:
+                        use_lock(_ml["w_ready"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_w1, offset=0, len=M_TILE_K8192 * row_bytes)
+                        use_lock(_ml["w_dma_done"], LockAction.Release, value=1)
+                        next_bd(block[4])
+                    with block[5]:
+                        dma_start(DMAChannelDir.S2MM, 0, dest=block[6], chain=block[7])
+                    with block[6]:
+                        use_lock(_ml["w_dma_done"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_w, offset=0, len=M_TILE_K8192 * row_bytes)
+                        use_lock(_ml["w_ready"], LockAction.Release, value=1)
+                        next_bd(block[10])
+                    with block[10]:
+                        use_lock(_ml["w_dma_done"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_w1, offset=0, len=M_TILE_K8192 * row_bytes)
+                        use_lock(_ml["w_ready"], LockAction.Release, value=1)
+                        next_bd(block[6])
                 with block[7]:
                     dma_start(DMAChannelDir.S2MM, 1, dest=block[8], chain=block[2])
                 with block[8]:
@@ -798,7 +835,8 @@ def _emit_awq_matvec_seg_k8192(sym: str, weight_arg_idx: int,
                     use_lock(_ml["y_ready"], LockAction.Release, value=1)
                     next_bd(block[8])
         for col in range(N_COLS):
-            _make_memtile_dma(col, mem_locks[col], mem_buf_w[col], mem_buf_y[col])
+            _make_memtile_dma(col, mem_locks[col], mem_buf_w[col],
+                              mem_buf_w1.get(col), mem_buf_y[col])
 
         out_base = chans["out_base"]
         weight_base = chans["weight_base"]
@@ -1449,12 +1487,14 @@ def build_o_gemv_ffn_awq_module(emb_dim: int = EMB_DIM,
         _emit_awq_matvec_seg_k8192(
             "dg_awq_matvec_0", weight_arg_idx=12, input_arg_idx=11,
             output_arg_idx=13, group_size=group_size)
-        # pingpong_x intentionally off: K_TILE_K8192=2 collapses the K-loop
-        # to a single iter, so there's nothing for X PP to hide behind. A/B
-        # vs the prior X PP committed state showed tied tok/sec (9.40 vs
-        # 9.41 median) but K_TILE=2 uses ~11 KB less L1, has half the BD
-        # count, and drops starv0 from 23% to 5%. infra for pingpong_x is
-        # still plumbed in case a future config wants K_TILE_K8192=1 again.
+        # pingpong_x off: K_TILE_K8192=2 already collapsed the K-loop.
+        # pingpong_w_l2 off too: tested, it improves W channel
+        # utilization (starv1 22%->12%, dma_in1_eff 30%->44%) but span
+        # only drops 0.4% and tok/sec is unchanged within noise -- W
+        # wasn't on the critical path here. AWQ dg's remaining ~50%
+        # unaccounted cycles are probably memory_stall during the
+        # dequant chain, which is outside what DMA optimizations can
+        # attack. Both PP infras stay plumbed.
         _emit_sw_silu_mul_seg(group_size=group_size)
         _emit_awq_matvec_seg_k2048(
             "ug_awq_matvec_0", weight_arg_idx=9, input_arg_idx=6,
