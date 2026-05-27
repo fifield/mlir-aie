@@ -12,13 +12,13 @@ AXI stream switch. "L2 X" rows are intentionally absent.
 
 | Kernel | Sub-device | K | W L1 | W L2 | X L1 | W L1 pp | W L2 pp | X L1 pp |
 |---|---|---|---|---|---|---|---|---|
-| rms_gemv_rope | **v_matvec_bf16_0** | 2048 | 16 KB | 32 KB | 4 KB | **ON** | off | off |
-| rms_gemv_rope | k_matvec_bf16_0 | 2048 | 16 KB | 32 KB | 4 KB | off | off | off |
-| rms_gemv_rope | q_matvec_bf16_0 | 2048 | 16 KB | 32 KB | 4 KB | off | off | off |
-| o_gemv_ffn | **og_matvec_bf16_0** (O-proj) | 2048 | 16 KB | 32 KB | 4 KB | **ON** | off | off |
-| o_gemv_ffn | gg_matvec_bf16_0 (gate) | 2048 | 16 KB | 32 KB | 4 KB | off | off | off |
-| o_gemv_ffn | ug_matvec_bf16_0 (up) | 2048 | 16 KB | 32 KB | 4 KB | off | off | off |
-| o_gemv_ffn | **dg_matvec_bf16_0** (down) | 8192 | 16 KB | 32 KB | 16 KB | off (L1 cap) | **ON** | off |
+| rms_gemv_rope | v_matvec_bf16_0 | 2048 | **32 KB** (K_TILE=8) | **32 KB** | 4 KB | off (reverted) | off | off |
+| rms_gemv_rope | k_matvec_bf16_0 | 2048 | **32 KB** (K_TILE=8) | **32 KB** | 4 KB | off | off | off |
+| rms_gemv_rope | q_matvec_bf16_0 | 2048 | **32 KB** (K_TILE=8) | **32 KB** | 4 KB | off | off | off |
+| o_gemv_ffn | og_matvec_bf16_0 (O-proj) | 2048 | **32 KB** (K_TILE=8) | **32 KB** | 4 KB | off (reverted) | off | off |
+| o_gemv_ffn | gg_matvec_bf16_0 (gate) | 2048 | **32 KB** (K_TILE=8) | **32 KB** | 4 KB | off | off | off |
+| o_gemv_ffn | ug_matvec_bf16_0 (up) | 2048 | **32 KB** (K_TILE=8) | **32 KB** | 4 KB | off | off | off |
+| o_gemv_ffn | **dg_matvec_bf16_0** (down) | 8192 | **32 KB** (K_TILE_K8192=2) | **32 KB** | 16 KB | off (L1 cap) | **ON** | off |
 | lm_head_gemv | LM head partitions | 2048 | 16 KB | 32 KB | 4 KB | off | off | off |
 
 ## AWQ path
@@ -40,11 +40,15 @@ Currently active across both paths:
 
 | Kernel | Sub-device | What's on | Commit |
 |---|---|---|---|
-| rms_gemv_rope | v_matvec_bf16_0 | W L1 pp | `6cfb1db03` |
-| o_gemv_ffn | og_matvec_bf16_0 | W L1 pp | `c0396143b` |
-| o_gemv_ffn | dg_matvec_bf16_0 | W L2 pp | `bb8ddd4ab` |
-| o_gemv_ffn_awq | dg_awq_matvec_0 | **K_TILE_K8192 = 2** (bigger tile) | `b9d5a515d` |
+| rms_gemv_rope (BF16, K=2048) | V/Q/K | **K_TILE = 8** (bigger tile) | `70431541f` |
+| o_gemv_ffn (BF16, K=2048) | og/gg/ug | **K_TILE = 8** (bigger tile) | `70431541f` |
+| o_gemv_ffn (BF16, K=8192) | dg_matvec_bf16_0 | **K_TILE_K8192 = 2** + W L2 PP | `70431541f` + `bb8ddd4ab` |
 | rms_gemv_rope_awq, o_gemv_ffn_awq (K=2048) | V/Q/K, og/gg/ug | **K_TILE = 8** (bigger tile) | `09b583ea6` |
+| o_gemv_ffn_awq (K=8192) | dg_awq_matvec_0 | **K_TILE_K8192 = 2** (bigger tile) | `b9d5a515d` |
+
+BF16 V/og L1 W PP (commits `6cfb1db03`, `c0396143b`) were reverted by `70431541f`
+in favor of the bigger-tile approach; they were superseded by K_TILE=8 which gave
+a larger gain on the same axes.
 
 Everything else is single-buffered at both L1 and L2.
 
