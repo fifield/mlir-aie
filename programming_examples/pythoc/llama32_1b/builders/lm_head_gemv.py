@@ -117,8 +117,10 @@ N_COLS = 8           # 8 compute columns per partition device
 ROWS_PER_CORE_PER_OUTER = 128   # rows handled per compute core per outer iter
 ROWS_PER_OUTER = ROWS_PER_CORE_PER_OUTER * N_COLS  # = 1024
 N_OUTER = N_PART // ROWS_PER_OUTER                 # = 16
-K_TILE = 4           # inner K tiling factor for the matvec kernel
+K_TILE = 8           # inner K tiling factor for the matvec kernel
 M_TILE = 8           # rows processed per matvec call
+# K_TILE = M_TILE => K-loop is a single iter. Same change as the BF16
+# K=2048 matvec builders (commit 70431541f).
 KERNEL_OBJECT = "mv_pythoc.o"
 
 
