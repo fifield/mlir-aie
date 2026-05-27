@@ -19,7 +19,7 @@ AXI stream switch. "L2 X" rows are intentionally absent.
 | o_gemv_ffn | gg_matvec_bf16_0 (gate) | 2048 | **32 KB** (K_TILE=8) | **32 KB** | 4 KB | off | off | off |
 | o_gemv_ffn | ug_matvec_bf16_0 (up) | 2048 | **32 KB** (K_TILE=8) | **32 KB** | 4 KB | off | off | off |
 | o_gemv_ffn | **dg_matvec_bf16_0** (down) | 8192 | **32 KB** (K_TILE_K8192=2) | **32 KB** | 16 KB | off (L1 cap) | **ON** | off |
-| lm_head_gemv | LM head partitions | 2048 | 16 KB | 32 KB | 4 KB | off | off | off |
+| lm_head_gemv | LM head partitions | 2048 | **32 KB** (K_TILE=8) | **32 KB** | 4 KB | off | off | off |
 
 ## AWQ path
 
@@ -32,7 +32,7 @@ AXI stream switch. "L2 X" rows are intentionally absent.
 | o_gemv_ffn_awq | gg_awq_matvec_0 (gate) | 2048 | **8.5 KB** (K_TILE=8) | **8.5 KB** | 4 KB | off | off | off |
 | o_gemv_ffn_awq | ug_awq_matvec_0 (up) | 2048 | **8.5 KB** (K_TILE=8) | **8.5 KB** | 4 KB | off | off | off |
 | o_gemv_ffn_awq | **dg_awq_matvec_0** (down) | 8192 | **8.5 KB** (K_TILE=2) | **17 KB** (M_TILE=2 × 8.5 KB) | 16 KB | off (infra not plumbed) | off (infra not plumbed) | off (replaced by K_TILE=2) |
-| lm_head_gemv_awq | LM head AWQ | 2048 | 4.25 KB | 8.5 KB | 4 KB | off | off | off |
+| lm_head_gemv_awq | LM head AWQ | 2048 | **8.5 KB** (K_TILE=8) | **8.5 KB** | 4 KB | off | off | off |
 
 ## Summary of what's ON
 
@@ -43,8 +43,10 @@ Currently active across both paths:
 | rms_gemv_rope (BF16, K=2048) | V/Q/K | **K_TILE = 8** (bigger tile) | `70431541f` |
 | o_gemv_ffn (BF16, K=2048) | og/gg/ug | **K_TILE = 8** (bigger tile) | `70431541f` |
 | o_gemv_ffn (BF16, K=8192) | dg_matvec_bf16_0 | **K_TILE_K8192 = 2** + W L2 PP | `70431541f` + `bb8ddd4ab` |
+| lm_head_gemv (BF16, K=2048) | partitions | **K_TILE = 8** (bigger tile) | `fcab5c0fc` |
 | rms_gemv_rope_awq, o_gemv_ffn_awq (K=2048) | V/Q/K, og/gg/ug | **K_TILE = 8** (bigger tile) | `09b583ea6` |
 | o_gemv_ffn_awq (K=8192) | dg_awq_matvec_0 | **K_TILE_K8192 = 2** (bigger tile) | `b9d5a515d` |
+| lm_head_gemv_awq (K=2048) | LM head AWQ | **K_TILE = 8** (bigger tile) | `fcab5c0fc` |
 
 BF16 V/og L1 W PP (commits `6cfb1db03`, `c0396143b`) were reverted by `70431541f`
 in favor of the bigger-tile approach; they were superseded by K_TILE=8 which gave
