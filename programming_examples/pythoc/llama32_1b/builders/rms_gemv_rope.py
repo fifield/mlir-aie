@@ -95,8 +95,11 @@ EMB_DIM = 2048      # model hidden size
 KV_DIM = 512        # n_kv_heads * head_dim = 8 * 64
 HEAD_DIM = 64       # per-head dimension (RoPE chunk size)
 N_COLS = 8          # 8 compute columns in the matvec herd
-K_TILE = 4          # inner K tiling factor for the matvec kernel
+K_TILE = 8          # inner K tiling factor for the matvec kernel
 M_TILE = 8          # rows processed per matvec call
+# K_TILE = M_TILE => K-loop is a single iter. Mirrors the same change
+# on AWQ K=2048 builders. With M_TILE/K_TILE==1, pingpong_w cannot be
+# enabled here (the unroll assertion requires M_TILE/K_TILE==2).
 
 # Per-segment kernel object filenames (must match what the kernel
 # builder cached on disk under ``build_peano/``). aie-assign-core-link-files
@@ -907,8 +910,9 @@ def build_rms_gemv_rope_module(emb_dim: int = EMB_DIM,
                        vec_size=EMB_DIM)
         _emit_matvec_seg("v_matvec_bf16_0",
                          weight_arg_idx=7, output_arg_idx=8,
-                         out_rows=KV_DIM,
-                         pingpong_w=True)
+                         out_rows=KV_DIM)
+        # pingpong_w off for K_TILE=8 experiment; M_TILE/K_TILE==1 makes
+        # the L1 PP unroll assertion fire anyway.
         _emit_matvec_seg("k_matvec_bf16_0",
                          weight_arg_idx=5, output_arg_idx=6,
                          out_rows=KV_DIM)
