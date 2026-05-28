@@ -232,6 +232,7 @@ class KernelCache:
         self.verbose = verbose
         self.profiler = profiler or Profiler()
         self.artifacts = {}  # name -> AIECompileArtifact
+        self.configs = {}    # name -> config signature (e.g. {"pack_mode": ...})
         self._loaded = {}    # name -> _XRTRunner
         self._cached_bos = {}
         # Trace: when set, exactly one kernel (`trace_target.kernel`) is
@@ -248,7 +249,7 @@ class KernelCache:
 
     # ----- Compile path -----------------------------------------------------
 
-    def compile_and_cache(self, name, ir_text, instance_name):
+    def compile_and_cache(self, name, ir_text, instance_name, config=None):
         """Compile post-stitched mlir-aie text to an ELF and cache it.
 
         Args:
@@ -258,7 +259,12 @@ class KernelCache:
                 i.e. the form aircc emits internally before invoking aiecc.
             instance_name: function symbol that becomes the XRT kernel
                 identifier (`main:<instance_name>`).
+            config: optional JSON-serializable signature of the IR-affecting
+                build options (e.g. ``{"pack_mode": "d1d3d4"}``). Stored in the
+                manifest so `load_manifest(expected_configs=...)` can detect a
+                stale ELF built under different options and trigger a rebuild.
         """
+        self.configs[name] = config
         # Trace mode is meant to be iterative. Reuse cached non-target kernels
         # so a `make trace` after a `make compile` only rebuilds the target.
         elf_path = self.cache_dir / f"{name}.elf"
@@ -353,27 +359,59 @@ class KernelCache:
                 "output_binary": str(art.output_binary),
                 "kernel": art.kernel,
                 "insts": None,
+                "config": self.configs.get(name),
             }
         (self.cache_dir / self.MANIFEST_FILE).write_text(
             json.dumps(manifest, indent=2)
         )
         self._log(f"Saved manifest with {len(manifest)} entries")
 
-    def load_manifest(self):
+    def manifest_exists(self):
+        return (self.cache_dir / self.MANIFEST_FILE).exists()
+
+    def load_manifest(self, expected_configs=None):
+        """Load cached artifacts from the manifest.
+
+        Returns False (treating the cache as absent) if the manifest is
+        missing, a cached binary is gone, or -- when ``expected_configs`` is
+        supplied -- any entry's stored build signature no longer matches what
+        the current environment would produce. The mismatch case is the
+        pack-mode "auto-distinguish" guard: a `make run` after toggling a
+        `PYTHOC_LLAMA_*_PACK_MODE` env var rebuilds instead of silently
+        reusing the prior mode's ELF.
+
+        Validation is atomic: ``self.artifacts`` is only updated if every
+        entry checks out, so a stale/partial manifest never leaves a
+        half-populated cache behind.
+        """
         path = self.cache_dir / self.MANIFEST_FILE
         if not path.exists():
             return False
         manifest = json.loads(path.read_text())
+        expected_configs = expected_configs or {}
+        loaded = {}
+        loaded_configs = {}
         for name, info in manifest.items():
             binary = info["output_binary"]
             if not Path(binary).exists():
                 print(f"  WARNING: cached binary not found: {binary}")
                 return False
-            self.artifacts[name] = AIECompileArtifact(
+            stored_config = info.get("config")
+            if name in expected_configs and stored_config != expected_configs[name]:
+                print(
+                    f"  Cache for '{name}' is stale: built with "
+                    f"config={stored_config}, expected {expected_configs[name]}. "
+                    f"Will rebuild."
+                )
+                return False
+            loaded[name] = AIECompileArtifact(
                 output_binary=binary,
                 kernel=info["kernel"],
                 insts=None,
             )
+            loaded_configs[name] = stored_config
+        self.artifacts.update(loaded)
+        self.configs.update(loaded_configs)
         self._log(f"Loaded manifest with {len(self.artifacts)} entries")
         return True
 
