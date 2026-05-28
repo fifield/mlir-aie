@@ -44,7 +44,7 @@ References:
 
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, Sequence
 
 import numpy as np
 
@@ -65,6 +65,7 @@ from aie.dialects.aie import (
     mem,
     memtile_dma,
     next_bd,
+    packetflow,
     shim_dma_allocation,
     tile,
     use_lock,
@@ -111,6 +112,17 @@ ADD_CHUNK = 256
 
 # SwiGLU per-tile buffer size.
 SWIGLU_CHUNK = 1024
+
+DEFAULT_DISPATCH_SEQUENCE = (
+    "og_matvec_bf16_0",
+    "a1_eltwise_add_seg",
+    "rm_rms_seg",
+    "gg_matvec_bf16_0",
+    "ug_matvec_bf16_0",
+    "sw_silu_mul_seg",
+    "dg_matvec_bf16_0",
+    "a2_eltwise_add_seg",
+)
 
 # Per-segment kernel object filenames.
 KO_MATVEC = "mv_pythoc.o"
@@ -901,6 +913,843 @@ def _emit_matvec_seg_k8192(sym: str, weight_arg_idx: int, input_arg_idx: int,
 
 
 # ---------------------------------------------------------------------------
+# Packed matvec -> add devices (D1 and D4).
+# ---------------------------------------------------------------------------
+def _emit_matvec_add_pack_k2048(
+    sym: str,
+    matvec_sym: str,
+    add_sym: str,
+    *,
+    weight_arg_idx: int,
+    input_arg_idx: int,
+    residual_arg_idx: int,
+    output_arg_idx: int,
+    out_rows: int = EMB_DIM,
+) -> None:
+    """Pack one K=2048 matvec with its following residual add.
+
+    The add consumes the matvec's per-column strided output partition in L2
+    and writes the global output with the matvec output BD dimensions. This is
+    the D1 shape: og(r2) -> a1_add(r3).
+    """
+    mat_chans = _CHANNELS[matvec_sym]
+    add_chans = _CHANNELS[add_sym]
+    assert out_rows % 1024 == 0, "out_rows must be multiple of 1024"
+    n_outer = out_rows // 1024
+
+    y_dims = [(16, 64), (8, 1)]
+    y_len = 128
+    post_chunk = y_len
+    x_repeat_count = 31
+    w_dims = [(16, 131072), (32, 512), (512, 1)]
+    w_len = 262144
+    weight_col_stride = M_TILE * EMB_DIM
+    weight_outer_stride = 1024 * EMB_DIM
+    output_col_stride = M_TILE
+    output_outer_stride = 1024
+
+    @device(AIEDevice.npu2, sym_name=sym)
+    def _dev():
+        shim_tiles = [tile(c, 0) for c in range(N_COLS)]
+        mem_tiles = [tile(c, 1) for c in range(N_COLS)]
+        mat_tiles = [tile(c, 2) for c in range(N_COLS)]
+        add_tiles = [tile(c, 3) for c in range(N_COLS)]
+
+        mem_locks = {}
+        for col in reversed(range(N_COLS)):
+            mt = mem_tiles[col]
+            mem_locks[col] = {
+                "w_dma_done": lock(mt, lock_id=3, init=1),
+                "w_ready":    lock(mt, lock_id=2, init=0),
+                "y_done":     lock(mt, lock_id=1, init=1),
+                "y_ready":    lock(mt, lock_id=0, init=0),
+            }
+
+        mat_locks = {}
+        add_locks = {}
+        for col in range(N_COLS):
+            mt = mat_tiles[col]
+            mat_locks[col] = {
+                "w_avail": lock(mt, lock_id=5, init=1),
+                "w_ready": lock(mt, lock_id=4, init=0),
+                "x_avail": lock(mt, lock_id=3, init=1),
+                "x_ready": lock(mt, lock_id=2, init=0),
+                "y_done":  lock(mt, lock_id=1, init=1),
+                "y_full":  lock(mt, lock_id=0, init=0),
+            }
+            at = add_tiles[col]
+            add_locks[col] = {
+                "in2_avail": lock(at, lock_id=5, init=1),
+                "in2_ready": lock(at, lock_id=4, init=0),
+                "in1_avail": lock(at, lock_id=3, init=1),
+                "in1_ready": lock(at, lock_id=2, init=0),
+                "out_done":  lock(at, lock_id=1, init=1),
+                "out_full":  lock(at, lock_id=0, init=0),
+            }
+
+        _W_L1_TY = bf16_memref(K_TILE, EMB_DIM, memory_space=2)
+        _X_L1_TY = bf16_memref(EMB_DIM, memory_space=2)
+        _Y_L1_TY = bf16_memref(M_TILE, memory_space=2)
+        _W_L2_TY = bf16_memref(1, M_TILE, EMB_DIM, memory_space=1)
+        _Y_L2_TY = bf16_memref(1, M_TILE, memory_space=1)
+        _ADD_TY = bf16_memref(post_chunk, memory_space=2)
+
+        mem_buf_w = {}
+        mem_buf_y = {}
+        for col in reversed(range(N_COLS)):
+            mem_buf_w[col] = buffer(mem_tiles[col], datatype=_W_L2_TY)
+        for col in reversed(range(N_COLS)):
+            mem_buf_y[col] = buffer(mem_tiles[col], datatype=_Y_L2_TY)
+
+        mat_buf_y = {}
+        mat_buf_w = {}
+        mat_buf_x = {}
+        add_buf_out = {}
+        add_buf_res = {}
+        add_buf_proj = {}
+        for col in reversed(range(N_COLS)):
+            mat_buf_y[col] = buffer(mat_tiles[col], datatype=_Y_L1_TY)
+            mat_buf_w[col] = buffer(mat_tiles[col], datatype=_W_L1_TY)
+            mat_buf_x[col] = buffer(mat_tiles[col], datatype=_X_L1_TY)
+            add_buf_out[col] = buffer(add_tiles[col], datatype=_ADD_TY)
+            add_buf_res[col] = buffer(add_tiles[col], datatype=_ADD_TY)
+            add_buf_proj[col] = buffer(add_tiles[col], datatype=_ADD_TY)
+
+        _emit_external_buffers((out_rows, EMB_DIM), (EMB_DIM,), (out_rows,))
+
+        from aie.dialects import memref, vector
+        from aie.extras import types as T
+        from aie.ir import AffineDimExpr, AffineMap
+        from ml_dtypes import bfloat16 as _bf16
+
+        fill_fn = external_func(
+            "linalg_fill_bf16",
+            inputs=[_bf16, _Y_L1_TY],
+            link_with=KO_MATVEC,
+        )
+        fill_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
+        matvec_fn = external_func(
+            "matvec_vectorized_bf16_bf16",
+            inputs=[np.int32, np.int32, np.int32, _W_L1_TY, _X_L1_TY, _Y_L1_TY],
+            link_with=KO_MATVEC,
+        )
+        matvec_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
+
+        for col in reversed(range(N_COLS)):
+            ct_op = mat_tiles[col]
+            cl = mat_locks[col]
+            y_buf = mat_buf_y[col]
+            w_buf = mat_buf_w[col]
+            x_buf = mat_buf_x[col]
+
+            def _make_mat_mem(_ct, _cl, _yb, _wb, _xb):
+                @mem(_ct)
+                def _core_mem(block):
+                    dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
+                    with block[1]:
+                        use_lock(_cl["y_full"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_yb, offset=0, len=M_TILE)
+                        use_lock(_cl["y_done"], LockAction.Release, value=1)
+                        next_bd(block[1])
+                    with block[2]:
+                        EndOp()
+                    with block[3]:
+                        dma_start(DMAChannelDir.S2MM, 0, dest=block[4], chain=block[5])
+                    with block[4]:
+                        use_lock(_cl["x_avail"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_xb, offset=0, len=EMB_DIM)
+                        use_lock(_cl["x_ready"], LockAction.Release, value=1)
+                        next_bd(block[4])
+                    with block[5]:
+                        dma_start(DMAChannelDir.S2MM, 1, dest=block[6], chain=block[2])
+                    with block[6]:
+                        use_lock(_cl["w_avail"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_wb, offset=0, len=K_TILE * EMB_DIM)
+                        use_lock(_cl["w_ready"], LockAction.Release, value=1)
+                        next_bd(block[6])
+            _make_mat_mem(ct_op, cl, y_buf, w_buf, x_buf)
+
+            def _make_mat_core(_ct, _cl, _yb, _wb, _xb):
+                import sys as _sys
+                from aie.extras.dialects.arith import index_cast
+
+                @core(_ct)
+                def _core_body():
+                    k_total = arith.constant(EMB_DIM, T.i32())
+                    k_tile_c = arith.constant(K_TILE, T.i32())
+                    zero_bf16 = arith.constant(0.0, T.bf16())
+                    for _ in range_(_sys.maxsize):
+                        use_lock(_cl["y_done"], LockAction.AcquireGreaterEqual, value=1)
+                        fill_fn(zero_bf16, _yb)
+                        for k_idx in range_(0, M_TILE, K_TILE):
+                            k_i32 = index_cast(k_idx, to=T.i32())
+                            use_lock(_cl["x_ready"], LockAction.AcquireGreaterEqual, value=1)
+                            use_lock(_cl["w_ready"], LockAction.AcquireGreaterEqual, value=1)
+                            matvec_fn(k_tile_c, k_total, k_i32, _wb, _xb, _yb)
+                            use_lock(_cl["x_avail"], LockAction.Release, value=1)
+                            use_lock(_cl["w_avail"], LockAction.Release, value=1)
+                        use_lock(_cl["y_full"], LockAction.Release, value=1)
+            _make_mat_core(ct_op, cl, y_buf, w_buf, x_buf)
+
+        for col in reversed(range(N_COLS)):
+            ct_op = add_tiles[col]
+            cl = add_locks[col]
+            buf_out = add_buf_out[col]
+            buf_res = add_buf_res[col]
+            buf_proj = add_buf_proj[col]
+
+            def _make_add_mem(_ct, _cl, _bo, _bres, _bproj):
+                @mem(_ct)
+                def _core_mem(block):
+                    dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
+                    with block[1]:
+                        use_lock(_cl["out_full"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_bo, offset=0, len=post_chunk)
+                        use_lock(_cl["out_done"], LockAction.Release, value=1)
+                        next_bd(block[1])
+                    with block[2]:
+                        EndOp()
+                    with block[3]:
+                        dma_start(DMAChannelDir.S2MM, 0, dest=block[4], chain=block[5])
+                    with block[4]:
+                        use_lock(_cl["in1_avail"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_bproj, offset=0, len=post_chunk)
+                        use_lock(_cl["in1_ready"], LockAction.Release, value=1)
+                        next_bd(block[4])
+                    with block[5]:
+                        dma_start(DMAChannelDir.S2MM, 1, dest=block[6], chain=block[2])
+                    with block[6]:
+                        use_lock(_cl["in2_avail"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_bres, offset=0, len=post_chunk)
+                        use_lock(_cl["in2_ready"], LockAction.Release, value=1)
+                        next_bd(block[6])
+            _make_add_mem(ct_op, cl, buf_out, buf_res, buf_proj)
+
+            def _make_add_core(_ct, _cl, _bo, _bres, _bproj):
+                import sys as _sys
+
+                @core(_ct)
+                def _core_body():
+                    zero_bf16 = arith.constant(0.0, T.bf16())
+                    c0 = arith.constant(0, T.index())
+                    perm = AffineMap.get(1, 0, [AffineDimExpr.get(0)])
+                    vec_ty = T.vector(16, T.bf16())
+                    for _ in range_(_sys.maxsize):
+                        use_lock(_cl["in1_ready"], LockAction.AcquireGreaterEqual, value=1)
+                        use_lock(_cl["in2_ready"], LockAction.AcquireGreaterEqual, value=1)
+                        use_lock(_cl["out_done"], LockAction.AcquireGreaterEqual, value=1)
+                        for i in range_(0, post_chunk, 16):
+                            sub1 = memref.subview(_bproj, [i], [16], [1])
+                            sub2 = memref.subview(_bres, [i], [16], [1])
+                            subo = memref.subview(_bo, [i], [16], [1])
+                            v1 = vector.transfer_read(
+                                vec_ty, sub1, [c0],
+                                permutation_map=perm, padding=zero_bf16,
+                                in_bounds=[True])
+                            v2 = vector.transfer_read(
+                                vec_ty, sub2, [c0],
+                                permutation_map=perm, padding=zero_bf16,
+                                in_bounds=[True])
+                            vsum = arith.addf(v1, v2)
+                            vector.transfer_write(
+                                None, vsum, subo, [c0],
+                                permutation_map=perm, in_bounds=[True])
+                        use_lock(_cl["in1_avail"], LockAction.Release, value=1)
+                        use_lock(_cl["in2_avail"], LockAction.Release, value=1)
+                        use_lock(_cl["out_full"], LockAction.Release, value=1)
+            _make_add_core(ct_op, cl, buf_out, buf_res, buf_proj)
+
+        # Packet-route shim MM2S0: pkt 0 feeds matvec weights, pkt 1 feeds
+        # the residual add operand. The matvec input broadcast uses shim0
+        # MM2S1 as in the standalone matvec.
+        for col in range(N_COLS):
+            packetflow(
+                pkt_id=0,
+                source=shim_tiles[col],
+                source_port=WireBundle.DMA,
+                source_channel=0,
+                dests={"dest": mem_tiles[col], "port": WireBundle.DMA, "channel": 0},
+            )
+            packetflow(
+                pkt_id=1,
+                source=shim_tiles[col],
+                source_port=WireBundle.DMA,
+                source_channel=0,
+                dests={"dest": add_tiles[col], "port": WireBundle.DMA, "channel": 1},
+            )
+        for col in range(N_COLS):
+            flow(shim_tiles[0], WireBundle.DMA, 1, mat_tiles[col], WireBundle.DMA, 0)
+        for col in range(N_COLS):
+            flow(mem_tiles[col], WireBundle.DMA, 1, mat_tiles[col], WireBundle.DMA, 1)
+        for col in range(N_COLS):
+            flow(mat_tiles[col], WireBundle.DMA, 0, mem_tiles[col], WireBundle.DMA, 1)
+        for col in range(N_COLS):
+            flow(mem_tiles[col], WireBundle.DMA, 0, add_tiles[col], WireBundle.DMA, 0)
+        for col in range(N_COLS):
+            flow(add_tiles[col], WireBundle.DMA, 0, shim_tiles[col], WireBundle.DMA, 0)
+
+        weight_base = mat_chans["weight_base"]
+        input_chan = mat_chans["input"]
+        residual_chan = add_chans["in1"]
+        out_chan = add_chans["out"]
+        for col in range(N_COLS):
+            shim_dma_allocation(
+                f"air_channel_{weight_base}_{col}",
+                shim_tiles[col],
+                DMAChannelDir.MM2S,
+                0,
+            )
+        for col in range(N_COLS):
+            shim_dma_allocation(
+                f"air_channel_{residual_chan}_{col}",
+                shim_tiles[col],
+                DMAChannelDir.MM2S,
+                0,
+            )
+        shim_dma_allocation(
+            f"air_channel_{input_chan}",
+            shim_tiles[0],
+            DMAChannelDir.MM2S,
+            1,
+        )
+        for col in range(N_COLS):
+            shim_dma_allocation(
+                f"air_channel_{out_chan}_{col}",
+                shim_tiles[col],
+                DMAChannelDir.S2MM,
+                0,
+            )
+
+        def _make_memtile_dma(_col, _ml, _w, _y):
+            @memtile_dma(mem_tiles[_col])
+            def _mt(block):
+                dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
+                with block[1]:
+                    use_lock(_ml["y_ready"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_y, offset=0, len=M_TILE)
+                    use_lock(_ml["y_done"], LockAction.Release, value=1)
+                    next_bd(block[1])
+                with block[2]:
+                    EndOp()
+                with block[3]:
+                    dma_start(DMAChannelDir.MM2S, 1, dest=block[4], chain=block[5])
+                with block[4]:
+                    use_lock(_ml["w_ready"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_w, offset=0, len=M_TILE * EMB_DIM)
+                    use_lock(_ml["w_dma_done"], LockAction.Release, value=1)
+                    next_bd(block[4])
+                with block[5]:
+                    dma_start(DMAChannelDir.S2MM, 0, dest=block[6], chain=block[7])
+                with block[6]:
+                    use_lock(_ml["w_dma_done"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_w, offset=0, len=M_TILE * EMB_DIM)
+                    use_lock(_ml["w_ready"], LockAction.Release, value=1)
+                    next_bd(block[6])
+                with block[7]:
+                    dma_start(DMAChannelDir.S2MM, 1, dest=block[8], chain=block[2])
+                with block[8]:
+                    use_lock(_ml["y_done"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_y, offset=0, len=M_TILE)
+                    use_lock(_ml["y_ready"], LockAction.Release, value=1)
+                    next_bd(block[8])
+        for col in range(N_COLS):
+            _make_memtile_dma(col, mem_locks[col], mem_buf_w[col], mem_buf_y[col])
+
+        @runtime_sequence(*o_gemv_ffn_host_arg_types(), sym_name=f"{sym}_sequence")
+        def _seq(*args):
+            arg_w = args[weight_arg_idx]
+            arg_x = args[input_arg_idx]
+            arg_res = args[residual_arg_idx]
+            arg_y = args[output_arg_idx]
+            for outer in range(n_outer):
+                weight_tasks = []
+                for col in range(N_COLS):
+                    t = dma_configure_task_for(f"air_channel_{weight_base}_{col}")
+                    with bds(t) as bd:
+                        with bd[0]:
+                            dma_bd(
+                                arg_w,
+                                offset=outer * weight_outer_stride + col * weight_col_stride,
+                                len=w_len,
+                                dimensions=w_dims,
+                                packet=(0, 0),
+                            )
+                            EndOp()
+                    dma_start_task(t)
+                    weight_tasks.append(t)
+
+                x_task = dma_configure_task_for(
+                    f"air_channel_{input_chan}",
+                    repeat_count=x_repeat_count,
+                )
+                with bds(x_task) as bd:
+                    with bd[0]:
+                        dma_bd(
+                            arg_x,
+                            offset=0,
+                            len=EMB_DIM,
+                            dimensions=[(4, 512), (512, 1)],
+                        )
+                        EndOp()
+                dma_start_task(x_task)
+
+                res_tasks = []
+                for col in range(N_COLS):
+                    t = dma_configure_task_for(f"air_channel_{residual_chan}_{col}")
+                    with bds(t) as bd:
+                        with bd[0]:
+                            dma_bd(
+                                arg_res,
+                                offset=outer * output_outer_stride + col * output_col_stride,
+                                len=y_len,
+                                dimensions=y_dims,
+                                packet=(0, 1),
+                            )
+                            EndOp()
+                    dma_start_task(t)
+                    res_tasks.append(t)
+
+                out_tasks = []
+                for col in range(N_COLS):
+                    t = dma_configure_task_for(
+                        f"air_channel_{out_chan}_{col}",
+                        issue_token=True,
+                    )
+                    with bds(t) as bd:
+                        with bd[0]:
+                            dma_bd(
+                                arg_y,
+                                offset=outer * output_outer_stride + col * output_col_stride,
+                                len=y_len,
+                                dimensions=y_dims,
+                            )
+                            EndOp()
+                    dma_start_task(t)
+                    out_tasks.append(t)
+
+                for t in reversed(out_tasks):
+                    dma_await_task(t)
+                for t in reversed(res_tasks):
+                    dma_free_task(t)
+                dma_free_task(x_task)
+                for t in reversed(weight_tasks):
+                    dma_free_task(t)
+
+
+def _emit_matvec_add_pack_k8192(
+    sym: str,
+    matvec_sym: str,
+    add_sym: str,
+    *,
+    weight_arg_idx: int,
+    input_arg_idx: int,
+    residual_arg_idx: int,
+    output_arg_idx: int,
+) -> None:
+    """Pack the K=8192 down matvec with a2_add (D4)."""
+    mat_chans = _CHANNELS[matvec_sym]
+    add_chans = _CHANNELS[add_sym]
+    n_outer = EMB_DIM // 256
+
+    y_dims = [(16, 16), (2, 1)]
+    y_len = 32
+    post_chunk = y_len
+    x_repeat_count = 31
+    x_dims = [(16, 512), (512, 1)]
+    x_len = HIDDEN_DIM
+    w_dims = [(16, 131072), (32, 512), (512, 1)]
+    w_len = 262144
+    weight_col_stride = M_TILE_K8192 * HIDDEN_DIM
+    weight_outer_stride = 256 * HIDDEN_DIM
+    output_col_stride = M_TILE_K8192
+    output_outer_stride = 256
+
+    @device(AIEDevice.npu2, sym_name=sym)
+    def _dev():
+        shim_tiles = [tile(c, 0) for c in range(N_COLS)]
+        mem_tiles = [tile(c, 1) for c in range(N_COLS)]
+        mat_tiles = [tile(c, 2) for c in range(N_COLS)]
+        add_tiles = [tile(c, 3) for c in range(N_COLS)]
+
+        mem_locks = {}
+        for col in reversed(range(N_COLS)):
+            mt = mem_tiles[col]
+            mem_locks[col] = {
+                "w_dma_done": lock(mt, lock_id=3, init=1),
+                "w_ready":    lock(mt, lock_id=2, init=0),
+                "y_done":     lock(mt, lock_id=1, init=1),
+                "y_ready":    lock(mt, lock_id=0, init=0),
+            }
+
+        mat_locks = {}
+        add_locks = {}
+        for col in range(N_COLS):
+            mt = mat_tiles[col]
+            mat_locks[col] = {
+                "w_avail": lock(mt, lock_id=5, init=1),
+                "w_ready": lock(mt, lock_id=4, init=0),
+                "x_avail": lock(mt, lock_id=3, init=1),
+                "x_ready": lock(mt, lock_id=2, init=0),
+                "y_done":  lock(mt, lock_id=1, init=1),
+                "y_full":  lock(mt, lock_id=0, init=0),
+            }
+            at = add_tiles[col]
+            add_locks[col] = {
+                "in2_avail": lock(at, lock_id=5, init=1),
+                "in2_ready": lock(at, lock_id=4, init=0),
+                "in1_avail": lock(at, lock_id=3, init=1),
+                "in1_ready": lock(at, lock_id=2, init=0),
+                "out_done":  lock(at, lock_id=1, init=1),
+                "out_full":  lock(at, lock_id=0, init=0),
+            }
+
+        _W_L1_TY = bf16_memref(K_TILE_K8192, HIDDEN_DIM, memory_space=2)
+        _X_L1_TY = bf16_memref(HIDDEN_DIM, memory_space=2)
+        _Y_L1_TY = bf16_memref(M_TILE_K8192, memory_space=2)
+        _W_L2_TY = bf16_memref(1, M_TILE_K8192, HIDDEN_DIM, memory_space=1)
+        _Y_L2_TY = bf16_memref(1, M_TILE_K8192, memory_space=1)
+        _ADD_TY = bf16_memref(post_chunk, memory_space=2)
+
+        mem_buf_w = {}
+        mem_buf_y = {}
+        for col in reversed(range(N_COLS)):
+            mem_buf_w[col] = buffer(mem_tiles[col], datatype=_W_L2_TY)
+        for col in reversed(range(N_COLS)):
+            mem_buf_y[col] = buffer(mem_tiles[col], datatype=_Y_L2_TY)
+
+        mat_buf_y = {}
+        mat_buf_w = {}
+        mat_buf_x = {}
+        add_buf_out = {}
+        add_buf_res = {}
+        add_buf_down = {}
+        for col in reversed(range(N_COLS)):
+            mat_buf_y[col] = buffer(mat_tiles[col], datatype=_Y_L1_TY)
+            mat_buf_w[col] = buffer(mat_tiles[col], datatype=_W_L1_TY)
+            mat_buf_x[col] = buffer(mat_tiles[col], datatype=_X_L1_TY)
+            add_buf_out[col] = buffer(add_tiles[col], datatype=_ADD_TY)
+            add_buf_res[col] = buffer(add_tiles[col], datatype=_ADD_TY)
+            add_buf_down[col] = buffer(add_tiles[col], datatype=_ADD_TY)
+
+        _emit_external_buffers((EMB_DIM, HIDDEN_DIM), (HIDDEN_DIM,), (EMB_DIM,))
+
+        from aie.dialects import memref, vector
+        from aie.extras import types as T
+        from aie.ir import AffineDimExpr, AffineMap
+        from ml_dtypes import bfloat16 as _bf16
+
+        fill_fn = external_func(
+            "dg_linalg_fill_bf16",
+            inputs=[_bf16, _Y_L1_TY],
+            link_with=KO_MATVEC_K8192,
+        )
+        fill_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
+        matvec_fn = external_func(
+            "dg_matvec_vectorized_bf16_bf16",
+            inputs=[np.int32, np.int32, np.int32, _W_L1_TY, _X_L1_TY, _Y_L1_TY],
+            link_with=KO_MATVEC_K8192,
+        )
+        matvec_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
+
+        for col in reversed(range(N_COLS)):
+            ct_op = mat_tiles[col]
+            cl = mat_locks[col]
+            y_buf = mat_buf_y[col]
+            w_buf = mat_buf_w[col]
+            x_buf = mat_buf_x[col]
+
+            def _make_mat_mem(_ct, _cl, _yb, _wb, _xb):
+                @mem(_ct)
+                def _core_mem(block):
+                    dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
+                    with block[1]:
+                        use_lock(_cl["y_full"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_yb, offset=0, len=M_TILE_K8192)
+                        use_lock(_cl["y_done"], LockAction.Release, value=1)
+                        next_bd(block[1])
+                    with block[2]:
+                        EndOp()
+                    with block[3]:
+                        dma_start(DMAChannelDir.S2MM, 0, dest=block[4], chain=block[5])
+                    with block[4]:
+                        use_lock(_cl["x_avail"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_xb, offset=0, len=HIDDEN_DIM)
+                        use_lock(_cl["x_ready"], LockAction.Release, value=1)
+                        next_bd(block[4])
+                    with block[5]:
+                        dma_start(DMAChannelDir.S2MM, 1, dest=block[6], chain=block[2])
+                    with block[6]:
+                        use_lock(_cl["w_avail"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_wb, offset=0, len=K_TILE_K8192 * HIDDEN_DIM)
+                        use_lock(_cl["w_ready"], LockAction.Release, value=1)
+                        next_bd(block[6])
+            _make_mat_mem(ct_op, cl, y_buf, w_buf, x_buf)
+
+            def _make_mat_core(_ct, _cl, _yb, _wb, _xb):
+                import sys as _sys
+                from aie.extras.dialects.arith import index_cast
+
+                @core(_ct)
+                def _core_body():
+                    k_total = arith.constant(HIDDEN_DIM, T.i32())
+                    k_tile_c = arith.constant(K_TILE_K8192, T.i32())
+                    zero_bf16 = arith.constant(0.0, T.bf16())
+                    for _ in range_(_sys.maxsize):
+                        use_lock(_cl["y_done"], LockAction.AcquireGreaterEqual, value=1)
+                        fill_fn(zero_bf16, _yb)
+                        for k_idx in range_(0, M_TILE_K8192, K_TILE_K8192):
+                            k_i32 = index_cast(k_idx, to=T.i32())
+                            use_lock(_cl["x_ready"], LockAction.AcquireGreaterEqual, value=1)
+                            use_lock(_cl["w_ready"], LockAction.AcquireGreaterEqual, value=1)
+                            matvec_fn(k_tile_c, k_total, k_i32, _wb, _xb, _yb)
+                            use_lock(_cl["x_avail"], LockAction.Release, value=1)
+                            use_lock(_cl["w_avail"], LockAction.Release, value=1)
+                        use_lock(_cl["y_full"], LockAction.Release, value=1)
+            _make_mat_core(ct_op, cl, y_buf, w_buf, x_buf)
+
+        for col in reversed(range(N_COLS)):
+            ct_op = add_tiles[col]
+            cl = add_locks[col]
+            buf_out = add_buf_out[col]
+            buf_res = add_buf_res[col]
+            buf_down = add_buf_down[col]
+
+            def _make_add_mem(_ct, _cl, _bo, _bres, _bdown):
+                @mem(_ct)
+                def _core_mem(block):
+                    dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
+                    with block[1]:
+                        use_lock(_cl["out_full"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_bo, offset=0, len=post_chunk)
+                        use_lock(_cl["out_done"], LockAction.Release, value=1)
+                        next_bd(block[1])
+                    with block[2]:
+                        EndOp()
+                    with block[3]:
+                        dma_start(DMAChannelDir.S2MM, 0, dest=block[4], chain=block[5])
+                    with block[4]:
+                        use_lock(_cl["in1_avail"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_bdown, offset=0, len=post_chunk)
+                        use_lock(_cl["in1_ready"], LockAction.Release, value=1)
+                        next_bd(block[4])
+                    with block[5]:
+                        dma_start(DMAChannelDir.S2MM, 1, dest=block[6], chain=block[2])
+                    with block[6]:
+                        use_lock(_cl["in2_avail"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_bres, offset=0, len=post_chunk)
+                        use_lock(_cl["in2_ready"], LockAction.Release, value=1)
+                        next_bd(block[6])
+            _make_add_mem(ct_op, cl, buf_out, buf_res, buf_down)
+
+            def _make_add_core(_ct, _cl, _bo, _bres, _bdown):
+                import sys as _sys
+
+                @core(_ct)
+                def _core_body():
+                    zero_bf16 = arith.constant(0.0, T.bf16())
+                    c0 = arith.constant(0, T.index())
+                    perm = AffineMap.get(1, 0, [AffineDimExpr.get(0)])
+                    vec_ty = T.vector(16, T.bf16())
+                    for _ in range_(_sys.maxsize):
+                        use_lock(_cl["in1_ready"], LockAction.AcquireGreaterEqual, value=1)
+                        use_lock(_cl["in2_ready"], LockAction.AcquireGreaterEqual, value=1)
+                        use_lock(_cl["out_done"], LockAction.AcquireGreaterEqual, value=1)
+                        for i in range_(0, post_chunk, 16):
+                            sub1 = memref.subview(_bdown, [i], [16], [1])
+                            sub2 = memref.subview(_bres, [i], [16], [1])
+                            subo = memref.subview(_bo, [i], [16], [1])
+                            v1 = vector.transfer_read(
+                                vec_ty, sub1, [c0],
+                                permutation_map=perm, padding=zero_bf16,
+                                in_bounds=[True])
+                            v2 = vector.transfer_read(
+                                vec_ty, sub2, [c0],
+                                permutation_map=perm, padding=zero_bf16,
+                                in_bounds=[True])
+                            vsum = arith.addf(v1, v2)
+                            vector.transfer_write(
+                                None, vsum, subo, [c0],
+                                permutation_map=perm, in_bounds=[True])
+                        use_lock(_cl["in1_avail"], LockAction.Release, value=1)
+                        use_lock(_cl["in2_avail"], LockAction.Release, value=1)
+                        use_lock(_cl["out_full"], LockAction.Release, value=1)
+            _make_add_core(ct_op, cl, buf_out, buf_res, buf_down)
+
+        for col in range(N_COLS):
+            packetflow(
+                pkt_id=0,
+                source=shim_tiles[col],
+                source_port=WireBundle.DMA,
+                source_channel=0,
+                dests={"dest": mem_tiles[col], "port": WireBundle.DMA, "channel": 0},
+            )
+            packetflow(
+                pkt_id=1,
+                source=shim_tiles[col],
+                source_port=WireBundle.DMA,
+                source_channel=0,
+                dests={"dest": add_tiles[col], "port": WireBundle.DMA, "channel": 1},
+            )
+        for col in range(N_COLS):
+            flow(shim_tiles[0], WireBundle.DMA, 1, mat_tiles[col], WireBundle.DMA, 0)
+        for col in range(N_COLS):
+            flow(mem_tiles[col], WireBundle.DMA, 1, mat_tiles[col], WireBundle.DMA, 1)
+        for col in range(N_COLS):
+            flow(mat_tiles[col], WireBundle.DMA, 0, mem_tiles[col], WireBundle.DMA, 1)
+        for col in range(N_COLS):
+            flow(mem_tiles[col], WireBundle.DMA, 0, add_tiles[col], WireBundle.DMA, 0)
+        for col in range(N_COLS):
+            flow(add_tiles[col], WireBundle.DMA, 0, shim_tiles[col], WireBundle.DMA, 0)
+
+        weight_base = mat_chans["weight_base"]
+        input_chan = mat_chans["input"]
+        residual_chan = add_chans["in1"]
+        out_chan = add_chans["out"]
+        for col in range(N_COLS):
+            shim_dma_allocation(
+                f"air_channel_{weight_base}_{col}",
+                shim_tiles[col],
+                DMAChannelDir.MM2S,
+                0,
+            )
+        for col in range(N_COLS):
+            shim_dma_allocation(
+                f"air_channel_{residual_chan}_{col}",
+                shim_tiles[col],
+                DMAChannelDir.MM2S,
+                0,
+            )
+        shim_dma_allocation(
+            f"air_channel_{input_chan}",
+            shim_tiles[0],
+            DMAChannelDir.MM2S,
+            1,
+        )
+        for col in range(N_COLS):
+            shim_dma_allocation(
+                f"air_channel_{out_chan}_{col}",
+                shim_tiles[col],
+                DMAChannelDir.S2MM,
+                0,
+            )
+
+        def _make_memtile_dma(_col, _ml, _w, _y):
+            @memtile_dma(mem_tiles[_col])
+            def _mt(block):
+                dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
+                with block[1]:
+                    use_lock(_ml["y_ready"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_y, offset=0, len=M_TILE_K8192)
+                    use_lock(_ml["y_done"], LockAction.Release, value=1)
+                    next_bd(block[1])
+                with block[2]:
+                    EndOp()
+                with block[3]:
+                    dma_start(DMAChannelDir.MM2S, 1, dest=block[4], chain=block[5])
+                with block[4]:
+                    use_lock(_ml["w_ready"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_w, offset=0, len=M_TILE_K8192 * HIDDEN_DIM)
+                    use_lock(_ml["w_dma_done"], LockAction.Release, value=1)
+                    next_bd(block[4])
+                with block[5]:
+                    dma_start(DMAChannelDir.S2MM, 0, dest=block[6], chain=block[7])
+                with block[6]:
+                    use_lock(_ml["w_dma_done"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_w, offset=0, len=M_TILE_K8192 * HIDDEN_DIM)
+                    use_lock(_ml["w_ready"], LockAction.Release, value=1)
+                    next_bd(block[6])
+                with block[7]:
+                    dma_start(DMAChannelDir.S2MM, 1, dest=block[8], chain=block[2])
+                with block[8]:
+                    use_lock(_ml["y_done"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_y, offset=0, len=M_TILE_K8192)
+                    use_lock(_ml["y_ready"], LockAction.Release, value=1)
+                    next_bd(block[8])
+        for col in range(N_COLS):
+            _make_memtile_dma(col, mem_locks[col], mem_buf_w[col], mem_buf_y[col])
+
+        @runtime_sequence(*o_gemv_ffn_host_arg_types(), sym_name=f"{sym}_sequence")
+        def _seq(*args):
+            arg_w = args[weight_arg_idx]
+            arg_x = args[input_arg_idx]
+            arg_res = args[residual_arg_idx]
+            arg_y = args[output_arg_idx]
+            for outer in range(n_outer):
+                weight_tasks = []
+                for col in range(N_COLS):
+                    t = dma_configure_task_for(f"air_channel_{weight_base}_{col}")
+                    with bds(t) as bd:
+                        with bd[0]:
+                            dma_bd(
+                                arg_w,
+                                offset=outer * weight_outer_stride + col * weight_col_stride,
+                                len=w_len,
+                                dimensions=w_dims,
+                                packet=(0, 0),
+                            )
+                            EndOp()
+                    dma_start_task(t)
+                    weight_tasks.append(t)
+
+                x_task = dma_configure_task_for(
+                    f"air_channel_{input_chan}",
+                    repeat_count=x_repeat_count,
+                )
+                with bds(x_task) as bd:
+                    with bd[0]:
+                        dma_bd(
+                            arg_x,
+                            offset=0,
+                            len=x_len,
+                            dimensions=x_dims,
+                        )
+                        EndOp()
+                dma_start_task(x_task)
+
+                res_tasks = []
+                for col in range(N_COLS):
+                    t = dma_configure_task_for(f"air_channel_{residual_chan}_{col}")
+                    with bds(t) as bd:
+                        with bd[0]:
+                            dma_bd(
+                                arg_res,
+                                offset=outer * output_outer_stride + col * output_col_stride,
+                                len=y_len,
+                                dimensions=y_dims,
+                                packet=(0, 1),
+                            )
+                            EndOp()
+                    dma_start_task(t)
+                    res_tasks.append(t)
+
+                out_tasks = []
+                for col in range(N_COLS):
+                    t = dma_configure_task_for(
+                        f"air_channel_{out_chan}_{col}",
+                        issue_token=True,
+                    )
+                    with bds(t) as bd:
+                        with bd[0]:
+                            dma_bd(
+                                arg_y,
+                                offset=outer * output_outer_stride + col * output_col_stride,
+                                len=y_len,
+                                dimensions=y_dims,
+                            )
+                            EndOp()
+                    dma_start_task(t)
+                    out_tasks.append(t)
+
+                for t in reversed(out_tasks):
+                    dma_await_task(t)
+                for t in reversed(res_tasks):
+                    dma_free_task(t)
+                dma_free_task(x_task)
+                for t in reversed(weight_tasks):
+                    dma_free_task(t)
+
+
+# ---------------------------------------------------------------------------
 # Eltwise-add segment (inline arith.addf, no link_with).
 # 8 compute tiles, each holds 256-elt bf16 buffers (3 per tile).
 # No mem tiles -- shim<->compute direct flows.
@@ -1249,6 +2098,504 @@ def _emit_rm_rms_seg() -> None:
             dma_free_task(t_x)
 
 
+
+# ---------------------------------------------------------------------------
+# Packed gate/up matvec -> SwiGLU device (D3).
+# ---------------------------------------------------------------------------
+def _emit_gg_ug_swiglu_pack(
+    sym: str = "d3_gg_ug_sw_pack",
+    *,
+    gg_sym: str = "gg_matvec_bf16_0",
+    ug_sym: str = "ug_matvec_bf16_0",
+    sw_sym: str = "sw_silu_mul_seg",
+    gg_weight_arg_idx: int = 7,
+    ug_weight_arg_idx: int = 9,
+    input_arg_idx: int = 6,
+    output_arg_idx: int = 11,
+    out_rows: int = HIDDEN_DIM,
+) -> None:
+    """Pack gate/up K=2048 matvecs with the following SwiGLU.
+
+    Gate runs on row 2, up runs on row 3, and SwiGLU runs on row 4. The
+    post-op consumes the matvec per-column output stream directly in 128-elt
+    chunks and writes the global hidden vector using the matvec output layout.
+    """
+    gg_chans = _CHANNELS[gg_sym]
+    ug_chans = _CHANNELS[ug_sym]
+    sw_chans = _CHANNELS[sw_sym]
+    assert out_rows % 1024 == 0, "out_rows must be multiple of 1024"
+    n_outer = out_rows // 1024
+
+    y_dims = [(16, 64), (8, 1)]
+    y_len = 128
+    x_repeat_count = 31
+    w_dims = [(16, 131072), (32, 512), (512, 1)]
+    w_len = 262144
+    weight_col_stride = M_TILE * EMB_DIM
+    weight_outer_stride = 1024 * EMB_DIM
+    output_col_stride = M_TILE
+    output_outer_stride = 1024
+    post_chunk = y_len
+
+    @device(AIEDevice.npu2, sym_name=sym)
+    def _dev():
+        shim_tiles = [tile(c, 0) for c in range(N_COLS)]
+        mem_tiles = [tile(c, 1) for c in range(N_COLS)]
+        gg_tiles = [tile(c, 2) for c in range(N_COLS)]
+        ug_tiles = [tile(c, 3) for c in range(N_COLS)]
+        sw_tiles = [tile(c, 4) for c in range(N_COLS)]
+
+        mem_locks = {}
+        for col in reversed(range(N_COLS)):
+            mt = mem_tiles[col]
+            mem_locks[col] = {
+                "gg_w_dma_done": lock(mt, lock_id=7, init=1),
+                "gg_w_ready":    lock(mt, lock_id=6, init=0),
+                "gg_y_done":     lock(mt, lock_id=5, init=1),
+                "gg_y_ready":    lock(mt, lock_id=4, init=0),
+                "ug_w_dma_done": lock(mt, lock_id=3, init=1),
+                "ug_w_ready":    lock(mt, lock_id=2, init=0),
+                "ug_y_done":     lock(mt, lock_id=1, init=1),
+                "ug_y_ready":    lock(mt, lock_id=0, init=0),
+            }
+
+        gg_locks = {}
+        ug_locks = {}
+        sw_locks = {}
+        for col in range(N_COLS):
+            gt = gg_tiles[col]
+            gg_locks[col] = {
+                "w_avail": lock(gt, lock_id=5, init=1),
+                "w_ready": lock(gt, lock_id=4, init=0),
+                "x_avail": lock(gt, lock_id=3, init=1),
+                "x_ready": lock(gt, lock_id=2, init=0),
+                "y_done":  lock(gt, lock_id=1, init=1),
+                "y_full":  lock(gt, lock_id=0, init=0),
+            }
+            ut = ug_tiles[col]
+            ug_locks[col] = {
+                "w_avail": lock(ut, lock_id=5, init=1),
+                "w_ready": lock(ut, lock_id=4, init=0),
+                "x_avail": lock(ut, lock_id=3, init=1),
+                "x_ready": lock(ut, lock_id=2, init=0),
+                "y_done":  lock(ut, lock_id=1, init=1),
+                "y_full":  lock(ut, lock_id=0, init=0),
+            }
+            st = sw_tiles[col]
+            sw_locks[col] = {
+                "up_avail":   lock(st, lock_id=5, init=1),
+                "up_ready":   lock(st, lock_id=4, init=0),
+                "gate_avail": lock(st, lock_id=3, init=1),
+                "gate_ready": lock(st, lock_id=2, init=0),
+                "out_done":   lock(st, lock_id=1, init=1),
+                "out_full":   lock(st, lock_id=0, init=0),
+            }
+
+        _W_L1_TY = bf16_memref(K_TILE, EMB_DIM, memory_space=2)
+        _X_L1_TY = bf16_memref(EMB_DIM, memory_space=2)
+        _Y_L1_TY = bf16_memref(M_TILE, memory_space=2)
+        _W_L2_TY = bf16_memref(1, M_TILE, EMB_DIM, memory_space=1)
+        _Y_L2_TY = bf16_memref(1, M_TILE, memory_space=1)
+        _SW_TY = bf16_memref(post_chunk, memory_space=2)
+
+        mem_buf_gg_w = {}
+        mem_buf_ug_w = {}
+        mem_buf_gg_y = {}
+        mem_buf_ug_y = {}
+        for col in reversed(range(N_COLS)):
+            mem_buf_gg_w[col] = buffer(mem_tiles[col], datatype=_W_L2_TY)
+            mem_buf_ug_w[col] = buffer(mem_tiles[col], datatype=_W_L2_TY)
+        for col in reversed(range(N_COLS)):
+            mem_buf_gg_y[col] = buffer(mem_tiles[col], datatype=_Y_L2_TY)
+            mem_buf_ug_y[col] = buffer(mem_tiles[col], datatype=_Y_L2_TY)
+
+        gg_buf_y = {}
+        gg_buf_w = {}
+        gg_buf_x = {}
+        ug_buf_y = {}
+        ug_buf_w = {}
+        ug_buf_x = {}
+        sw_buf_out = {}
+        sw_buf_up = {}
+        sw_buf_gate = {}
+        for col in reversed(range(N_COLS)):
+            gg_buf_y[col] = buffer(gg_tiles[col], datatype=_Y_L1_TY)
+            gg_buf_w[col] = buffer(gg_tiles[col], datatype=_W_L1_TY)
+            gg_buf_x[col] = buffer(gg_tiles[col], datatype=_X_L1_TY)
+            ug_buf_y[col] = buffer(ug_tiles[col], datatype=_Y_L1_TY)
+            ug_buf_w[col] = buffer(ug_tiles[col], datatype=_W_L1_TY)
+            ug_buf_x[col] = buffer(ug_tiles[col], datatype=_X_L1_TY)
+            sw_buf_out[col] = buffer(sw_tiles[col], datatype=_SW_TY)
+            sw_buf_up[col] = buffer(sw_tiles[col], datatype=_SW_TY)
+            sw_buf_gate[col] = buffer(sw_tiles[col], datatype=_SW_TY)
+
+        _emit_external_buffers((out_rows, EMB_DIM), (EMB_DIM,), (out_rows,))
+
+        from aie.extras import types as T
+        from ml_dtypes import bfloat16 as _bf16
+
+        fill_fn = external_func(
+            "linalg_fill_bf16",
+            inputs=[_bf16, _Y_L1_TY],
+            link_with=KO_MATVEC,
+        )
+        fill_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
+        matvec_fn = external_func(
+            "matvec_vectorized_bf16_bf16",
+            inputs=[np.int32, np.int32, np.int32, _W_L1_TY, _X_L1_TY, _Y_L1_TY],
+            link_with=KO_MATVEC,
+        )
+        matvec_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
+        silu_fn = external_func(
+            "silu_and_mul_bf16",
+            inputs=[_SW_TY, _SW_TY, _SW_TY, np.int32],
+            link_with=KO_SWIGLU,
+        )
+        silu_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
+
+        for col in reversed(range(N_COLS)):
+            def _make_mat_mem(_ct, _cl, _yb, _wb, _xb):
+                @mem(_ct)
+                def _core_mem(block):
+                    dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
+                    with block[1]:
+                        use_lock(_cl["y_full"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_yb, offset=0, len=M_TILE)
+                        use_lock(_cl["y_done"], LockAction.Release, value=1)
+                        next_bd(block[1])
+                    with block[2]:
+                        EndOp()
+                    with block[3]:
+                        dma_start(DMAChannelDir.S2MM, 0, dest=block[4], chain=block[5])
+                    with block[4]:
+                        use_lock(_cl["x_avail"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_xb, offset=0, len=EMB_DIM)
+                        use_lock(_cl["x_ready"], LockAction.Release, value=1)
+                        next_bd(block[4])
+                    with block[5]:
+                        dma_start(DMAChannelDir.S2MM, 1, dest=block[6], chain=block[2])
+                    with block[6]:
+                        use_lock(_cl["w_avail"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_wb, offset=0, len=K_TILE * EMB_DIM)
+                        use_lock(_cl["w_ready"], LockAction.Release, value=1)
+                        next_bd(block[6])
+            _make_mat_mem(
+                gg_tiles[col], gg_locks[col], gg_buf_y[col], gg_buf_w[col], gg_buf_x[col]
+            )
+            _make_mat_mem(
+                ug_tiles[col], ug_locks[col], ug_buf_y[col], ug_buf_w[col], ug_buf_x[col]
+            )
+
+            def _make_mat_core(_ct, _cl, _yb, _wb, _xb):
+                import sys as _sys
+                from aie.extras.dialects.arith import index_cast
+
+                @core(_ct)
+                def _core_body():
+                    k_total = arith.constant(EMB_DIM, T.i32())
+                    k_tile_c = arith.constant(K_TILE, T.i32())
+                    zero_bf16 = arith.constant(0.0, T.bf16())
+                    for _ in range_(_sys.maxsize):
+                        use_lock(_cl["y_done"], LockAction.AcquireGreaterEqual, value=1)
+                        fill_fn(zero_bf16, _yb)
+                        for k_idx in range_(0, M_TILE, K_TILE):
+                            k_i32 = index_cast(k_idx, to=T.i32())
+                            use_lock(_cl["x_ready"], LockAction.AcquireGreaterEqual, value=1)
+                            use_lock(_cl["w_ready"], LockAction.AcquireGreaterEqual, value=1)
+                            matvec_fn(k_tile_c, k_total, k_i32, _wb, _xb, _yb)
+                            use_lock(_cl["x_avail"], LockAction.Release, value=1)
+                            use_lock(_cl["w_avail"], LockAction.Release, value=1)
+                        use_lock(_cl["y_full"], LockAction.Release, value=1)
+            _make_mat_core(
+                gg_tiles[col], gg_locks[col], gg_buf_y[col], gg_buf_w[col], gg_buf_x[col]
+            )
+            _make_mat_core(
+                ug_tiles[col], ug_locks[col], ug_buf_y[col], ug_buf_w[col], ug_buf_x[col]
+            )
+
+            def _make_sw_mem(_ct, _cl, _bo, _bup, _bgate):
+                @mem(_ct)
+                def _core_mem(block):
+                    dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
+                    with block[1]:
+                        use_lock(_cl["out_full"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_bo, offset=0, len=post_chunk)
+                        use_lock(_cl["out_done"], LockAction.Release, value=1)
+                        next_bd(block[1])
+                    with block[2]:
+                        EndOp()
+                    with block[3]:
+                        dma_start(DMAChannelDir.S2MM, 0, dest=block[4], chain=block[5])
+                    with block[4]:
+                        use_lock(_cl["gate_avail"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_bgate, offset=0, len=post_chunk)
+                        use_lock(_cl["gate_ready"], LockAction.Release, value=1)
+                        next_bd(block[4])
+                    with block[5]:
+                        dma_start(DMAChannelDir.S2MM, 1, dest=block[6], chain=block[2])
+                    with block[6]:
+                        use_lock(_cl["up_avail"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_bup, offset=0, len=post_chunk)
+                        use_lock(_cl["up_ready"], LockAction.Release, value=1)
+                        next_bd(block[6])
+            _make_sw_mem(
+                sw_tiles[col], sw_locks[col], sw_buf_out[col], sw_buf_up[col], sw_buf_gate[col]
+            )
+
+            def _make_sw_core(_ct, _cl, _bo, _bup, _bgate):
+                import sys as _sys
+
+                @core(_ct)
+                def _core_body():
+                    n_c = arith.constant(post_chunk, T.i32())
+                    for _ in range_(_sys.maxsize):
+                        use_lock(_cl["gate_ready"], LockAction.AcquireGreaterEqual, value=1)
+                        use_lock(_cl["up_ready"], LockAction.AcquireGreaterEqual, value=1)
+                        use_lock(_cl["out_done"], LockAction.AcquireGreaterEqual, value=1)
+                        silu_fn(_bgate, _bup, _bo, n_c)
+                        use_lock(_cl["gate_avail"], LockAction.Release, value=1)
+                        use_lock(_cl["up_avail"], LockAction.Release, value=1)
+                        use_lock(_cl["out_full"], LockAction.Release, value=1)
+            _make_sw_core(
+                sw_tiles[col], sw_locks[col], sw_buf_out[col], sw_buf_up[col], sw_buf_gate[col]
+            )
+
+        for col in range(N_COLS):
+            packetflow(
+                pkt_id=0,
+                source=shim_tiles[col],
+                source_port=WireBundle.DMA,
+                source_channel=0,
+                dests={"dest": mem_tiles[col], "port": WireBundle.DMA, "channel": 0},
+            )
+            packetflow(
+                pkt_id=1,
+                source=shim_tiles[col],
+                source_port=WireBundle.DMA,
+                source_channel=0,
+                dests={"dest": mem_tiles[col], "port": WireBundle.DMA, "channel": 2},
+            )
+        for col in range(N_COLS):
+            flow(shim_tiles[0], WireBundle.DMA, 1, gg_tiles[col], WireBundle.DMA, 0)
+            flow(shim_tiles[1], WireBundle.DMA, 1, ug_tiles[col], WireBundle.DMA, 0)
+        for col in range(N_COLS):
+            flow(mem_tiles[col], WireBundle.DMA, 1, gg_tiles[col], WireBundle.DMA, 1)
+            flow(mem_tiles[col], WireBundle.DMA, 2, ug_tiles[col], WireBundle.DMA, 1)
+        for col in range(N_COLS):
+            flow(gg_tiles[col], WireBundle.DMA, 0, mem_tiles[col], WireBundle.DMA, 1)
+            flow(ug_tiles[col], WireBundle.DMA, 0, mem_tiles[col], WireBundle.DMA, 3)
+        for col in range(N_COLS):
+            flow(mem_tiles[col], WireBundle.DMA, 0, sw_tiles[col], WireBundle.DMA, 0)
+            flow(mem_tiles[col], WireBundle.DMA, 3, sw_tiles[col], WireBundle.DMA, 1)
+        for col in range(N_COLS):
+            flow(sw_tiles[col], WireBundle.DMA, 0, shim_tiles[col], WireBundle.DMA, 0)
+
+        gg_weight_base = gg_chans["weight_base"]
+        ug_weight_base = ug_chans["weight_base"]
+        gg_input_chan = gg_chans["input"]
+        ug_input_chan = ug_chans["input"]
+        out_chan = sw_chans["out"]
+        for col in range(N_COLS):
+            shim_dma_allocation(
+                f"air_channel_{gg_weight_base}_{col}",
+                shim_tiles[col],
+                DMAChannelDir.MM2S,
+                0,
+            )
+        for col in range(N_COLS):
+            shim_dma_allocation(
+                f"air_channel_{ug_weight_base}_{col}",
+                shim_tiles[col],
+                DMAChannelDir.MM2S,
+                0,
+            )
+        shim_dma_allocation(
+            f"air_channel_{gg_input_chan}",
+            shim_tiles[0],
+            DMAChannelDir.MM2S,
+            1,
+        )
+        shim_dma_allocation(
+            f"air_channel_{ug_input_chan}",
+            shim_tiles[1],
+            DMAChannelDir.MM2S,
+            1,
+        )
+        for col in range(N_COLS):
+            shim_dma_allocation(
+                f"air_channel_{out_chan}_{col}",
+                shim_tiles[col],
+                DMAChannelDir.S2MM,
+                0,
+            )
+
+        def _make_memtile_dma(_col, _ml, _gg_w, _ug_w, _gg_y, _ug_y):
+            @memtile_dma(mem_tiles[_col])
+            def _mt(block):
+                dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
+                with block[1]:
+                    use_lock(_ml["gg_y_ready"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_gg_y, offset=0, len=M_TILE)
+                    use_lock(_ml["gg_y_done"], LockAction.Release, value=1)
+                    next_bd(block[1])
+                with block[2]:
+                    EndOp()
+                with block[3]:
+                    dma_start(DMAChannelDir.MM2S, 1, dest=block[4], chain=block[5])
+                with block[4]:
+                    use_lock(_ml["gg_w_ready"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_gg_w, offset=0, len=M_TILE * EMB_DIM)
+                    use_lock(_ml["gg_w_dma_done"], LockAction.Release, value=1)
+                    next_bd(block[4])
+                with block[5]:
+                    dma_start(DMAChannelDir.MM2S, 2, dest=block[6], chain=block[7])
+                with block[6]:
+                    use_lock(_ml["ug_w_ready"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_ug_w, offset=0, len=M_TILE * EMB_DIM)
+                    use_lock(_ml["ug_w_dma_done"], LockAction.Release, value=1)
+                    next_bd(block[6])
+                with block[7]:
+                    dma_start(DMAChannelDir.MM2S, 3, dest=block[8], chain=block[9])
+                with block[8]:
+                    use_lock(_ml["ug_y_ready"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_ug_y, offset=0, len=M_TILE)
+                    use_lock(_ml["ug_y_done"], LockAction.Release, value=1)
+                    next_bd(block[8])
+                with block[9]:
+                    dma_start(DMAChannelDir.S2MM, 0, dest=block[10], chain=block[11])
+                with block[10]:
+                    use_lock(_ml["gg_w_dma_done"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_gg_w, offset=0, len=M_TILE * EMB_DIM)
+                    use_lock(_ml["gg_w_ready"], LockAction.Release, value=1)
+                    next_bd(block[10])
+                with block[11]:
+                    dma_start(DMAChannelDir.S2MM, 1, dest=block[12], chain=block[13])
+                with block[12]:
+                    use_lock(_ml["gg_y_done"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_gg_y, offset=0, len=M_TILE)
+                    use_lock(_ml["gg_y_ready"], LockAction.Release, value=1)
+                    next_bd(block[12])
+                with block[13]:
+                    dma_start(DMAChannelDir.S2MM, 2, dest=block[14], chain=block[15])
+                with block[14]:
+                    use_lock(_ml["ug_w_dma_done"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_ug_w, offset=0, len=M_TILE * EMB_DIM)
+                    use_lock(_ml["ug_w_ready"], LockAction.Release, value=1)
+                    next_bd(block[14])
+                with block[15]:
+                    dma_start(DMAChannelDir.S2MM, 3, dest=block[16], chain=block[2])
+                with block[16]:
+                    use_lock(_ml["ug_y_done"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_ug_y, offset=0, len=M_TILE)
+                    use_lock(_ml["ug_y_ready"], LockAction.Release, value=1)
+                    next_bd(block[16])
+        for col in range(N_COLS):
+            _make_memtile_dma(
+                col,
+                mem_locks[col],
+                mem_buf_gg_w[col],
+                mem_buf_ug_w[col],
+                mem_buf_gg_y[col],
+                mem_buf_ug_y[col],
+            )
+
+        @runtime_sequence(*o_gemv_ffn_host_arg_types(), sym_name=f"{sym}_sequence")
+        def _seq(*args):
+            arg_gg_w = args[gg_weight_arg_idx]
+            arg_ug_w = args[ug_weight_arg_idx]
+            arg_x = args[input_arg_idx]
+            arg_y = args[output_arg_idx]
+            for outer in range(n_outer):
+                gg_weight_tasks = []
+                for col in range(N_COLS):
+                    t = dma_configure_task_for(f"air_channel_{gg_weight_base}_{col}")
+                    with bds(t) as bd:
+                        with bd[0]:
+                            dma_bd(
+                                arg_gg_w,
+                                offset=outer * weight_outer_stride + col * weight_col_stride,
+                                len=w_len,
+                                dimensions=w_dims,
+                                packet=(0, 0),
+                            )
+                            EndOp()
+                    dma_start_task(t)
+                    gg_weight_tasks.append(t)
+
+                ug_weight_tasks = []
+                for col in range(N_COLS):
+                    t = dma_configure_task_for(f"air_channel_{ug_weight_base}_{col}")
+                    with bds(t) as bd:
+                        with bd[0]:
+                            dma_bd(
+                                arg_ug_w,
+                                offset=outer * weight_outer_stride + col * weight_col_stride,
+                                len=w_len,
+                                dimensions=w_dims,
+                                packet=(0, 1),
+                            )
+                            EndOp()
+                    dma_start_task(t)
+                    ug_weight_tasks.append(t)
+
+                gg_x_task = dma_configure_task_for(
+                    f"air_channel_{gg_input_chan}",
+                    repeat_count=x_repeat_count,
+                )
+                with bds(gg_x_task) as bd:
+                    with bd[0]:
+                        dma_bd(
+                            arg_x,
+                            offset=0,
+                            len=EMB_DIM,
+                            dimensions=[(4, 512), (512, 1)],
+                        )
+                        EndOp()
+                dma_start_task(gg_x_task)
+
+                ug_x_task = dma_configure_task_for(
+                    f"air_channel_{ug_input_chan}",
+                    repeat_count=x_repeat_count,
+                )
+                with bds(ug_x_task) as bd:
+                    with bd[0]:
+                        dma_bd(
+                            arg_x,
+                            offset=0,
+                            len=EMB_DIM,
+                            dimensions=[(4, 512), (512, 1)],
+                        )
+                        EndOp()
+                dma_start_task(ug_x_task)
+
+                out_tasks = []
+                for col in range(N_COLS):
+                    t = dma_configure_task_for(
+                        f"air_channel_{out_chan}_{col}",
+                        issue_token=True,
+                    )
+                    with bds(t) as bd:
+                        with bd[0]:
+                            dma_bd(
+                                arg_y,
+                                offset=outer * output_outer_stride + col * output_col_stride,
+                                len=y_len,
+                                dimensions=y_dims,
+                            )
+                            EndOp()
+                    dma_start_task(t)
+                    out_tasks.append(t)
+
+                for t in reversed(out_tasks):
+                    dma_await_task(t)
+                dma_free_task(ug_x_task)
+                dma_free_task(gg_x_task)
+                for t in reversed(ug_weight_tasks):
+                    dma_free_task(t)
+                for t in reversed(gg_weight_tasks):
+                    dma_free_task(t)
+
+
 # ---------------------------------------------------------------------------
 # SwiGLU segment: [8,1] herd, link_with silu_and_mul_bf16.o.
 # Each tile processes SWIGLU_CHUNK (1024) elements: silu_and_mul(in0, in1, out, 1024).
@@ -1429,12 +2776,16 @@ def _emit_sw_silu_mul_seg() -> None:
 # ---------------------------------------------------------------------------
 # Dispatcher device emitter.
 # ---------------------------------------------------------------------------
-def _emit_dispatcher_device() -> None:
+def _emit_dispatcher_device(
+    dispatch_sequence: Sequence[str] = DEFAULT_DISPATCH_SEQUENCE,
+) -> None:
     """Emit the unnamed top-level dispatcher device.
 
-    Fires the 8 segments in pipeline order:
+    By default this fires the 8 segments in pipeline order:
         og -> a1 -> rm -> gg -> ug -> sw -> dg -> a2.
-    All segments share the 15-arg host signature.
+    ``dispatch_sequence`` is exposed for dispatch-overhead microbenchmarks
+    that need reduced or repeated inner ``aiex.run`` sequences without
+    changing the production kernel.
     """
     from aie.dialects._aiex_ops_gen import ConfigureOp, RunOp
 
@@ -1445,10 +2796,7 @@ def _emit_dispatcher_device() -> None:
             sym_name="o_gemv_ffn",
         )
         def _outer(*args):
-            for sym in ("og_matvec_bf16_0", "a1_eltwise_add_seg",
-                        "rm_rms_seg", "gg_matvec_bf16_0",
-                        "ug_matvec_bf16_0", "sw_silu_mul_seg",
-                        "dg_matvec_bf16_0", "a2_eltwise_add_seg"):
+            for sym in dispatch_sequence:
                 cfg = ConfigureOp(symbol=sym)
                 blk = cfg.body.blocks.append()
                 with InsertionPoint(blk):
@@ -1458,15 +2806,23 @@ def _emit_dispatcher_device() -> None:
                     )
 
 
+
 # ---------------------------------------------------------------------------
 # Public entry point.
 # ---------------------------------------------------------------------------
-def build_o_gemv_ffn_module(emb_dim: int = EMB_DIM,
-                            hidden_dim: int = HIDDEN_DIM) -> str:
+def build_o_gemv_ffn_module(
+    emb_dim: int = EMB_DIM,
+    hidden_dim: int = HIDDEN_DIM,
+    dispatch_sequence: Sequence[str] | None = None,
+    pack_mode: str = "none",
+) -> str:
     """Build the o_gemv_ffn ``aie/aiex``-dialect module.
 
     Both dimensions are fixed to the Llama-3.2-1B values (the cached AIR
-    layout is shape-specialized).
+    layout is shape-specialized). ``dispatch_sequence`` is only for
+    measurement variants; leave it unset for production IR.
+    ``pack_mode="d1d4"`` emits the experimental D1/D4 packed devices;
+    ``pack_mode="d1d3d4"`` also packs gate/up/SwiGLU into D3.
     """
     if emb_dim != EMB_DIM or hidden_dim != HIDDEN_DIM:
         raise ValueError(
@@ -1475,34 +2831,82 @@ def build_o_gemv_ffn_module(emb_dim: int = EMB_DIM,
             f"hidden_dim={hidden_dim}."
         )
 
+    if pack_mode not in {"none", "d1d4", "d1d3d4"}:
+        raise ValueError(f"unsupported o_gemv_ffn pack_mode={pack_mode!r}")
+
     with mlir_mod_ctx() as ctx:
-        # AIR emit order is reverse pipeline order:
-        # a2, dg, sw, ug, gg, rm, a1, og, then dispatcher.
-        _emit_eltwise_add_seg(
-            "a2_eltwise_add_seg", in0_arg_idx=13, in1_arg_idx=4, out_arg_idx=14)
-        _emit_matvec_seg_k8192(
-            "dg_matvec_bf16_0", weight_arg_idx=12, input_arg_idx=11,
-            output_arg_idx=13, pingpong_w_l2=True)
+        # AIR emit order is reverse pipeline order.  In d1d4 mode, D4 replaces
+        # {dg,a2} and D1 replaces {og,a1}; the middle {rm,gg,ug,sw} remains
+        # unchanged until the D3 pack lands.
+        if pack_mode in {"d1d4", "d1d3d4"}:
+            _emit_matvec_add_pack_k8192(
+                "d4_dg_a2_pack",
+                "dg_matvec_bf16_0",
+                "a2_eltwise_add_seg",
+                weight_arg_idx=12,
+                input_arg_idx=11,
+                residual_arg_idx=4,
+                output_arg_idx=14,
+            )
+        else:
+            _emit_eltwise_add_seg(
+                "a2_eltwise_add_seg", in0_arg_idx=13, in1_arg_idx=4, out_arg_idx=14)
+            _emit_matvec_seg_k8192(
+                "dg_matvec_bf16_0", weight_arg_idx=12, input_arg_idx=11,
+                output_arg_idx=13, pingpong_w_l2=True)
         # pingpong_w (L1) intentionally off: dg's L1 is already at the
         # 64 KB cap with one W buffer (yb 1 KB + wb 16 KB + xb 16 KB +
         # slack), so doubling W has nowhere to go. We ping-pong at L2
         # instead -- memtile L2 has 512 KB to spare for the second W
         # slot (32 KB).
-        _emit_sw_silu_mul_seg()
-        _emit_matvec_seg_k2048(
-            "ug_matvec_bf16_0", weight_arg_idx=9, input_arg_idx=6,
-            output_arg_idx=10, out_rows=HIDDEN_DIM)
-        _emit_matvec_seg_k2048(
-            "gg_matvec_bf16_0", weight_arg_idx=7, input_arg_idx=6,
-            output_arg_idx=8, out_rows=HIDDEN_DIM)
+        if pack_mode == "d1d3d4":
+            _emit_gg_ug_swiglu_pack()
+        else:
+            _emit_sw_silu_mul_seg()
+            _emit_matvec_seg_k2048(
+                "ug_matvec_bf16_0", weight_arg_idx=9, input_arg_idx=6,
+                output_arg_idx=10, out_rows=HIDDEN_DIM)
+            _emit_matvec_seg_k2048(
+                "gg_matvec_bf16_0", weight_arg_idx=7, input_arg_idx=6,
+                output_arg_idx=8, out_rows=HIDDEN_DIM)
         _emit_rm_rms_seg()
-        _emit_eltwise_add_seg(
-            "a1_eltwise_add_seg", in0_arg_idx=2, in1_arg_idx=3, out_arg_idx=4)
-        _emit_matvec_seg_k2048(
-            "og_matvec_bf16_0", weight_arg_idx=0, input_arg_idx=1,
-            output_arg_idx=2, out_rows=EMB_DIM)
-        # pingpong_w off for K_TILE=8 experiment (see rms_gemv_rope.py).
-        _emit_dispatcher_device()
+        if pack_mode in {"d1d4", "d1d3d4"}:
+            _emit_matvec_add_pack_k2048(
+                "d1_og_a1_pack",
+                "og_matvec_bf16_0",
+                "a1_eltwise_add_seg",
+                weight_arg_idx=0,
+                input_arg_idx=1,
+                residual_arg_idx=3,
+                output_arg_idx=4,
+                out_rows=EMB_DIM,
+            )
+        else:
+            _emit_eltwise_add_seg(
+                "a1_eltwise_add_seg", in0_arg_idx=2, in1_arg_idx=3, out_arg_idx=4)
+            _emit_matvec_seg_k2048(
+                "og_matvec_bf16_0", weight_arg_idx=0, input_arg_idx=1,
+                output_arg_idx=2, out_rows=EMB_DIM)
+        if dispatch_sequence is None:
+            if pack_mode == "d1d3d4":
+                dispatch_sequence = (
+                    "d1_og_a1_pack",
+                    "rm_rms_seg",
+                    "d3_gg_ug_sw_pack",
+                    "d4_dg_a2_pack",
+                )
+            elif pack_mode == "d1d4":
+                dispatch_sequence = (
+                    "d1_og_a1_pack",
+                    "rm_rms_seg",
+                    "gg_matvec_bf16_0",
+                    "ug_matvec_bf16_0",
+                    "sw_silu_mul_seg",
+                    "d4_dg_a2_pack",
+                )
+            else:
+                dispatch_sequence = DEFAULT_DISPATCH_SEQUENCE
+        _emit_dispatcher_device(dispatch_sequence)
         module = ctx.module
         attach_loop_annotation_to_all_scf_for(module)
 
@@ -1516,10 +2920,12 @@ if __name__ == "__main__":  # pragma: no cover
     import argparse
 
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--pack-mode", choices=["none", "d1d4", "d1d3d4"],
+                        default="none", help="Experimental device packing mode")
     parser.add_argument("-o", "--output", help="Output path (default: stdout)",
                         default=None)
     args = parser.parse_args()
-    text = build_o_gemv_ffn_module()
+    text = build_o_gemv_ffn_module(pack_mode=args.pack_mode)
     if args.output:
         with open(args.output, "w") as f:
             f.write(text)
