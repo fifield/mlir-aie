@@ -557,9 +557,12 @@ codebase). So device boundary stays at the broadcast.
 | device  | phases                                   | rows used | intra‑device L2 chain | boundary type |
 | ------- | ---------------------------------------- | --------- | --------------------- | ------------- |
 | `RGR1`  | r_rms (col 0, r2)                        | 2         | —                     | single→broadcast (normed → q/k/v) |
-| `RGR2`  | q_matvec(r2) ‖ k_matvec(r3) ‖ v_matvec(r4) + in‑core rope | 2, 3, 4 | (matvec output → in‑core rope, no memtile) | element‑wise (q/k/v → host) |
+| `RGR2`  | q/k/v matvecs + q/k RoPE in one runtime sequence | validated: matvec r2 reused, RoPE r3; target: q/k/v rows 2/3/4 | validated mode keeps q/k DDR handoff; true in‑core RoPE needs a different matvec/RoPE layout | q/k/v → host |
 
 → **2 device dispatches per attn‑pre layer instead of 6** (3× reduction).
+The dispatch math is unchanged by whether RoPE is folded in‑core or run after
+a same-device DDR handoff; the latter is what the current validation implements
+(§14).
 
 ### 10.8 Token‑level math (revised, realistic)
 
@@ -836,21 +839,25 @@ Honest packing for rms_gemv_rope (revised, §10.7 above): two devices.
 **RGR1 (r_rms alone, single tile col 0 row 2):** writes normed to DDR
 via shim S2MM 0 (same as today). 3 flows.
 
-**RGR2 (q ‖ k ‖ v matvec on rows 2/3/4 + in‑core rope post):**
-* Read normed from DDR via shim col‑0 MM2S 1, packet‑broadcast to all
-  3 rows × 8 cols (today's pattern works as‑is — this is what shim
-  already does well).
-* Each row's matvec writes its M‑slice per col to its own memtile
-  region.
-* Rope post folds into the matvec kernel (no extra memtile hop).
-* Each compute writes the final per‑col q/k/v slice out via shim S2MM.
+**RGR2 target:** q/k/v matvecs plus q/k RoPE in one device. The
+original note assumed RoPE could fold directly into the matvec core, but the
+current matvec partition is column-sliced: each core writes 8 dimensions of a
+64-wide head, while the RoPE kernel pairs `x[i]` with `x[i+32]`. A single RoPE
+pair therefore spans columns `c` and `c+4`. Literal in-core RoPE is not legal
+with the current output layout unless we add a paired-output matvec kernel or
+cross-column exchange.
 
-Intra‑device L2 hand‑offs in RGR2: **none** (rope is in‑core, matvec
-output goes straight to shim). The "L2 chain" benefit is zero here —
-the saving comes purely from collapsing 3 matvec dispatches into 1
-device, which packet routing on the shim makes possible (§10).
+Validated RGR2 (§14): reuse one 8-core matvec herd for Q, K, and V inside one
+runtime sequence, write pre-RoPE Q/K to DDR as today, then run the existing Q/K
+RoPE tiles before returning to the host dispatcher. This keeps the same logical
+6 → 2 device dispatch reduction while preserving the existing DDR handoff for
+Q/K RoPE.
 
-→ 6 → 2 devices, 3× dispatch reduction.
+Intra-device L2 hand-offs in the validated RGR2 mode: **none**. The saving comes
+purely from collapsing five post-RMS phases into one device run.
+
+→ 6 → 2 devices, 3× dispatch reduction validated; true in-core RoPE remains a
+separate kernel/layout experiment.
 
 ### 11.7 Single‑device stretch (revised)
 
@@ -1057,6 +1064,125 @@ Next D3-specific experiments:
   shim MM2S0 for every column.
 * Validate D1/D3/D4 inside the full decode loop before promoting it beyond the
   explicit `PYTHOC_LLAMA_O_GEMV_FFN_PACK_MODE=d1d3d4` experiment flag.
+
+## 14. RGR2 packing validation results (2026-05-28)
+
+Implemented experimental `rms_gemv_rope` pack mode in
+`builders/rms_gemv_rope.py`:
+
+* `pack_mode="rgr2_ddr"`: dispatcher drops from 6 inner runs to 2:
+  `r_rms_seg` followed by `rgr2_qkv_rope_pack`.
+* `PYTHOC_LLAMA_RMS_GEMV_ROPE_PACK_MODE=rgr2_ddr` selects the mode through
+  `kernel_builder.aie_ir_gen.build_rms_gemv_rope_ir`; unset keeps the baseline.
+* RGR2 reuses one 8-core matvec herd for Q, K, and V sequentially, then runs
+  existing Q/K RoPE cores inside the same device. It keeps the existing DDR
+  handoff for pre-RoPE Q/K because the current matvec column split is not
+  compatible with the half-split RoPE pairing (§11.6).
+* RoPE uses physical shim MM2S1/S2MM1 channels on columns 2/3/4 and 5/6/7. The
+  first direct-routing attempt reused matvec shim channels and failed routing
+  with duplicate static connects; the final route compiles with aiecc.
+
+Correctness: packed output is bit-exact versus the cached baseline for
+`arg2`, `arg4`, `arg6`, `arg8`, `arg11`, and `arg12`. Production-output
+comparison (`output_indices=[8,11,12]`) is also bit-exact.
+
+Production-like BO-reuse timing, rotated order, 20 timed samples, matching
+`llama32_1b_decode.py` call semantics (`output_indices=[8,11,12]`,
+`static_indices={3,5,7}`, `intermediate_indices={2,4,6,8,11,12}`):
+
+| variant | inner runs | kernel median ms | total median ms | correctness |
+| ------- | ---------- | ---------------- | --------------- | ----------- |
+| baseline | 6 | 0.930 | 1.055 | reference |
+| RGR2 DDR pack | 2 | 0.648 | 0.768 | exact match |
+
+Median savings: **0.282 ms kernel**, **0.287 ms total** for this kernel call
+(~1.43× kernel speedup, ~1.37× total speedup). This captures the expected
+dispatch-side savings for the `rms_gemv_rope` half of the revised §10.8 plan,
+without solving true in-core RoPE.
+
+Next validation steps:
+
+* Run the full decode profile with both explicit pack flags enabled:
+  `PYTHOC_LLAMA_RMS_GEMV_ROPE_PACK_MODE=rgr2_ddr` and
+  `PYTHOC_LLAMA_O_GEMV_FFN_PACK_MODE=d1d3d4`. **Done — §15.**
+* Run the HF gate after the full profile is clean. **Done — §15.**
+* Treat true in-core RoPE as a separate experiment: either change matvec output
+  ownership so each core owns both halves of each RoPE pair, or add a
+  cross-column exchange before the RoPE operation.
+
+## 15. End-to-end decode + hf-gate validation (2026-05-28)
+
+Ran `make profile N_TOKENS=32` and `make hf-gate` on the full `llama32_1b`
+BF16 decode path with the cached prefill+decode kernels recompiled for each
+pack-mode combination. Prompt: `"What is the capital of France?"`; model:
+`unsloth/Llama-3.2-1B-Instruct`. All three runs hit EOS at token 9
+(`128009`) before reaching the 32-token cap. The cache was wiped for
+`o_gemv_ffn` / `rms_gemv_rope` between variants so the packed IR was
+actually rebuilt; `o_gemv_ffn.npu.air.mlir` and `rms_gemv_rope.npu.air.mlir`
+were inspected to confirm the expected segment counts.
+
+| variant | env vars set | rms_gemv_rope segs | o_gemv_ffn segs | segs/token |
+| ------- | ------------ | ------------------ | --------------- | ---------- |
+| baseline | none | 6 | 8 | 232 |
+| D1/D3/D4 | `PYTHOC_LLAMA_O_GEMV_FFN_PACK_MODE=d1d3d4` | 6 | 4 | 168 |
+| RGR2 + D1/D3/D4 | + `PYTHOC_LLAMA_RMS_GEMV_ROPE_PACK_MODE=rgr2_ddr` | 2 | 4 | 104 |
+
+End-to-end timing (median across 9 generated tokens, full decode loop
+including LM head and CPU attn, single decode invocation):
+
+| variant | ms/token | tok/s | Δ vs baseline | Δ vs prior |
+| ------- | -------- | ----- | ------------- | ---------- |
+| baseline | 94 | 10.68 | — | — |
+| D1/D3/D4 | 90 | 11.07 | −4 ms / +3.7% tok/s | — |
+| RGR2 + D1/D3/D4 | **88** | **11.40** | **−6 ms / +6.7% tok/s** | −2 ms / +3.0% tok/s |
+
+Correctness:
+
+* Token sequence is bit-identical across all three runs:
+  `[271, 791, 6864, 315, 9822, 374, 12366, 13, 128009]` →
+  `"\n\nThe capital of France is Paris."`
+* `make hf-gate` passes under both packed variants (the gate compares
+  generated token IDs against the expected sequence).
+
+Interpretation of the wall-clock numbers:
+
+* The composite saving (6 ms / token) matches the direction predicted by
+  §10.8: the 232 → 104 segment-dispatch reduction translates to a
+  ~6.7% throughput gain at the end-to-end loop level, where decode is also
+  paying for LM head, CPU attention, and Python orchestration that the
+  packing does not touch.
+* Per-dispatch saving implied by the deltas:
+  - o_gemv_ffn alone: 4 ms saved / (16 layers × 4 fewer segs) ≈ 63 µs/seg
+  - rms_gemv_rope alone: 2 ms saved / (16 layers × 4 fewer segs) ≈ 31 µs/seg
+  Both are in the same order as the §12 microbenchmark (~40 µs/seg empty
+  PDI swap, ~115 µs/seg real eltwise), so the gains are dispatch-limited
+  rather than memory-bandwidth limited at this scale.
+* Prefill time (~1.85 s) is unchanged across variants, as expected — the
+  pack flags only retarget decode kernels.
+
+Status of the §10.8 plan:
+
+| target | predicted | measured |
+| ------ | --------- | -------- |
+| `rms_gemv_rope` segs/token | 32 | 32 ✓ |
+| `o_gemv_ffn` segs/token | 64 | 64 ✓ |
+| total segs/token | 104 | 104 ✓ |
+| dispatch reduction | 55% | 55% ✓ |
+| end-to-end decode throughput gain | order of "tens of µs × N segs" per token | +6.7% (~6 ms/tok saved) ✓ |
+
+The §10.8 dispatch-reduction target is met exactly. The end-to-end gain
+is smaller in percentage terms because decode is not purely
+dispatch-bound; this is consistent with the §12 finding that
+~40–115 µs/seg is real but is a single contributor among several.
+
+Next steps once this is promoted out of the experimental flag:
+
+* Wire the pack flags into the cache key so the manifest auto-distinguishes
+  packed vs. unpacked ELFs without manual `rm -f`.
+* Add a regression test that exercises both flags through `make hf-gate`.
+* Investigate the D3 row-trace bottleneck from §13 — the 4 → 8 phase
+  collapse is still not exercised end-to-end, and the remaining savings
+  there are the most likely path to closing on the §11.7 stretch goal.
 
 ---
 
