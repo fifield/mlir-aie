@@ -163,11 +163,16 @@ def build_o_gemv_ffn_ir(emb_dim, hidden_dim, *, verbose=False):
     if _placed_builder_enabled("o_gemv_ffn"):
         _ensure_builders_on_path()
         from builders.o_gemv_ffn import build_o_gemv_ffn_module
+        pack_mode = (
+            os.environ.get("PYTHOC_LLAMA_O_GEMV_FFN_PACK_MODE", "none").strip()
+            or "none"
+        )
         if verbose:
+            suffix = f", pack_mode={pack_mode}" if pack_mode != "none" else ""
             print(f"  [aie_ir_gen] Using placed-IRON builder for o_gemv_ffn "
-                  f"(emb_dim={emb_dim}, hidden_dim={hidden_dim})")
+                  f"(emb_dim={emb_dim}, hidden_dim={hidden_dim}{suffix})")
         return build_o_gemv_ffn_module(
-            emb_dim=emb_dim, hidden_dim=hidden_dim,
+            emb_dim=emb_dim, hidden_dim=hidden_dim, pack_mode=pack_mode,
         )
     del emb_dim, hidden_dim, verbose
     return _load_cached("o_gemv_ffn")
