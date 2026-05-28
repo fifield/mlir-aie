@@ -35,6 +35,23 @@ from kernel_builder.backend_presets import (
 # ---------------------------------------------------------------------------
 
 
+def decode_cache_signatures():
+    """Per-kernel build signatures recorded in the decode manifest.
+
+    Currently only the device-packing mode affects the emitted IR, so the
+    signature is the resolved pack mode for each packable decode kernel. A
+    `make run` after toggling `PYTHOC_LLAMA_*_PACK_MODE` sees the mismatch via
+    `KernelCache.load_manifest(expected_configs=...)` and rebuilds.
+    """
+    from kernel_builder import aie_ir_gen
+
+    modes = aie_ir_gen.decode_pack_modes()
+    return {
+        "rms_gemv_rope": {"pack_mode": modes["rms_gemv_rope"]},
+        "o_gemv_ffn": {"pack_mode": modes["o_gemv_ffn"]},
+    }
+
+
 def compile_decode_kernels(cache, config):
     """Compile the 3 merged decode kernels (mlir-aie -> aiecc -> ELF)."""
     from kernel_builder.external_kernels import compile_all_external_kernels
@@ -49,8 +66,12 @@ def compile_decode_kernels(cache, config):
     n_heads = config.n_heads
     kv_dim = n_kv_heads * head_dim
 
+    sigs = decode_cache_signatures()
+
     print(f"\n{'='*60}")
     print(f"Compiling decode kernels (2-call merged pipeline)...")
+    print(f"  pack modes: rms_gemv_rope={sigs['rms_gemv_rope']['pack_mode']}, "
+          f"o_gemv_ffn={sigs['o_gemv_ffn']['pack_mode']}")
     print(f"{'='*60}\n")
 
     cache.compile_and_cache(
@@ -60,6 +81,7 @@ def compile_decode_kernels(cache, config):
             verbose=cache.verbose,
         ),
         instance_name="rms_gemv_rope",
+        config=sigs["rms_gemv_rope"],
     )
 
     cache.compile_and_cache(
@@ -67,6 +89,7 @@ def compile_decode_kernels(cache, config):
         aie_ir_gen.build_o_gemv_ffn_ir(emb_dim, hidden_dim,
                                        verbose=cache.verbose),
         instance_name="o_gemv_ffn",
+        config=sigs["o_gemv_ffn"],
     )
 
     cache.compile_and_cache(

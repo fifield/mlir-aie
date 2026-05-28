@@ -68,6 +68,60 @@ def _placed_builder_enabled(name: str) -> bool:
     return name in {tok.strip() for tok in val.split(",") if tok.strip()}
 
 
+# ---------------------------------------------------------------------------
+# Decode device-packing pack modes.
+#
+# These default to the proven-good packed variants validated end-to-end in
+# DEVICE_PACKING_ANALYSIS.md §14/§15 (bit-exact tokens, passes hf-gate,
+# +6.7% decode throughput from 232 -> 104 segment dispatches/token):
+#
+#   o_gemv_ffn    -> "d1d3d4"  (8 -> 4 devices)
+#   rms_gemv_rope -> "rgr2_ddr" (6 -> 2 devices)
+#
+# Set the corresponding env var to "none" to revert a kernel to its unpacked
+# baseline (e.g. for A/B regression-testing). The resolved mode is recorded
+# in the decode kernel-cache manifest so a stale ELF built under a different
+# mode is auto-rebuilt rather than silently reused (see cache.py).
+# ---------------------------------------------------------------------------
+_O_GEMV_FFN_PACK_ENV = "PYTHOC_LLAMA_O_GEMV_FFN_PACK_MODE"
+_RMS_GEMV_ROPE_PACK_ENV = "PYTHOC_LLAMA_RMS_GEMV_ROPE_PACK_MODE"
+_O_GEMV_FFN_PACK_DEFAULT = "d1d3d4"
+_RMS_GEMV_ROPE_PACK_DEFAULT = "rgr2_ddr"
+
+# AWQ O+FFN decode packing: validated on hardware (passes `make hf-gate
+# QUANT=awq`, +4.6% over the unpacked baseline), so it defaults to the full
+# d1d3d4 pack. Set the env var to "none" to revert.
+_O_GEMV_FFN_AWQ_PACK_ENV = "PYTHOC_LLAMA_O_GEMV_FFN_AWQ_PACK_MODE"
+_O_GEMV_FFN_AWQ_PACK_DEFAULT = "d1d3d4"
+
+# AWQ RMS+GEMV+RoPE decode packing: validated on hardware (passes `make
+# hf-gate QUANT=awq`; combined with the O+FFN pack, AWQ decode goes
+# 9.90 -> 10.75 tok/s, +8.6%), so it defaults to the 6->2 rgr2_ddr pack.
+# Set the env var to "none" to revert.
+_RMS_GEMV_ROPE_AWQ_PACK_ENV = "PYTHOC_LLAMA_RMS_GEMV_ROPE_AWQ_PACK_MODE"
+_RMS_GEMV_ROPE_AWQ_PACK_DEFAULT = "rgr2_ddr"
+
+
+def _resolve_pack_mode(env_var: str, default: str) -> str:
+    return (os.environ.get(env_var, default).strip() or default)
+
+
+def decode_pack_modes() -> dict:
+    """Resolve the decode device-packing modes from the environment.
+
+    Returns a ``{kernel_name: pack_mode}`` dict for the packable BF16 decode
+    kernels, applying the packed-by-default values above. Used both to build
+    the IR and to compute the manifest cache signature so packed/unpacked
+    ELFs are auto-distinguished.
+    """
+    return {
+        "o_gemv_ffn": _resolve_pack_mode(
+            _O_GEMV_FFN_PACK_ENV, _O_GEMV_FFN_PACK_DEFAULT),
+        "rms_gemv_rope": _resolve_pack_mode(
+            _RMS_GEMV_ROPE_PACK_ENV, _RMS_GEMV_ROPE_PACK_DEFAULT),
+    }
+
+
 def _ensure_builders_on_path() -> None:
     project_root = _REFERENCE_DIR.parent
     p = str(project_root)
@@ -148,10 +202,7 @@ def build_rms_gemv_rope_ir(emb_dim, kv_dim, n_heads, n_kv_heads, head_dim,
     if _placed_builder_enabled("rms_gemv_rope"):
         _ensure_builders_on_path()
         from builders.rms_gemv_rope import build_rms_gemv_rope_module
-        pack_mode = (
-            os.environ.get("PYTHOC_LLAMA_RMS_GEMV_ROPE_PACK_MODE", "none").strip()
-            or "none"
-        )
+        pack_mode = decode_pack_modes()["rms_gemv_rope"]
         if verbose:
             suffix = f", pack_mode={pack_mode}" if pack_mode != "none" else ""
             print(f"  [aie_ir_gen] Using placed-IRON builder for rms_gemv_rope "
@@ -169,10 +220,7 @@ def build_o_gemv_ffn_ir(emb_dim, hidden_dim, *, verbose=False):
     if _placed_builder_enabled("o_gemv_ffn"):
         _ensure_builders_on_path()
         from builders.o_gemv_ffn import build_o_gemv_ffn_module
-        pack_mode = (
-            os.environ.get("PYTHOC_LLAMA_O_GEMV_FFN_PACK_MODE", "none").strip()
-            or "none"
-        )
+        pack_mode = decode_pack_modes()["o_gemv_ffn"]
         if verbose:
             suffix = f", pack_mode={pack_mode}" if pack_mode != "none" else ""
             print(f"  [aie_ir_gen] Using placed-IRON builder for o_gemv_ffn "
@@ -207,13 +255,17 @@ def build_rms_gemv_rope_awq_ir(emb_dim, kv_dim, n_heads, n_kv_heads, head_dim,
     if _placed_builder_enabled("rms_gemv_rope_awq"):
         _ensure_builders_on_path()
         from builders.rms_gemv_rope_awq import build_rms_gemv_rope_awq_module
+        pack_mode = _resolve_pack_mode(
+            _RMS_GEMV_ROPE_AWQ_PACK_ENV, _RMS_GEMV_ROPE_AWQ_PACK_DEFAULT)
         if verbose:
+            suffix = f", pack_mode={pack_mode}" if pack_mode != "none" else ""
             print(f"  [aie_ir_gen] Using placed-IRON builder for rms_gemv_rope_awq "
-                  f"(emb_dim={emb_dim}, kv_dim={kv_dim}, group_size={group_size})")
+                  f"(emb_dim={emb_dim}, kv_dim={kv_dim}, "
+                  f"group_size={group_size}{suffix})")
         return build_rms_gemv_rope_awq_module(
             emb_dim=emb_dim, kv_dim=kv_dim,
             n_heads=n_heads, n_kv_heads=n_kv_heads, head_dim=head_dim,
-            group_size=group_size,
+            group_size=group_size, pack_mode=pack_mode,
         )
     del emb_dim, kv_dim, n_heads, n_kv_heads, head_dim, group_size, verbose
     return _load_cached("rms_gemv_rope_awq")
@@ -247,13 +299,16 @@ def build_o_gemv_ffn_awq_ir(emb_dim, hidden_dim, *, group_size=128, verbose=Fals
     if _placed_builder_enabled("o_gemv_ffn_awq"):
         _ensure_builders_on_path()
         from builders.o_gemv_ffn_awq import build_o_gemv_ffn_awq_module
+        pack_mode = _resolve_pack_mode(
+            _O_GEMV_FFN_AWQ_PACK_ENV, _O_GEMV_FFN_AWQ_PACK_DEFAULT)
         if verbose:
+            suffix = f", pack_mode={pack_mode}" if pack_mode != "none" else ""
             print(f"  [aie_ir_gen] Using placed-IRON builder for o_gemv_ffn_awq "
                   f"(emb_dim={emb_dim}, hidden_dim={hidden_dim}, "
-                  f"group_size={group_size})")
+                  f"group_size={group_size}{suffix})")
         return build_o_gemv_ffn_awq_module(
             emb_dim=emb_dim, hidden_dim=hidden_dim,
-            group_size=group_size, verbose=verbose,
+            group_size=group_size, pack_mode=pack_mode, verbose=verbose,
         )
     del emb_dim, hidden_dim, group_size, verbose
     return _load_cached("o_gemv_ffn_awq")

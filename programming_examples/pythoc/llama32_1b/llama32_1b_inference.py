@@ -895,7 +895,28 @@ def build_session(args) -> Session:
         missing_caches = []
         if not prefill_cache.load_manifest():
             missing_caches.append(f"prefill ({prefill_cache.cache_dir})")
-        if not decode_cache.load_manifest():
+        # The BF16 decode kernels (rms_gemv_rope, o_gemv_ffn) carry a pack-mode
+        # signature in the manifest. If the cache exists but was built under a
+        # different pack mode (env toggled), rebuild it transparently instead
+        # of silently running the stale ELF.
+        #
+        # AWQ decode uses its own *_awq kernels (compiled lazily in
+        # _preload_decode_weights) and never runs these BF16 kernels, so the
+        # pack-mode staleness check is skipped there -- forcing a BF16 rebuild
+        # mid-AWQ-run is both wasteful and interferes with the subsequent
+        # AWQ-kernel compile.
+        if args.quant == "awq":
+            decode_ok = decode_cache.load_manifest()
+        else:
+            from llama32_1b_decode import decode_cache_signatures
+            decode_sigs = decode_cache_signatures()
+            decode_ok = decode_cache.load_manifest(expected_configs=decode_sigs)
+            if not decode_ok and decode_cache.manifest_exists():
+                print("\nDecode kernel cache is stale (pack mode changed); "
+                      "recompiling decode kernels...")
+                compile_decode_kernels(decode_cache, config)
+                decode_ok = True
+        if not decode_ok:
             missing_caches.append(f"decode ({decode_cache.cache_dir})")
         if missing_caches:
             missing = ", ".join(missing_caches)

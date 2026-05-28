@@ -181,23 +181,37 @@ The two large per-token decode kernels pack multiple phases into fewer
 validated modes (see `DEVICE_PACKING_ANALYSIS.md` §14/§15 — bit-exact
 tokens, passes `hf-gate`):
 
-| Kernel | Default pack mode | Effect |
-|---|---|---|
-| `o_gemv_ffn` | `d1d3d4` | 8 → 4 devices/layer |
-| `rms_gemv_rope` | `rgr2_ddr` | 6 → 2 devices/layer |
+| Kernel | Env var | Default | Effect |
+|---|---|---|---|
+| `o_gemv_ffn` (BF16) | `PYTHOC_LLAMA_O_GEMV_FFN_PACK_MODE` | `d1d3d4` | 8 → 4 devices/layer |
+| `rms_gemv_rope` (BF16) | `PYTHOC_LLAMA_RMS_GEMV_ROPE_PACK_MODE` | `rgr2_ddr` | 6 → 2 devices/layer |
+| `o_gemv_ffn_awq` (AWQ) | `PYTHOC_LLAMA_O_GEMV_FFN_AWQ_PACK_MODE` | `d1d3d4` | 8 → 4 devices/layer |
+| `rms_gemv_rope_awq` (AWQ) | `PYTHOC_LLAMA_RMS_GEMV_ROPE_AWQ_PACK_MODE` | `rgr2_ddr` | 6 → 2 devices/layer |
+
+The AWQ packs mirror the BF16 ones with packed-uint4 weights; the AWQ
+A/B (`DEVICE_PACKING_ANALYSIS.md` §16) measured **9.90 → 10.75 tok/s
+(+8.6%)** on real HF weights, bit-correct through `make hf-gate
+QUANT=awq`.
 
 Override (or revert to the unpacked baseline) per kernel:
 
 ```bash
-# Revert both decode kernels to their unpacked single-device baseline:
+# Revert both BF16 decode kernels to their unpacked single-device baseline:
 PYTHOC_LLAMA_O_GEMV_FFN_PACK_MODE=none \
 PYTHOC_LLAMA_RMS_GEMV_ROPE_PACK_MODE=none make profile
+
+# Same for the AWQ decode kernels:
+PYTHOC_LLAMA_O_GEMV_FFN_AWQ_PACK_MODE=none \
+PYTHOC_LLAMA_RMS_GEMV_ROPE_AWQ_PACK_MODE=none make profile-awq AWQ_WEIGHTS=/path
 ```
 
-The resolved pack mode is recorded in the decode kernel-cache manifest, so
-toggling these flags auto-rebuilds the affected ELFs on the next `make
-run`/`make profile`/`make hf-gate` — no manual `rm -f` needed. Resolution
-lives in `kernel_builder/aie_ir_gen.py::decode_pack_modes`.
+For the BF16 kernels the resolved pack mode is recorded in the decode
+kernel-cache manifest, so toggling those flags auto-rebuilds the affected
+ELFs on the next `make run`/`make profile`/`make hf-gate` — no manual
+`rm -f` needed. The AWQ decode kernels are compiled lazily at runtime
+(`_preload_decode_weights`), so toggling the AWQ flags rebuilds them on the
+next run directly. Resolution lives in
+`kernel_builder/aie_ir_gen.py` (`decode_pack_modes` / `_resolve_pack_mode`).
 
 ### Hand-editing the cached IR
 
