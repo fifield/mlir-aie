@@ -1191,3 +1191,85 @@ Next steps once this is promoted out of the experimental flag:
 `mlir-aie/lib/Dialect/AIE/IR/AIETargetModel.cpp` (npu2 channel
 budgets), and `llama32_1b_decode.py` / `llama32_1b_inference.py`
 (token‑loop dispatch counts).*
+
+## 16. AWQ decode packing — port of §13/§14 to the uint4 path (2026-05-28)
+
+The BF16 packing of §13 (`o_gemv_ffn`) and §14 (`rms_gemv_rope`) was
+ported to the packed-AWQ uint4 decode kernels. The packing topology —
+which phases merge, the packet routing, the memtile L2 chains, the
+runtime-sequence structure — is identical to BF16; the **only**
+differences are weight-side, because AWQ streams packed-uint4 rows
+instead of bf16:
+
+| axis | BF16 | AWQ |
+| ---- | ---- | --- |
+| W L1/L2 memref | `bf16[K_TILE, K]` | `ui8[K_TILE, row_bytes]` |
+| `row_bytes` | n/a (K elts × 2B) | `K/2 + 4*(K/group)` = 1088 (K=2048), 4352 (K=8192) |
+| W DMA dims | `[(16,131072),(32,512),(512,1)]`, len 262144 | `[(16,69632),(16,544),(544,1)]`, len 139264 |
+| W strides | `* K` (elements) | `* row_bytes` (bytes) |
+| kernel symbols | `matvec_vectorized_bf16_bf16` / `dg_matvec_…` + `*_linalg_fill_bf16` | `awq_matvec_vectorized_u4_bf16` / `dg_awq_…` + `awq_linalg_fill_bf16` / `dg_awq_linalg_fill_bf16` |
+| link object | `mv_pythoc.o` / `mv_k8192_pythoc.o` | `awq_mv_pythoc.o` / `awq_mv_k8192_pythoc.o` |
+
+The X (bf16), Y (bf16), locks, flows, packet IDs, SwiGLU/add/RMS/RoPE
+post-ops, output strides, and dispatcher are byte-for-byte the same as
+the BF16 emitters.
+
+### 16.1 `o_gemv_ffn_awq` — 8 → 4 devices
+
+New emitters in `builders/o_gemv_ffn_awq.py` (counterparts of §13):
+
+| pack | emitter | devices |
+| ---- | ------- | ------- |
+| D1 (og+a1) | `_emit_awq_matvec_add_pack_k2048` | — |
+| D3 (gg‖ug→sw) | `_emit_awq_gg_ug_swiglu_pack` | — |
+| D4 (dg+a2) | `_emit_awq_matvec_add_pack_k8192` | — |
+| `pack_mode` | `none`/`d1`/`d1d4`/`d1d3d4` | 9/8/7/**5** (incl. dispatcher) |
+
+The D3 normed2 broadcast is split across two shim columns (gg-x via
+shim0 MM2S1, ug-x via shim1 MM2S1) — the §13 hang fix carries over.
+
+### 16.2 `rms_gemv_rope_awq` — 6 → 2 devices
+
+New emitter `_emit_awq_qkv_rope_pack` in `builders/rms_gemv_rope_awq.py`
+(counterpart of §14's `_emit_qkv_rope_pack`): one 8-core AWQ matvec herd
+reused for Q/K/V sequentially in one runtime sequence, then the existing
+Q/K RoPE tiles, keeping the DDR hand-off for pre-RoPE Q/K (the §14
+`rgr2_ddr` shape). `pack_mode` ∈ `none`/`rgr2_ddr` → 7/**3** devices.
+
+### 16.3 Validation + results
+
+Each increment passed `make hf-gate QUANT=awq` (real HF weights,
+`"…Paris."`): d1, d1d4, d1d3d4, rgr2_ddr+d1d3d4, and pure defaults — the
+"structural-match-but-runtime-garbage" risk (see project memory) did not
+materialize on any AWQ pack.
+
+On-machine A/B (`make profile-awq`, 100-token, this prompt):
+
+| AWQ config | tok/s | ms/token |
+| ---------- | ----- | -------- |
+| baseline (none/none) | 9.90 | 101 |
+| + O+FFN pack (d1d3d4) | 10.36 | 97 |
+| **+ RGR2 (both packs)** | **10.75** | **93** |
+
+→ **+8.6% / −8 ms/token**, correct. AWQ decode now matches BF16's
+unpacked throughput (10.75).
+
+### 16.4 Defaults
+
+Both AWQ packs are **default-on** (validated), resolved in
+`kernel_builder/aie_ir_gen.py`:
+
+| env var | default |
+| ------- | ------- |
+| `PYTHOC_LLAMA_O_GEMV_FFN_AWQ_PACK_MODE` | `d1d3d4` |
+| `PYTHOC_LLAMA_RMS_GEMV_ROPE_AWQ_PACK_MODE` | `rgr2_ddr` |
+
+Set either to `none` to revert that kernel to the unpacked baseline.
+The AWQ decode kernels are compiled lazily in
+`llama32_1b_inference.py::_preload_decode_weights`, so toggling the env
+var rebuilds the affected ELF on the next run.
+
+*Source: `builders/o_gemv_ffn_awq.py`, `builders/rms_gemv_rope_awq.py`
+(AWQ pack emitters), `builders/o_gemv_ffn.py` / `builders/rms_gemv_rope.py`
+(BF16 templates), `kernels/awq_mv.py` / `kernels/awq_mv_k8192.py`
+(weight ABI).*

@@ -97,20 +97,15 @@ def _parse_decode_token_ids(stdout: str) -> list[int]:
     return ids
 
 
-@pytest.mark.skipif(
-    not _has_tokenizer(),
-    reason=(
-        "HuggingFace cache does not contain {model}; this gate requires "
-        "real weights. Populate the cache via `huggingface-cli download "
-        "{model}` (gated; needs HF auth) and re-run. Synthetic-weight "
-        "phase-snapshot tests cover the rest of the pipeline."
-    ).format(model=HF_MODEL),
-)
-def test_hf_answer_gate_paris():
-    """Gold-standard answer-level correctness gate.
+def _run_gate_and_detokenize(extra_env=None):
+    """Run the NPU inference under the HF gate prompt and return the
+    detokenized first-N decode tokens. Shared by the default-mode gate and
+    the unpacked-baseline regression test.
 
-    With real HF weights, ask "What is the capital of France?" and verify the
-    NPU produces a string containing "Paris" within the first 10 decode tokens.
+    ``extra_env`` overlays environment variables (e.g. decode pack-mode
+    flags) for this run. Because the decode manifest records its pack-mode
+    signature, toggling a `PYTHOC_LLAMA_*_PACK_MODE` flag here makes the
+    `--run-only` invocation transparently rebuild the stale decode ELFs.
     """
     from transformers import AutoTokenizer
 
@@ -146,6 +141,8 @@ def test_hf_answer_gate_paris():
     pip_peano = "/home/jfifield/npu-dev-air/venv/lib/python3.12/site-packages/llvm-aie"
     if Path(pip_peano, "bin", "clang++").exists():
         env.setdefault("PEANO_INSTALL_DIR", pip_peano)
+    if extra_env:
+        env.update(extra_env)
 
     proc = subprocess.run(
         cmd, cwd=BUILD_DIR, capture_output=True, text=True,
@@ -168,13 +165,64 @@ def test_hf_answer_gate_paris():
     tok = AutoTokenizer.from_pretrained(tokenizer_src)
     head = token_ids[:EXPECTED_FIRST_N_DECODE]
     text = tok.decode(head, skip_special_tokens=True)
-    print(f"\n[hf-gate] first {len(head)} decode tokens -> {head}")
-    print(f"[hf-gate] detokenized: {text!r}")
+    return head, text
 
+
+def _assert_paris(head, text, label):
+    print(f"\n[hf-gate:{label}] first {len(head)} decode tokens -> {head}")
+    print(f"[hf-gate:{label}] detokenized: {text!r}")
     assert EXPECTED_SUBSTRING in text.lower(), (
-        f"expected first {EXPECTED_FIRST_N_DECODE} decode tokens to "
+        f"[{label}] expected first {EXPECTED_FIRST_N_DECODE} decode tokens to "
         f"detokenize to a string containing {EXPECTED_SUBSTRING!r}; got "
         f"{text!r} (ids={head}). This is the gold-standard correctness gate "
         f"-- if this fails, a recent kernel swap likely broke real-weight "
         f"behavior even though synthetic-weight snapshots still pass."
     )
+
+
+@pytest.mark.skipif(
+    not _has_tokenizer(),
+    reason=(
+        "HuggingFace cache does not contain {model}; this gate requires "
+        "real weights. Populate the cache via `huggingface-cli download "
+        "{model}` (gated; needs HF auth) and re-run. Synthetic-weight "
+        "phase-snapshot tests cover the rest of the pipeline."
+    ).format(model=HF_MODEL),
+)
+def test_hf_answer_gate_paris():
+    """Gold-standard answer-level correctness gate (default decode pack modes).
+
+    With real HF weights, ask "What is the capital of France?" and verify the
+    NPU produces a string containing "Paris" within the first 10 decode tokens.
+    Default pack modes are the packed variants (o_gemv_ffn=d1d3d4,
+    rms_gemv_rope=rgr2_ddr), so this gate exercises the packed path.
+    """
+    head, text = _run_gate_and_detokenize()
+    _assert_paris(head, text, "default")
+
+
+@pytest.mark.skipif(
+    not _has_tokenizer(),
+    reason=(
+        "HuggingFace cache does not contain {model}; this gate requires "
+        "real weights."
+    ).format(model=HF_MODEL),
+)
+def test_hf_answer_gate_unpacked_baseline():
+    """Regression guard for the unpacked decode baseline.
+
+    Forces both decode kernels back to their pre-packing single-device layout
+    (`PYTHOC_LLAMA_*_PACK_MODE=none`) and asserts the answer is still correct.
+    Together with `test_hf_answer_gate_paris` (packed default), this exercises
+    both pack settings -- and the manifest pack-mode signature that makes the
+    `--run-only` invocation rebuild the stale (packed) decode ELFs unpacked.
+
+    Skipped under AWQ: device packing is BF16-only.
+    """
+    if HF_GATE_QUANT == "awq":
+        pytest.skip("device packing is BF16-only; no unpacked AWQ baseline")
+    head, text = _run_gate_and_detokenize(extra_env={
+        "PYTHOC_LLAMA_O_GEMV_FFN_PACK_MODE": "none",
+        "PYTHOC_LLAMA_RMS_GEMV_ROPE_PACK_MODE": "none",
+    })
+    _assert_paris(head, text, "unpacked")

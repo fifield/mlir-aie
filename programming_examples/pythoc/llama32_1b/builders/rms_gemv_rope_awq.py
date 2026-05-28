@@ -49,7 +49,7 @@ References:
 
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, Sequence
 
 import numpy as np
 
@@ -127,6 +127,17 @@ ROW_BYTES = _combined_row_bytes(EMB_DIM)  # 1088
 KO_AWQ_MV = "awq_mv_pythoc.o"
 KO_ROPE = "rope_pythoc.o"
 KO_RMS = "rms_norm_2048_bf16.o"
+
+DEFAULT_DISPATCH_SEQUENCE = (
+    "r_rms_awq_seg",
+    "q_matvec_awq_bf16_0",
+    "k_matvec_awq_bf16_0",
+    "v_matvec_awq_bf16_0",
+    "rq_rope_awq_seg",
+    "rk_rope_awq_seg",
+)
+
+RGR2_PACK_SYM = "rgr2_qkv_rope_pack"
 
 
 # ---------------------------------------------------------------------------
@@ -817,19 +828,468 @@ def _emit_awq_matvec_seg(sym: str, weight_arg_idx: int, output_arg_idx: int,
 
 
 # ---------------------------------------------------------------------------
+# Experimental RGR2 6->2 packing device (AWQ).
+# ---------------------------------------------------------------------------
+def _emit_awq_qkv_rope_pack(sym: str = RGR2_PACK_SYM) -> None:
+    """Emit a single RGR2 device for AWQ Q/K/V matvecs plus Q/K RoPE.
+
+    AWQ counterpart of ``builders/rms_gemv_rope.py::_emit_qkv_rope_pack``.
+    Structurally identical; the only differences are weight-side: ui8 packed
+    L1/L2 buffers, AWQ kernel symbols/link object, AWQ row-byte DMA strides.
+
+    The device reuses one 8-core matvec herd for Q, K, and V sequentially in a
+    single runtime_sequence, then runs the existing one-core RoPE kernels for Q
+    and K before returning to the host dispatcher.  The outer dispatcher thus
+    has only two device runs: r_rms_awq_seg and this packed RGR2 sequence.
+    """
+    mat_chans = _CHANNELS["q_matvec_awq_bf16_0"]
+    rq_chans = _CHANNELS["rq_rope_awq_seg"]
+    rk_chans = _CHANNELS["rk_rope_awq_seg"]
+    row_bytes = ROW_BYTES  # 1088
+
+    @device(AIEDevice.npu2, sym_name=sym)
+    def _dev():
+        shim_tiles = [tile(c, 0) for c in range(N_COLS)]
+        mem_tiles = [tile(c, 1) for c in range(N_COLS)]
+        mat_tiles = [tile(c, 2) for c in range(N_COLS)]
+        rq_tile = tile(2, 3)
+        rk_tile = tile(5, 3)
+
+        # Matvec locks and buffers: one reusable Q/K/V herd.
+        mem_locks = {}
+        for col in reversed(range(N_COLS)):
+            mt = mem_tiles[col]
+            mem_locks[col] = {
+                "w_dma_done": lock(mt, lock_id=3, init=1),
+                "w_ready": lock(mt, lock_id=2, init=0),
+                "y_done": lock(mt, lock_id=1, init=1),
+                "y_ready": lock(mt, lock_id=0, init=0),
+            }
+
+        core_locks = {}
+        for col in range(N_COLS):
+            ct = mat_tiles[col]
+            core_locks[col] = {
+                "w_avail": lock(ct, lock_id=5, init=1),
+                "w_ready": lock(ct, lock_id=4, init=0),
+                "x_avail": lock(ct, lock_id=3, init=1),
+                "x_ready": lock(ct, lock_id=2, init=0),
+                "y_done": lock(ct, lock_id=1, init=1),
+                "y_full": lock(ct, lock_id=0, init=0),
+            }
+
+        # RoPE locks.  Each tile uses the standalone RoPE lock numbering.
+        def _rope_locks(_ct):
+            return {
+                "freqs_avail": lock(_ct, lock_id=5, init=1),
+                "freqs_ready": lock(_ct, lock_id=4, init=0),
+                "x_avail": lock(_ct, lock_id=3, init=1),
+                "x_ready": lock(_ct, lock_id=2, init=0),
+                "y_done": lock(_ct, lock_id=1, init=1),
+                "y_full": lock(_ct, lock_id=0, init=0),
+            }
+
+        rq_locks = _rope_locks(rq_tile)
+        rk_locks = _rope_locks(rk_tile)
+
+        # ui8 weight buffer types (the AWQ change vs BF16 sibling).
+        from aie.ir import MemRefType, IntegerAttr, IntegerType
+        from aie.extras import types as T
+
+        def _ui8_memref(*shape, memory_space=None):
+            ms = None
+            if memory_space is not None:
+                ms = IntegerAttr.get(
+                    IntegerType.get_signless(32), memory_space)
+            return MemRefType.get(list(shape), T.ui8(), None, ms)
+
+        _W_L1_TY = _ui8_memref(K_TILE, row_bytes, memory_space=2)
+        _X_L1_TY = bf16_memref(EMB_DIM, memory_space=2)
+        _Y_L1_TY = bf16_memref(M_TILE, memory_space=2)
+        _W_L2_TY = _ui8_memref(1, M_TILE, row_bytes, memory_space=1)
+        _Y_L2_TY = bf16_memref(1, M_TILE, memory_space=1)
+        _BF16_64_L1 = bf16_memref(HEAD_DIM, memory_space=2)
+
+        mem_buf_w = {}
+        mem_buf_y = {}
+        for col in reversed(range(N_COLS)):
+            mem_buf_w[col] = buffer(mem_tiles[col], datatype=_W_L2_TY)
+        for col in reversed(range(N_COLS)):
+            mem_buf_y[col] = buffer(mem_tiles[col], datatype=_Y_L2_TY)
+
+        core_buf_y = {}
+        core_buf_w = {}
+        core_buf_x = {}
+        for col in reversed(range(N_COLS)):
+            core_buf_y[col] = buffer(mat_tiles[col], datatype=_Y_L1_TY)
+            core_buf_w[col] = buffer(mat_tiles[col], datatype=_W_L1_TY)
+            core_buf_x[col] = buffer(mat_tiles[col], datatype=_X_L1_TY)
+
+        def _rope_buffers(_ct):
+            return {
+                "y": buffer(_ct, datatype=_BF16_64_L1),
+                "f": buffer(_ct, datatype=_BF16_64_L1),
+                "x": buffer(_ct, datatype=_BF16_64_L1),
+            }
+
+        rq_bufs = _rope_buffers(rq_tile)
+        rk_bufs = _rope_buffers(rk_tile)
+
+        _emit_external_buffers(
+            ((EMB_DIM, row_bytes), "ui8"),
+            ((EMB_DIM,), "bf16"),
+            ((EMB_DIM,), "bf16"),
+        )
+
+        from ml_dtypes import bfloat16 as _bf16
+
+        fill_fn = external_func(
+            "awq_linalg_fill_bf16",
+            inputs=[_bf16, _Y_L1_TY],
+            link_with=KO_AWQ_MV,
+        )
+        fill_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
+        matvec_fn = external_func(
+            "awq_matvec_vectorized_u4_bf16",
+            inputs=[np.int32, np.int32, np.int32, _W_L1_TY, _X_L1_TY, _Y_L1_TY],
+            link_with=KO_AWQ_MV,
+        )
+        matvec_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
+        rope_fn = external_func(
+            "rope",
+            inputs=[_BF16_64_L1, _BF16_64_L1, _BF16_64_L1, np.int32],
+            link_with=KO_ROPE,
+        )
+        rope_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
+
+        for col in reversed(range(N_COLS)):
+            ct_op = mat_tiles[col]
+            cl = core_locks[col]
+            y_buf = core_buf_y[col]
+            w_buf = core_buf_w[col]
+            x_buf = core_buf_x[col]
+
+            def _make_core_mem(_ct, _cl, _yb, _wb, _xb):
+                @mem(_ct)
+                def _core_mem(block):
+                    dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
+                    with block[1]:
+                        use_lock(_cl["y_full"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_yb, offset=0, len=M_TILE)
+                        use_lock(_cl["y_done"], LockAction.Release, value=1)
+                        next_bd(block[1])
+                    with block[2]:
+                        EndOp()
+                    with block[3]:
+                        dma_start(DMAChannelDir.S2MM, 0, dest=block[4], chain=block[5])
+                    with block[4]:
+                        use_lock(_cl["x_avail"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_xb, offset=0, len=EMB_DIM)
+                        use_lock(_cl["x_ready"], LockAction.Release, value=1)
+                        next_bd(block[4])
+                    with block[5]:
+                        dma_start(DMAChannelDir.S2MM, 1, dest=block[6], chain=block[2])
+                    with block[6]:
+                        use_lock(_cl["w_avail"], LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(_wb, offset=0, len=K_TILE * row_bytes)
+                        use_lock(_cl["w_ready"], LockAction.Release, value=1)
+                        next_bd(block[6])
+            _make_core_mem(ct_op, cl, y_buf, w_buf, x_buf)
+
+            def _make_core_body(_ct, _cl, _yb, _wb, _xb):
+                import sys as _sys
+                from aie.extras.dialects.arith import index_cast
+
+                @core(_ct)
+                def _core_body():
+                    k_total = arith.constant(EMB_DIM, T.i32())
+                    k_tile_c = arith.constant(K_TILE, T.i32())
+                    zero_bf16 = arith.constant(0.0, T.bf16())
+                    for _ in range_(_sys.maxsize):
+                        use_lock(_cl["y_done"], LockAction.AcquireGreaterEqual, value=1)
+                        fill_fn(zero_bf16, _yb)
+                        for k_idx in range_(0, M_TILE, K_TILE):
+                            k_i32 = index_cast(k_idx, to=T.i32())
+                            use_lock(_cl["x_ready"], LockAction.AcquireGreaterEqual, value=1)
+                            use_lock(_cl["w_ready"], LockAction.AcquireGreaterEqual, value=1)
+                            matvec_fn(k_tile_c, k_total, k_i32, _wb, _xb, _yb)
+                            use_lock(_cl["x_avail"], LockAction.Release, value=1)
+                            use_lock(_cl["w_avail"], LockAction.Release, value=1)
+                        use_lock(_cl["y_full"], LockAction.Release, value=1)
+            _make_core_body(ct_op, cl, y_buf, w_buf, x_buf)
+
+        def _make_rope_tile(_ct, _locks, _bufs, _n_iters):
+            @mem(_ct)
+            def _rope_mem(block):
+                dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
+                with block[1]:
+                    use_lock(_locks["y_full"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_bufs["y"], offset=0, len=HEAD_DIM)
+                    use_lock(_locks["y_done"], LockAction.Release, value=1)
+                    next_bd(block[1])
+                with block[2]:
+                    EndOp()
+                with block[3]:
+                    dma_start(DMAChannelDir.S2MM, 0, dest=block[4], chain=block[5])
+                with block[4]:
+                    use_lock(_locks["x_avail"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_bufs["x"], offset=0, len=HEAD_DIM)
+                    use_lock(_locks["x_ready"], LockAction.Release, value=1)
+                    next_bd(block[4])
+                with block[5]:
+                    dma_start(DMAChannelDir.S2MM, 1, dest=block[6], chain=block[2])
+                with block[6]:
+                    use_lock(_locks["freqs_avail"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_bufs["f"], offset=0, len=HEAD_DIM)
+                    use_lock(_locks["freqs_ready"], LockAction.Release, value=1)
+                    next_bd(block[6])
+
+            @core(_ct)
+            def _rope_core():
+                import sys as _sys
+                head_dim_c = arith.constant(HEAD_DIM, T.i32())
+                for _outer in range_(_sys.maxsize):
+                    for _ in range_(0, _n_iters, 1):
+                        use_lock(_locks["y_done"], LockAction.AcquireGreaterEqual, value=1)
+                        use_lock(_locks["x_ready"], LockAction.AcquireGreaterEqual, value=1)
+                        use_lock(_locks["freqs_ready"], LockAction.AcquireGreaterEqual, value=1)
+                        rope_fn(_bufs["x"], _bufs["f"], _bufs["y"], head_dim_c)
+                        use_lock(_locks["x_avail"], LockAction.Release, value=1)
+                        use_lock(_locks["freqs_avail"], LockAction.Release, value=1)
+                        use_lock(_locks["y_full"], LockAction.Release, value=1)
+
+        _make_rope_tile(rq_tile, rq_locks, rq_bufs, EMB_DIM // HEAD_DIM)
+        _make_rope_tile(rk_tile, rk_locks, rk_bufs, KV_DIM // HEAD_DIM)
+
+        # Matvec flows.
+        for col in range(N_COLS):
+            flow(shim_tiles[col], WireBundle.DMA, 0, mem_tiles[col], WireBundle.DMA, 0)
+        for col in range(N_COLS):
+            flow(shim_tiles[0], WireBundle.DMA, 1, mat_tiles[col], WireBundle.DMA, 0)
+        for col in range(N_COLS):
+            flow(mem_tiles[col], WireBundle.DMA, 0, shim_tiles[col], WireBundle.DMA, 0)
+        for col in range(N_COLS):
+            flow(mem_tiles[col], WireBundle.DMA, 1, mat_tiles[col], WireBundle.DMA, 1)
+        for col in range(N_COLS):
+            flow(mat_tiles[col], WireBundle.DMA, 0, mem_tiles[col], WireBundle.DMA, 1)
+
+        # RoPE flows.  The matvec herd already uses shim MM2S0 on every
+        # column, shim0 MM2S1 for the normed input multicast, and shim S2MM0
+        # on every column.  Route RoPE through otherwise-unused physical shim
+        # channels to avoid duplicate static connects while preserving the
+        # original logical air_channel ids.
+        flow(shim_tiles[2], WireBundle.DMA, 1, rq_tile, WireBundle.DMA, 0)
+        flow(shim_tiles[3], WireBundle.DMA, 1, rq_tile, WireBundle.DMA, 1)
+        flow(rq_tile, WireBundle.DMA, 0, shim_tiles[4], WireBundle.DMA, 1)
+        flow(shim_tiles[5], WireBundle.DMA, 1, rk_tile, WireBundle.DMA, 0)
+        flow(shim_tiles[6], WireBundle.DMA, 1, rk_tile, WireBundle.DMA, 1)
+        flow(rk_tile, WireBundle.DMA, 0, shim_tiles[7], WireBundle.DMA, 1)
+
+        def _make_memtile_dma(_col, _ml, _w, _y):
+            @memtile_dma(mem_tiles[_col])
+            def _mt(block):
+                dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
+                with block[1]:
+                    use_lock(_ml["y_ready"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_y, offset=0, len=M_TILE)
+                    use_lock(_ml["y_done"], LockAction.Release, value=1)
+                    next_bd(block[1])
+                with block[2]:
+                    EndOp()
+                with block[3]:
+                    dma_start(DMAChannelDir.MM2S, 1, dest=block[4], chain=block[5])
+                with block[4]:
+                    use_lock(_ml["w_ready"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_w, offset=0, len=M_TILE * row_bytes)
+                    use_lock(_ml["w_dma_done"], LockAction.Release, value=1)
+                    next_bd(block[4])
+                with block[5]:
+                    dma_start(DMAChannelDir.S2MM, 0, dest=block[6], chain=block[7])
+                with block[6]:
+                    use_lock(_ml["w_dma_done"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_w, offset=0, len=M_TILE * row_bytes)
+                    use_lock(_ml["w_ready"], LockAction.Release, value=1)
+                    next_bd(block[6])
+                with block[7]:
+                    dma_start(DMAChannelDir.S2MM, 1, dest=block[8], chain=block[2])
+                with block[8]:
+                    use_lock(_ml["y_done"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_y, offset=0, len=M_TILE)
+                    use_lock(_ml["y_ready"], LockAction.Release, value=1)
+                    next_bd(block[8])
+
+        for col in range(N_COLS):
+            _make_memtile_dma(col, mem_locks[col], mem_buf_w[col], mem_buf_y[col])
+
+        out_base = mat_chans["out_base"]
+        weight_base = mat_chans["weight_base"]
+        input_chan = mat_chans["input"]
+        for col in range(N_COLS):
+            shim_dma_allocation(
+                f"air_channel_{out_base}_{col}",
+                shim_tiles[col],
+                DMAChannelDir.S2MM,
+                0,
+            )
+        for col in range(N_COLS):
+            shim_dma_allocation(
+                f"air_channel_{weight_base}_{col}",
+                shim_tiles[col],
+                DMAChannelDir.MM2S,
+                0,
+            )
+        shim_dma_allocation(
+            f"air_channel_{input_chan}",
+            shim_tiles[0],
+            DMAChannelDir.MM2S,
+            1,
+        )
+        shim_dma_allocation(f"air_channel_{rq_chans['out']}", shim_tiles[4], DMAChannelDir.S2MM, 1)
+        shim_dma_allocation(f"air_channel_{rq_chans['in0']}", shim_tiles[2], DMAChannelDir.MM2S, 1)
+        shim_dma_allocation(f"air_channel_{rq_chans['in1']}", shim_tiles[3], DMAChannelDir.MM2S, 1)
+        shim_dma_allocation(f"air_channel_{rk_chans['out']}", shim_tiles[7], DMAChannelDir.S2MM, 1)
+        shim_dma_allocation(f"air_channel_{rk_chans['in0']}", shim_tiles[5], DMAChannelDir.MM2S, 1)
+        shim_dma_allocation(f"air_channel_{rk_chans['in1']}", shim_tiles[6], DMAChannelDir.MM2S, 1)
+
+        @runtime_sequence(*rms_gemv_rope_awq_host_arg_types(),
+                          sym_name=f"{sym}_sequence")
+        def _seq(*args):
+            arg_x = args[2]
+            weight_col_stride = M_TILE * row_bytes
+            output_col_stride = M_TILE
+
+            def _run_matvec(arg_w, arg_y, n_outer, y_dims, y_len,
+                            x_repeat_count, w_dims, w_len,
+                            weight_outer_stride, output_outer_stride):
+                for outer in range(n_outer):
+                    weight_tasks = []
+                    for col in range(N_COLS):
+                        t = dma_configure_task_for(
+                            f"air_channel_{weight_base}_{col}",
+                        )
+                        with bds(t) as bd:
+                            with bd[0]:
+                                dma_bd(
+                                    arg_w,
+                                    offset=outer * weight_outer_stride + col * weight_col_stride,
+                                    len=w_len,
+                                    dimensions=w_dims,
+                                )
+                                EndOp()
+                        dma_start_task(t)
+                        weight_tasks.append(t)
+
+                    x_task = dma_configure_task_for(
+                        f"air_channel_{input_chan}",
+                        repeat_count=x_repeat_count,
+                    )
+                    with bds(x_task) as bd:
+                        with bd[0]:
+                            dma_bd(
+                                arg_x,
+                                offset=0,
+                                len=EMB_DIM,
+                                dimensions=[(4, 512), (512, 1)],
+                            )
+                            EndOp()
+                    dma_start_task(x_task)
+
+                    out_tasks = []
+                    for col in range(N_COLS):
+                        t = dma_configure_task_for(
+                            f"air_channel_{out_base}_{col}",
+                            issue_token=True,
+                        )
+                        with bds(t) as bd:
+                            with bd[0]:
+                                dma_bd(
+                                    arg_y,
+                                    offset=outer * output_outer_stride + col * output_col_stride,
+                                    len=y_len,
+                                    dimensions=y_dims,
+                                )
+                                EndOp()
+                        dma_start_task(t)
+                        out_tasks.append(t)
+
+                    for t in reversed(out_tasks):
+                        dma_await_task(t)
+                    dma_free_task(x_task)
+                    for t in reversed(weight_tasks):
+                        dma_free_task(t)
+
+            def _run_rope(chans, arg_x_rope, arg_f, arg_y_rope, vec_size):
+                if vec_size == EMB_DIM:
+                    dims = [(4, 512), (512, 1)]
+                else:
+                    dims = [(512, 1)]
+
+                t0 = dma_configure_task_for(f"air_channel_{chans['in0']}")
+                with bds(t0) as bd:
+                    with bd[0]:
+                        dma_bd(arg_x_rope, offset=0, len=vec_size, dimensions=dims)
+                        EndOp()
+                dma_start_task(t0)
+                t1 = dma_configure_task_for(f"air_channel_{chans['in1']}")
+                with bds(t1) as bd:
+                    with bd[0]:
+                        dma_bd(arg_f, offset=0, len=vec_size, dimensions=dims)
+                        EndOp()
+                dma_start_task(t1)
+                t2 = dma_configure_task_for(f"air_channel_{chans['out']}", issue_token=True)
+                with bds(t2) as bd:
+                    with bd[0]:
+                        dma_bd(arg_y_rope, offset=0, len=vec_size, dimensions=dims)
+                        EndOp()
+                dma_start_task(t2)
+                dma_await_task(t2)
+                dma_free_task(t0)
+                dma_free_task(t1)
+
+            _run_matvec(
+                args[3],
+                args[4],
+                2,
+                [(16, 64), (8, 1)],
+                128,
+                31,
+                [(16, 69632), (16, 544), (544, 1)],
+                16 * 16 * 544,
+                1024 * row_bytes,
+                1024,
+            )
+            for weight_arg, output_arg in ((args[5], args[6]), (args[7], args[8])):
+                _run_matvec(
+                    weight_arg,
+                    output_arg,
+                    1,
+                    [(8, 64), (8, 1)],
+                    64,
+                    15,
+                    [(8, 69632), (16, 544), (544, 1)],
+                    8 * 16 * 544,
+                    0,
+                    0,
+                )
+            _run_rope(rq_chans, args[4], args[9], args[11], EMB_DIM)
+            _run_rope(rk_chans, args[6], args[10], args[12], KV_DIM)
+
+
+# ---------------------------------------------------------------------------
 # Dispatcher device emitter.
 # ---------------------------------------------------------------------------
-def _emit_dispatcher_device() -> None:
+def _emit_dispatcher_device(dispatch_sequence: Sequence[str] = None) -> None:
     """Emit the unnamed top-level dispatcher device.
 
-    The dispatcher carries the outer ``aie.runtime_sequence
-    @rms_gemv_rope_awq`` that fires the 6 segment sequences in topological
-    order:
-        r_rms_awq_seg -> q_matvec_awq_bf16_0 -> k_matvec_awq_bf16_0 ->
-        v_matvec_awq_bf16_0 -> rq_rope_awq_seg -> rk_rope_awq_seg.
+    ``dispatch_sequence`` lists the device runtime sequences that form the
+    outer ``aie.runtime_sequence @rms_gemv_rope_awq``.  The default path keeps
+    AIR's 6-device sequence; experimental packing uses a 2-device sequence.
     All segments share the same AWQ 13-arg signature.
     """
     from aie.dialects._aiex_ops_gen import ConfigureOp, RunOp
+
+    if dispatch_sequence is None:
+        dispatch_sequence = DEFAULT_DISPATCH_SEQUENCE
 
     @device(AIEDevice.npu2)
     def _dispatcher():
@@ -838,9 +1298,7 @@ def _emit_dispatcher_device() -> None:
             sym_name="rms_gemv_rope_awq",
         )
         def _outer(*args):
-            for sym in ("r_rms_awq_seg", "q_matvec_awq_bf16_0",
-                        "k_matvec_awq_bf16_0", "v_matvec_awq_bf16_0",
-                        "rq_rope_awq_seg", "rk_rope_awq_seg"):
+            for sym in dispatch_sequence:
                 cfg = ConfigureOp(symbol=sym)
                 blk = cfg.body.blocks.append()
                 with InsertionPoint(blk):
@@ -859,12 +1317,15 @@ def build_rms_gemv_rope_awq_module(emb_dim: int = EMB_DIM,
                                     n_kv_heads: int = 8,
                                     head_dim: int = HEAD_DIM,
                                     *,
-                                    group_size: int = 128) -> str:
+                                    group_size: int = 128,
+                                    pack_mode: str = "none") -> str:
     """Build the RMS+GEMV+RoPE AWQ ``aie/aiex``-dialect module.
 
     All dimension args must match the Llama-3.2-1B values; ``group_size``
     is accepted for API future-proofing but currently must equal 128 (the
-    value baked into ``awq_mv_pythoc.o``).
+    value baked into ``awq_mv_pythoc.o``).  ``pack_mode="rgr2_ddr"`` emits the
+    experimental 2-device dispatcher: standalone RMS followed by one packed
+    Q/K/V+RoPE runtime sequence.
     """
     if emb_dim != EMB_DIM or kv_dim != KV_DIM or head_dim != HEAD_DIM:
         raise ValueError(
@@ -879,29 +1340,45 @@ def build_rms_gemv_rope_awq_module(emb_dim: int = EMB_DIM,
         )
     del n_heads, n_kv_heads
 
+    pack_mode = (pack_mode or "none").strip()
+    valid_pack_modes = {"none", "rgr2_ddr"}
+    if pack_mode not in valid_pack_modes:
+        raise ValueError(
+            f"unknown rms_gemv_rope_awq pack_mode={pack_mode!r}; "
+            f"expected one of {sorted(valid_pack_modes)}"
+        )
+
     with mlir_mod_ctx() as ctx:
-        _emit_rope_seg("rk_rope_awq_seg",
-                       x_arg_idx=6, freqs_arg_idx=10, out_arg_idx=12,
-                       vec_size=KV_DIM)
-        _emit_rope_seg("rq_rope_awq_seg",
-                       x_arg_idx=4, freqs_arg_idx=9, out_arg_idx=11,
-                       vec_size=EMB_DIM)
-        _emit_awq_matvec_seg("v_matvec_awq_bf16_0",
-                              weight_arg_idx=7, output_arg_idx=8,
-                              out_rows=KV_DIM)
-        # pingpong_w / pingpong_w_l2 plumbed but off: prior trace showed
-        # AWQ V kernel is not lock-stall-bound enough for W PP to claim
-        # back cycles (lock_stall ~23%, span +2% when PP'd). K_TILE=8 is
-        # the bigger-tile alternative; with M_TILE/K_TILE=1, PP can't be
-        # enabled here anyway (unroll requires M/K==2).
-        _emit_awq_matvec_seg("k_matvec_awq_bf16_0",
-                              weight_arg_idx=5, output_arg_idx=6,
-                              out_rows=KV_DIM)
-        _emit_awq_matvec_seg("q_matvec_awq_bf16_0",
-                              weight_arg_idx=3, output_arg_idx=4,
-                              out_rows=EMB_DIM)
+        if pack_mode == "rgr2_ddr":
+            _emit_awq_qkv_rope_pack()
+        else:
+            _emit_rope_seg("rk_rope_awq_seg",
+                           x_arg_idx=6, freqs_arg_idx=10, out_arg_idx=12,
+                           vec_size=KV_DIM)
+            _emit_rope_seg("rq_rope_awq_seg",
+                           x_arg_idx=4, freqs_arg_idx=9, out_arg_idx=11,
+                           vec_size=EMB_DIM)
+            _emit_awq_matvec_seg("v_matvec_awq_bf16_0",
+                                  weight_arg_idx=7, output_arg_idx=8,
+                                  out_rows=KV_DIM)
+            # pingpong_w / pingpong_w_l2 plumbed but off: prior trace showed
+            # AWQ V kernel is not lock-stall-bound enough for W PP to claim
+            # back cycles (lock_stall ~23%, span +2% when PP'd). K_TILE=8 is
+            # the bigger-tile alternative; with M_TILE/K_TILE=1, PP can't be
+            # enabled here anyway (unroll requires M/K==2).
+            _emit_awq_matvec_seg("k_matvec_awq_bf16_0",
+                                  weight_arg_idx=5, output_arg_idx=6,
+                                  out_rows=KV_DIM)
+            _emit_awq_matvec_seg("q_matvec_awq_bf16_0",
+                                  weight_arg_idx=3, output_arg_idx=4,
+                                  out_rows=EMB_DIM)
         _emit_r_rms_seg()
-        _emit_dispatcher_device()
+        dispatch_sequence = (
+            ("r_rms_awq_seg", RGR2_PACK_SYM)
+            if pack_mode == "rgr2_ddr"
+            else DEFAULT_DISPATCH_SEQUENCE
+        )
+        _emit_dispatcher_device(dispatch_sequence)
         module = ctx.module
         attach_loop_annotation_to_all_scf_for(module)
 
@@ -921,8 +1398,11 @@ if __name__ == "__main__":  # pragma: no cover
         help="Output path (default: stdout)",
         default=None,
     )
+    parser.add_argument("--pack-mode", choices=("none", "rgr2_ddr"),
+                        default="none",
+                        help="Experimental device packing mode")
     args = parser.parse_args()
-    text = build_rms_gemv_rope_awq_module()
+    text = build_rms_gemv_rope_awq_module(pack_mode=args.pack_mode)
     if args.output:
         with open(args.output, "w") as f:
             f.write(text)
