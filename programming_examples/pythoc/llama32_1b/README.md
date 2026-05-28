@@ -16,16 +16,24 @@ every builder onto it).
 
 ## Current performance
 
-Real HF weights (`unsloth/Llama-3.2-1B-Instruct`), 100-token decode on
-NPU2, 5-run median (within-config noise ≈ ±0.06 tok/s):
+Real HF weights (`unsloth/Llama-3.2-1B-Instruct`) on NPU2.
 
 | Path | tok/s | ms/token |
 |---|---|---|
-| BF16 | **10.35** (peak 10.40) | 96–97 |
+| BF16 (packed decode, default) | **11.4** | 88 |
+| BF16 (unpacked baseline) | 10.75 | 93 |
 | AWQ uint4 | **9.60** | 104 |
 
+BF16 decode device-packing (`d1d3d4` / `rgr2_ddr`) is now default-on and
+gives +6.7% over the unpacked baseline on an A/B with bit-identical tokens
+(see "Decode device-packing" below and `DEVICE_PACKING_ANALYSIS.md`
+§15). The BF16 rows are a single answer-length run for the standard
+"capital of France" prompt; the AWQ row predates the packing work and is
+still the prior 100-token / 5-run median. AWQ decode is not yet packed.
+
 Correctness gated by `make hf-gate` (asserts decode contains "paris" for
-"What is the capital of France?") on real HF weights.
+"What is the capital of France?") on real HF weights, for both the packed
+default and the unpacked baseline.
 
 ## What runs where
 
@@ -97,6 +105,12 @@ state for each role) lives in [`PINGPONG_STATUS.md`](PINGPONG_STATUS.md).
    = 128 dispatch iters per token. Single-knob `K_TILE 4 → 8` change
    moved BF16 by +0.39 tok/s alone.
 
+4. **Device packing cuts per-token dispatch ~55%.** Packing decode phases
+   into fewer `aie.device` blocks drops segment dispatches 232 → 104 per
+   token (`o_gemv_ffn` 8 → 4, `rms_gemv_rope` 6 → 2), bit-exact and gated.
+   **Now default-on** (`d1d3d4` / `rgr2_ddr`); see the "Decode
+   device-packing" section above and `DEVICE_PACKING_ANALYSIS.md` §14/§15.
+
 Current default state per matvec role:
 
 | Role | BF16 default | AWQ default |
@@ -158,6 +172,32 @@ PYTHOC_LLAMA_USE_PLACED_BUILDERS=cached make hf-gate
 # Explicit allowlist:
 PYTHOC_LLAMA_USE_PLACED_BUILDERS=lm_head_gemv,o_gemv_ffn make hf-gate
 ```
+
+### Decode device-packing (default-on)
+
+The two large per-token decode kernels pack multiple phases into fewer
+`aie.device` blocks to cut per-token segment-dispatch reconfiguration
+(232 → 104 segs/token, ~55%). These are **on by default** at the proven
+validated modes (see `DEVICE_PACKING_ANALYSIS.md` §14/§15 — bit-exact
+tokens, passes `hf-gate`):
+
+| Kernel | Default pack mode | Effect |
+|---|---|---|
+| `o_gemv_ffn` | `d1d3d4` | 8 → 4 devices/layer |
+| `rms_gemv_rope` | `rgr2_ddr` | 6 → 2 devices/layer |
+
+Override (or revert to the unpacked baseline) per kernel:
+
+```bash
+# Revert both decode kernels to their unpacked single-device baseline:
+PYTHOC_LLAMA_O_GEMV_FFN_PACK_MODE=none \
+PYTHOC_LLAMA_RMS_GEMV_ROPE_PACK_MODE=none make profile
+```
+
+The resolved pack mode is recorded in the decode kernel-cache manifest, so
+toggling these flags auto-rebuilds the affected ELFs on the next `make
+run`/`make profile`/`make hf-gate` — no manual `rm -f` needed. Resolution
+lives in `kernel_builder/aie_ir_gen.py::decode_pack_modes`.
 
 ### Hand-editing the cached IR
 
