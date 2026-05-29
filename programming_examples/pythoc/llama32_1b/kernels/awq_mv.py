@@ -41,7 +41,7 @@ intrinsic (matches kernels/matvec.py:73; conf=0 silently breaks).
 
 from aie.iron.pythoc import aie_kernel
 
-from pythoc import bf16, f32, i16, i32, ptr, u8, u32, void
+from pythoc import bf16, f32, i32, i64, ptr, u8, u32, void
 
 # Lazy intrinsics.  ``set_ctrl_reg`` selects rounding mode at the start of
 # each entry. The Fix2Float chain stays at 32-lane (no v64accfloat_to_v64bf16
@@ -51,11 +51,14 @@ from pythoc import bf16, f32, i16, i32, ptr, u8, u32, void
 # throughput per group.
 from pythoc.aie import (  # noqa: F401
     set_ctrl_reg,
-    I512_I512_ACC1024_bf_msc_conf,
     I1024_I1024_ACC2048_bf_mac_conf,
     I1024_I1024_ACC2048_bf_msc_conf,
     v32accfloat_to_v32bf16,
+    v32bf16_to_v32accfloat,
     unpack_I1024_I8_I4,
+    acc32_v32_I256_ups,
+    ACC2048_add_conf,
+    ACC2048_accfloat_sub_conf,
 )
 from pythoc.aie import (
     aie_vector,
@@ -65,8 +68,6 @@ from pythoc.aie import (
     loop_range,
     prepare_for_pipelining,
     reduce_add_reassoc,
-    unpack_unsigned,
-    vector_add,
     vector_cast,
     vector_extract,
     vector_mul,
@@ -136,10 +137,18 @@ def awq_matvec_vectorized_u4_bf16(
     # Number of 32-byte chunks per group (= number of 64-nibble blocks).
     chunks_per_group: u32 = packed_per_group / u32(32)  # 2 for GS=128
 
-    # Hoist magic constants out of the hot loop.
-    magic_acc32: aie_vector[i32, 32] = broadcast(i32, 32, MAGIC_L_I32)
+    # Hoist magic constants out of the hot loop.  These mirror clang's
+    # aie::to_float<bfloat16> 64-lane Fix2Float front-end:
+    #   * magic_acc32_64: integer magic 0x4b010000 broadcast to 64 acc32
+    #     lanes, repacked as <32 x i64> for ACC2048.add.conf.
+    #   * magic_acc_64: bf16 magic 0x4b01 routed through
+    #     v32bf16_to_v32accfloat then concatenated to 64 accfloat lanes;
+    #     ACC2048.accfloat.sub.conf subtracts it to undo the integer bias.
+    magic_acc32_lanes: aie_vector[i32, 64] = broadcast(i32, 64, MAGIC_L_I32)
+    magic_acc32_64: aie_vector[i64, 32] = vector_cast(magic_acc32_lanes, i64, 32)
     magic_bf: aie_vector[bf16, 32] = broadcast(bf16, 32, MAGIC_L_BF)
-    ones_bf: aie_vector[bf16, 32] = broadcast(bf16, 32, bf16(1.0))
+    magic_acc_32: aie_vector[f32, 32] = v32bf16_to_v32accfloat(magic_bf)
+    magic_acc_64: aie_vector[f32, 64] = concat(magic_acc_32, magic_acc_32)
 
     p_c: ptr[bf16] = c_out + row_offset
 
@@ -199,20 +208,23 @@ def awq_matvec_vectorized_u4_bf16(
                     nib_3: aie_vector[u8, 32] = vector_extract(nibbles_all, 96, 32)
 
                     # === Chunk 0 (K_offset = 0..63 within group) ===
-                    lo_i16_0: aie_vector[i16, 32] = unpack_unsigned(nib_0, i16)
-                    hi_i16_0: aie_vector[i16, 32] = unpack_unsigned(nib_1, i16)
-                    lo_i32_0: aie_vector[i32, 32] = unpack_unsigned(lo_i16_0, i32)
-                    hi_i32_0: aie_vector[i32, 32] = unpack_unsigned(hi_i16_0, i32)
-                    sum_lo_i32_0: aie_vector[i32, 32] = vector_add(lo_i32_0, magic_acc32)
-                    sum_hi_i32_0: aie_vector[i32, 32] = vector_add(hi_i32_0, magic_acc32)
-                    sum_lo_acc_0: aie_vector[f32, 32] = vector_cast(sum_lo_i32_0, f32, 32)
-                    sum_hi_acc_0: aie_vector[f32, 32] = vector_cast(sum_hi_i32_0, f32, 32)
-                    w_lo_acc_0: aie_vector[f32, 32] = I512_I512_ACC1024_bf_msc_conf(
-                        magic_bf, ones_bf, sum_lo_acc_0, CONF_BF16_MAC
+                    # 64-lane Fix2Float front-end (mirrors clang aie::to_float):
+                    #   u8 nibbles -> acc32 (ONE ups, unsigned) -> 64-lane i32
+                    #   -> +magic (ACC2048.add) -> bitcast accfloat
+                    #   -> -magic (ACC2048.accfloat.sub) -> v32->bf16 x2.
+                    lo_i32_0: aie_vector[i32, 32] = acc32_v32_I256_ups(nib_0, i32(0), i32(0))
+                    hi_i32_0: aie_vector[i32, 32] = acc32_v32_I256_ups(nib_1, i32(0), i32(0))
+                    comb_i32_0: aie_vector[i32, 64] = concat(lo_i32_0, hi_i32_0)
+                    comb_i64_0: aie_vector[i64, 32] = vector_cast(comb_i32_0, i64, 32)
+                    sum_i64_0: aie_vector[i64, 32] = ACC2048_add_conf(
+                        comb_i64_0, magic_acc32_64, i32(0)
                     )
-                    w_hi_acc_0: aie_vector[f32, 32] = I512_I512_ACC1024_bf_msc_conf(
-                        magic_bf, ones_bf, sum_hi_acc_0, CONF_BF16_MAC
+                    sum_acc_0: aie_vector[f32, 64] = vector_cast(sum_i64_0, f32, 64)
+                    w_acc_0: aie_vector[f32, 64] = ACC2048_accfloat_sub_conf(
+                        sum_acc_0, magic_acc_64, i32(60)
                     )
+                    w_lo_acc_0: aie_vector[f32, 32] = vector_extract(w_acc_0, 0, 32)
+                    w_hi_acc_0: aie_vector[f32, 32] = vector_extract(w_acc_0, 32, 32)
                     w_lo_bf_0: aie_vector[bf16, 32] = v32accfloat_to_v32bf16(w_lo_acc_0)
                     w_hi_bf_0: aie_vector[bf16, 32] = v32accfloat_to_v32bf16(w_hi_acc_0)
                     # w_scaled = w_bf * scale (1 bf16 mul per half).
@@ -231,20 +243,19 @@ def awq_matvec_vectorized_u4_bf16(
                     )
 
                     # === Chunk 1 (K_offset = 64..127 within group) ===
-                    lo_i16_1: aie_vector[i16, 32] = unpack_unsigned(nib_2, i16)
-                    hi_i16_1: aie_vector[i16, 32] = unpack_unsigned(nib_3, i16)
-                    lo_i32_1: aie_vector[i32, 32] = unpack_unsigned(lo_i16_1, i32)
-                    hi_i32_1: aie_vector[i32, 32] = unpack_unsigned(hi_i16_1, i32)
-                    sum_lo_i32_1: aie_vector[i32, 32] = vector_add(lo_i32_1, magic_acc32)
-                    sum_hi_i32_1: aie_vector[i32, 32] = vector_add(hi_i32_1, magic_acc32)
-                    sum_lo_acc_1: aie_vector[f32, 32] = vector_cast(sum_lo_i32_1, f32, 32)
-                    sum_hi_acc_1: aie_vector[f32, 32] = vector_cast(sum_hi_i32_1, f32, 32)
-                    w_lo_acc_1: aie_vector[f32, 32] = I512_I512_ACC1024_bf_msc_conf(
-                        magic_bf, ones_bf, sum_lo_acc_1, CONF_BF16_MAC
+                    lo_i32_1: aie_vector[i32, 32] = acc32_v32_I256_ups(nib_2, i32(0), i32(0))
+                    hi_i32_1: aie_vector[i32, 32] = acc32_v32_I256_ups(nib_3, i32(0), i32(0))
+                    comb_i32_1: aie_vector[i32, 64] = concat(lo_i32_1, hi_i32_1)
+                    comb_i64_1: aie_vector[i64, 32] = vector_cast(comb_i32_1, i64, 32)
+                    sum_i64_1: aie_vector[i64, 32] = ACC2048_add_conf(
+                        comb_i64_1, magic_acc32_64, i32(0)
                     )
-                    w_hi_acc_1: aie_vector[f32, 32] = I512_I512_ACC1024_bf_msc_conf(
-                        magic_bf, ones_bf, sum_hi_acc_1, CONF_BF16_MAC
+                    sum_acc_1: aie_vector[f32, 64] = vector_cast(sum_i64_1, f32, 64)
+                    w_acc_1: aie_vector[f32, 64] = ACC2048_accfloat_sub_conf(
+                        sum_acc_1, magic_acc_64, i32(60)
                     )
+                    w_lo_acc_1: aie_vector[f32, 32] = vector_extract(w_acc_1, 0, 32)
+                    w_hi_acc_1: aie_vector[f32, 32] = vector_extract(w_acc_1, 32, 32)
                     w_lo_bf_1: aie_vector[bf16, 32] = v32accfloat_to_v32bf16(w_lo_acc_1)
                     w_hi_bf_1: aie_vector[bf16, 32] = v32accfloat_to_v32bf16(w_hi_acc_1)
                     w_lo_s_1: aie_vector[bf16, 32] = vector_mul(w_lo_bf_1, scale_v)
