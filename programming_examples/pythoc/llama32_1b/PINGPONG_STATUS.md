@@ -31,7 +31,7 @@ AXI stream switch. "L2 X" rows are intentionally absent.
 | o_gemv_ffn_awq | og_awq_matvec_0 (O-proj) | 2048 | **8.5 KB** (K_TILE=8) | **8.5 KB** | 4 KB | off | off | off |
 | o_gemv_ffn_awq | gg_awq_matvec_0 (gate) | 2048 | **8.5 KB** (K_TILE=8) | **8.5 KB** | 4 KB | off | off | off |
 | o_gemv_ffn_awq | ug_awq_matvec_0 (up) | 2048 | **8.5 KB** (K_TILE=8) | **8.5 KB** | 4 KB | off | off | off |
-| o_gemv_ffn_awq | **dg_awq_matvec_0** (down) | 8192 | **8.5 KB** (K_TILE=2) | **17 KB** (M_TILE=2 × 8.5 KB) | 16 KB | off (infra not plumbed) | off (infra not plumbed) | off (replaced by K_TILE=2) |
+| o_gemv_ffn_awq | **dg_awq_matvec_0** (down) | 8192 | **8.5 KB** (K_TILE_K8192=2) | **8.5 KB** (M_TILE_K8192=2 × 4.25 KB row) | 16 KB | off (no L1 W infra) | off (`pingpong_w_l2` plumbed; tested, not worth it) | off (`pingpong_x` plumbed; K_TILE_K8192=2 collapsed K-loop) |
 | lm_head_gemv_awq | LM head AWQ | 2048 | **8.5 KB** (K_TILE=8) | **8.5 KB** | 4 KB | off | off | off |
 
 ## Summary of what's ON
@@ -64,13 +64,14 @@ tok/sec with less L1 footprint and lower DMA contention.
 - `pingpong_w` on `_emit_matvec_seg_k2048` (o_gemv_ffn — L2 still not plumbed here)
 - `pingpong_w` + `pingpong_w_l2` on `_emit_matvec_seg_k8192` (o_gemv_ffn)
 - `pingpong_w` + `pingpong_w_l2` on `_emit_awq_matvec_seg` (rms_gemv_rope_awq)
-- `pingpong_x` on `_emit_awq_matvec_seg_k8192` (o_gemv_ffn_awq) — **only X pp anywhere**
+- `pingpong_x` **+** `pingpong_w_l2` on `_emit_awq_matvec_seg_k8192` (o_gemv_ffn_awq) — this is the **only X pp anywhere**; both default off, dg call site (`o_gemv_ffn_awq.py:2840`) passes neither
 
 ## Where infrastructure is **not** plumbed
 
 - `pingpong_x` not on any BF16 builder
 - `pingpong_x` not on the AWQ K=2048 builders (`_emit_awq_matvec_seg`, `_emit_awq_matvec_seg_k2048`)
-- `pingpong_w` / `pingpong_w_l2` not on any AWQ kernel in `o_gemv_ffn_awq` (the AWQ counterpart of `o_gemv_ffn`)
+- `pingpong_w` (L1 W) not on **any** AWQ builder
+- In `o_gemv_ffn_awq`: `_emit_awq_matvec_seg_k8192` **does** have `pingpong_w_l2` (and `pingpong_x`), but `_emit_awq_matvec_seg_k2048` has no pp params at all
 - Nothing on `lm_head_gemv` / `lm_head_gemv_awq` (those builders haven't been touched)
 
 ## Where the data suggests the next wins live
@@ -122,57 +123,49 @@ budget either way.
 
 | AWQ tile | lock_stall | vec_util | What ping-pong-able | What tile-size-able |
 |---|---|---|---|---|
-| V/og/gg/ug AWQ | 17-25% | 17-19% | small lock_stall to claim back | K_TILE=4 → 8 cuts K-loop iters in half |
-| dg AWQ | 40% (PP'd to 18%) | 14.5% → 19.7% | already X-PP'd | K_TILE_K8192=1 → 2 would also remove the K-loop |
+| V/og/gg/ug AWQ | 17-25% | 17-19% | small lock_stall to claim back | K_TILE 4 → 8 (**landed**, `09b583ea6`) |
+| dg AWQ | 40% → 18% | 14.5% → 19.7% | X PP works but was reverted | K_TILE_K8192 1 → 2 (**landed**, `b9d5a515d`) |
 
-For dg AWQ we already proved X PP works: lock_stall went 40 → 18%, span −26.6%,
-+0.46 tok/sec.
+For dg AWQ X PP was proven to work (lock_stall 40 → 18%, span −26.6%, +0.46 tok/sec)
+**but was then reverted** in favor of `K_TILE_K8192 = 2`, which collapses the K-loop
+to a single iter and gives equivalent tok/sec with less L1 footprint and lower DMA
+contention. With one K-iter there is nothing for X PP to hide behind, so `pingpong_x`
+stays plumbed-but-off (the unroll assert at `o_gemv_ffn_awq.py:747` would in fact fire
+if it were re-enabled against the current `M_TILE_K8192/K_TILE_K8192 == 1`).
 
 For AWQ K=2048 (V/og/gg/ug) the lock_stall budget to attack is much smaller (17-25%),
 and the W PP experiment showed PP doesn't claim it cleanly because there's not enough
-to amortize the BD overhead.
+to amortize the BD overhead. The win there came from `K_TILE = 8` (bigger tile)
+instead — **landed**.
 
-### Where to actually spend the headroom
+### What landed (the bigger-tile bet paid off on both)
 
-**1. Grow K_TILE on AWQ K=2048 first** — single-knob change, no PP infrastructure needed.
+Both candidate experiments below have since been merged; bigger tiles beat ping-pong
+on AWQ in both cases:
 
-Current `K_TILE = 4` (4 output rows per matvec_fn call, 2 K-iters per outer-for-iter).
+**1. AWQ K=2048 `K_TILE = 8` — LANDED (`09b583ea6`).** Each `matvec_fn` call now does
+8 rows in one shot (`K_TILE = M_TILE = 8`, `o_gemv_ffn_awq.py:91-92`), so the K-loop is
+a single iter — halves the lock acquire/release cycles and removes the K-loop
+branch/prolog. W L1 is 8.5 KB (still tiny). No PP infrastructure was needed. Applied
+to V/Q/K and og/gg/ug.
 
-Bumping to `K_TILE = 8`: each call does 8 rows in one shot, K-loop becomes 1 iter.
-Halves the lock acquire/release cycles AND removes the K-loop branch/prolog. W L1
-grows from 4.25 KB → 8.5 KB (still tiny). No need to touch X or Y.
+**2. AWQ dg `K_TILE_K8192 = 2` — LANDED (`b9d5a515d`), X PP reverted.** With
+`K_TILE_K8192 = M_TILE_K8192 = 2` (`o_gemv_ffn_awq.py:97-98`) there is one K-iter and
+one matvec call per outer iter, so X PP has nothing to hide behind. The single bigger
+call uses W 8.5 KB + X 16 KB + Y 4 B ≈ 25 KB — *less* L1 than the X-PP version
+(W 4.25 + 2×X 32 ≈ 36 KB), because doubling K_TILE costs less than doubling X. Measured
+equivalent tok/sec to X PP with lower L1 footprint and DMA contention, so X PP was
+reverted (`7a221447b` → reverted).
 
-Expected: 5-10% kernel-local cycle reduction. Tok/sec impact depends on whether the
-kernel matters dispatch-wise.
+**3. X is not a tile-size lever** — X is the full input vec, fixed by the model. The
+only X-side lever is double-buffering (`pingpong_x`), which is now moot on dg per #2.
 
-**2. For AWQ dg, evaluate K_TILE_K8192 = 1 → 2 *instead of* X PP.**
+### What's left
 
-Right now we ping-pong X across 2 K-iters. If K_TILE_K8192 = 2 (matching
-M_TILE_K8192), there's only 1 K-iter and only 1 matvec call per outer iter. The X PP
-becomes moot — we'd be hiding nothing because there's nothing to hide behind. The
-single bigger call uses:
-- 1 W fill (8.5 KB)
-- 1 X fill (16 KB)
-- 1 matvec_fn call processing 2 rows × 8192 K
-
-L1: W 8.5 + X 16 + Y 4B = ~25 KB. *Less* L1 than the X PP version (which used
-W 4.25 + 2×X 32 = ~36 KB), because doubling K_TILE costs less than doubling X.
-
-This is an A/B test against the +0.46 tok/sec we got from X PP.
-
-**3. Don't grow X** — there's nothing to grow. X is the full input vec, dictated by
-the model. The only X-side lever is double-buffering (which is what PP does).
-
-### Order to try
-
-1. **A/B AWQ dg `K_TILE_K8192 = 2` vs the current X PP committed state.** Same
-   correctness check + 5-run benchmark + trace. Two outcomes:
-   - K_TILE=2 wins → revert X PP, take the bigger-tile path.
-   - X PP wins → keep current state. Either way we now know which.
-
-2. **AWQ K=2048 `K_TILE = 8` everywhere** (V/Q/K, og/gg/ug). Single-knob change, but
-   it touches the runtime sequence dimensions too (M_TILE/K_TILE = 1 instead of 2
-   changes how the host issues DMAs). Probably another +0.1-0.3 tok/sec.
-
-3. **Skip W PP on AWQ for good** unless step 2 shows lock_stall growing again — the
-   trace says it's not worth it on AWQ K=2048.
+- **W PP on AWQ: skip for good.** The trace says it's not worth it on AWQ K=2048
+  (lock_stall budget too small to amortize BD overhead), and on dg `pingpong_w_l2`
+  was tested (starv1 22%→12%, dma_in1_eff 30%→44%) for only a 0.4% span change — W is
+  not on the critical path. Both PP infras stay plumbed but off.
+- The remaining ~50% unaccounted dg cycles are likely **memory_stall in the dequant
+  chain** (uint4→bf16), which DMA/buffer changes cannot attack — see the AWQ-dequant
+  codegen-gap note. That, not buffering, is the higher-leverage AWQ target.
