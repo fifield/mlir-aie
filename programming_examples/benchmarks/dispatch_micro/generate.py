@@ -162,16 +162,27 @@ def _emit_device(name, dev_enum, cols, rows_per_col, bds_per_task, topology,
             # BD-count axis: `bds_per_task` independent dma_configure_task_for
             # ops per direction per column, each with one shim BD reading its
             # own slice of the shared in/out buffer. Each BD moves a chunk of
-            # size `chunk_words` that covers all rows in the column (the
-            # memtile splits it via object_fifo_link).
+            # size `chunk_words` that covers all rows in the column.
+            #
+            # Per-channel shim BD pool on Strix npu2 is 4 slots. We issue a
+            # completion token every PIPELINE_DEPTH BDs and await the prior
+            # group's token after starting the next group's first BD — a
+            # double-buffer-style sliding window that caps in-flight BDs at
+            # PIPELINE_DEPTH+1 per channel, well inside the pool. This avoids
+            # the firmware BD-recycling path that interacts badly with
+            # `aiex.npu.load_pdi` (see bugs/bd_load_pdi_crash.md).
+            PIPELINE_DEPTH = 2
             last_out_tasks = []
             for c in range(cols):
                 in_fifo = of_ins[c]
                 out_fifo = of_outs[c]
                 col_base = c * bds_per_task * chunk_words
+                pending_out = None
 
                 for k in range(bds_per_task):
-                    issue_out = (k == bds_per_task - 1)
+                    is_group_end = ((k + 1) % PIPELINE_DEPTH == 0)
+                    is_last = (k == bds_per_task - 1)
+                    issue_out = is_group_end or is_last
                     bd_offset = col_base + k * chunk_words
                     t_in = shim_dma_single_bd_task(
                         in_fifo, in_buf,
@@ -187,8 +198,18 @@ def _emit_device(name, dev_enum, cols, rows_per_col, bds_per_task, topology,
                     )
                     dma_start_task(t_in)
                     dma_start_task(t_out)
+                    # After starting the first BD of a new group, drain the
+                    # previous group so its pool slots are freed before this
+                    # group fills up.
+                    is_first_of_group = (k % PIPELINE_DEPTH == 0)
+                    if is_first_of_group and pending_out is not None:
+                        dma_await_task(pending_out)
+                        pending_out = None
                     if issue_out:
-                        last_out_tasks.append(t_out)
+                        pending_out = t_out
+
+                if pending_out is not None:
+                    last_out_tasks.append(pending_out)
 
             for t_out in last_out_tasks:
                 dma_await_task(t_out)

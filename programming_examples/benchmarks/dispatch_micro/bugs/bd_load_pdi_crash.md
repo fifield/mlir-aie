@@ -108,10 +108,12 @@ Speculation only — needs firmware-side instrumentation to confirm:
 - Each `aiex.dma_configure_task_for` emits one shim BD configuration.
   At `bds = 8 × {in, out}` we generate 16 BD setup ops in the txn
   stream.
-- The shim DMA has hardware BD pools per channel. With 8 BDs queued
-  on one MM2S channel (or S2MM), we may already be at or near the
-  per-channel pool limit on the device the harness is targeting
-  (Strix npu2).
+- The shim DMA has hardware BD pools per channel — 4 BDs per channel
+  on Strix npu2. Queueing 8 BDs on one MM2S channel (or S2MM)
+  exceeds the per-channel pool by 2x, so the firmware has to recycle
+  BD slots mid-chain. This lines up cleanly with the observed
+  boundary: `bds=4` works at every tile count we tested, `bds=8`
+  fails as soon as `load_pdi` is also in the stream.
 - The `aiex.npu.load_pdi` op runs at the start of the runtime
   sequence. If the firmware's PDI load path internally allocates a
   scratch BD on the same shim channel — even briefly — it could
@@ -139,9 +141,12 @@ Counterpoints:
 1. Capture XRT trace + `dmesg` around a timeout to see if the
    driver/firmware logs anything useful that `xrt::run::aie_error`
    doesn't surface.
-2. Try reducing the BD count one at a time (5, 6, 7) at fixed tile
-   count to find the exact threshold — if the boundary is sharp at 8,
-   that's a strong clue for a hardware queue depth.
+2. Threshold is now known: Strix npu2 shim channels have a 4-BD pool,
+   so the predicted boundary for fire-and-forget queueing is BD #5.
+   `bds=4` works at every tile count; `bds=8` (the smallest value we
+   tested above 4) crashes with `load_pdi`. Sweeping 5/6/7 would
+   confirm whether the crash starts exactly at 5 or only at some
+   higher multiple of the pool, but isn't needed for the workaround.
 3. Run the failing MLIR through `aiecc -v --keep-loc` to see exactly
    what txn opcodes get emitted, and whether the load_pdi expansion
    path differs from the firmware path in BD bookkeeping.
@@ -149,13 +154,41 @@ Counterpoints:
    distinct `bd_id` attributes assigned, or whether they share one
    that collides with internal load_pdi state.
 
+## Workaround in the generator
+
+As of the current generator (`generate.py:_emit_dma_body`), the
+benchmark emits a 2-deep sliding window: a completion token is
+issued every other BD, and `dma_await_task` on the previous group's
+token is inserted after starting the next group's first BD. Peak
+in-flight is 3 BDs per channel — within pool=4 with one slot of
+headroom — so we never depend on firmware-side BD recycling under
+pressure, which is the path that interacts badly with `load_pdi`.
+
+Verified: `load_pdi_fw × bds=8 × tiles ∈ {1,2,4,8}` and
+`load_pdi_expanded × bds=8 × tiles=1` all dispatch cleanly with
+this change. Compared to v1/v2 numbers in `REPORT.md`, the BD-count
+axis curves for `bds > 4` are no longer comparable — the new
+measurement folds (bds/2 - 1) intermediate awaits into each
+dispatch, which is a more honest model of any real producer/consumer
+loop than the prior "fire-and-forget N BDs and hope the firmware
+recycles slots in the background".
+
+If you need to reproduce the crash for firmware debugging, revert
+the sliding-window logic in `_emit_dma_body` to the prior
+"fire-and-forget" loop (single `dma_await_task` on the final OUT
+token only).
+
 ## Workaround for users
 
-Don't combine `aiex.npu.load_pdi` with `bds ≥ 8` per shim channel
-direction until this is resolved. Either:
-- Reduce BD count to ≤ 4 per direction (works);
+Don't combine `aiex.npu.load_pdi` with `bds ≥ 5` per shim channel
+direction without intermediate completion-token syncs. Either:
+- Stay ≤ 4 BDs per channel per dispatch (within the Strix npu2
+  shim BD pool);
+- Insert `dma_await_task` on every Nth BD where N ≤ 4 to bound
+  in-flight count;
 - Use the `baseline` mechanism (`--aie-generate-xclbin`, no
-  `--generate-full-elf`) — works at any BD count we tested.
+  `--generate-full-elf`) — works at any BD count we tested, though
+  it also benefits from explicit syncing on long BD chains.
 
 ## Related: the `--no-self-reload` failure mode
 

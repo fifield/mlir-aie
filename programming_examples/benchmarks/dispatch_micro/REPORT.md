@@ -788,93 +788,104 @@ real reconfig (i.e. `load_pdi_expanded`).
 
 ## §8. BD count under multi-row (v2)
 
-> *Added in v2.*
+> *Added in v2. Re-baselined 2026-05-22 after `generate.py` was
+> updated to use a 2-deep sliding window (token every other BD,
+> intermediate `dma_await_task` before next group fills the pool).
+> See `bugs/bd_load_pdi_crash.md`. Numbers above `bds=4` here are
+> NOT comparable to the v1/v2 fire-and-forget curve; the prior
+> table was implicitly relying on firmware-side BD recycling, which
+> we now know interacts badly with `load_pdi` and degrades
+> `baseline + multi-row` to a multi-second slow path.*
 
 v1's BD-count sweep covered `rows_per_col=1` only. v1's whole-array
 sweep covered `rows_per_col ∈ {1, 2, 4}` but only at `bds=2`. The gap:
 how does BD count interact with multi-row configurations? v2 #8 fills
-the matrix at `bds ∈ {2, 4}` × `rows_per_col ∈ {2, 4}` × `tiles ∈ {1,
-2, 4}` for all three working mechanisms.
+the matrix at `bds ∈ {2, 4, 8}` × `rows_per_col ∈ {2, 4}` × `tiles
+∈ {1, 2, 4}` for all three working mechanisms.
 
-### Table: `pure_dispatch` p50 µs at `b ∈ {2, 4}` × `r ∈ {2, 4}`
+### Table: `pure_dispatch` p50 µs at `b ∈ {2, 4, 8}` × `r ∈ {2, 4}`
 
-| mech                | t | r | b=2   | b=4   | b=4/b=2 |
-|---------------------|--:|--:|------:|------:|--------:|
-| baseline            | 1 | 2 |  67.9 |  68.3 |   1.01  |
-| baseline            | 2 | 2 |  66.1 |  75.1 |   1.14  |
-| baseline            | 4 | 2 |  75.4 |  77.2 |   1.02  |
-| baseline            | 1 | 4 |  62.6 |  74.0 |   1.18  |
-| baseline            | 2 | 4 |  69.6 |  74.7 |   1.07  |
-| baseline            | 4 | 4 |  75.4 |  80.1 |   1.06  |
-| load_pdi_fw         | 1 | 2 |  66.8 |  73.9 |   1.11  |
-| load_pdi_fw         | 2 | 2 |  65.1 |  78.4 |   1.20  |
-| load_pdi_fw         | 4 | 2 |  72.8 |  71.7 |   0.99  |
-| load_pdi_fw         | 1 | 4 |  64.3 |  71.1 |   1.10  |
-| load_pdi_fw         | 2 | 4 |  73.8 |  78.8 |   1.07  |
-| load_pdi_fw         | 4 | 4 |  73.9 |  84.3 |   1.14  |
-| load_pdi_expanded   | 1 | 2 |  77.7 |  85.9 |   1.11  |
-| load_pdi_expanded   | 2 | 2 | 101.2 | 108.3 |   1.07  |
-| load_pdi_expanded   | 4 | 2 | 131.6 | 134.9 |   1.02  |
-| load_pdi_expanded   | 1 | 4 |  93.6 | 107.8 |   1.15  |
-| load_pdi_expanded   | 2 | 4 | 130.0 | 133.8 |   1.03  |
-| load_pdi_expanded   | 4 | 4 | 184.5 | 190.5 |   1.03  |
+| mech                | t | r | b=2   | b=4   | b=8     | b=8/b=2 |
+|---------------------|--:|--:|------:|------:|--------:|--------:|
+| baseline            | 1 | 2 |  64.5 |  77.1 | **fail**|    —    |
+| baseline            | 2 | 2 |  69.5 |  84.7 | **fail**|    —    |
+| baseline            | 4 | 2 |  75.6 | 110.6 | **fail**|    —    |
+| baseline            | 1 | 4 |  64.8 |  78.9 |  113.9  |   1.76  |
+| baseline            | 2 | 4 |  73.8 |  99.5 |  146.2  |   1.98  |
+| baseline            | 4 | 4 |  77.4 | 117.0 |  208.4  |   2.69  |
+| load_pdi_fw         | 1 | 2 |  65.8 |  76.7 | **fail**|    —    |
+| load_pdi_fw         | 2 | 2 |  77.3 |  85.3 | **fail**|    —    |
+| load_pdi_fw         | 4 | 2 |  67.1 | 110.6 | **fail**|    —    |
+| load_pdi_fw         | 1 | 4 |  68.4 |  74.2 |  112.1  |   1.64  |
+| load_pdi_fw         | 2 | 4 |  76.2 |  86.7 |  142.2  |   1.87  |
+| load_pdi_fw         | 4 | 4 |  78.5 | 113.4 |  206.3  |   2.63  |
+| load_pdi_expanded   | 1 | 2 |  78.4 |  83.8 | **fail**|    —    |
+| load_pdi_expanded   | 2 | 2 | 105.0 | 124.4 | **fail**|    —    |
+| load_pdi_expanded   | 4 | 2 | 134.3 | 159.9 | **fail**|    —    |
+| load_pdi_expanded   | 1 | 4 |  90.5 | 115.7 |  140.7  |   1.55  |
+| load_pdi_expanded   | 2 | 4 | 132.7 | 150.6 |  198.1  |   1.49  |
+| load_pdi_expanded   | 4 | 4 | 190.9 | 223.0 |  315.0  |   1.65  |
+
+**fail** in the `b=8 × r=2` column means: `baseline` hits the 60-second
+benchmark timeout (the multi-second slow path is still present at
+`r=2` even with the sliding window); `load_pdi_*` SIGABRT during
+dispatch. The same cells run cleanly at `r=4` and at `r=1` (see
+"Remaining boundary" below).
 
 ### Findings
 
-1. **BD count is mostly noise within `bds ∈ {2, 4}`.** Ratios mostly
-   1.0–1.2; doubling BDs increases latency by 0–20%. The BD axis
-   isn't a major lever at these scales.
-2. **Rows matter much more than BDs for `load_pdi_expanded`.** At
-   t=4 b=4: r=2 → 134.9 µs vs r=4 → 190.5 µs (+41%). Compare to b=2
-   → b=4 at the same t=4, r=4: 184.5 → 190.5 µs (+3%). For
-   expanded, the txn stream length is dominated by per-row memtile
-   reconfig, not per-BD shim reconfig.
-3. **baseline + load_pdi_fw stay flat across all 24 multi-row cells**
-   (~62–85 µs), confirming v1+v2's general finding that those paths
-   don't pay per-dispatch reconfig cost.
+1. **The `bds=8 × r=4` cells now work cleanly** — the prior table
+   reported `r=4 × b=8` as the same broken state as `r=2 × b=8`.
+   With the sliding-window generator, peak in-flight on each shim
+   channel is 3 BDs (within the 4-slot pool), so `r=4 × b=8` is no
+   longer in the degenerate firmware-BD-recycling path.
+2. **BD count now scales meaningfully** (b=8/b=2 ratio 1.5×–2.7×),
+   reflecting that we're actually serializing through pool capacity.
+   This is the honest measurement: a real producer/consumer loop has
+   to pace BD issuance against pool depth too.
+3. **Rows still matter more than BDs for `load_pdi_expanded`** at the
+   low end. At t=4 b=2: r=2 → 134.3 µs vs r=4 → 190.9 µs (+42%).
+   At t=4 b=8 the gap is similar: r=4 → 315 µs. Per-row memtile
+   reconfig dominates over per-BD shim reconfig for `expanded`.
+4. **baseline + load_pdi_fw stay nearly identical across cells** —
+   the new b=8 ratios are within ~5% of each other (e.g. t=4 r=4:
+   208.4 vs 206.3 µs). Whatever the firmware/expanded gap is, it
+   isn't sensitive to BD pacing.
 
-### New failure mode: `bds=8 × rows_per_col > 1` extends to all mechanisms
+### Remaining boundary: `bds=8 × r=2`
 
-v1's firmware-crash bug
-([`bugs/bd_load_pdi_crash.md`](bugs/bd_load_pdi_crash.md)) was framed
-as "`load_pdi_*` + `bds=8` hangs." v2 #8 found that **the
-load-bearing condition is `bds=8`, not the mechanism.** Under
-`rows_per_col > 1`:
+Despite the sliding-window fix, `r=2 × b=8` is still broken — and
+the failure shape is different per mechanism:
 
-| mech                | t | r | b | first-dispatch result          |
-|---------------------|--:|--:|--:|--------------------------------|
-| baseline            | 1 | 1 | 8 | OK, ~100 µs                    |
-| baseline            | 1 | 2 | 8 | OK but **~6.1 *seconds* per dispatch** |
-| baseline            | 1 | 4 | 8 | OK but **~6.1 *seconds* per dispatch** |
-| load_pdi_fw         | 1 | 1 | 8 | hangs from a fresh process<sup>†</sup> |
-| load_pdi_fw         | 1 | 2 | 8 | hangs                          |
-| load_pdi_fw         | 1 | 4 | 8 | hangs                          |
-| load_pdi_expanded   | 1 | 1 | 8 | OK, ~178 µs                    |
-| load_pdi_expanded   | 1 | 2 | 8 | hangs                          |
-| load_pdi_expanded   | 1 | 4 | 8 | hangs                          |
+| mech                | t | r | b | result with sliding-window generator |
+|---------------------|--:|--:|--:|---------------------------------------|
+| baseline            | 1 | 2 | 8 | runs but ~5.9 *seconds* per dispatch (first-dispatch FM-protocol measurement; 60s timeout in iter-loop measurement) |
+| baseline            | 2 | 2 | 8 | 60s timeout                          |
+| baseline            | 4 | 2 | 8 | 60s timeout                          |
+| load_pdi_fw         | * | 2 | 8 | SIGABRT during dispatch              |
+| load_pdi_expanded   | * | 2 | 8 | SIGABRT during dispatch              |
+| baseline            | 1 | 1 | 8 | OK, ~1.1 ms first-dispatch (~100 µs warm) |
+| baseline            | 1 | 4 | 8 | OK, ~1.4 ms first-dispatch (~114 µs warm) |
+| load_pdi_fw         | 1 | 1 | 8 | OK, ~1.0 ms first-dispatch (was hang at warmup=0) |
+| load_pdi_fw         | 1 | 4 | 8 | OK, ~1.3 ms first-dispatch          |
+| load_pdi_expanded   | 1 | 1 | 8 | OK, ~1.1 ms first-dispatch          |
+| load_pdi_expanded   | 1 | 4 | 8 | OK, ~1.0 ms first-dispatch          |
 
-<sup>†</sup> `load_pdi_fw` t=1, r=1, b=8 hangs at `warmup=0` but
-runs cleanly at `warmup=10` (matching v1) — XRT's first-call
-internal warmup apparently sidesteps the bug after enough retries.
+So the boundary tightened considerably: the sliding window fixes
+`r=1` and `r=4`, but `r=2` retains the original symptom (baseline
+slow-path + load_pdi hard fault). This is a separate bug — the BD
+pool can't be the only thing in play here, since both `r=1` and
+`r=4` use the same 8 BDs per shim channel under the same pacing.
+The `r=2` cell uses a memtile fanout with 2 destinations (vs 1 for
+r=1 and 4 for r=4), which is the only architectural difference; I
+don't yet know why a 2-way memtile fanout would expose a firmware
+bug that 4-way does not. Logged for follow-up; doesn't block the
+mainline BD-count axis since `r ∈ {1, 4}` covers both single-row
+and whole-array cases.
 
-The boundary is now clearly: **`bds=8` is unstable across multiple
-mechanisms and configurations**. `baseline + bds=8 + multi-row` doesn't
-crash but degrades by ~10⁵× (6 seconds vs ~75 µs at b=4). v1's
-hypothesis about a BD-id collision is still consistent with this
-broader pattern. Updated bug write-up:
-
-- `baseline + bds=8 + r=1` still works.
-- `baseline + bds=8 + r>1` produces correct results but at multi-second
-  per-dispatch latency — looks like a degenerate slow path rather
-  than a hard hang.
-- `load_pdi_* + bds=8 + (r>1 OR cold)` reliably hangs with
-  `txn_op_idx = 0xFFFFFFFF`.
-
-For practical use: **avoid `bds=8` entirely with this generator
-shape on Strix.** The other six "same-signature" failure modes (BD
-hang, `--no-self-reload` hang, ctrlpkt 2nd-dispatch hang) suggest
-something deeper in the firmware BD pool / XRT patch machinery is
-implicated, beyond a single specific code path.
+For practical use: **avoid `bds=8 × r=2` with this generator on
+Strix.** `bds=8` is otherwise safe at `r=1` and `r=4` under the
+sliding-window pacing.
 
 ## §9. What each mechanism actually emits (v2 — closes #4 and #12)
 
