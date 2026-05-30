@@ -397,7 +397,10 @@ def compile_pythoc_source(
             from pythoc.aie.loop_hints import prepare_for_pipelining, loop_range
             from pythoc.aie.profiling import event0, event1
             from pythoc.aie.utils import bitcast_i32_to_f32, fast_exp2_i32_to_f32
-            from pythoc.aie.operations import read_tm, write_tm
+            from pythoc.aie.operations import (
+                read_tm, write_tm, lock_acquire, lock_release,
+                use_lock, LockAction,
+            )
 
             # Populate user_globals with all imported names
             user_globals.update(
@@ -452,6 +455,10 @@ def compile_pythoc_source(
                     "fast_exp2_i32_to_f32": fast_exp2_i32_to_f32,
                     "read_tm": read_tm,
                     "write_tm": write_tm,
+                    "lock_acquire": lock_acquire,
+                    "lock_release": lock_release,
+                    "use_lock": use_lock,
+                    "LockAction": LockAction,
                     "struct": struct,
                     "range": range,  # Add Python's built-in range for standard loop syntax
                     # AIE API bf16 mmul<4,8,8> emulation helpers (aie2p)
