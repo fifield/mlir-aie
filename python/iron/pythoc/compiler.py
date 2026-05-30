@@ -183,6 +183,27 @@ def _strip_unsupported_flags(ir: str) -> str:
     return ir
 
 
+def _promote_to_linkonce(ir: str, function_name: str) -> str:
+    """Give the kernel ``define`` ``linkonce_odr`` linkage (inline mode).
+
+    Combined with ``alwaysinline``, this lets aiecc's post-merge ``opt`` DCE
+    the kernel definition once it has been inlined into the core. Linkage
+    keywords precede the optional ``dso_local`` preemption specifier in the
+    LLVM IR grammar, so inserting right after ``define`` is well-formed:
+    ``define void @k(`` -> ``define linkonce_odr void @k(``.
+    """
+    pattern = re.compile(
+        r"(?m)^(define\s+)(\S.*?@" + re.escape(function_name) + r"\()"
+    )
+
+    def _sub(m):
+        if "linkonce_odr" in m.group(2):
+            return m.group(0)
+        return m.group(1) + "linkonce_odr " + m.group(2)
+
+    return pattern.sub(_sub, ir)
+
+
 def compile_pythoc_kernel(
     kernel_path: str,
     function_name: str,
@@ -234,8 +255,9 @@ def compile_pythoc_source(
     optimization_level: int = 2,
     verbose: bool = False,
     extra_globals: Optional[dict] = None,
+    inline: bool = False,
 ) -> Path:
-    """Compile PythoC source code to an AIE object file.
+    """Compile PythoC source code to an AIE object file (or inline IR).
 
     Args:
         source_code: PythoC source code as string
@@ -244,9 +266,16 @@ def compile_pythoc_source(
         output_dir: Directory for output files (default: temp directory)
         optimization_level: LLVM optimization level (0-3)
         verbose: Enable verbose output
+        inline: When True, stop at an optimized ``.ll`` (LLVM IR) marked
+            ``alwaysinline`` instead of running ``llc`` to a ``.o``. aiecc
+            merges this IR into the core module (llvm-link) and the inliner
+            folds the kernel body into the core — no surviving ``func.call``
+            and no separately object-linked kernel ``.o``. When False
+            (default), behaves as before and returns a compiled ``.o``.
 
     Returns:
-        Path to compiled object file (.o)
+        Path to the compiled object file (``.o``) when ``inline`` is False,
+        or to the optimized IR file (``.ll``) when ``inline`` is True.
 
     Raises:
         RuntimeError: If compilation fails
@@ -506,6 +535,13 @@ def compile_pythoc_source(
             user_globals=user_globals,
         )
 
+        # For inline lowering, mark the kernel ``alwaysinline`` so that when
+        # aiecc llvm-links this IR into the core module, the inliner folds the
+        # body in even under Peano's conservative ``-inline-threshold``. The
+        # attribute serializes via ``get_ir()`` (str(module)) below.
+        if inline:
+            llvm_func.attributes.add("alwaysinline")
+
         # ── Pipeline matching mlir-aie/aiecc flow ──────────────────────
         # 1. Get raw IR from llvmlite (no in-process optimization)
         # 2. Strip all vector alignment ("peanohack")
@@ -552,6 +588,24 @@ def compile_pythoc_source(
             opt_ir = f.read()
         opt_ir = _strip_vector_alignment(opt_ir)
         opt_ir = _strip_unsupported_flags(opt_ir)
+
+        # Inline mode: stop at the optimized .ll. aiecc llvm-links it into the
+        # core module and the inliner (driven by alwaysinline) folds it in, so
+        # there is no separately object-linked kernel and no surviving call.
+        if inline:
+            # Promote the kernel to linkonce_odr *after* the standalone opt so
+            # that, once aiecc merges it into the core and the always-inliner
+            # folds it in, globaldce removes the now-dead definition (external
+            # linkage would leave a dead define for llc to codegen). It must be
+            # done post-opt: linkonce_odr set before the standalone opt above
+            # would let O2 DCE the (callerless) kernel away to nothing.
+            opt_ir = _promote_to_linkonce(opt_ir, function_name)
+            with open(opt_ll_file, "w") as f:
+                f.write(opt_ir)
+            if verbose:
+                print(f"Inline IR (alwaysinline, linkonce_odr) ready: {opt_ll_file}")
+            return opt_ll_file
+
         with open(opt_ll_file, "w") as f:
             f.write(opt_ir)
 

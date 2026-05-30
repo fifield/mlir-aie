@@ -95,10 +95,10 @@ def test_kernel_compilation():
 
         print(f"  ✓ Kernel compiled successfully")
         print(f"  ✓ Kernel name: {kernel._name}")
-        print(f"  ✓ Object file: {kernel.bin_name}")
+        print(f"  ✓ Object file: {kernel.object_file_name}")
 
         # Verify object file was created
-        obj_file = Path(kernel.bin_name)
+        obj_file = Path(kernel.object_file_name)
         if not obj_file.exists():
             print(f"  ✗ Object file not found: {obj_file}")
             return False
@@ -120,8 +120,12 @@ def test_kernel_compilation():
         with open(ll_file, "r") as f:
             ir_content = f.read()
 
-        # Verify function definition exists
-        if f"define void @test_add_kernel" not in ir_content:
+        # Verify function definition exists. llvmlite quotes global identifiers
+        # (``@"test_add_kernel"``), so accept both quoted and unquoted forms.
+        if (
+            'define void @"test_add_kernel"' not in ir_content
+            and "define void @test_add_kernel" not in ir_content
+        ):
             print(f"  ✗ Function definition not found in IR")
             return False
 
