@@ -1,0 +1,22 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// MDV6 32-core full-model multi-frame regression test.
+//
+// Bead: nd-fnjae3
+//
+// This exercises the video-stream path that repeatedly constructs and frees
+// the model. It catches regressions where fused-weight caches key on recycled
+// Python object ids, causing frame 2+ to reuse stale tensors.
+//
+// REQUIRES: ryzen_ai_npu2, peano, torch, mdv6_weights
+//
+// RUN: rm -rf test_stx_multi_frame
+// RUN: mkdir -p test_stx_multi_frame
+// RUN: cd test_stx_multi_frame
+//
+// Build the xclbins into this test's working directory so no generated
+// artifacts are written to the source tree.
+// RUN: env MDV6_BUILD_DIR=. %run_on_npu2% python3 %S/conv/build_multicore.py || true
+// RUN: env MDV6_BUILD_DIR=. %run_on_npu2% python3 %S/gemm_conv1x1/build_gemm_conv1x1.py
+// RUN: env MDV6_BUILD_DIR=. %run_on_npu2% python3 %S/test_full_model_mc.py --profile 3
