@@ -398,8 +398,7 @@ struct AIEObjectFifoStatefulTransformPass
   createObjectFifo(OpBuilder &builder, Location loc, AIEObjectFifoType datatype,
                    std::string name, Value prodTile, Value consTile,
                    Attribute depth, BDDimLayoutArrayAttr dimensionsToStream,
-                   BDDimLayoutArrayArrayAttr dimensionsFromStreamPerConsumer,
-                   Location loc = {}) {
+                   BDDimLayoutArrayArrayAttr dimensionsFromStreamPerConsumer) {
     auto ofName = builder.getStringAttr(name);
     auto fifo = ObjectFifoCreateOp::create(
         builder, loc, ofName, prodTile, consTile, depth, datatype,
