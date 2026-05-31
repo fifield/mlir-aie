@@ -113,47 +113,41 @@ launches per re_mc call × 3 (re4/6/8) + neck calls.
   unchanged.
 - **Risk**: increased dispatcher complexity; need a one-shot test rig.
 
-### D. Move RepConv to NPU — INFRASTRUCTURE LANDED, NET LOSS WITHOUT KERNEL FUSION
+### D. Move RepConv to NPU — IN CODE (kept despite isolated regression)
 
-**What was tried (2026-05-31):** added `fuse_repconv()` to
-_full_model_helpers/elan_test_tiled.py that folds the two parallel BN+Conv
-branches of a RepConv into a single 3x3 conv with bias. The reparameterized
-weights drop straight into the existing mc_*_rn3 kernel (bn_w=1, bn_b=B_fused).
-Replaced `CPU bn_block.conv1(current)` in run_rn_mc with
-`rt(mc_rn3, ..., fuse_repconv(bn_block.conv1))`.
+**Status (2026-05-31):** active on the run_rn_mc bottleneck path.
+`fuse_repconv()` in _full_model_helpers/elan_test_tiled.py folds the two
+parallel BN+Conv branches of a RepConv into a single 3x3 conv with bias.
+The reparameterized weights drop straight into the existing mc_*_rn3
+kernel (bn_w=1, bn_b=B_fused). The CPU RepConv path is gone.
 
-**Result:** PASS bytewise (max_class_diff=0.219 vs 0.221 baseline; tiny
-diff is bf16 rounding from the weight fusion, not a correctness regression).
+**Correctness:** PASS bytewise (max_class_diff=0.219 vs 0.221 baseline;
+tiny diff is bf16 rounding from the weight fusion).
 
-**Perf:** wall **1330 → 1582 ms (+252 ms regression)**. Each bottleneck now
-fires 2 mc_rn3 NPU calls instead of 1 — added 114 dispatches/frame ×
-~1.4 ms NPU each ≈ +160 ms NPU + +30 ms launch_gap. Only recovers ~26 ms
-of cpu.RepConv. **Net loss ~250 ms.**
+**Perf cost in isolation:** wall **1330 → 1582 ms (+252 ms regression)**.
+Each bottleneck now fires 2 mc_rn3 NPU calls instead of 1 — adds 114
+dispatches/frame × ~1.4 ms NPU each ≈ +160 ms NPU + +30 ms launch_gap.
+Only recovers ~26 ms of cpu.RepConv on its own.
 
-**Reverted on the model path**, but fuse_repconv stays as committed
-future-use infrastructure.
+**Why we kept it despite the regression:** fuse_repconv is the host-side
+prep that makes a future fused 3x3+3x3+add+SiLU kernel (Phase E)
+drop-in. Reverting RepConv to CPU now would mean the eventual Phase E
+kernel has to do RepConv internally too — much bigger surface area.
+Keeping the host call structure as "two rn3 dispatches per bottleneck"
+locks in the contract that Phase E will collapse.
 
-**Why simple port is a regression:** the math was wrong in the
-pre-implementation plan. I assumed RepConv-on-NPU was incrementally
-~free; it's actually a full mc_*_rn3 dispatch (1.4 ms NPU + 700 µs host
-plumbing), which costs significantly more than the 600 µs CPU it
-replaces.
+**The Phase E target:** a single fused kernel doing
+`SiLU(W2 · SiLU(W1 · x + B1) + B2) + residual`
+with intermediate stays in memtile L2. Replaces the current
+600 µs CPU RepConv + 1.4 ms NPU mc_rn3 per iteration with ~1.5 ms /
+iteration → recovers the +250 ms regression *and* delivers an
+additional ~50 ms saving across 102 bottleneck iterations.
 
-**Real Phase D win requires kernel-level fusion:** a NEW 3x3+3x3+add+SiLU
-kernel that does the bottleneck's two convs back-to-back with the
-intermediate staying in memtile L2 (no DDR roundtrip, no host
-patch-extract between them). Approximate target: one such fused-kernel
-call replaces RepConv + mc_rn3 (currently 600 µs CPU + 1.4 ms NPU = 2.0
-ms/iteration) with ~1.5 ms / iteration → ~50 ms wall saved across 102
-bottleneck iterations in re6+re8.
-
-**Effort to do it right:** new IRON kernel + memtile-resident dataflow
-+ matching dispatch. Multi-session.
-
-A shared-BO chain (à la step A) does NOT work for two rn3 calls back
-to back: sub0's output is in core-packed format, sub1's input needs
+**A shared-BO chain (à la step A) does NOT work for two rn3 calls back
+to back:** sub0's output is in core-packed format, sub1's input needs
 patch-extracted format. The host has to do the reshape between them,
-which makes BO-sharing pointless.
+which makes BO-sharing pointless. Hence the need for kernel-level
+fusion, not just dispatcher-level chaining.
 
 ### E. Memtile-resident chaining (the original Phase C pitch)
 One `aie.device` containing chained workers for, say, the whole rep_elan
@@ -166,11 +160,10 @@ under compute.
 ## Proposed sequence
 
 1. ~~**A: RN1 pair fusion**~~ — DONE (-45 ms wall).
-2. ~~**D: RepConv-on-NPU port**~~ — Tried + reverted. Infrastructure
-   (fuse_repconv) committed for future use. Naive port was a +252 ms wall
-   regression because the new mc_rn3 dispatches cost more than the CPU
-   RepConv they replaced. Real win requires the fused 3x3+3x3 kernel
-   in step E.
+2. ~~**D: RepConv-on-NPU port**~~ — DONE, kept in code despite +252 ms wall
+   regression in isolation. fuse_repconv prepares the host contract so the
+   eventual Phase E fused-kernel drop-in is straightforward (just replace
+   the two sequential mc_rn3 dispatches with one fused-kernel dispatch).
 3. **C: rep_elan outer fusion** (next, smaller surface). c1 + outer-c3 +
    outer-c3 + c4 in `run_re_mc` — four convs called back-to-back with
    different intermediates. Different host plumbing pattern from A; ROI
@@ -178,7 +171,10 @@ under compute.
 4. **E: memtile-resident chaining / fused multi-conv kernel**. The real
    prize. RepConv lesson confirms: kernel-level fusion (intermediate in
    memtile L2, no host reshape) is the only way to compound conv
-   dispatches without a regression. Multi-session, new IRON design.
+   dispatches without a regression. Multi-session, new IRON design. Phase
+   D leaves the host structure already in the right shape — Phase E only
+   needs to replace the bottleneck loop's two rn3 dispatches with one
+   fused dispatch per iteration.
 
 ## Why this differs from the pre-Phase-A pitch
 
