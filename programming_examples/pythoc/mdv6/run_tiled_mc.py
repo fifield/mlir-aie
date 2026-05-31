@@ -1522,6 +1522,152 @@ def _run_gemm_oc_blocked_merged(merged_entry, elf_name, input_hwc, weights_uint1
     return output
 
 
+def _run_gemm_oc_blocked_pair_merged(merged_entry, elf_name, input_hwc,
+                                     wt_a_u16, wt_b_u16,
+                                     out_h, out_w, out_ch, tile_m, ppc):
+    """Phase C step A: dispatch two 1x1 convs sharing one input BO in a
+    single xrt.run. Mirror of _run_gemm_oc_blocked_merged but with paired
+    weights/outputs — saves one launch per pair vs sequential dispatch.
+
+    ELF arg layout (from build_pair_rn1.py via chain_links): in, wt_a, out_a,
+    wt_b, out_b. No share_arg_idxs, so weights & outputs are NOT shared.
+    """
+    import pyxrt as _xrt
+    device, _elf, _ctx, kernel = merged_entry
+
+    H, W, IC = input_hwc.shape
+    M = H * W
+    input_size = tile_m * IC
+    output_size = tile_m * out_ch
+
+    wt_blocks_a = _repack_weights_for_gemm(wt_a_u16, IC, out_ch, out_ch)
+    wt_blocks_b = _repack_weights_for_gemm(wt_b_u16, IC, out_ch, out_ch)
+    wt_a = wt_blocks_a[0]
+    wt_b = wt_blocks_b[0]
+
+    pixels_per_call = N_CORES * tile_m * ppc
+    total_slots = N_CORES * ppc
+
+    in_bo = _get_merged_bo(device, elf_name, "in", total_slots * input_size * 2)
+    wt_a_bo = _get_merged_bo(device, elf_name, "wt_a", wt_a.nbytes)
+    wt_b_bo = _get_merged_bo(device, elf_name, "wt_b", wt_b.nbytes)
+    out_a_bo = _get_merged_bo(device, elf_name, "out_a",
+                              total_slots * output_size * 2)
+    out_b_bo = _get_merged_bo(device, elf_name, "out_b",
+                              total_slots * output_size * 2)
+    _xrt_fill_bo(wt_a_bo, wt_a)
+    _xrt_fill_bo(wt_b_bo, wt_b)
+
+    input_flat = input_hwc.reshape(M, IC)
+    out_a = torch.zeros(out_h, out_w, out_ch, dtype=torch.bfloat16)
+    out_b = torch.zeros(out_h, out_w, out_ch, dtype=torch.bfloat16)
+    out_a_flat = out_a.reshape(M, out_ch)
+    out_b_flat = out_b.reshape(M, out_ch)
+
+    for batch_start in range(0, M, pixels_per_call):
+        batch_end = min(batch_start + pixels_per_call, M)
+        batch_pixels = batch_end - batch_start
+
+        host_in = np.zeros(total_slots * input_size, dtype=np.uint16)
+        n_active_slots = (batch_pixels + tile_m - 1) // tile_m
+        for s in range(n_active_slots):
+            pix_start = batch_start + s * tile_m
+            pix_end = min(pix_start + tile_m, batch_end)
+            active_u16 = bf16_to_uint16(input_flat[pix_start:pix_end].flatten())
+            dst = s * input_size
+            host_in[dst:dst + len(active_u16)] = active_u16
+        slot0 = host_in[:input_size]
+        for s in range(n_active_slots, total_slots):
+            host_in[s * input_size:(s + 1) * input_size] = slot0
+
+        _xrt_fill_bo(in_bo, host_in)
+        _xrt_run_kernel(kernel, [in_bo, wt_a_bo, out_a_bo, wt_b_bo, out_b_bo])
+        out_a_bo.sync(_xrt.xclBOSyncDirection.XCL_BO_SYNC_BO_FROM_DEVICE)
+        out_b_bo.sync(_xrt.xclBOSyncDirection.XCL_BO_SYNC_BO_FROM_DEVICE)
+        out_a_data = np.frombuffer(out_a_bo.map(), dtype=np.uint16,
+                                    count=total_slots * output_size).copy()
+        out_b_data = np.frombuffer(out_b_bo.map(), dtype=np.uint16,
+                                    count=total_slots * output_size).copy()
+
+        for s in range(min(n_active_slots, total_slots)):
+            pix_start = batch_start + s * tile_m
+            pix_end = min(pix_start + tile_m, batch_end)
+            if pix_start >= batch_end:
+                break
+            n_pix = pix_end - pix_start
+            start = s * output_size
+            ta = uint16_to_bf16(out_a_data[start:start + n_pix * out_ch])
+            tb = uint16_to_bf16(out_b_data[start:start + n_pix * out_ch])
+            out_a_flat[pix_start:pix_end, :] = ta.reshape(n_pix, out_ch).to(torch.bfloat16)
+            out_b_flat[pix_start:pix_end, :] = tb.reshape(n_pix, out_ch).to(torch.bfloat16)
+
+    return out_a, out_b
+
+
+def _gemm_pair_elf_name(tile_m, ic, oc, ppc):
+    """Filename convention for a rn1-style 2-sub pair ELF (no k_block)."""
+    return f"merged_gemm_t{tile_m}_ic{ic}_oc{oc}_p{ppc}_pair_x1"
+
+
+def run_gemm_pair_mc(gemm_name, sc_name, input_hwc, wt_a_u16, wt_b_u16,
+                     out_h, out_w, out_ch):
+    """Phase C step A entry point. Dispatches two 1x1 convs sharing one
+    input BO in one xrt.run if a pair ELF exists for the layer's shape;
+    otherwise falls back to two sequential run_gemm_conv1x1_mc calls.
+
+    Returns (out_a, out_b). Caller uses this for back-to-back rn1 calls
+    inside run_rn_mc (RepNCSP.conv1 + RepNCSP.conv2 on the same input).
+    """
+    if not USE_MERGED_KERNELS:
+        out_a = run_gemm_conv1x1_mc(gemm_name, sc_name, input_hwc, wt_a_u16,
+                                     out_h, out_w, out_ch)
+        out_b = run_gemm_conv1x1_mc(gemm_name, sc_name, input_hwc, wt_b_u16,
+                                     out_h, out_w, out_ch)
+        return out_a, out_b
+
+    H, W, IC = input_hwc.shape
+    M = H * W
+    # Pair ELFs are only built for the non-K-blocked, single-OCB shape today.
+    k_block, _ = _gemm_choose_k_block(IC, out_ch, M)
+    if k_block > 0:
+        out_a = run_gemm_conv1x1_mc(gemm_name, sc_name, input_hwc, wt_a_u16,
+                                     out_h, out_w, out_ch)
+        out_b = run_gemm_conv1x1_mc(gemm_name, sc_name, input_hwc, wt_b_u16,
+                                     out_h, out_w, out_ch)
+        return out_a, out_b
+
+    oc_block = _gemm_choose_oc_block(IC, out_ch)
+    if oc_block is None or oc_block != out_ch:
+        out_a = run_gemm_conv1x1_mc(gemm_name, sc_name, input_hwc, wt_a_u16,
+                                     out_h, out_w, out_ch)
+        out_b = run_gemm_conv1x1_mc(gemm_name, sc_name, input_hwc, wt_b_u16,
+                                     out_h, out_w, out_ch)
+        return out_a, out_b
+
+    tile_m = min(_gemm_tile_m(IC, oc_block), 256)
+    ppc = _gemm_compute_ppc(M, tile_m, IC, oc_block)
+    elf_name = _gemm_pair_elf_name(tile_m, IC, out_ch, ppc)
+    merged = _get_merged_kernel(elf_name)
+    if merged is None:
+        out_a = run_gemm_conv1x1_mc(gemm_name, sc_name, input_hwc, wt_a_u16,
+                                     out_h, out_w, out_ch)
+        out_b = run_gemm_conv1x1_mc(gemm_name, sc_name, input_hwc, wt_b_u16,
+                                     out_h, out_w, out_ch)
+        return out_a, out_b
+
+    # Pair-path uses the same _CURRENT_LAYER attribution as the singletons.
+    global _CURRENT_LAYER
+    _prev_layer = _CURRENT_LAYER
+    _CURRENT_LAYER = gemm_name
+    try:
+        return _run_gemm_oc_blocked_pair_merged(
+            merged, elf_name, input_hwc, wt_a_u16, wt_b_u16,
+            out_h, out_w, out_ch, tile_m, ppc,
+        )
+    finally:
+        _CURRENT_LAYER = _prev_layer
+
+
 def _run_gemm_oc_blocked(gemm_kh, handle_name, insts_name, input_hwc, weights_uint16,
                           out_h, out_w, out_ch, tile_m, oc_block, ppc,
                           regime=None):
