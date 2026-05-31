@@ -224,52 +224,51 @@ def multicore_conv_ocb(dev, tile_h=8, tile_w=8, ic=16, oc_block=16,
         for b in barriers:
             rt.set_barrier(b, 1)
 
-        # OCB loop — compile-time unrolled. Each iteration emits its own
-        # weight fill (strided into W) + input fill (same offset, reused
-        # data) + output drain (strided into O).
+        # OCB loop collapsed into single 4D-strided BD descriptors per fifo.
+        # Each fill/drain uses sizes=[n_ocb, 1, 1, slot_size] with the outer
+        # stride controlling per-OCB BO offset (or stride=0 for replication).
+        # This emits ONE shim/memtile BD descriptor per channel that iterates
+        # n_ocb times in hardware, avoiding the BD-count blow-up that hit
+        # large n_ocb (re6_c3 / re8_c3) when each OCB iteration emitted its
+        # own descriptor.
         #
-        # Weight fill uses a 4D TAP to match the descriptor shape the
-        # original aie2_multicore.py emits when calling rt.fill(..., W) with
-        # no TAP (the default lowers to a 4D descriptor on weight broadcasts).
-        # Input/output fills use 2D TAPs matching the original's explicit
-        # TAPs on those fifos.
-        for ocb in range(n_ocb):
-            tap_wt = TensorAccessPattern(
-                (big_weight_size,),
-                offset=ocb * weight_block_size,
-                sizes=[1, 1, 1, weight_block_size],
+        # The cores still do n_ocb acquire/release pairs (unrolled at build
+        # time via `for _ in range(n_ocb):` in core_fn). The fifo synchronizes
+        # producer (memtile, single iterating BD) with consumer (cores) per
+        # slot via the existing depth=1 ObjectFifo handshake.
+
+        # Weight: read n_ocb consecutive weight slots from big_W
+        tap_wt = TensorAccessPattern(
+            (big_weight_size,),
+            offset=0,
+            sizes=[n_ocb, 1, 1, weight_block_size],
+            strides=[weight_block_size, 0, 0, 1],
+        )
+        for wf in wt_fifos:
+            rt.fill(wf.prod(), W, tap_wt)
+
+        for col in range(n_cols):
+            cores_this_col = min(cores_per_col, n_cores - col * cores_per_col)
+            col_in_size = cores_this_col * core_input_size
+            col_out_size = cores_this_col * core_output_size
+
+            # Input: same data replicated n_ocb times (stride=0 on outer dim).
+            tap_in = TensorAccessPattern(
+                (host_input_size,),
+                offset=col * cores_per_col * core_input_size,
+                sizes=[n_ocb, 1, 1, col_in_size],
                 strides=[0, 0, 0, 1],
             )
-            for wf in wt_fifos:
-                rt.fill(wf.prod(), W, tap_wt)
-
-            for col in range(n_cols):
-                cores_this_col = min(cores_per_col, n_cores - col * cores_per_col)
-                col_in_size = cores_this_col * core_input_size
-                col_out_size = cores_this_col * core_output_size
-
-                tap_in = TensorAccessPattern(
-                    (host_input_size,),
-                    offset=col * cores_per_col * core_input_size,
-                    sizes=[1, col_in_size],
-                    strides=[0, 1],
-                )
-                # Output TAP: stride into O by (ocb * host_output_size) +
-                # (col * cores_per_col * core_output_size). Per-column slice
-                # stays the same size; ocb stride places this OCB's outputs
-                # after all earlier OCBs' outputs in the host BO.
-                tap_out = TensorAccessPattern(
-                    (big_output_size,),
-                    offset=(ocb * host_output_size +
-                            col * cores_per_col * core_output_size),
-                    sizes=[1, col_out_size],
-                    strides=[0, 1],
-                )
-                rt.fill(col_in_fifos[col].prod(), I, tap_in)
-                # Wait only on the final OCB's drain — earlier drains can
-                # overlap with subsequent fills/compute.
-                rt.drain(col_out_fifos[col].cons(), O, tap_out,
-                         wait=(ocb == n_ocb - 1))
+            # Output: n_ocb consecutive col-output slots, each at offset
+            # ocb * host_output_size + col_base.
+            tap_out = TensorAccessPattern(
+                (big_output_size,),
+                offset=col * cores_per_col * core_output_size,
+                sizes=[n_ocb, 1, 1, col_out_size],
+                strides=[host_output_size, 0, 0, 1],
+            )
+            rt.fill(col_in_fifos[col].prod(), I, tap_in)
+            rt.drain(col_out_fifos[col].cons(), O, tap_out, wait=True)
 
     return Program(dev, rt).resolve_program()
 
