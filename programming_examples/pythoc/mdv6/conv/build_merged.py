@@ -173,7 +173,7 @@ def _rewrite_sub(mlir_text, dev_sym, seq_sym):
     return inner, arg_types
 
 
-def _make_dispatcher_block(subs, share_arg_idxs=None):
+def _make_dispatcher_block(subs, share_arg_idxs=None, chain_links=None):
     """Emit the dispatcher aie.device with one aiex.configure/aiex.run per sub.
 
     Args:
@@ -185,10 +185,17 @@ def _make_dispatcher_block(subs, share_arg_idxs=None):
             per-sub args are flattened in order. Typical use: share the wt
             arg (idx=1) when cloning the same kernel for N batches of the
             same OCB.
+        chain_links: optional list of (sub_a, arg_a, sub_b, arg_b) tuples
+            (Phase C). Each link aliases sub_b's arg_b to the dispatcher %arg
+            that sub_a's arg_a uses — useful for chaining "sub_a output ==
+            sub_b input" so one BO threads through both sub-devices with no
+            host plumbing between them. Types of the two args must match.
+            chain_links is applied *after* share_arg_idxs.
 
     Returns a string containing the indented dispatcher device block.
     """
     share_arg_idxs = set(share_arg_idxs or ())
+    chain_links = list(chain_links or ())
 
     if share_arg_idxs:
         # Validate the shared args have the same MLIR type across every sub.
@@ -201,11 +208,32 @@ def _make_dispatcher_block(subs, share_arg_idxs=None):
                         f"has {ref_types[idx]} but {dev_sym!r} has {ats[idx]}"
                     )
 
+    # Validate chain links: types must match, and a destination (sub_b, arg_b)
+    # may only be the target of ONE chain link (else the alias is ambiguous).
+    chain_dest = {}  # (sub_b, arg_b) -> (sub_a, arg_a)
+    for sub_a, arg_a, sub_b, arg_b in chain_links:
+        if sub_a >= len(subs) or sub_b >= len(subs):
+            raise ValueError(f"chain_links references out-of-range sub index")
+        ta = subs[sub_a][2][arg_a]
+        tb = subs[sub_b][2][arg_b]
+        if ta != tb:
+            raise ValueError(
+                f"chain_links type mismatch: sub{sub_a}.arg{arg_a} ({ta}) "
+                f"vs sub{sub_b}.arg{arg_b} ({tb})"
+            )
+        key = (sub_b, arg_b)
+        if key in chain_dest:
+            raise ValueError(
+                f"chain_links destination (sub{sub_b}, arg{arg_b}) already "
+                f"aliased to (sub{chain_dest[key][0]}, arg{chain_dest[key][1]})"
+            )
+        chain_dest[key] = (sub_a, arg_a)
+
     # Build dispatcher arg list: shared args first (taken from sub 0), then
-    # per-sub remaining args in sub order. Track the dispatcher %arg index
-    # for every (sub_i, sub_j-arg) so aiex.run can reference them.
+    # per-sub args in sub order. Track the dispatcher %arg index for every
+    # (sub_i, sub_j-arg) so aiex.run can reference them.
     flat_types = []
-    sub_arg_refs = [[] for _ in subs]  # sub_arg_refs[i][j] = "%argK"
+    sub_arg_refs = [[None] * len(ats) for _, _, ats in subs]  # sub_arg_refs[i][j] = "%argK"
 
     if share_arg_idxs:
         ref_types = subs[0][2]
@@ -217,9 +245,20 @@ def _make_dispatcher_block(subs, share_arg_idxs=None):
     for i, (_, _, ats) in enumerate(subs):
         for j, ty in enumerate(ats):
             if j in share_arg_idxs:
-                sub_arg_refs[i].append(shared_refs[j])
+                sub_arg_refs[i][j] = shared_refs[j]
                 continue
-            sub_arg_refs[i].append(f"%arg{len(flat_types)}")
+            if (i, j) in chain_dest:
+                # Alias to the source's dispatcher arg. Source is always an
+                # earlier sub (we process subs in order), so its ref is set.
+                src_i, src_j = chain_dest[(i, j)]
+                if sub_arg_refs[src_i][src_j] is None:
+                    raise ValueError(
+                        f"chain_links source (sub{src_i}, arg{src_j}) not yet "
+                        f"emitted — chain target sub must come after its source"
+                    )
+                sub_arg_refs[i][j] = sub_arg_refs[src_i][src_j]
+                continue
+            sub_arg_refs[i][j] = f"%arg{len(flat_types)}"
             flat_types.append(ty)
 
     sig = ", ".join(f"%arg{i}: {ty}" for i, ty in enumerate(flat_types))
@@ -245,7 +284,8 @@ def _make_dispatcher_block(subs, share_arg_idxs=None):
 
 
 def build_merged(out_name, sub_names, build_dir=None, share_arg_idxs=None,
-                 kind="mc", sub_spec_overrides=None):
+                 kind="mc", sub_spec_overrides=None, chain_links=None,
+                 sub_extra_args=None):
     """Generate and compile a merged-device ELF.
 
     Args:
@@ -261,6 +301,15 @@ def build_merged(out_name, sub_names, build_dir=None, share_arg_idxs=None,
         sub_spec_overrides: dict {sub_name: (script_path, args_list)} bypassing
             the CONFIGS lookup. Required for GEMM since GEMM shapes are
             dynamically derived per-layer (no fixed CONFIGS list).
+        chain_links: optional list of (sub_a, arg_a, sub_b, arg_b) tuples
+            (Phase C). Aliases sub_b's arg_b to sub_a's arg_a so one
+            dispatcher %arg is shared between them — useful for cross-layer
+            chaining where sub_a's output BO is the same buffer as sub_b's
+            input.
+        sub_extra_args: optional dict {sub_idx: [extra_cli_arg, ...]} appended
+            to the generator command for that sub (e.g. ["--trace-size",
+            str(N), "--trace-worker", "0"]). Lets us instrument one sub-
+            device with hardware tracing while keeping siblings unchanged.
     """
     if build_dir is None:
         build_dir = _resolve_build_dir()
@@ -282,26 +331,39 @@ def build_merged(out_name, sub_names, build_dir=None, share_arg_idxs=None,
                 raise
 
     print(f"  {out_name}: generating {len(sub_names)} sub-MLIRs...")
-    # Cache the raw MLIR per unique sub label — repeated clones reuse it
-    # rather than re-running the MLIR generator for the same shape.
+    # Cache key includes the sub label AND any per-sub extra args so
+    # an instrumented sub doesn't accidentally reuse a non-traced clone.
     raw_cache = {}
     subs = []
     sub_chunks = []
     for idx, name in enumerate(sub_names):
-        if name not in raw_cache:
+        extra = (sub_extra_args or {}).get(idx)
+        cache_key = (name, tuple(extra) if extra else None)
+        if cache_key not in raw_cache:
             override = (sub_spec_overrides or {}).get(name)
-            raw_cache[name] = _generate_sub_mlir(
+            if extra:
+                # Append extra args to the override's args list, or build a
+                # fresh one from _resolve_sub_spec.
+                if override is None:
+                    script, base_args = _resolve_sub_spec(name, kind)
+                    override = (script, list(base_args) + list(extra))
+                else:
+                    script, base_args = override
+                    override = (script, list(base_args) + list(extra))
+            raw_cache[cache_key] = _generate_sub_mlir(
                 name, build_dir, kind=kind, sub_spec_override=override
             )
-        sub_text = raw_cache[name]
+        sub_text = raw_cache[cache_key]
         dev_sym = f"sub{idx}_{name}"
         seq_sym = f"sub{idx}_{name}_seq"
         rewritten, arg_types = _rewrite_sub(sub_text, dev_sym, seq_sym)
         subs.append((dev_sym, seq_sym, arg_types))
         sub_chunks.append(rewritten)
-        print(f"    [{idx}] {name} ({len(arg_types)} args)")
+        tag = " [traced]" if extra else ""
+        print(f"    [{idx}] {name} ({len(arg_types)} args){tag}")
 
-    dispatcher = _make_dispatcher_block(subs, share_arg_idxs=share_arg_idxs)
+    dispatcher = _make_dispatcher_block(subs, share_arg_idxs=share_arg_idxs,
+                                         chain_links=chain_links)
 
     merged_mlir = "module {\n" + "\n".join(sub_chunks) + "\n" + dispatcher + "\n}\n"
     mlir_path = os.path.join(build_dir, f"{out_name}.mlir")
