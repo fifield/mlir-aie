@@ -861,6 +861,7 @@ def _run_tiled_mc_inner_merged(merged_entry, elf_name, n_batches, ppc,
 #   re6_rn3: regime_ppc=1, 100 spatial patches → n_spatial_batches=4,
 #            effective_ppc=4. OCB collapse 3→1 + spatial 4→1, total 12×.
 _MERGED_LAYERS_OCB_ALL = {
+    # ---- rn3 layers (Phase E) ----
     "mc_re8_rn3":      ("ocb_re8_rn3_x1",     4, 1),
     "mc_re6_rn3":      ("ocb_re6_rn3_x1",     3, 4),
     # re4_rn3 active name after _get_mc_variant is mc_re4_rn3_p4 (variant
@@ -868,6 +869,11 @@ _MERGED_LAYERS_OCB_ALL = {
     # effective_ppc=16 = regime_ppc 4 × n_spatial_batches 4 absorbs all
     # 400 spatial patches into one xrt.run.
     "mc_re4_rn3_p4":   ("ocb_re4_rn3_x1",     1, 16),
+    # ---- c3 layers (Phase F) ----
+    "mc_re8_c3":       ("ocb_re8_c3_x1",      8, 1),
+    "mc_re6_c3":       ("ocb_re6_c3_x1",      6, 4),
+    # mc_re4_c3 is variant-selected to mc_re4_c3_p2 (ppc=2 from _MC_PPC).
+    "mc_re4_c3_p2":    ("ocb_re4_c3_x1",      4, 16),
 }
 
 _merged_ocb_enabled = os.environ.get("MERGED_OCB", "1").strip()

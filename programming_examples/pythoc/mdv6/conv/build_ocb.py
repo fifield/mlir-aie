@@ -29,6 +29,7 @@ _OCB_SCRIPT = os.path.join(_HERE, "aie2_multicore_ocb.py")
 # regime_ppc × n_spatial_batches. The kernel's range_(ppc) unroll absorbs
 # both the original ppc and the spatial-batch dimension into one xrt.run.
 _LAYERS = {
+    # ---- rn3 layers (Phase E) ----
     # re8_rn3: regime_ppc=1, 25 spatial patches fit in 32×1=32 cores per call,
     # n_spatial_batches=1 → effective ppc=1.
     "re8_rn3":     (32, 4, 4, 64, 16, 4, 3, 1, 1,  4, 64, 16),
@@ -40,6 +41,21 @@ _LAYERS = {
     # re4_rn3: regime_ppc=4, 400 spatial patches need 32×16=512 cores per call,
     # n_spatial_batches=4 → effective ppc=16. n_ocb=1 (OC=32 / oc_block=32).
     "re4_rn3":     (32, 4, 4, 32, 32, 1, 3, 1, 16,  4, 32, 16),
+
+    # ---- c3 layers (Phase F) ----
+    # re8_c3: spatial 20×20 → 5×5=25 patches @ tile=4. n_spatial_batches=1,
+    # effective ppc=1. OC=128 → n_ocb=8. IC=128.
+    "re8_c3":      (32, 4, 4, 128, 16, 8, 3, 1, 1,  4, 128, 16),
+    # re6_c3: spatial 40×40 → 10×10=100 patches @ tile=4.
+    # n_spatial_batches=4 → effective ppc=4. OC=96 → n_ocb=6. IC=96.
+    "re6_c3":      (32, 4, 4, 96, 16, 6, 3, 1, 4,  4, 96, 16),
+    # re4_c3: spatial 80×80 → 20×20=400 patches @ tile=4.
+    # n_spatial_batches=13 (=ceil(400/32)) → round to ppc=16 (covers 512).
+    # OC=64 → n_ocb=4. IC=64.
+    "re4_c3":      (32, 4, 4, 64, 16, 4, 3, 1, 16,  4, 64, 16),
+    # elan_c3: spatial 160×160 → 40×40=1600 patches @ tile=4. Too many for
+    # single-batch absorption — would need ppc=50. Skip OCB for now (already
+    # uses merged_elan_c3_p4_x4 fanout dispatch).
 }
 
 
