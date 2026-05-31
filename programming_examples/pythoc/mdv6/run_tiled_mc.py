@@ -466,6 +466,34 @@ def _run_tiled_fused_conv_mc_impl(mc_name, sc_name, input_hwc, weights_uint16,
                                    stride=1, kernel_size=3, padding=1):
     actual_name, ppc = _get_mc_variant(mc_name)
 
+    # OCB-unroll merged-ELF fast path (Phase E): one xrt.run covers all OCBs
+    # AND all spatial batches. Takes precedence over the per-OCB merged path
+    # for layers registered in _MERGED_LAYERS_OCB. Forces the regime's active
+    # config (tile/oc_block) since the OCB-unroll ELF is built against those
+    # values. effective_ppc from the registry overrides regime_ppc inside the
+    # OCB dispatch (the ELF was built with effective_ppc baked in).
+    if USE_MERGED_KERNELS and actual_name in _MERGED_LAYERS_OCB:
+        elf_name, n_ocb, effective_ppc = _MERGED_LAYERS_OCB[actual_name]
+        merged = _get_merged_kernel(elf_name)
+        if merged is not None:
+            regime = _regime_conv_artifact(mc_name, actual_name, ppc)
+            if regime is not None:
+                ocb_tile_h = regime["active_tile_h"]
+                ocb_tile_w = regime["active_tile_w"]
+                ocb_oc = regime["active_oc"]
+                ocb_stride = regime["active_stride"]
+                ocb_padding = regime["active_padding"]
+            else:
+                ocb_tile_h, ocb_tile_w = tile_h, tile_w
+                ocb_oc = oc_block
+                ocb_stride, ocb_padding = stride, padding
+            return _run_tiled_mc_inner_ocb_merged(
+                merged, elf_name, n_ocb, effective_ppc,
+                input_hwc, weights_uint16,
+                out_h, out_w, out_ch, ocb_tile_h, ocb_tile_w, ocb_oc,
+                ocb_stride, kernel_size, ocb_padding,
+            )
+
     # Merged-ELF fast path: collapse the per-batch launch loop into one XRT
     # call per OCB when this layer's *active* variant has a registered merged
     # ELF and USE_MERGED_KERNELS is set. Falls through to the standard xclbin
@@ -816,6 +844,183 @@ def _run_tiled_mc_inner_merged(merged_entry, elf_name, n_batches, ppc,
                 tile_out = tile_out.reshape(tile_h, tile_w, oc_block)
                 output[oh_s:oh_e, ow_s:ow_e, oc_start:oc_end] = \
                     tile_out[:oh_e - oh_s, :ow_e - ow_s, :actual_oc]
+
+    return output
+
+
+# Per-layer OCB-unroll merged ELF registry (Phase E). Maps mc_name →
+# (elf_name, n_ocb, effective_ppc). The OCB-unrolled ELF packs all n_ocb
+# OCBs AND all spatial batches into a single xrt.run via compile-time-
+# unrolled runtime sequence with strided weight/output TAPs. effective_ppc
+# = regime_ppc × n_spatial_batches: the kernel processes that many patches
+# per core per worker invocation (compile-time-unrolled).
+#
+# Examples:
+#   re8_rn3: regime_ppc=1, 25 spatial patches < 32 cores → n_spatial_batches=1,
+#            effective_ppc=1. OCB collapse 4→1, total work 4×.
+#   re6_rn3: regime_ppc=1, 100 spatial patches → n_spatial_batches=4,
+#            effective_ppc=4. OCB collapse 3→1 + spatial 4→1, total 12×.
+_MERGED_LAYERS_OCB_ALL = {
+    "mc_re8_rn3":      ("ocb_re8_rn3_x1",     4, 1),
+    "mc_re6_rn3":      ("ocb_re6_rn3_x1",     3, 4),
+    # re4_rn3 active name after _get_mc_variant is mc_re4_rn3_p4 (variant
+    # selected for ppc=4 from _MC_PPC). n_ocb=1 (OC=32 = oc_block=32);
+    # effective_ppc=16 = regime_ppc 4 × n_spatial_batches 4 absorbs all
+    # 400 spatial patches into one xrt.run.
+    "mc_re4_rn3_p4":   ("ocb_re4_rn3_x1",     1, 16),
+}
+
+_merged_ocb_enabled = os.environ.get("MERGED_OCB", "1").strip()
+if _merged_ocb_enabled in ("", "all", "1"):
+    _MERGED_LAYERS_OCB = dict(_MERGED_LAYERS_OCB_ALL)
+elif _merged_ocb_enabled in ("0", "off", "none"):
+    _MERGED_LAYERS_OCB = {}
+else:
+    _allowed_ocb = {s.strip() for s in _merged_ocb_enabled.split(",") if s.strip()}
+    _MERGED_LAYERS_OCB = {k: v for k, v in _MERGED_LAYERS_OCB_ALL.items() if k in _allowed_ocb}
+
+
+def _run_tiled_mc_inner_ocb_merged(merged_entry, elf_name, n_ocb, ppc,
+                                    input_hwc, weights_uint16,
+                                    out_h, out_w, out_ch, tile_h, tile_w, oc_block,
+                                    stride, kernel_size, padding):
+    """OCB-unrolled merged dispatch (Phase E).
+
+    One xrt.run processes all n_ocb output channel blocks AND all spatial
+    batches. Host pre-concatenates per-OCB weight slots into one big BO;
+    the kernel's runtime sequence has the OCB loop unrolled at compile
+    time with strided memtile TAPs serving each OCB its weight/output
+    slice. The `ppc` argument is the EFFECTIVE patches_per_core baked
+    into the ELF (= regime_ppc × n_spatial_batches), which absorbs
+    spatial batching into the same xrt.run via the existing patches_per_core
+    compile-time unroll mechanism.
+    """
+    import pyxrt as _xrt
+    device, _elf, _ctx, kernel = merged_entry
+
+    H, W, C = input_hwc.shape
+    tiles_h = (out_h + tile_h - 1) // tile_h
+    tiles_w = (out_w + tile_w - 1) // tile_w
+    n_oc_blocks = (out_ch + oc_block - 1) // oc_block
+    if n_oc_blocks != n_ocb:
+        raise RuntimeError(
+            f"OCB-unroll {elf_name}: registered n_ocb={n_ocb} but layer needs "
+            f"{n_oc_blocks} OCBs (out_ch={out_ch}, oc_block={oc_block})")
+
+    output = torch.zeros(out_h, out_w, out_ch, dtype=torch.bfloat16)
+
+    patch_h = (tile_h - 1) * stride + kernel_size
+    patch_w = (tile_w - 1) * stride + kernel_size
+    patch_size_raw = patch_h * patch_w * C
+    patch_size = patch_size_raw + (patch_size_raw % 2)
+    output_tile_size = tile_h * tile_w * oc_block
+    active_conv_wt_size = oc_block * C * kernel_size * kernel_size
+    weight_slot_size = active_conv_wt_size + 2 * oc_block
+
+    total_conv_wts = out_ch * C * kernel_size * kernel_size
+    all_conv_wts = weights_uint16[:total_conv_wts]
+    all_bn_w = weights_uint16[total_conv_wts:total_conv_wts + out_ch]
+    all_bn_b = weights_uint16[total_conv_wts + out_ch:total_conv_wts + 2 * out_ch]
+    wts_id = id(weights_uint16)
+    expected_wts_len = total_conv_wts + 2 * out_ch
+
+    # Patch extraction — single spatial batch per OCB.
+    all_patches = []
+    all_coords = []
+    for tr in range(tiles_h):
+        for tc in range(tiles_w):
+            patch = extract_patch(input_hwc, tr, tc, tile_h, tile_w,
+                                   stride, kernel_size, padding)
+            patch_u16 = bf16_to_uint16(patch.flatten())
+            if len(patch_u16) < patch_size:
+                patch_u16 = np.pad(patch_u16, (0, patch_size - len(patch_u16)))
+            all_patches.append(patch_u16)
+            all_coords.append((tr, tc))
+
+    patches_per_call = N_CORES * ppc
+    if len(all_patches) > patches_per_call:
+        raise RuntimeError(
+            f"OCB-unroll {elf_name}: layer needs {len(all_patches)} patches > "
+            f"{patches_per_call} (cores*effective_ppc={ppc}); ELF built with "
+            f"insufficient effective_ppc to absorb all spatial batches")
+
+    # Pack single input batch, padding incomplete trailing slots with slot-0.
+    batch_patches = list(all_patches)
+    while len(batch_patches) < patches_per_call:
+        batch_patches.append(batch_patches[0])
+    per_core_batches = []
+    for core in range(N_CORES):
+        core_start = core * ppc
+        core_end = core_start + ppc
+        per_core_batches.append(np.concatenate(batch_patches[core_start:core_end]))
+    input_concat = np.concatenate(per_core_batches)
+
+    output_per_batch = N_CORES * ppc * output_tile_size
+
+    # Pre-pack per-OCB weights, concatenate into big_wt.
+    wt_blocks = []
+    for ocb in range(n_ocb):
+        oc_start = ocb * oc_block
+        oc_end = min(oc_start + oc_block, out_ch)
+        actual_oc = oc_end - oc_start
+
+        wt_key = (wts_id, ocb, oc_block, out_ch, C, kernel_size,
+                  expected_wts_len, weight_slot_size)
+        wt_block = (_WTBLOCK_CACHE_3x3.get(wt_key)
+                    if len(weights_uint16) == expected_wts_len else None)
+        if wt_block is None:
+            cw_per_oc = C * kernel_size * kernel_size
+            conv_block = all_conv_wts[oc_start * cw_per_oc:oc_end * cw_per_oc]
+            if actual_oc < oc_block:
+                conv_block = np.pad(conv_block, (0, (oc_block - actual_oc) * cw_per_oc))
+            if kernel_size == 3:
+                conv_block = _pack_3x3_weights(conv_block, oc_block, C)
+            bn_w_block = all_bn_w[oc_start:oc_end]
+            bn_b_block = all_bn_b[oc_start:oc_end]
+            wt_block = np.concatenate([conv_block, bn_w_block, bn_b_block])
+            if len(wt_block) < weight_slot_size:
+                wt_block = np.pad(wt_block, (0, weight_slot_size - len(wt_block)))
+            _WTBLOCK_CACHE_3x3[wt_key] = wt_block
+            _gemm_cache_evict_dead_ids(_WTBLOCK_CACHE_3x3)
+        wt_blocks.append(wt_block)
+
+    big_wt = np.concatenate(wt_blocks)
+    big_out_nelem = n_ocb * output_per_batch
+
+    big_wt_bo = _get_merged_bo(device, elf_name, "big_wt", big_wt.nbytes)
+    in_bo = _get_merged_bo(device, elf_name, "in_0", input_concat.nbytes)
+    big_out_bo = _get_merged_bo(device, elf_name, "big_out", big_out_nelem * 2)
+
+    _xrt_fill_bo(in_bo, input_concat)
+    _xrt_fill_bo(big_wt_bo, big_wt)
+
+    # Single dispatch — args follow merged-x1 share_arg_idxs={1} convention:
+    # arg0=wt(big), arg1=in, arg2=out(big).
+    _xrt_run_kernel(kernel, [big_wt_bo, in_bo, big_out_bo])
+
+    big_out_bo.sync(_xrt.xclBOSyncDirection.XCL_BO_SYNC_BO_FROM_DEVICE)
+    big_out_data = np.frombuffer(
+        big_out_bo.map(), dtype=np.uint16, count=big_out_nelem
+    ).copy()
+
+    # Unpack tile-by-tile per OCB.
+    for ocb in range(n_ocb):
+        oc_start = ocb * oc_block
+        oc_end = min(oc_start + oc_block, out_ch)
+        actual_oc = oc_end - oc_start
+        ocb_base = ocb * output_per_batch
+        for j in range(len(all_patches)):
+            tr, tc = all_coords[j]
+            oh_s = tr * tile_h; ow_s = tc * tile_w
+            oh_e = min(oh_s + tile_h, out_h)
+            ow_e = min(ow_s + tile_w, out_w)
+            core = j // ppc
+            slot = j % ppc
+            start = ocb_base + (core * ppc + slot) * output_tile_size
+            tile_out = uint16_to_bf16(big_out_data[start:start + output_tile_size])
+            tile_out = tile_out.reshape(tile_h, tile_w, oc_block)
+            output[oh_s:oh_e, ow_s:ow_e, oc_start:oc_end] = \
+                tile_out[:oh_e - oh_s, :ow_e - ow_s, :actual_oc]
 
     return output
 
