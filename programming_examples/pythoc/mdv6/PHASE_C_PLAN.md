@@ -1,6 +1,13 @@
 # Phase C Plan — On-chip pipelining / cross-layer fusion
 
-Status: planning. Tracks the work after Phase A landed (5f7460cba).
+Status: step A landed (8649037dc). Tracks the work after Phase A (5f7460cba).
+
+## Progress
+
+- **Step A: RN1 pair fusion** — done. Pair ELFs cover every rn1 dispatch in
+  the model (re4/re6/re8). Wall **1375 → 1330 ms (-3.3%)**, launches
+  **368 → 354**, launch_gap **237 → 203 ms**, NPU **973 → 966 ms**, PASS
+  bytewise. The chain_links infrastructure is now validated end-to-end.
 
 ## Baseline (post-Phase A, post-xrt.run hook)
 
@@ -78,14 +85,16 @@ So one re6 frame fires ~14 NPU calls plus 3 CPU RepConvs per inner block.
 
 ## Phase C fusion candidates, ordered by ROI vs effort
 
-### A. RN1 pair (lowest effort)
+### A. RN1 pair — DONE (8649037dc, 2026-05-31)
 Fuse the two `mc_rn1` calls in `run_rn_mc` (conv1 + conv2 on the same `inp`).
-- **Effort**: small. Restructure host: compute x2_rn upfront alongside x1_rn,
-  then run the bottleneck loop. One merged ELF with 2 sub-devices, shared `inp`
-  arg via chain_links.
-- **Savings**: 1 launch per `run_rn_mc` invocation × ~10 invocations/frame =
-  ~10 launches × ~700 µs = ~7 ms wall.
-- **Risk**: changes host orchestration semantics. Need careful diff tests.
+- **Predicted**: ~7 ms wall.
+- **Measured**: -45 ms wall (-3.3%), -14 launches, -34 ms launch_gap, -7 ms NPU.
+  Better than predicted because per-call host overhead also dropped (575 vs
+  644 µs/call) and one xrt.run.wait covers two ops instead of two waits per
+  pair.
+- Outputs: `merged_gemm_t{tile}_ic{ic}_oc{oc}_p{ppc}_pair_x1.elf` for the
+  three rn1 shapes; `run_gemm_pair_mc` finds them by shape and falls back
+  to two sequential calls when no pair ELF exists.
 
 ### B. C3 pair (medium effort)
 `x3 = mc_re6_c3(x3rn)` and `x4 = mc_re6_c3(x4rn)` are called with different
@@ -123,10 +132,14 @@ under compute.
 
 ## Proposed sequence
 
-1. **A: RN1 pair fusion** (this week). Smallest commit, validates the chain_links
-   infrastructure in build_merged.py on a real model path. Bytewise test.
-2. **C: rep_elan outer fusion** (next), if A goes smoothly.
-3. **D: RepConv NPU port** (in parallel, larger).
+1. ~~**A: RN1 pair fusion**~~ — DONE.
+2. **C: rep_elan outer fusion** (next). Now justified by step A's measured
+   savings: per-call host overhead dropped 11% with chain_links, so a larger
+   outer fusion should compound similarly.
+3. **D: RepConv NPU port** (in parallel, larger). Phase A timing data shows
+   mc_re6_rn3 + mc_re8_rn3 = 141 ms across 102 calls — the densest NPU work.
+   Fusing each rn3 with its preceding RepConv into one ELF needs RepConv on
+   NPU first.
 4. **E: memtile-resident** (only if A–D land cleanly and we're still above
    500 ms wall).
 
