@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""Phase E prototype build — OCB-unrolled rn3 ELF.
+
+Wraps aie2_multicore_ocb.py output in a single-sub merged dispatcher
+(via build_merged.build_merged) so the resulting ELF has a `@main`
+entry point compatible with xrt.elf + xrt.ext.kernel(ctx, "main").
+That matches how every other merged-x1 ELF in conv/build_merged is
+loaded by run_tiled_mc.py.
+
+Usage:
+  python3 build_ocb.py --layer re8_rn3
+  python3 build_ocb.py --layer re8_rn3_ref
+"""
+import argparse
+import os
+import sys
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _HERE)
+
+from build_merged import build_merged
+
+_OCB_SCRIPT = os.path.join(_HERE, "aie2_multicore_ocb.py")
+
+# (label, n_cores, tile_h, tile_w, ic, oc_block, n_ocb, ks, stride, ppc,
+#  active_tile, active_ic, active_oc)
+# Tile/ic/oc match the regime-active config; n_ocb covers the full OC budget.
+# ppc is the EFFECTIVE patches_per_core inside the OCB-unroll ELF:
+# regime_ppc × n_spatial_batches. The kernel's range_(ppc) unroll absorbs
+# both the original ppc and the spatial-batch dimension into one xrt.run.
+_LAYERS = {
+    # re8_rn3: regime_ppc=1, 25 spatial patches fit in 32×1=32 cores per call,
+    # n_spatial_batches=1 → effective ppc=1.
+    "re8_rn3":     (32, 4, 4, 64, 16, 4, 3, 1, 1,  4, 64, 16),
+    "re8_rn3_ref": (32, 4, 4, 64, 16, 1, 3, 1, 1,  4, 64, 16),
+    # re6_rn3: regime_ppc=1, 100 spatial patches need 32×4=128 cores per call,
+    # n_spatial_batches=4 → effective ppc=4. n_ocb=3 (OC=48 / oc_block=16).
+    "re6_rn3":     (32, 4, 4, 48, 16, 3, 3, 1, 4,  4, 48, 16),
+    "re6_rn3_ref": (32, 4, 4, 48, 16, 1, 3, 1, 4,  4, 48, 16),
+    # re4_rn3: regime_ppc=4, 400 spatial patches need 32×16=512 cores per call,
+    # n_spatial_batches=4 → effective ppc=16. n_ocb=1 (OC=32 / oc_block=32).
+    "re4_rn3":     (32, 4, 4, 32, 32, 1, 3, 1, 16,  4, 32, 16),
+}
+
+
+def _build_layer(label, cfg):
+    (n_cores, tile_h, tile_w, ic, oc_block, n_ocb, ks, stride, ppc,
+     active_tile, active_ic, active_oc) = cfg
+
+    # Build the args list aie2_multicore_ocb.py expects:
+    # positional: n_cores tile_h tile_w ic oc_block n_ocb ks stride ppc
+    # then --active-* keyword args.
+    sub_args = [
+        str(n_cores), str(tile_h), str(tile_w), str(ic), str(oc_block),
+        str(n_ocb), str(ks), str(stride), str(ppc),
+        "--active-tile-h", str(active_tile),
+        "--active-tile-w", str(active_tile),
+        "--active-ic", str(active_ic),
+        "--active-oc", str(active_oc),
+        "--active-stride", str(stride),
+        "--active-padding", "1" if ks == 3 else "0",
+    ]
+
+    sub_name = f"ocb_{label}"
+    out_name = f"ocb_{label}_x1"
+    return build_merged(
+        out_name, [sub_name],
+        kind="mc",
+        sub_spec_overrides={sub_name: (_OCB_SCRIPT, sub_args)},
+        share_arg_idxs={1},  # matches existing merged-x1 convention (W at arg0)
+    )
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--layer", choices=list(_LAYERS) + ["all"], default="re8_rn3")
+    args = parser.parse_args()
+
+    layers = list(_LAYERS) if args.layer == "all" else [args.layer]
+    ok = fail = 0
+    for label in layers:
+        print(f"=== {label} ===")
+        if _build_layer(label, _LAYERS[label]) is not None:
+            ok += 1
+        else:
+            fail += 1
+    print(f"\nDone: {ok} OK, {fail} FAIL")
+    return 0 if fail == 0 else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
