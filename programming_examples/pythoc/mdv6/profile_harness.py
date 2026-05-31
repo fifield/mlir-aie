@@ -272,6 +272,8 @@ class Profiler:
         for tgt in tfmm_targets:
             tgt.run_tiled_mc = mcr.run_tiled_fused_conv_mc
             tgt.run_gemm_conv1x1 = mcr.run_gemm_conv1x1_mc
+            if hasattr(mcr, "run_gemm_pair_mc"):
+                tgt.run_gemm_pair = mcr.run_gemm_pair_mc
             if "fuse_bn" in dir(tgt):
                 tgt.fuse_bn = ett.fuse_bn
                 tgt.fuse_bn_transposed = ett.fuse_bn_transposed
