@@ -224,6 +224,13 @@ class Profiler:
                 prof._bump("npu_run", t1 - t0)
                 prof._cur.n_launches += 1
                 prof._last_launch_end = t1
+                # Per-layer attribution: bucket the NPU time by the layer name
+                # set in mcr._CURRENT_LAYER by run_tiled_fused_conv_mc /
+                # run_gemm_conv1x1_mc.
+                layer = getattr(mcr, "_CURRENT_LAYER", None)
+                if layer is not None:
+                    prof._cur.sub_bucket_ms[f"layer.{layer}"] += (t1 - t0) * 1000
+                    prof._cur.sub_bucket_n[f"layer.{layer}"] += 1
                 return r
 
             self._patch(mcr, "_xrt_run_kernel", _wrap_xrt)
