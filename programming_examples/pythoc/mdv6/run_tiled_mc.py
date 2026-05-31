@@ -233,6 +233,12 @@ def _get_merged_kernel(elf_name):
     return entry
 
 
+# Per-layer attribution: set by run_tiled_fused_conv_mc / run_gemm_conv1x1_mc
+# at entry and cleared at exit. _xrt_run_kernel and the harness's wrap can read
+# this to attribute NPU time + launch_gap to a specific model layer.
+_CURRENT_LAYER = None
+
+
 def _xrt_run_kernel(kernel, args):
     """One xrt.run launch: set_arg per positional, start(), wait2().
 
@@ -442,6 +448,22 @@ def run_tiled_fused_conv_mc(mc_name, sc_name, input_hwc, weights_uint16,
         mc_name: multicore xclbin name (e.g., 'mc_re4_c1')
         sc_name: unused in current flow; retained for signature compatibility.
     """
+    global _CURRENT_LAYER
+    _prev_layer = _CURRENT_LAYER
+    _CURRENT_LAYER = mc_name
+    try:
+        return _run_tiled_fused_conv_mc_impl(
+            mc_name, sc_name, input_hwc, weights_uint16,
+            out_h, out_w, out_ch, tile_h, tile_w, oc_block,
+            stride, kernel_size, padding,
+        )
+    finally:
+        _CURRENT_LAYER = _prev_layer
+
+
+def _run_tiled_fused_conv_mc_impl(mc_name, sc_name, input_hwc, weights_uint16,
+                                   out_h, out_w, out_ch, tile_h, tile_w, oc_block,
+                                   stride=1, kernel_size=3, padding=1):
     actual_name, ppc = _get_mc_variant(mc_name)
 
     # Merged-ELF fast path: collapse the per-batch launch loop into one XRT
@@ -1172,6 +1194,20 @@ def run_gemm_conv1x1_mc(gemm_name, sc_name, input_hwc, weights_uint16,
     Tries K-blocked path first (no OC blocking), falls back to OC-blocked,
     then to scalar MC.
     """
+    global _CURRENT_LAYER
+    _prev_layer = _CURRENT_LAYER
+    _CURRENT_LAYER = gemm_name
+    try:
+        return _run_gemm_conv1x1_mc_impl(
+            gemm_name, sc_name, input_hwc, weights_uint16,
+            out_h, out_w, out_ch, oc_block,
+        )
+    finally:
+        _CURRENT_LAYER = _prev_layer
+
+
+def _run_gemm_conv1x1_mc_impl(gemm_name, sc_name, input_hwc, weights_uint16,
+                               out_h, out_w, out_ch, oc_block=None):
     H, W, IC = input_hwc.shape
     M = H * W
 
