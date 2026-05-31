@@ -22,6 +22,7 @@ mcr = importlib.util.module_from_spec(spec3); spec3.loader.exec_module(mcr)
 
 fuse_bn = ett.fuse_bn
 fuse_bn_transposed = ett.fuse_bn_transposed
+fuse_repconv = ett.fuse_repconv
 run_tiled_mc = mcr.run_tiled_fused_conv_mc
 run_gemm_conv1x1 = mcr.run_gemm_conv1x1_mc
 run_gemm_pair = mcr.run_gemm_pair_mc
@@ -113,6 +114,14 @@ def run_rn_mc(repncsp, inp, H, W, ic, oc,
         with torch.no_grad():
             repconv_out_nchw = bn_block.conv1(nchw_in)
         repconv_out = repconv_out_nchw.squeeze(0).permute(1, 2, 0).contiguous()
+        # NOTE: RepConv stays on CPU. Phase D port (NPU mc_rn3 with
+        # fuse_repconv weights) was implemented and confirmed bytewise PASS,
+        # but added 114 NPU dispatches/frame (~160 ms NPU + 30 ms launch_gap)
+        # while only recovering ~26 ms CPU — net wall regression of ~250 ms.
+        # See PHASE_C_PLAN.md / Phase D lesson. fuse_repconv (in
+        # _full_model_helpers/elan_test_tiled.py) stays as future-use
+        # infrastructure; a real Phase D win needs a fused 3x3+3x3+SiLU
+        # kernel with memtile-resident intermediate (not just a port).
         conv2_out = rt(mc_rn3, sc_rn3, repconv_out, fuse_bn(bn_block.conv2),
                        H, W, neck, trn3, trn3, orn3, 1, 3, 1)
         current = (residual + conv2_out) if bn_block.residual else conv2_out

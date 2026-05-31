@@ -278,6 +278,8 @@ class Profiler:
                 tgt.fuse_bn = ett.fuse_bn
                 tgt.fuse_bn_transposed = ett.fuse_bn_transposed
                 tgt.fuse_bn_transposed_3x3 = ett.fuse_bn_transposed_3x3
+                if hasattr(ett, "fuse_repconv"):
+                    tgt.fuse_repconv = ett.fuse_repconv
 
         # numpy: np.concatenate is the dominant numpy cost (per repack).
         _orig_concat = np.concatenate
