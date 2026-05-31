@@ -110,18 +110,21 @@ def run_rn_mc(repncsp, inp, H, W, ic, oc,
     current = x1
     for bn_block in repncsp.bottleneck:
         residual = current.clone()
-        nchw_in = current.float().permute(2, 0, 1).unsqueeze(0).to(torch.bfloat16)
-        with torch.no_grad():
-            repconv_out_nchw = bn_block.conv1(nchw_in)
-        repconv_out = repconv_out_nchw.squeeze(0).permute(1, 2, 0).contiguous()
-        # NOTE: RepConv stays on CPU. Phase D port (NPU mc_rn3 with
-        # fuse_repconv weights) was implemented and confirmed bytewise PASS,
-        # but added 114 NPU dispatches/frame (~160 ms NPU + 30 ms launch_gap)
-        # while only recovering ~26 ms CPU — net wall regression of ~250 ms.
-        # See PHASE_C_PLAN.md / Phase D lesson. fuse_repconv (in
-        # _full_model_helpers/elan_test_tiled.py) stays as future-use
-        # infrastructure; a real Phase D win needs a fused 3x3+3x3+SiLU
-        # kernel with memtile-resident intermediate (not just a port).
+        # Phase D: RepConv on NPU via weight reparameterization.
+        # bn_block.conv1 is a RepConv module — SiLU(BN(3x3(x)) + BN(1x1(x)))
+        # — which folds into a single 3x3 conv with bias at inference.
+        # fuse_repconv collapses both BN+conv branches and sets bn_w=1 so
+        # the mc_*_rn3 kernel runs it straight (its built-in SiLU matches
+        # RepConv.act). This adds one mc_rn3 dispatch per bottleneck (~1.4
+        # ms NPU) while removing ~600 µs CPU RepConv per iteration —
+        # currently a net wall regression on its own, because each mc_rn3
+        # dispatch costs more than the CPU it replaces. The real win comes
+        # when a fused 3x3+3x3+add+SiLU kernel lands (Phase E): the
+        # back-to-back conv pair stays in memtile L2 with no host
+        # reshape between them. fuse_repconv is the host-side prep that
+        # makes that future fusion drop-in. See PHASE_C_PLAN.md.
+        repconv_out = rt(mc_rn3, sc_rn3, current, fuse_repconv(bn_block.conv1),
+                         H, W, neck, trn3, trn3, orn3, 1, 3, 1)
         conv2_out = rt(mc_rn3, sc_rn3, repconv_out, fuse_bn(bn_block.conv2),
                        H, W, neck, trn3, trn3, orn3, 1, 3, 1)
         current = (residual + conv2_out) if bn_block.residual else conv2_out
