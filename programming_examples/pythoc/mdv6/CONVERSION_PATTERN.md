@@ -3,7 +3,7 @@
 How to port `programming_examples/ml/mdv6/<layer>/` (IRON + external C++ kernel)
 into a single-file PythoC + IRON example matching the `pythoc/` style.
 
-The first worked example is `mdv6/elementwise/elementwise_pythoc.py` — start
+The first worked example is `mdv6/prototypes/elementwise/elementwise_pythoc.py` — start
 there before applying this to another layer.
 
 ---
@@ -27,7 +27,7 @@ Use this when:
 
 Replace the `Kernel("foo", "foo.o", [...])` reference with an inline
 `@aie_kernel`-decorated PythoC function, then build a `PythocKernel` from it.
-This is what `mdv6/elementwise/elementwise_pythoc.py` does for add/mul/max.
+This is what `mdv6/prototypes/elementwise/elementwise_pythoc.py` does for add/mul/max.
 
 Use this when:
 - The kernel is small (≲100 lines) or naturally maps to a handful of
@@ -41,7 +41,7 @@ kernel is large or uses anything exotic.
 
 ## Canonical single-file structure (Pattern B)
 
-Skeleton — see `mdv6/elementwise/elementwise_pythoc.py` for the full version.
+Skeleton — see `mdv6/prototypes/elementwise/elementwise_pythoc.py` for the full version.
 
 ```python
 #!/usr/bin/env python3
