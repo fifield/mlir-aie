@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""Build merged_<variant>_x1.elf for every active MC 3x3 conv variant.
+"""Build merged ELFs for every active MC 3x3 conv variant.
 
-Phase A.1 (mlir-aie-mi7 Phase A) target: convert standalone MC xclbins to
-single-sub-device ELFs so every MC dispatch can take the xrt.elf+xrt.run
-path. The 5 layers already batch-merged in run_tiled_mc._MERGED_LAYERS_ALL
-keep their multi-clone ELFs — only the *remaining* variants get a 1-clone
-wrapper here.
+Phase A.1 (mlir-aie-mi7 Phase A) target: every MC dispatch takes the
+xrt.elf+xrt.run path. This script produces:
+
+  1. Single-clone wrappers (merged_<variant>_x1.elf) for layers that
+     don't benefit from batch fanout — most variants.
+  2. Multi-clone batch-fanout ELFs (merged_<variant>_xN.elf) for the
+     3 large-tile / large-fanout layers in _FANOUT below.
+
+The Phase E/F/G OCB-unrolled ELFs (ocb_*) are built separately by
+build_ocb.py and take precedence over the x1 ELFs at dispatch time.
 """
 import os
 import sys
@@ -14,23 +19,16 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from build_merged import build_merged
 
-# Variants that already have a multi-clone batch ELF in run_tiled_mc.py
-# (mlir-aie-mi7.5 Phase 3). We don't override those — the larger fan-out
-# is a strict win.
-_ALREADY_MERGED = {
-    "mc_ftconv0",
-    "mc_ftconv1_p2",
-    "mc_elan_c3_p4",
-    "mc_aconv3",
-    "mc_aconv16",
-}
-
-# Every other 3x3 MC variant that the model dispatches at steady state.
-# Derived from the call sites in test_full_model_mc.py + _MC_PPC variant
-# resolution in run_tiled_mc.py.
+# Single-clone (x1) variants — every 3x3 MC variant the model dispatches
+# at steady state, derived from call sites in test_full_model_mc.py +
+# _MC_PPC variant resolution in run_tiled_mc.py. Most are also covered
+# by OCB-unrolled ELFs (Phase E/F/G) which take precedence; the x1 ELFs
+# remain as the fallback path for MERGED_OCB=0 testing.
 _X1_VARIANTS = [
+    "mc_aconv3",
     "mc_aconv5_p4",
     "mc_aconv7",
+    "mc_aconv16",
     "mc_aconv19",
     "mc_re4_c3_p2",
     "mc_re4_rn3_p4",
@@ -40,34 +38,49 @@ _X1_VARIANTS = [
     "mc_re8_rn3",
 ]
 
+# Multi-clone batch-fanout ELFs. `(variant, n_clones)` — N sub-clones of
+# the same kernel in one dispatcher collapse N spatial batches per
+# layer-call into one xrt.run.
+_FANOUT = [
+    ("mc_ftconv0",     8),   # merged_ftconv0_x8
+    ("mc_ftconv1_p2",  4),   # merged_ftconv1_p2_x4
+    ("mc_elan_c3_p4",  4),   # merged_elan_c3_p4_x4
+]
+
+
+def _build_one(variant, n_clones):
+    if n_clones == 1:
+        out = f"merged_{variant.replace('mc_', '')}_x1"
+        sub_names = [variant]
+    else:
+        out = f"merged_{variant.replace('mc_', '')}_x{n_clones}"
+        sub_names = [variant] * n_clones
+    bd = os.path.normpath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "build_merged"))
+    elf_path = os.path.join(bd, f"{out}.elf")
+    if os.path.exists(elf_path):
+        print(f"  {out}: already built, skipping")
+        return True
+    print(f"=== Building {out} ({n_clones} clone{'s' if n_clones > 1 else ''}) ===")
+    # share_arg_idxs={1} promotes the per-sub wt arg (index 1 in the sub's
+    # (in, wt, out) tuple) to a single shared dispatcher arg. All clones
+    # then receive the same wt BO; per-clone in/out args follow. The runtime
+    # dispatcher in _run_tiled_mc_inner_merged matches this convention.
+    path = build_merged(out, sub_names, share_arg_idxs={1})
+    return path is not None
+
 
 def main():
-    print(f"Building {len(_X1_VARIANTS)} MC _x1 ELFs...")
+    targets = [(v, 1) for v in _X1_VARIANTS] + _FANOUT
+    print(f"Building {len(targets)} MC merged ELFs...")
     t0 = time.time()
     ok = fail = 0
-    for variant in _X1_VARIANTS:
-        out = f"merged_{variant.replace('mc_', '')}_x1"
-        # Skip if already built (build_merged itself doesn't have a cache).
-        bd = os.path.normpath(
-            os.path.join(os.path.dirname(__file__), "build_merged"))
-        elf_path = os.path.join(bd, f"{out}.elf")
-        if os.path.exists(elf_path):
-            print(f"  {out}: already built, skipping")
-            ok += 1
-            continue
-        print(f"=== Building {out} ===")
-        # share={1} puts the wt arg first in @main, matching the multi-clone
-        # ELF convention (wt, then per-clone in/out pairs). The runtime
-        # dispatcher in run_tiled_mc._run_tiled_mc_inner_merged sets
-        # arg0=wt regardless of n_batches, so all merged ELFs must agree on
-        # this order. (For n_clones=1, --share is purely an arg reordering.)
-        path = build_merged(out, [variant], share_arg_idxs={1})
-        if path is not None:
+    for variant, n_clones in targets:
+        if _build_one(variant, n_clones):
             ok += 1
         else:
             fail += 1
-    dt = time.time() - t0
-    print(f"\nDone: {ok} OK, {fail} FAIL in {dt:.0f}s")
+    print(f"\nDone: {ok} OK, {fail} FAIL in {time.time() - t0:.0f}s")
     return 0 if fail == 0 else 1
 
 
