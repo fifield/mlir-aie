@@ -25,6 +25,7 @@ pair into one PythoC file.
 | `aconv/` | AvgPool2d + Conv3x3 (stride 2) + BN + SiLU |
 | `batchnorm_silu/` | Standalone BN + SiLU |
 | `bottleneck/` | RepConv + Conv3x3 + residual |
+| `conv/` | Conv3x3 + BN + SiLU (general per-layer tiled conv) |
 | `elan/` | ELAN block (c1 + c3 split/merge + c4) |
 | `elementwise/` | add / mul / max (the canonical conversion example) |
 | `repconv/` | RepConv (parallel 3x3 + 1x1 branches + BN + SiLU) |
