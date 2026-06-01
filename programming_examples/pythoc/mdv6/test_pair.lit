@@ -1,0 +1,20 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// Bytewise correctness for GEMM rn1 pair ELFs (Phase C step A).
+//
+// For each shape in conv/build_pair_rn1._RN1_PAIRS, dispatches the
+// pair ELF (one shared input BO, two independent weight/output args via
+// chain_links) and compares each per-sub output against the x1 single-
+// kernel ELF run twice with the same weights. PASS = bytewise identical.
+//
+// Both the pair ELF and its x1 counterpart are built on demand into
+// MDV6_BUILD_DIR/build_merged/.
+//
+// REQUIRES: ryzen_ai_npu2, peano, torch
+//
+// RUN: rm -rf test_stx
+// RUN: mkdir -p test_stx
+// RUN: cd test_stx
+//
+// RUN: env MDV6_BUILD_DIR=. %run_on_npu2% python3 %S/conv/test_pair.py --shape all
