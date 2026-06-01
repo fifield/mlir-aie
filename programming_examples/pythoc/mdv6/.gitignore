@@ -1,0 +1,7 @@
+# Large binaries (weights, graphs) — too big for git, generated/downloaded
+mdv6_bf16_weights.pt
+graphs/mdv6_mit_yolov9c.onnx
+
+# Runtime logs
+*.log
+test_full_model_mc_profile.log
