@@ -1,4 +1,4 @@
-%#!/usr/bin/env python3
+#!/usr/bin/env python3
 # sppelan_pythoc.py -*- Python -*-
 #
 # This file is licensed under the Apache License v2.0 with LLVM Exceptions.
