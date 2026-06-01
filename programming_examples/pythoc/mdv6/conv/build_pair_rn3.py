@@ -38,7 +38,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from build_merged import build_merged, _resolve_build_dir
 
-# (label, mc_config_name) — pulls shape from build_multicore.CONFIGS
+# (label, mc_config_name) — pulls shape from mc_configs.CONFIGS
 _RN3_PAIRS = [
     ("re8_rn3", "mc_re8_rn3"),
     # re6_rn3 / re4_rn3 deferred until step 1 validates

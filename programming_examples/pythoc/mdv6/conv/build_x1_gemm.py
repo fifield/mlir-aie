@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Build merged_<layer>_gemm_x1.elf for every active GEMM 1x1 conv layer.
+"""Build merged_gemm_<shape>_x1.elf for every active GEMM 1x1 conv shape.
 
-Phase A.2 (mlir-aie-mi7 Phase A): convert the GEMM standalone xclbin path to
-single-sub-device ELFs so every GEMM dispatch can route through xrt.elf/xrt.run.
+Picks the shape per layer from gemm_configs.MODEL_LAYERS_1x1 using the same
+`choose_k_block` / `compute_ppc{_kblocked}` logic the runtime applies — so
+every shape an actual rt() call resolves to is covered. Multiple layers may
+share the same physical (tile_m, ic, oc, k_block, ppc) shape and therefore
+the same ELF.
 
-The shape per layer is derived from the model's MODEL_LAYERS_1x1 list, using
-the same `choose_k_block` / `compute_ppc_kblocked` logic the runtime would.
-Each ELF is built with `--share 1` so the dispatcher arg order is
-(wt, in, out) — matching the host-side `set_arg(0, wt_bo)` convention shared
-with MC merged ELFs (see feedback_merged_elf_arg_order.md).
+share_arg_idxs={1} makes the dispatcher arg order (wt, in, out), matching
+the host-side `set_arg(0, wt_bo)` convention used by both single-clone MC
+and GEMM merged ELFs.
 
-Output naming: merged_<layer>_gemm_x1.elf
+Output naming: merged_gemm_t<tile_m>_ic<IC>_oc<OC>[_kb<k_block>]_p<ppc>_x1.elf
 """
 import math
 import os

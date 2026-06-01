@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""Build a merged-device xclbin for MDV6.
+"""Build a merged-device ELF for MDV6.
 
-This script takes one or more sub-device specs (each a CONFIGS-style tuple)
-and produces a single ELF holding all sub-devices plus a dispatcher whose
-``aie.runtime_sequence @main`` chains them via ``aiex.configure``/``aiex.run``.
-
-Mechanism (cf. ``llama32_1b/builders/lm_head_gemv.py`` and ``aie.elf``):
+Takes one or more sub-device specs and produces a single ELF holding all
+sub-devices plus a dispatcher whose ``aie.runtime_sequence @main`` chains
+them via ``aiex.configure``/``aiex.run``:
 
   module {
     aie.device(npu2) @sub0 { ... aie.runtime_sequence @sub0_seq(...) ... }
@@ -18,14 +16,20 @@ Mechanism (cf. ``llama32_1b/builders/lm_head_gemv.py`` and ``aie.elf``):
     }
   }
 
-The two MLIR passes that run inside ``aiecc.py --generate-full-elf
---expand-load-pdis`` materialize the ``load_pdi`` switch between configs and
-pack every sub-device's CDO/PDI into one ELF.
+``aiecc.py --generate-full-elf --expand-load-pdis`` materializes the
+``load_pdi`` switch between configs and packs every sub-device's CDO/PDI
+into one ELF. XRT loads the resulting ELF via ``xrt.elf`` + ``xrt.ext.kernel``
+with the entry point ``main``.
 
-Phase 1 scope: prove the toolflow on ``mc_ftconv0 + mc_ftconv1`` (the
-backbone stem). Each sub-device keeps its native I/O layout — the host
-still re-arranges activations between conv0_out and conv1_in. Real
-data-flow merging is Phase 3, out of scope here.
+Options the caller controls:
+  - ``share_arg_idxs={1}``: promote the per-sub arg at index 1 (weight by
+    convention) to a single shared dispatcher arg. Standard for cloned
+    fanout where all N copies use the same weights but different inputs.
+  - ``chain_links=[(src_sub, src_arg, dst_sub, dst_arg)]``: alias one
+    sub's arg to another's — used for the GEMM pair pattern where two
+    sub-devices share one input BO.
+
+The same MLIR pattern is used by llama32_1b/builders/*.py.
 """
 import argparse
 import os
@@ -34,11 +38,11 @@ import shutil
 import subprocess
 import sys
 
-# Per-shape config list lives in mc_configs.py (was extracted from the
-# retired build_multicore.py during the Phase G+ cleanup).
-# pick the same parameters as the standalone xclbins.
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "gemm_conv1x1")))
+# MC_CONFIGS is the per-shape tuple list (label, n_cores, tile_h, tile_w,
+# ic, oc, ks, stride, ppc). Sub-device kind="mc" build args are derived
+# from this table.
 from mc_configs import CONFIGS as MC_CONFIGS  # noqa: E402
 
 KERNELS_DIR = os.path.normpath(
