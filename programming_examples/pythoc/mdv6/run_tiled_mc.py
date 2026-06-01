@@ -473,24 +473,24 @@ def _run_tiled_fused_conv_mc_impl(mc_name, sc_name, input_hwc, weights_uint16,
     # values. effective_ppc from the registry overrides regime_ppc inside the
     # OCB dispatch (the ELF was built with effective_ppc baked in).
     if USE_MERGED_KERNELS and actual_name in _MERGED_LAYERS_OCB:
-        elf_name, n_ocb, effective_ppc = _MERGED_LAYERS_OCB[actual_name]
+        elf_name, n_ocb, effective_ppc, ocb_oc_block = _MERGED_LAYERS_OCB[actual_name]
         merged = _get_merged_kernel(elf_name)
         if merged is not None:
             regime = _regime_conv_artifact(mc_name, actual_name, ppc)
             if regime is not None:
                 ocb_tile_h = regime["active_tile_h"]
                 ocb_tile_w = regime["active_tile_w"]
-                ocb_oc = regime["active_oc"]
                 ocb_stride = regime["active_stride"]
                 ocb_padding = regime["active_padding"]
             else:
                 ocb_tile_h, ocb_tile_w = tile_h, tile_w
-                ocb_oc = oc_block
                 ocb_stride, ocb_padding = stride, padding
+            # oc_block comes from the registry (must match the ELF's built
+            # oc_block, NOT necessarily regime active_oc — see re4_rn3).
             return _run_tiled_mc_inner_ocb_merged(
                 merged, elf_name, n_ocb, effective_ppc,
                 input_hwc, weights_uint16,
-                out_h, out_w, out_ch, ocb_tile_h, ocb_tile_w, ocb_oc,
+                out_h, out_w, out_ch, ocb_tile_h, ocb_tile_w, ocb_oc_block,
                 ocb_stride, kernel_size, ocb_padding,
             )
 
@@ -848,12 +848,15 @@ def _run_tiled_mc_inner_merged(merged_entry, elf_name, n_batches, ppc,
     return output
 
 
-# Per-layer OCB-unroll merged ELF registry (Phase E). Maps mc_name →
-# (elf_name, n_ocb, effective_ppc). The OCB-unrolled ELF packs all n_ocb
-# OCBs AND all spatial batches into a single xrt.run via compile-time-
-# unrolled runtime sequence with strided weight/output TAPs. effective_ppc
-# = regime_ppc × n_spatial_batches: the kernel processes that many patches
-# per core per worker invocation (compile-time-unrolled).
+# Per-layer OCB-unroll merged ELF registry (Phase E/F/G). Maps mc_name →
+# (elf_name, n_ocb, effective_ppc, oc_block). The OCB-unrolled ELF packs
+# all n_ocb OCBs AND all spatial batches into a single xrt.run via
+# compile-time-unrolled runtime sequence with strided weight/output TAPs.
+# effective_ppc = regime_ppc × n_spatial_batches: the kernel processes
+# that many patches per core per worker invocation (compile-time-unrolled).
+# oc_block must match the value baked into the ELF (= total_oc / n_ocb);
+# the dispatch uses this instead of regime active_oc when they differ
+# (e.g. re4_rn3 builds at oc_block=32 to keep n_ocb=1, regime says 16).
 #
 # Examples:
 #   re8_rn3: regime_ppc=1, 25 spatial patches < 32 cores → n_spatial_batches=1,
@@ -862,18 +865,27 @@ def _run_tiled_mc_inner_merged(merged_entry, elf_name, n_batches, ppc,
 #            effective_ppc=4. OCB collapse 3→1 + spatial 4→1, total 12×.
 _MERGED_LAYERS_OCB_ALL = {
     # ---- rn3 layers (Phase E) ----
-    "mc_re8_rn3":      ("ocb_re8_rn3_x1",     4, 1),
-    "mc_re6_rn3":      ("ocb_re6_rn3_x1",     3, 4),
-    # re4_rn3 active name after _get_mc_variant is mc_re4_rn3_p4 (variant
-    # selected for ppc=4 from _MC_PPC). n_ocb=1 (OC=32 = oc_block=32);
-    # effective_ppc=16 = regime_ppc 4 × n_spatial_batches 4 absorbs all
-    # 400 spatial patches into one xrt.run.
-    "mc_re4_rn3_p4":   ("ocb_re4_rn3_x1",     1, 16),
+    "mc_re8_rn3":      ("ocb_re8_rn3_x1",     4, 1,  16),
+    "mc_re6_rn3":      ("ocb_re6_rn3_x1",     3, 4,  16),
+    # mc_re4_rn3 NOT registered: caller passes oc_block=32 (full OC) so
+    # legacy n_ocb=1 already → no OCB dispatches to collapse. The Phase E
+    # "step 3" reported saving was an artifact of a build/regime mismatch
+    # where the kernel computed only half the output channels (correct
+    # version is identical to legacy in wall time, see PHASE_G_NOTES).
     # ---- c3 layers (Phase F) ----
-    "mc_re8_c3":       ("ocb_re8_c3_x1",      8, 1),
-    "mc_re6_c3":       ("ocb_re6_c3_x1",      6, 4),
+    "mc_re8_c3":       ("ocb_re8_c3_x1",      8, 1,  16),
+    "mc_re6_c3":       ("ocb_re6_c3_x1",      6, 4,  16),
     # mc_re4_c3 is variant-selected to mc_re4_c3_p2 (ppc=2 from _MC_PPC).
-    "mc_re4_c3_p2":    ("ocb_re4_c3_x1",      4, 16),
+    "mc_re4_c3_p2":    ("ocb_re4_c3_x1",      4, 16, 16),
+    # ---- stride-2 aconv layers (Phase G) ----
+    # aconv3/aconv16 today use merged_aconv*_x4 (4-clone spatial fanout);
+    # OCB-unroll absorbs spatial via ppc and collapses OCB iterations into
+    # one xrt.run. aconv7/aconv19 use single-sub merged today (x1).
+    # aconv5 skipped — too many OCB iterations to fit in unroll budget.
+    "mc_aconv3":       ("ocb_aconv3_x1",      8, 4,  16),
+    "mc_aconv7":       ("ocb_aconv7_x1",      16, 1, 16),
+    "mc_aconv16":      ("ocb_aconv16_x1",     6, 4,  16),
+    "mc_aconv19":      ("ocb_aconv19_x1",     16, 1, 8),
 }
 
 _merged_ocb_enabled = os.environ.get("MERGED_OCB", "1").strip()
