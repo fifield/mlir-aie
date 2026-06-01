@@ -17,7 +17,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from build_merged import build_merged
+from build_merged import build_merged, _resolve_build_dir
 
 # Single-clone (x1) variants — every 3x3 MC variant the model dispatches
 # at steady state, derived from call sites in test_full_model_mc.py +
@@ -55,9 +55,11 @@ def _build_one(variant, n_clones):
     else:
         out = f"merged_{variant.replace('mc_', '')}_x{n_clones}"
         sub_names = [variant] * n_clones
-    bd = os.path.normpath(
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "build_merged"))
-    elf_path = os.path.join(bd, f"{out}.elf")
+    # Skip check must look at the actual build target (which honors
+    # MDV6_BUILD_DIR), not the source tree — otherwise CI/lit runs that
+    # set MDV6_BUILD_DIR=. silently skip builds that the test then can't
+    # find in the per-test working directory.
+    elf_path = os.path.join(_resolve_build_dir(), f"{out}.elf")
     if os.path.exists(elf_path):
         print(f"  {out}: already built, skipping")
         return True

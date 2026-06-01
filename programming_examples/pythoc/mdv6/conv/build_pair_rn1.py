@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "gemm_conv1x1")))
 
-from build_merged import build_merged
+from build_merged import build_merged, _resolve_build_dir
 
 _GEMM_SCRIPT = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
@@ -43,10 +43,7 @@ _RN1_PAIRS = [
 def _build_one(tile_m, ic, oc, ppc):
     sub_args = ["32", str(tile_m), str(ic), str(oc), str(ppc), "0"]
     out_name = f"merged_gemm_t{tile_m}_ic{ic}_oc{oc}_p{ppc}_pair_x1"
-    bd = os.path.normpath(
-        os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                     "build_merged"))
-    elf_path = os.path.join(bd, f"{out_name}.elf")
+    elf_path = os.path.join(_resolve_build_dir(), f"{out_name}.elf")
     if os.path.exists(elf_path):
         print(f"  {out_name}: already built, skipping")
         return True
