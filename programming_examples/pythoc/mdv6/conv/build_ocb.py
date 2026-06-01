@@ -28,23 +28,21 @@ _OCB_SCRIPT = os.path.join(_HERE, "aie2_multicore_ocb.py")
 # ppc is the EFFECTIVE patches_per_core inside the OCB-unroll ELF:
 # regime_ppc × n_spatial_batches. The kernel's range_(ppc) unroll absorbs
 # both the original ppc and the spatial-batch dimension into one xrt.run.
+# Production OCB layers (built by `--layer all`).
+# Tuple: (n_cores, tile_h, tile_w, ic, oc_block, n_ocb, ks, stride, ppc,
+#         active_tile, active_ic, active_oc).
+# Tile/ic/oc match the regime-active config; n_ocb covers the full OC budget.
+# ppc is the EFFECTIVE patches_per_core inside the OCB-unroll ELF:
+# regime_ppc × n_spatial_batches. The kernel's range_(ppc) unroll absorbs
+# both the original ppc and the spatial-batch dimension into one xrt.run.
 _LAYERS = {
     # ---- rn3 layers (Phase E) ----
     # re8_rn3: regime_ppc=1, 25 spatial patches fit in 32×1=32 cores per call,
     # n_spatial_batches=1 → effective ppc=1.
     "re8_rn3":     (32, 4, 4, 64, 16, 4, 3, 1, 1,  4, 64, 16),
-    "re8_rn3_ref": (32, 4, 4, 64, 16, 1, 3, 1, 1,  4, 64, 16),
     # re6_rn3: regime_ppc=1, 100 spatial patches need 32×4=128 cores per call,
     # n_spatial_batches=4 → effective ppc=4. n_ocb=3 (OC=48 / oc_block=16).
     "re6_rn3":     (32, 4, 4, 48, 16, 3, 3, 1, 4,  4, 48, 16),
-    "re6_rn3_ref": (32, 4, 4, 48, 16, 1, 3, 1, 4,  4, 48, 16),
-    # re4_rn3: regime_ppc=4, 400 spatial patches need 32×16=512 cores per call,
-    # n_spatial_batches=4 → effective ppc=16. n_ocb=1 (OC=32 = oc_block=32).
-    # active_oc=32 must match the ELF's built oc_block (the dispatch will
-    # use this oc_block, overriding the regime active_oc=16). Phase E shipped
-    # with active_oc=16 here which produced a BO size mismatch and silent
-    # numerical error (~+0.06 max_class_diff).
-    "re4_rn3":     (32, 4, 4, 32, 32, 1, 3, 1, 16,  4, 32, 32),
 
     # ---- c3 layers (Phase F) ----
     # re8_c3: spatial 20×20 → 5×5=25 patches @ tile=4. n_spatial_batches=1,
@@ -83,6 +81,22 @@ _LAYERS = {
     # aconv5 (out 40×40, ic=96, oc=192) at oc_block=8 has 24 OCBs × ppc=4
     # = 96 iter → compile fails. oc_block=16 would still be 12×4=48 iter.
     # oc_block=24 doesn't align to 8-wide SIMD. Skip OCB for aconv5.
+
+    # ---- diagnostic-only ----
+    # re4_rn3 was the Phase E shipped config that had a silent oc_block
+    # mismatch between dispatch (active_oc=16) and ELF build (oc_block=32);
+    # it was de-registered from _MERGED_LAYERS_OCB_ALL in Phase G. Kept here
+    # so `--layer re4_rn3` still builds for debugging — not in `--layer all`.
+    "re4_rn3":     (32, 4, 4, 32, 32, 1, 3, 1, 16,  4, 32, 32),
+}
+
+# Reference variants used by conv/test_ocb.py — same shape as the
+# production entry with n_ocb forced to 1. test_ocb.py builds these on
+# demand (not part of `--layer all`).
+_REF_LAYERS = {
+    f"{label}_ref": cfg[:5] + (1,) + cfg[6:]
+    for label, cfg in _LAYERS.items()
+    if cfg[5] > 1  # skip layers already at n_ocb=1 (re4_rn3)
 }
 
 
@@ -114,16 +128,31 @@ def _build_layer(label, cfg):
     )
 
 
+def _all_layers():
+    return {**_LAYERS, **_REF_LAYERS}
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--layer", choices=list(_LAYERS) + ["all"], default="re8_rn3")
+    parser.add_argument("--layer",
+                        choices=list(_all_layers()) + ["all"],
+                        default="re8_rn3",
+                        help="`all` builds production layers only "
+                             "(no *_ref); use --layer NAME_ref for refs")
     args = parser.parse_args()
 
-    layers = list(_LAYERS) if args.layer == "all" else [args.layer]
+    if args.layer == "all":
+        # Production OCB ELFs only — skip _ref entries (built on demand by
+        # test_ocb.py) and the de-registered re4_rn3 (kept for diagnostics).
+        layers = [k for k in _LAYERS if k != "re4_rn3"]
+    else:
+        layers = [args.layer]
+
+    cfgs = _all_layers()
     ok = fail = 0
     for label in layers:
         print(f"=== {label} ===")
-        if _build_layer(label, _LAYERS[label]) is not None:
+        if _build_layer(label, cfgs[label]) is not None:
             ok += 1
         else:
             fail += 1
