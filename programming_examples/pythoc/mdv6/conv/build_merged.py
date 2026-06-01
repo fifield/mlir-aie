@@ -34,11 +34,12 @@ import shutil
 import subprocess
 import sys
 
-# Reuse the per-shape config list from build_multicore.py so merged builds
+# Per-shape config list lives in mc_configs.py (was extracted from the
+# retired build_multicore.py during the Phase G+ cleanup).
 # pick the same parameters as the standalone xclbins.
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "gemm_conv1x1")))
-from build_multicore import CONFIGS as MC_CONFIGS  # noqa: E402
+from mc_configs import CONFIGS as MC_CONFIGS  # noqa: E402
 
 KERNELS_DIR = os.path.normpath(
     os.path.join(os.path.dirname(__file__), "..", "kernels", "build")
@@ -52,9 +53,11 @@ _GEMM_SCRIPT = os.path.normpath(
 
 
 def _resolve_build_dir():
+    # Subdir name must match run_tiled_mc.py's _MERGED_BD lookup ("build_merged"),
+    # otherwise CI/lit runs that set MDV6_BUILD_DIR see no merged ELFs.
     root = os.environ.get("MDV6_BUILD_DIR")
     if root:
-        return os.path.abspath(os.path.join(root, "merged"))
+        return os.path.abspath(os.path.join(root, "build_merged"))
     return os.path.join(os.path.dirname(__file__), "build_merged")
 
 
