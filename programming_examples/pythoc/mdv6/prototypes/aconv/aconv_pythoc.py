@@ -14,7 +14,7 @@
 
 """MDV6 AConv layer as a PythoC + IRON example.
 
-Port of programming_examples/pythoc/mdv6/aconv/{aie2.py,aconv_bf16.cc} that
+Port of programming_examples/ml/mdv6/aconv/{aie2.py,aconv_bf16.cc} that
 replaces the external C++ kernel with an inline PythoC kernel.
 
 AConv = AvgPool2d(2×2, stride=1) + Conv3x3(stride=2, padding=1) + BN + SiLU

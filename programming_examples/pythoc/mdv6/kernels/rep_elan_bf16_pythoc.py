@@ -32,7 +32,7 @@ Auto-vectorizer escape
 The BN+SiLU per-pixel scalar bf16 tails get auto-vectorized by Peano
 ``opt -O2`` into ``<32 x bfloat> fadd`` which AIE2P llc cannot legalize.
 We patch ``subprocess.run`` (the same fix used in
-``mdv6/repncsp/repncsp_pythoc.py``) to inject ``-vectorize-loops=false
+``mdv6/prototypes/repncsp/repncsp_pythoc.py``) to inject ``-vectorize-loops=false
 -vectorize-slp=false`` into the opt invocation. The fix is process-
 global; importing this module installs it once.
 
