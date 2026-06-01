@@ -10,8 +10,9 @@ The default events (set by Runtime.enable_trace via the IRON layer) cover:
   - INSTR_VECTOR, INSTR_EVENT_0/1, LOCK_STALL, MEMORY_STALL,
     PORT_RUNNING_0/1/2 on the core trace unit
   - DMA_S2MM/MM2S start+finish + S2MM stream-starvation on the memory unit
-That's enough to answer "is the 974 ms/frame NPU time compute-bound or
-DMA-bound?" — the goal of this diagnostic.
+That's enough to answer "is the per-frame NPU time compute-bound,
+DMA-bound, or dispatch-overhead-bound?" — see PHASE_E_BOTTLENECK_MODEL.md
+for the offline / first-principles analog of this measurement.
 
 Usage:
   source env.sh && source venv/bin/activate
