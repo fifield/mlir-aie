@@ -209,26 +209,82 @@ mdv6/
 ├── test_full_model_mc.py            # Top-level driver; defines run_re_mc, run_rn_mc, run_aconv_mc
 ├── profile_harness.py               # Profiler wrappers (_xrt_run_kernel hook for per-layer attribution)
 ├── run_tiled_mc.py                  # Dispatch entry + all _run_*_merged variants + registries
-├── regime_config.py                 # Shared-envelope xclbin layouts (legacy path)
+├── regime_config.py                 # Active-shape lookup (tile_h/oc_block/stride) per layer
+├── run_full_model.lit               # End-to-end CI test (build merged ELFs + run model)
+├── Makefile                         # build / profile / clean targets
+├── .gitignore                       # Excludes mdv6_bf16_weights.pt + onnx graph + logs
+├── lit.local.cfg                    # Sets mdv6_weights feature when weights.pt is present
 ├── _full_model_helpers/
 │   └── elan_test_tiled.py           # extract_patch, fuse_bn, fuse_repconv, etc.
 ├── conv/
-│   ├── aie2_multicore.py            # IRON gen for 3×3 conv (Phase A standalone)
+│   ├── aie2_multicore.py            # IRON gen for 3×3 conv (production stock kernel)
 │   ├── aie2_multicore_ocb.py        # IRON gen for OCB-unrolled (Phase E/F/G fork)
-│   ├── build_merged.py              # Merged-ELF dispatcher builder
-│   ├── build_x1_mc.py               # Phase A single-clone ELF builder
-│   ├── build_ocb.py                 # Phase E/F/G OCB-unrolled ELF builder
-│   ├── build_pair_rn1.py            # Phase C step A pair builder
-│   ├── build_multicore.py           # Phase 0 standalone xclbin builder
-│   ├── build_merged/                # All .elf and .mlir outputs land here
-│   └── build/                       # Legacy standalone xclbin outputs
+│   ├── mc_configs.py                # MC conv shape registry
+│   ├── gemm_configs.py              # GEMM 1×1 shape registry + sizing helpers
+│   ├── build_merged.py              # Dispatcher-stitching builder (the workhorse)
+│   ├── build_x1_mc.py               # Builds x1 + multi-clone fanout MC merged ELFs
+│   ├── build_x1_gemm.py             # Builds GEMM merged ELFs (kblocked + oc-blocked)
+│   ├── build_pair_rn1.py            # Builds GEMM pair ELFs (Phase C step A)
+│   ├── build_pair_rn3.py            # Phase H step-1 spike (chain_links bottleneck pair)
+│   ├── build_ocb.py                 # Builds OCB-unrolled ELFs (Phase E/F/G)
+│   ├── test_pair_rn1.py             # Standalone correctness: GEMM pair (re6_rn1)
+│   ├── test_ocb_re6_rn3.py          # Standalone correctness: OCB re6_rn3
+│   ├── test_ocb_re8_rn3.py          # Standalone correctness: OCB re8_rn3
+│   ├── trace_ftconv0.py             # HW trace runner (diagnostic)
+│   └── build_merged/                # ELF + MLIR + per-build artifacts (gitignored)
 ├── gemm_conv1x1/
 │   ├── aie2_gemm_conv1x1.py         # IRON gen for 1×1 conv via GEMM
-│   ├── build_gemm_conv1x1.py        # GEMM xclbin builder
-│   └── build/                       # GEMM standalone xclbin outputs
+│   ├── gemm_conv1x1_pythoc.py       # Standalone single-shape PythoC GEMM example
+│   └── spot_check.py                # Single-shape correctness check (debug)
 ├── kernels/
 │   ├── build_kernels.py             # Compiles PythoC .cc kernels to .o
-│   └── build/                       # conv3x3_fused_packed_bf16.o etc.
-└── *.md                             # PHASE_C_PLAN, PHASE_E_PLAN, PHASE_E_BOTTLENECK_MODEL,
-                                      # PHASE_G_NOTES (this file is IMPL_ARCH_STATUS)
+│   ├── rep_elan_bf16.cc             # The C kernel sources (3x3, gemm, k-blocked, residual)
+│   ├── rep_elan_bf16_pythoc.py      # PythoC wrapper for kernel compilation
+│   └── build/                       # .o outputs (gitignored)
+├── graphs/
+│   └── export_mdv6_graphs.py        # Dump model topology to .onnx / .html / .json
+├── prototypes/                      # Per-layer standalone PythoC examples — NOT used by the
+│   ├── README.md                    # production path; reference for porting new layers
+│   ├── lit.local.cfg                # .py suffix override (each prototype is a lit test)
+│   └── <9 dirs>/<layer>_pythoc.py   # aconv, batchnorm_silu, bottleneck, conv, elan,
+│                                    # elementwise, repconv, repncsp, repncsp_elan, sppelan
+└── *.md                             # PHASE_*_PLAN, PHASE_E_BOTTLENECK_MODEL, CONVERSION_PATTERN,
+                                      # PHASE_H_DEVICE_STITCHING_PLAN, IMPL_ARCH_STATUS (this)
 ```
+
+## Testing gaps
+
+The full-model test (`test_full_model_mc.py`) provides end-to-end PASS/FAIL
+coverage across every layer. **Standalone bytewise correctness tests
+exist only for a subset** of the merged ELFs — the others rely on the
+full-model test to catch regressions, which means a per-ELF bug can be
+masked by downstream layer interactions before the detection head.
+
+What's tested standalone (in `conv/test_*.py`):
+
+| ELF | Test |
+|---|---|
+| `merged_gemm_t164_ic96_oc48_p1_pair_x1` (re6_rn1) | `test_pair_rn1.py` |
+| `ocb_re6_rn3_x1` | `test_ocb_re6_rn3.py` |
+| `ocb_re8_rn3_x1` | `test_ocb_re8_rn3.py` |
+
+What's NOT tested standalone (relies on full-model coverage):
+
+| ELF | Why no test |
+|---|---|
+| `ocb_re4_c3_x1`, `ocb_re6_c3_x1`, `ocb_re8_c3_x1` | Phase F — never built standalone tests |
+| `ocb_aconv3_x1`, `_aconv7_x1`, `_aconv16_x1`, `_aconv19_x1` | Phase G — same |
+| `merged_re4_rn3_p4_x1` | Pre-OCB single-clone, never tested standalone |
+| `merged_aconv5_p4_x1` | Same |
+| `merged_ftconv0_x8`, `merged_ftconv1_p2_x4`, `merged_elan_c3_p4_x4` | Phase A.1 fanouts — old standalone tests were deleted because they validated against the legacy xclbin baseline which is gone |
+| `merged_gemm_t256_ic64_oc32_p1_pair_x1` (re4_rn1), `merged_gemm_t104_ic128_oc64_p1_pair_x1` (re8_rn1) | Phase C step A — only re6_rn1 has a test |
+| GEMM K-blocked ELFs (`merged_gemm_*_kbN_*`) | Never had a standalone test |
+
+Cheapest gap-fillers (in priority order):
+
+1. Generalize `test_ocb_re6_rn3.py` to parameterize on layer name + shape;
+   instantiate for every OCB layer (one test file → 8 test invocations).
+2. Generalize `test_pair_rn1.py` similarly for the 3 GEMM pair ELFs.
+3. New `test_merged_fanout.py` validating x4/x8 fanout ELFs against
+   reference computed in numpy/torch (not xclbin baseline).
+4. K-blocked GEMM correctness: build a single-shape standalone test.
