@@ -255,24 +255,27 @@ mdv6/
 ## Testing gaps
 
 The full-model test (`test_full_model_mc.py`) provides end-to-end PASS/FAIL
-coverage across every layer. Three additional bytewise-correctness lit
-suites cover specific dispatch patterns in isolation so a per-ELF
-regression doesn't have to wait for the full-model PASS gate to trip.
+coverage. Six additional lit suites cover specific dispatch patterns and
+correctness anchors so a per-ELF regression surfaces before the full-model
+PASS gate trips.
 
 | Lit test | Covers | What it checks |
 |---|---|---|
 | `test_ocb.lit` (`conv/test_ocb.py`) | 9 OCB-unrolled ELFs (re8_rn3, re6_rn3, re{4,6,8}_c3, aconv{3,7,16,19}) | n_ocb-unrolled output slice-by-slice == n_ocb=1 ref ELF run n_ocb times |
 | `test_pair.lit` (`conv/test_pair.py`) | 3 GEMM rn1 pair ELFs (re4_rn1, re6_rn1, re8_rn1) | pair-ELF dispatch == x1 single-sub ELF run twice (chain-linked input BO) |
 | `test_fanout.lit` (`conv/test_fanout.py`) | 3 multi-clone fanout ELFs (`merged_ftconv0_x8`, `merged_ftconv1_p2_x4`, `merged_elan_c3_p4_x4`) | x4/x8 clone outputs == x1 single-sub ELF run N times |
+| `test_packed_gemm.lit` (`conv/test_packed_gemm.py`) | All GEMM 1x1 shapes with n_batches > 1 (5+ ELFs, mix of K-blocked and non-K-blocked) | packed-ABI ELF output == x1 ELF run n_batches times |
+| `test_packed_gemm_unit.lit` (`conv/test_packed_gemm_unit.py`) | Pure-Python (no NPU) | dispatcher-side packing helpers (ELF naming, batch concatenation layout) |
+| `test_gemm_truth.lit` (`conv/test_gemm_truth.py`) | One non-K-blocked + one K-blocked GEMM shape | NPU output matches a torch float-precision reference (BN-fold + kernel SiLU approximation) within bf16 tolerance — absolute-truth anchor that the bytewise tests don't provide |
 
-Each test auto-builds any missing ELFs into `MDV6_BUILD_DIR/build_merged/`
-(per-lit-run temp dir under CI). Selection is `--layer NAME / --shape NAME
-/ --variant NAME / all` so a single CI invocation covers all shapes.
+Each NPU test auto-builds any missing ELFs into `MDV6_BUILD_DIR/build_merged/`
+(per-lit-run temp dir under CI). Selection is `--layer/--shape/--variant
+NAME` or `all` so a single CI invocation covers every shape.
 
 Remaining gaps (only covered by full-model PASS):
 
 | ELF set | Why no standalone test |
 |---|---|
-| GEMM K-blocked (`merged_gemm_*_kbN_*`) | Needs self-contained weight-repack helper + torch reference with bf16 accumulator tolerance — kernel does fused matmul + BN, exact-bytewise comparison across k_block configurations isn't guaranteed |
+| K-blocked GEMM ELFs with n_batches=1 (re6_c1, re8_c1, spp_c1, re18_c1, re21_c1, etc.) | Used as the x1 reference in `test_packed_gemm.py` — covered transitively (any kernel bug would also fail the n_batches>1 packed comparison) and once absolutely via `test_gemm_truth.py` for the kb16 path. Other k_block values are only covered by the full-model PASS. |
 | `merged_re4_rn3_p4_x1`, `merged_aconv5_p4_x1` | Pre-OCB single-clone variants kept as fallback; full-model exercises them when MERGED_OCB=0 |
 | `ocb_re4_rn3_x1` | De-registered from `_MERGED_LAYERS_OCB_ALL` in Phase G after the silent oc_block mismatch; build target retained for diagnostic-only use |

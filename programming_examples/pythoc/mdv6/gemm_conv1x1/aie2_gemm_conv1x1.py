@@ -53,7 +53,7 @@ KERNELS_DIR = os.path.abspath(
 def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
                  patches_per_core=1, k_block=0, fused=True,
                  active_tile_m=None, active_ic=None, active_oc=None,
-                 active_k_block=None):
+                 active_k_block=None, spatial_batches=1):
     """N-core GEMM-based Conv1x1 [+ BN + SiLU] with optional K-blocking.
 
     Args:
@@ -68,6 +68,7 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
     assert tile_m % 4 == 0, f"tile_m={tile_m} must be divisible by 4 (mmul<4,8,8>)"
     assert ic % 8 == 0, f"ic={ic} must be divisible by 8"
     assert oc % 8 == 0, f"oc={oc} must be divisible by 8"
+    assert spatial_batches >= 1, f"spatial_batches={spatial_batches} must be >= 1"
     active_tile_m = tile_m if active_tile_m is None else active_tile_m
     active_ic = ic if active_ic is None else active_ic
     active_oc = oc if active_oc is None else active_oc
@@ -108,6 +109,7 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
         mem_per_core = (input_tile_size + weight_size + output_tile_size) * 2 + 2048
     print(f"GEMM Conv1x1: tile_m={tile_m}, {ic}->{oc}, "
           f"{n_cores} cores, {patches_per_core} patches/core"
+          + (f", spatial_batches={spatial_batches}" if spatial_batches > 1 else "")
           + (f", k_block={k_block} ({n_k_blocks} K-blocks)" if use_kblocking else ""),
           file=sys.stderr)
     print(f"  input={input_tile_size} wt_chunk={weight_size} out={output_tile_size} "
@@ -128,11 +130,15 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
     core_in_ty = np.ndarray[(core_in_size,), np.dtype[np.uint16]]
     core_out_ty = np.ndarray[(core_out_size,), np.dtype[np.uint16]]
 
-    # Host buffer types
+    # Host buffer types. spatial_batches>1 keeps the existing x1 per-batch
+    # layout intact and concatenates batch slices in the host memref; the
+    # runtime sequence below adds batch*host_{in,out}_size TAP offsets.
     host_in_size = n_cores * core_in_size
     host_out_size = n_cores * core_out_size
-    host_in_ty = np.ndarray[(host_in_size,), np.dtype[np.uint16]]
-    host_out_ty = np.ndarray[(host_out_size,), np.dtype[np.uint16]]
+    packed_host_in_size = spatial_batches * host_in_size
+    packed_host_out_size = spatial_batches * host_out_size
+    host_in_ty = np.ndarray[(packed_host_in_size,), np.dtype[np.uint16]]
+    host_out_ty = np.ndarray[(packed_host_out_size,), np.dtype[np.uint16]]
 
     # Host weight buffer: for K-blocking, contains n_k_blocks chunks
     # (sent repeatedly for each patch via TAP)
@@ -186,6 +192,7 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
     if use_kblocking:
         # K-blocked kernel args: tile_m, full_ic, oc, k_start, k_block, n_k_blocks
         # k_start varies per K-block (Python-unrolled)
+        total_patch_cycles = patches_per_core * spatial_batches
         def core_fn(of_in, of_wt, of_out, kern, my_rtp, barrier):
             barrier.wait_for_value(1)
             tm_v = my_rtp[0]
@@ -193,7 +200,7 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
             oc_v = my_rtp[2]
             kb_v = my_rtp[3]
             nkb_v = my_rtp[4]
-            for _ in range_(patches_per_core):
+            for _ in range_(total_patch_cycles):
                 elem_in = of_in.acquire(1)
                 elem_out = of_out.acquire(1)
                 # Python range = unrolled in MLIR, each iteration has constant k_start
@@ -207,6 +214,7 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
             barrier.release_with_value(1)
     else:
         # Original non-K-blocked path
+        total_patch_cycles = patches_per_core * spatial_batches
         kern_tile_h = tile_m
         kern_tile_w = 1
         stride = 1
@@ -221,7 +229,7 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
             s_v = my_rtp[4]
             p_v = my_rtp[5]
             elem_wt = of_wt.acquire(1)
-            for _ in range_(patches_per_core):
+            for _ in range_(total_patch_cycles):
                 elem_in = of_in.acquire(1)
                 elem_out = of_out.acquire(1)
                 kern(elem_in, elem_wt, elem_out,
@@ -314,14 +322,14 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
                 return n, 1
 
             wt_d1, wt_d0 = _factor_for_dma(wt_chunk_size)
-            print(f"  Weight TAP: [{patches_per_core}, {n_k_blocks}, {wt_d1}, {wt_d0}]",
+            print(f"  Weight TAP: [{total_patch_cycles}, {n_k_blocks}, {wt_d1}, {wt_d0}]",
                   file=sys.stderr)
 
             for wf in wt_fifos:
                 tap_wt = TensorAccessPattern(
                     (host_wt_size,),
                     offset=0,
-                    sizes=[patches_per_core, n_k_blocks, wt_d1, wt_d0],
+                    sizes=[total_patch_cycles, n_k_blocks, wt_d1, wt_d0],
                     strides=[0, wt_chunk_size, wt_d0, 1],
                 )
                 rt.fill(wf.prod(), W, tap_wt)
@@ -349,24 +357,30 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
         in_d1, in_d0 = _factor_for_dma(input_tile_size)
         out_d1, out_d0 = _factor_for_dma(output_tile_size)
 
-        for col in range(n_cols):
-            cores_this_col = min(cores_per_col, n_cores - col * cores_per_col)
+        for batch in range(spatial_batches):
+            batch_in_base = batch * host_in_size
+            batch_out_base = batch * host_out_size
+            for col in range(n_cols):
+                cores_this_col = min(cores_per_col, n_cores - col * cores_per_col)
 
-            tap_in = TensorAccessPattern(
-                (host_in_size,),
-                offset=col * cores_per_col * core_in_size,
-                sizes=[patches_per_core, cores_this_col, in_d1, in_d0],
-                strides=[input_tile_size, core_in_size, in_d0, 1],
-            )
-            tap_out = TensorAccessPattern(
-                (host_out_size,),
-                offset=col * cores_per_col * core_out_size,
-                sizes=[patches_per_core, cores_this_col, out_d1, out_d0],
-                strides=[output_tile_size, core_out_size, out_d0, 1],
-            )
-            rt.fill(col_in_fifos[col].prod(), I, tap_in)
-            rt.drain(col_out_fifos[col].cons(), O, tap_out,
-                     wait=(col == n_cols - 1))
+                tap_in = TensorAccessPattern(
+                    (packed_host_in_size,),
+                    offset=batch_in_base + col * cores_per_col * core_in_size,
+                    sizes=[patches_per_core, cores_this_col, in_d1, in_d0],
+                    strides=[input_tile_size, core_in_size, in_d0, 1],
+                )
+                tap_out = TensorAccessPattern(
+                    (packed_host_out_size,),
+                    offset=batch_out_base + col * cores_per_col * core_out_size,
+                    sizes=[patches_per_core, cores_this_col, out_d1, out_d0],
+                    strides=[output_tile_size, core_out_size, out_d0, 1],
+                )
+                rt.fill(col_in_fifos[col].prod(), I, tap_in)
+                # Keep x1 behavior unchanged; for packed multi-batch fanout,
+                # require each drain completion before issuing more traffic into
+                # the same FIFOs/worker loop.
+                rt.drain(col_out_fifos[col].cons(), O, tap_out,
+                         wait=(spatial_batches > 1 or col == n_cols - 1))
 
     return Program(dev, rt).resolve_program()
 
@@ -381,6 +395,8 @@ def _parse_args(argv):
     parser.add_argument("oc", nargs="?", type=int, default=64)
     parser.add_argument("patches_per_core", nargs="?", type=int, default=1)
     parser.add_argument("k_block", nargs="?", type=int, default=0)
+    parser.add_argument("--spatial-batches", type=int, default=1,
+                        help="concatenate this many x1 spatial batches into one runtime sequence")
     parser.add_argument("--active-tile-m", type=int)
     parser.add_argument("--active-ic", type=int)
     parser.add_argument("--active-oc", type=int)
@@ -405,5 +421,6 @@ if __name__ == "__main__":
         active_ic=args.active_ic,
         active_oc=args.active_oc,
         active_k_block=args.active_k_block,
+        spatial_batches=args.spatial_batches,
     )
     print(module)
