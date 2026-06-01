@@ -1,0 +1,14 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// Pure-Python ABI/layout checks for the packed GEMM spatial fanout
+// helpers (build_packed_gemm.packed_gemm_elf_name, packed_host_sizes,
+// and run_tiled_mc._pack_gemm_spatial_inputs).
+//
+// No NPU dispatch — these guard the dispatcher-side layout decisions so
+// any regression surfaces before an actual on-device test would even
+// build an ELF. Fast (sub-second).
+//
+// REQUIRES: peano, torch
+//
+// RUN: python3 %S/conv/test_packed_gemm_unit.py
