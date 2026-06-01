@@ -1,4 +1,8 @@
-"""Generalized multi-core tiled fused Conv+BN+SiLU for AIE2P.
+"""IRON MLIR generator for multicore tiled fused Conv+BN+SiLU on AIE2P.
+
+Emits one ``aie.device(npu2)`` block to stdout. Wrapped into a dispatcher
+ELF by ``build_merged.py`` (called by ``build_x1_mc.py``,
+``build_pair_rn1.py``, etc.).
 
 Supports:
 - Conv1x1 and Conv3x3 (with stride and padding)
@@ -10,11 +14,10 @@ Supports:
 Usage:
   python3 aie2_multicore.py n_cores tile_h tile_w ic oc kernel_size [stride] [patches_per_core]
 
-This is the PythoC variant — the C++ ``rep_elan_bf16.cc`` kernel is replaced by
-the pre-built PythoC ``.o`` files under ``../kernels/build/``. Construction
-uses ``PythocKernel(name, .o_path, [...])``; the symbol exported by the
-``.o`` matches the ``Kernel(...)`` call name from the original tree, so the
-generated MLIR is structurally identical to the C++ flavour.
+The compute kernel itself is the PythoC-compiled ``.o`` file under
+``../kernels/build/``, linked via ``PythocKernel(name, .o_path, [...])``.
+``build_merged.py`` stages the .o into the per-build dir before invoking
+aiecc so the ``link_with`` resolves correctly.
 """
 import argparse
 import os
@@ -37,7 +40,7 @@ from aie.helpers.taplib import TensorAccessPattern
 
 # Absolute path to the directory holding the pre-built PythoC ``.o`` files.
 # ``build_kernels.py`` (under ``mdv6/kernels/``) stages canonical ``.o`` files
-# here; build_multicore.py copies them into the per-build dir before invoking
+# here; ``build_merged.py`` copies them into the per-build dir before invoking
 # aiecc so the relative ``link_with`` resolves.
 KERNELS_DIR = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "kernels", "build")
@@ -114,13 +117,12 @@ def multicore_conv(dev, tile_h=8, tile_w=8, ic=16, oc=16,
     host_input_ty = np.ndarray[(host_input_size,), np.dtype[np.uint16]]
     host_output_ty = np.ndarray[(host_output_size,), np.dtype[np.uint16]]
 
-    # Kernel — Pythoc .o exporting the same extern "C" symbol as the C++
-    # ``rep_elan_bf16.cc`` flavour. The 1x1 case uses
-    # ``gemm_conv1x1_fused_packed_bf16``; the 3x3 case uses
-    # ``conv3x3_fused_packed_bf16``. MC conv xclbins built by
-    # ``build_multicore.py`` are exclusively 3x3 / stride-2 in the current
-    # full-model graph, but the 1x1 selector is preserved for parity with
-    # the original IRON generator.
+    # Kernel — PythoC-compiled .o exporting the extern "C" symbol read
+    # by the host. 3x3 uses ``conv3x3_fused_packed_bf16``; 1x1 uses
+    # ``gemm_conv1x1_fused_packed_bf16``. The 1x1 selector is preserved
+    # for parity but the production full-model graph routes 1x1 convs
+    # through ``aie2_gemm_conv1x1.py`` instead — this module's 1x1 path
+    # is used only by per-layer prototypes / standalone tests.
     kern_name = (
         "gemm_conv1x1_fused_packed_bf16" if kernel_size == 1
         else "conv3x3_fused_packed_bf16"
@@ -137,11 +139,12 @@ def multicore_conv(dev, tile_h=8, tile_w=8, ic=16, oc=16,
     stride = active_stride
     padding = active_padding
 
-    # Runtime parameters (Tier 2 prereq): six int32 scalars per core, written by
-    # host via rt.inline_ops each invocation and read by the kernel. For this
-    # values are compile-time constants baked into the runtime sequence. Tier 2
-    # can still collapse xclbins by keeping the regime envelope fixed and
-    # generating per-layer .bin streams with different constants.
+    # Runtime parameters: six int32 scalars per core, written by host via
+    # rt.inline_ops each invocation and read by the kernel. RTPs let one
+    # ELF cover a range of (tile_h, tile_w, ic, oc, stride, padding)
+    # combinations without re-compilation — needed for the regime-envelope
+    # pattern where multiple layers share one merged ELF and the per-layer
+    # active config is plugged in at dispatch time.
     RTP_LEN = 6  # (tile_h, tile_w, ic, oc, stride, padding)
     rtp_ty = np.ndarray[(RTP_LEN,), np.dtype[np.int32]]
     init_rtp = np.array([active_tile_h, active_tile_w, active_ic, active_oc,
@@ -240,8 +243,9 @@ def multicore_conv(dev, tile_h=8, tile_w=8, ic=16, oc=16,
     with rt.sequence(host_input_ty, weight_ty, host_output_ty) as (I, W, O):
         rt.start(*workers)
 
-        # Runtime parameter write. Values may differ by generated .bin while the
-        # xclbin/ObjectFifo envelope remains shared across a regime.
+        # Runtime parameter write. Values may differ across dispatches
+        # (per-layer tile/ic/oc) while the ELF / ObjectFifo envelope remains
+        # shared across the regime.
         t_h, t_w = active_tile_h, active_tile_w
         ic_c, oc_c, s_c, p_c = active_ic, active_oc, stride, padding
         def set_rtps(*rtp_bufs):

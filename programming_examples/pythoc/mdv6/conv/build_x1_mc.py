@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """Build merged ELFs for every active MC 3x3 conv variant.
 
-Phase A.1 (mlir-aie-mi7 Phase A) target: every MC dispatch takes the
-xrt.elf+xrt.run path. This script produces:
-
+Produces:
   1. Single-clone wrappers (merged_<variant>_x1.elf) for layers that
      don't benefit from batch fanout — most variants.
   2. Multi-clone batch-fanout ELFs (merged_<variant>_xN.elf) for the
      3 large-tile / large-fanout layers in _FANOUT below.
 
-The Phase E/F/G OCB-unrolled ELFs (ocb_*) are built separately by
-build_ocb.py and take precedence over the x1 ELFs at dispatch time.
+The OCB-unrolled ELFs (ocb_*) built by build_ocb.py take precedence
+over these at dispatch time — see _MERGED_LAYERS_OCB in run_tiled_mc.py.
+The x1 / fanout ELFs here remain as the fallback path for layers
+without an OCB-unroll registration (mc_re4_rn3_p4, mc_aconv5_p4,
+mc_ftconv0, mc_ftconv1_p2, mc_elan_c3_p4).
 """
 import os
 import sys
