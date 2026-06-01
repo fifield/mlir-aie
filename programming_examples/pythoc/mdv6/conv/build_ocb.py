@@ -39,8 +39,12 @@ _LAYERS = {
     "re6_rn3":     (32, 4, 4, 48, 16, 3, 3, 1, 4,  4, 48, 16),
     "re6_rn3_ref": (32, 4, 4, 48, 16, 1, 3, 1, 4,  4, 48, 16),
     # re4_rn3: regime_ppc=4, 400 spatial patches need 32×16=512 cores per call,
-    # n_spatial_batches=4 → effective ppc=16. n_ocb=1 (OC=32 / oc_block=32).
-    "re4_rn3":     (32, 4, 4, 32, 32, 1, 3, 1, 16,  4, 32, 16),
+    # n_spatial_batches=4 → effective ppc=16. n_ocb=1 (OC=32 = oc_block=32).
+    # active_oc=32 must match the ELF's built oc_block (the dispatch will
+    # use this oc_block, overriding the regime active_oc=16). Phase E shipped
+    # with active_oc=16 here which produced a BO size mismatch and silent
+    # numerical error (~+0.06 max_class_diff).
+    "re4_rn3":     (32, 4, 4, 32, 32, 1, 3, 1, 16,  4, 32, 32),
 
     # ---- c3 layers (Phase F) ----
     # re8_c3: spatial 20×20 → 5×5=25 patches @ tile=4. n_spatial_batches=1,
@@ -56,6 +60,29 @@ _LAYERS = {
     # elan_c3: spatial 160×160 → 40×40=1600 patches @ tile=4. Too many for
     # single-batch absorption — would need ppc=50. Skip OCB for now (already
     # uses merged_elan_c3_p4_x4 fanout dispatch).
+
+    # ---- stride-2 aconv layers (Phase G). Regime envelope is
+    # regime_r5_stride2_conv3x3 (active oc_block=8) but the test_full_model
+    # callers pass larger oc_block: aconv3 caller=16, others caller=8.
+    # Building at oc_block=16 keeps n_ocb manageable (avoids the iter-count
+    # compilation limit hit at >40 unrolled iterations for stride=2 patches).
+    # Stride=2 means patch_h = (tile-1)*2 + 3 = 9 (vs 6 for stride=1).
+    #
+    # aconv3: out 80×80, ic=64, oc=128. Caller oc_block=16, n_ocb=8.
+    # 32×4=128 covers 100 spatial. ppc=4. 32 inner iter.
+    "aconv3":      (32, 4, 4, 64, 16, 8, 3, 2, 4,  4, 64, 16),
+    # aconv7: out 20×20, ic=128, oc=256. Caller oc_block=8, but build at 16
+    # (override): n_ocb=16. 32×1 covers 25 spatial. ppc=1. 16 inner iter.
+    "aconv7":      (32, 4, 4, 128, 16, 16, 3, 2, 1,  4, 128, 16),
+    # aconv16: out 40×40, ic=64, oc=96. Caller oc_block=8, build at 16:
+    # n_ocb=6. 32×4=128 covers 100 spatial. ppc=4. 24 inner iter.
+    "aconv16":     (32, 4, 4, 64, 16, 6, 3, 2, 4,  4, 64, 16),
+    # aconv19: out 20×20, ic=96, oc=128. Build at oc_block=8 matches regime:
+    # n_ocb=16, ppc=1, 16 inner iter (built earlier, kept for reference).
+    "aconv19":     (32, 4, 4, 96, 8, 16, 3, 2, 1,  4, 96, 8),
+    # aconv5 (out 40×40, ic=96, oc=192) at oc_block=8 has 24 OCBs × ppc=4
+    # = 96 iter → compile fails. oc_block=16 would still be 12×4=48 iter.
+    # oc_block=24 doesn't align to 8-wide SIMD. Skip OCB for aconv5.
 }
 
 
