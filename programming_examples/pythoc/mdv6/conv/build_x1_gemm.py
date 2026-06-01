@@ -18,11 +18,9 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.normpath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "gemm_conv1x1")))
 
 from build_merged import build_merged
-from build_gemm_conv1x1 import (  # noqa: E402
+from gemm_configs import (  # noqa: E402
     MODEL_LAYERS_1x1,
     choose_k_block,
     compute_ppc_kblocked,
