@@ -36,7 +36,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from build_merged import build_merged
+from build_merged import build_merged, _resolve_build_dir
 
 # (label, mc_config_name) — pulls shape from build_multicore.CONFIGS
 _RN3_PAIRS = [
@@ -47,9 +47,7 @@ _RN3_PAIRS = [
 
 def _build_one(label, mc_name):
     out_name = f"merged_{label}_pair_x1"
-    bd = os.path.normpath(
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "build_merged"))
-    elf_path = os.path.join(bd, f"{out_name}.elf")
+    elf_path = os.path.join(_resolve_build_dir(), f"{out_name}.elf")
     if os.path.exists(elf_path):
         print(f"  {out_name}: already built, skipping")
         return True
