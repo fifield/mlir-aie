@@ -19,7 +19,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from build_merged import build_merged
+from build_merged import build_merged, _resolve_build_dir
 from gemm_configs import (  # noqa: E402
     MODEL_LAYERS_1x1,
     choose_k_block,
@@ -72,8 +72,9 @@ def main():
         kb_str = f"kb{k_block}_" if k_block > 0 else ""
         print(f"  gemm_t{tile_m}_ic{ic}_oc{oc}_{kb_str}p{ppc}: {names}")
 
-    bd = os.path.normpath(
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "build_merged"))
+    # Skip check must look at the actual build target (which honors
+    # MDV6_BUILD_DIR), not the source tree.
+    bd = _resolve_build_dir()
 
     t0 = time.time()
     ok = fail = 0
