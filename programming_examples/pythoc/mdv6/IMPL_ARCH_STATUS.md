@@ -255,36 +255,24 @@ mdv6/
 ## Testing gaps
 
 The full-model test (`test_full_model_mc.py`) provides end-to-end PASS/FAIL
-coverage across every layer. **Standalone bytewise correctness tests
-exist only for a subset** of the merged ELFs — the others rely on the
-full-model test to catch regressions, which means a per-ELF bug can be
-masked by downstream layer interactions before the detection head.
+coverage across every layer. Three additional bytewise-correctness lit
+suites cover specific dispatch patterns in isolation so a per-ELF
+regression doesn't have to wait for the full-model PASS gate to trip.
 
-What's tested standalone (in `conv/test_*.py`):
+| Lit test | Covers | What it checks |
+|---|---|---|
+| `test_ocb.lit` (`conv/test_ocb.py`) | 9 OCB-unrolled ELFs (re8_rn3, re6_rn3, re{4,6,8}_c3, aconv{3,7,16,19}) | n_ocb-unrolled output slice-by-slice == n_ocb=1 ref ELF run n_ocb times |
+| `test_pair.lit` (`conv/test_pair.py`) | 3 GEMM rn1 pair ELFs (re4_rn1, re6_rn1, re8_rn1) | pair-ELF dispatch == x1 single-sub ELF run twice (chain-linked input BO) |
+| `test_fanout.lit` (`conv/test_fanout.py`) | 3 multi-clone fanout ELFs (`merged_ftconv0_x8`, `merged_ftconv1_p2_x4`, `merged_elan_c3_p4_x4`) | x4/x8 clone outputs == x1 single-sub ELF run N times |
 
-| ELF | Test |
+Each test auto-builds any missing ELFs into `MDV6_BUILD_DIR/build_merged/`
+(per-lit-run temp dir under CI). Selection is `--layer NAME / --shape NAME
+/ --variant NAME / all` so a single CI invocation covers all shapes.
+
+Remaining gaps (only covered by full-model PASS):
+
+| ELF set | Why no standalone test |
 |---|---|
-| `merged_gemm_t164_ic96_oc48_p1_pair_x1` (re6_rn1) | `test_pair_rn1.py` |
-| `ocb_re6_rn3_x1` | `test_ocb_re6_rn3.py` |
-| `ocb_re8_rn3_x1` | `test_ocb_re8_rn3.py` |
-
-What's NOT tested standalone (relies on full-model coverage):
-
-| ELF | Why no test |
-|---|---|
-| `ocb_re4_c3_x1`, `ocb_re6_c3_x1`, `ocb_re8_c3_x1` | Phase F — never built standalone tests |
-| `ocb_aconv3_x1`, `_aconv7_x1`, `_aconv16_x1`, `_aconv19_x1` | Phase G — same |
-| `merged_re4_rn3_p4_x1` | Pre-OCB single-clone, never tested standalone |
-| `merged_aconv5_p4_x1` | Same |
-| `merged_ftconv0_x8`, `merged_ftconv1_p2_x4`, `merged_elan_c3_p4_x4` | Phase A.1 fanouts — old standalone tests were deleted because they validated against the legacy xclbin baseline which is gone |
-| `merged_gemm_t256_ic64_oc32_p1_pair_x1` (re4_rn1), `merged_gemm_t104_ic128_oc64_p1_pair_x1` (re8_rn1) | Phase C step A — only re6_rn1 has a test |
-| GEMM K-blocked ELFs (`merged_gemm_*_kbN_*`) | Never had a standalone test |
-
-Cheapest gap-fillers (in priority order):
-
-1. Generalize `test_ocb_re6_rn3.py` to parameterize on layer name + shape;
-   instantiate for every OCB layer (one test file → 8 test invocations).
-2. Generalize `test_pair_rn1.py` similarly for the 3 GEMM pair ELFs.
-3. New `test_merged_fanout.py` validating x4/x8 fanout ELFs against
-   reference computed in numpy/torch (not xclbin baseline).
-4. K-blocked GEMM correctness: build a single-shape standalone test.
+| GEMM K-blocked (`merged_gemm_*_kbN_*`) | Needs self-contained weight-repack helper + torch reference with bf16 accumulator tolerance — kernel does fused matmul + BN, exact-bytewise comparison across k_block configurations isn't guaranteed |
+| `merged_re4_rn3_p4_x1`, `merged_aconv5_p4_x1` | Pre-OCB single-clone variants kept as fallback; full-model exercises them when MERGED_OCB=0 |
+| `ocb_re4_rn3_x1` | De-registered from `_MERGED_LAYERS_OCB_ALL` in Phase G after the silent oc_block mismatch; build target retained for diagnostic-only use |
