@@ -5,6 +5,7 @@ Falls back to single-core if the multicore xclbin is not available.
 """
 import math
 import os, sys, time
+from collections import OrderedDict
 import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../python"))
 import torch
@@ -205,25 +206,61 @@ if _MDV6_BUILD_ROOT:
     _MERGED_BD = os.path.abspath(os.path.join(_MDV6_BUILD_ROOT, "build_merged"))
 else:
     _MERGED_BD = os.path.join(_base, "conv", "build_merged")
-_MERGED_KERNELS = {}     # elf_name -> (device, elf, hw_context, kernel)
-_MERGED_BO_POOL = {}     # (elf_name, role, size) -> xrt.ext.bo
+_MERGED_KERNELS = OrderedDict()  # elf_name -> (device, elf, hw_context, kernel) or None
+_MERGED_BO_POOL = {}             # (elf_name, role, size) -> xrt.ext.bo
+_USE_PACKED_GEMM = os.environ.get("MDV6_USE_PACKED_GEMM", "0") not in ("", "0", "false", "False")
+_DEFAULT_MAX_LIVE_CONTEXTS = "30" if _USE_PACKED_GEMM else "1000000"
+_MERGED_MAX_LIVE_CONTEXTS = int(os.environ.get("MDV6_MAX_LIVE_MERGED_CONTEXTS", _DEFAULT_MAX_LIVE_CONTEXTS))
+
+
+def _drop_merged_kernel(elf_name):
+    """Release one cached xrt.elf hw_context and any BOs tied to that ELF."""
+    _MERGED_KERNELS.pop(elf_name, None)
+    for key in list(_MERGED_BO_POOL.keys()):
+        if key[0] == elf_name:
+            _MERGED_BO_POOL.pop(key, None)
+
+
+def _trim_merged_kernel_cache():
+    """Keep live xrt.elf hw_contexts below the driver/context limit.
+
+    The full mdv6 frame can touch more unique merged ELFs than the XRT driver
+    allows to remain open simultaneously. Profile runs are sequential, so an
+    LRU cache preserves common reuse while releasing stale hw_contexts before
+    CREATE_HWCTX starts failing late in the model.
+    """
+    live = sum(1 for entry in _MERGED_KERNELS.values() if entry is not None)
+    while live > _MERGED_MAX_LIVE_CONTEXTS:
+        for old_name, old_entry in list(_MERGED_KERNELS.items()):
+            if old_entry is None:
+                _MERGED_KERNELS.pop(old_name, None)
+                continue
+            _drop_merged_kernel(old_name)
+            live -= 1
+            break
+        else:
+            break
 
 
 def _get_merged_kernel(elf_name):
     """Load a merged ELF kernel (cached). Returns (device, kernel) or None."""
     if elf_name in _MERGED_KERNELS:
-        return _MERGED_KERNELS[elf_name]
+        entry = _MERGED_KERNELS.pop(elf_name)
+        _MERGED_KERNELS[elf_name] = entry
+        return entry
     elf_path = os.path.join(_MERGED_BD, f"{elf_name}.elf")
     if not os.path.exists(elf_path):
         _MERGED_KERNELS[elf_name] = None
         return None
     import pyxrt as _xrt
+    _trim_merged_kernel_cache()
     device = _xrt.device(0)
     elf = _xrt.elf(elf_path)
     hw_context = _xrt.hw_context(device, elf)
     kernel = _xrt.ext.kernel(hw_context, "main")
     entry = (device, elf, hw_context, kernel)
     _MERGED_KERNELS[elf_name] = entry
+    _trim_merged_kernel_cache()
     return entry
 
 
@@ -1121,6 +1158,46 @@ def _merged_gemm_elf_name(tile_m, ic, oc, k_block, ppc):
     return f"merged_gemm_t{tile_m}_ic{ic}_oc{oc}_{kb_str}p{ppc}_x1"
 
 
+def _merged_gemm_packed_elf_name(tile_m, ic, oc, k_block, ppc, n_batches):
+    """Filename convention shared with conv/build_packed_gemm.py."""
+    kb_str = f"kb{k_block}_" if k_block > 0 else ""
+    return f"merged_gemm_t{tile_m}_ic{ic}_oc{oc}_{kb_str}p{ppc}_x{n_batches}_packed"
+
+
+def _pack_gemm_spatial_inputs(input_flat, total_slots, input_size, tile_m, pixels_per_call):
+    """Pack all GEMM spatial batches into concat(old_x1_host_in_batch_i).
+
+    input_flat is [M, IC] uint16/bf16 bits. Each x1 batch layout is the same
+    as _run_gemm_*_merged used: total_slots slots, each slot contains tile_m
+    pixels flattened. Incomplete trailing slots are padded with slot0.
+    Returns (packed_host_in_u16, n_batches).
+    """
+    M = int(input_flat.shape[0])
+    n_batches = int(math.ceil(M / pixels_per_call)) if M else 0
+    host_in_size = total_slots * input_size
+    packed = np.zeros(n_batches * host_in_size, dtype=np.uint16)
+    for batch_idx, batch_start in enumerate(range(0, M, pixels_per_call)):
+        batch_end = min(batch_start + pixels_per_call, M)
+        batch_pixels = batch_end - batch_start
+        n_active_slots = (batch_pixels + tile_m - 1) // tile_m
+        base = batch_idx * host_in_size
+        for s in range(n_active_slots):
+            pix_start = batch_start + s * tile_m
+            pix_end = min(pix_start + tile_m, batch_end)
+            active = input_flat[pix_start:pix_end].reshape(-1)
+            if isinstance(active, np.ndarray) and active.dtype == np.uint16:
+                active_u16 = active
+            else:
+                active_u16 = bf16_to_uint16(active)
+            dst = base + s * input_size
+            packed[dst:dst + len(active_u16)] = active_u16
+        slot0 = packed[base:base + input_size].copy()
+        for s in range(n_active_slots, total_slots):
+            dst = base + s * input_size
+            packed[dst:dst + input_size] = slot0
+    return packed, n_batches
+
+
 def run_gemm_conv1x1_mc(gemm_name, sc_name, input_hwc, weights_uint16,
                          out_h, out_w, out_ch, oc_block=None):
     """GEMM-based 1×1 conv with 32-core multicore.
@@ -1147,6 +1224,17 @@ def _run_gemm_conv1x1_mc_impl(gemm_name, sc_name, input_hwc, weights_uint16,
 
     # --- Try K-blocked path first ---
     k_block, tile_m_kb = _gemm_choose_k_block(IC, out_ch, M)
+    if _USE_PACKED_GEMM and k_block > 0 and tile_m_kb >= 4:
+        ppc = _gemm_compute_ppc_kblocked(M, tile_m_kb, IC, out_ch, k_block)
+        n_batches = int(math.ceil(M / (N_CORES * tile_m_kb * ppc)))
+        if n_batches > 1:
+            packed_elf_name = _merged_gemm_packed_elf_name(tile_m_kb, IC, out_ch, k_block, ppc, n_batches)
+            packed_merged = _get_merged_kernel(packed_elf_name)
+            if packed_merged is not None:
+                return _run_gemm_kblocked_packed_merged(
+                    packed_merged, packed_elf_name, input_hwc, weights_uint16,
+                    out_h, out_w, out_ch, tile_m_kb, k_block, ppc,
+                )
     if k_block > 0 and tile_m_kb >= 4:
         ppc = _gemm_compute_ppc_kblocked(M, tile_m_kb, IC, out_ch, k_block)
         elf_name = _merged_gemm_elf_name(tile_m_kb, IC, out_ch, k_block, ppc)
@@ -1176,6 +1264,16 @@ def _run_gemm_conv1x1_mc_impl(gemm_name, sc_name, input_hwc, weights_uint16,
     # The ELFs were built with k_block=0 for layers where the full IC fits
     # in L1; they match the OC-blocked kernel exactly when oc_block == OC
     # (the only case build_x1_gemm.py emits).
+    if _USE_PACKED_GEMM and oc_block == out_ch:
+        n_batches = int(math.ceil(M / (N_CORES * tile_m * ppc)))
+        if n_batches > 1:
+            packed_elf_name = _merged_gemm_packed_elf_name(tile_m, IC, out_ch, 0, ppc, n_batches)
+            packed_merged = _get_merged_kernel(packed_elf_name)
+            if packed_merged is not None:
+                return _run_gemm_oc_blocked_packed_merged(
+                    packed_merged, packed_elf_name, input_hwc, weights_uint16,
+                    out_h, out_w, out_ch, tile_m, ppc,
+                )
     if oc_block == out_ch:
         elf_name = _merged_gemm_elf_name(tile_m, IC, out_ch, 0, ppc)
         merged = _get_merged_kernel(elf_name)
@@ -1190,6 +1288,80 @@ def _run_gemm_conv1x1_mc_impl(gemm_name, sc_name, input_hwc, weights_uint16,
         f"Build with conv/build_x1_gemm.py."
     )
 
+
+
+def _run_gemm_packed_merged_common(merged_entry, elf_name, input_hwc, wt_u16,
+                                   out_h, out_w, out_ch, tile_m, ppc):
+    """Run packed single-dispatch GEMM spatial fanout ABI: [W, packed_I, packed_O]."""
+    import pyxrt as _xrt
+    device, _elf, _ctx, kernel = merged_entry
+
+    H, W, IC = input_hwc.shape
+    M = H * W
+    input_size = tile_m * IC
+    output_size = tile_m * out_ch
+    total_slots = N_CORES * ppc
+    pixels_per_call = N_CORES * tile_m * ppc
+    host_in_size = total_slots * input_size
+    host_out_size = total_slots * output_size
+
+    input_flat = input_hwc.reshape(M, IC)
+    packed_in, n_batches = _pack_gemm_spatial_inputs(
+        input_flat, total_slots, input_size, tile_m, pixels_per_call,
+    )
+    if n_batches <= 0:
+        return torch.zeros(out_h, out_w, out_ch, dtype=torch.bfloat16)
+
+    packed_out_nelem = n_batches * host_out_size
+    wt_bo = _get_merged_bo(device, elf_name, "wt", wt_u16.nbytes)
+    in_bo = _get_merged_bo(device, elf_name, "packed_in", packed_in.nbytes)
+    out_bo = _get_merged_bo(device, elf_name, "packed_out", packed_out_nelem * 2)
+
+    _xrt_fill_bo(wt_bo, wt_u16)
+    _xrt_fill_bo(in_bo, packed_in)
+    _xrt_run_kernel(kernel, [wt_bo, in_bo, out_bo])
+    out_bo.sync(_xrt.xclBOSyncDirection.XCL_BO_SYNC_BO_FROM_DEVICE)
+    packed_out = np.frombuffer(out_bo.map(), dtype=np.uint16,
+                               count=packed_out_nelem).copy()
+
+    output = torch.zeros(out_h, out_w, out_ch, dtype=torch.bfloat16)
+    output_flat = output.reshape(M, out_ch)
+    for batch_idx, batch_start in enumerate(range(0, M, pixels_per_call)):
+        batch_end = min(batch_start + pixels_per_call, M)
+        batch_pixels = batch_end - batch_start
+        n_active_slots = (batch_pixels + tile_m - 1) // tile_m
+        base = batch_idx * host_out_size
+        for s in range(min(n_active_slots, total_slots)):
+            pix_start = batch_start + s * tile_m
+            pix_end = min(pix_start + tile_m, batch_end)
+            if pix_start >= batch_end:
+                break
+            n_pix = pix_end - pix_start
+            start = base + s * output_size
+            tile_out = uint16_to_bf16(packed_out[start:start + n_pix * out_ch])
+            tile_out = tile_out.reshape(n_pix, out_ch)
+            output_flat[pix_start:pix_end, :] = tile_out.to(torch.bfloat16)
+    return output
+
+
+def _run_gemm_kblocked_packed_merged(merged_entry, elf_name, input_hwc, weights_uint16,
+                                      out_h, out_w, out_ch, tile_m, k_block, ppc):
+    H, W, IC = input_hwc.shape
+    wt_kblocked = _repack_weights_kblocked(weights_uint16, IC, out_ch, k_block)
+    return _run_gemm_packed_merged_common(
+        merged_entry, elf_name, input_hwc, wt_kblocked,
+        out_h, out_w, out_ch, tile_m, ppc,
+    )
+
+
+def _run_gemm_oc_blocked_packed_merged(merged_entry, elf_name, input_hwc, weights_uint16,
+                                        out_h, out_w, out_ch, tile_m, ppc):
+    H, W, IC = input_hwc.shape
+    wt_blocks = _repack_weights_for_gemm(weights_uint16, IC, out_ch, out_ch)
+    return _run_gemm_packed_merged_common(
+        merged_entry, elf_name, input_hwc, wt_blocks[0],
+        out_h, out_w, out_ch, tile_m, ppc,
+    )
 
 
 def _run_gemm_kblocked_merged(merged_entry, elf_name, input_hwc, weights_uint16,
