@@ -104,6 +104,8 @@ def compile_mlir_module(
         "--no-compile-host",
         "--no-xchesscc",
         "--no-xbridge",
+        "--dump-intermediates",
+        "--keep-loc",
         f"--peano={config.peano_install_dir()}",
     ]
     if insts_path:
@@ -129,7 +131,10 @@ def compile_mlir_module(
         aiecc_bin = config.aiecc_path()
         mlir_file = os.path.join(work_dir, "aie.mlir")
         with open(mlir_file, "w") as f:
-            f.write(str(mlir_module))
+            if hasattr(mlir_module, "operation"):
+                f.write(mlir_module.operation.get_asm(enable_debug_info=True))
+            else:
+                f.write(str(mlir_module))
         result = subprocess.run(
             [aiecc_bin, mlir_file] + args, capture_output=True, text=True
         )

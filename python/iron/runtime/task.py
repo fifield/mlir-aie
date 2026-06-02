@@ -13,6 +13,7 @@ from ..buffer import Buffer
 from ..resolvable import Resolvable
 from ..worker import Worker
 from .taskgroup import RuntimeTaskGroup
+from .._loc import loc_or_unknown
 
 
 class RuntimeTask(Resolvable):
@@ -64,7 +65,11 @@ class InlineOpRuntimeTask(RuntimeTask):
     in a lower-level style of IRON. This can be especially useful for tracing."""
 
     def __init__(
-        self, fn: Callable, args: list, task_group: RuntimeTaskGroup | None = None
+        self,
+        fn: Callable,
+        args: list,
+        task_group: RuntimeTaskGroup | None = None,
+        user_loc=None,
     ):
         """Construct an InlineOpRuntimeTask.
 
@@ -72,10 +77,12 @@ class InlineOpRuntimeTask(RuntimeTask):
             fn (Callable): The function that will generate ops. It will be run within an MLIR module context.
             args (list): The arguments for the task: this should included objects such as Buffers used by the function.
             task_group (RuntimeTaskGroup | None, optional): The TaskGroup to associated these operation with. Defaults to None.
+            user_loc (CapturedLoc | None, optional): The user-source loc captured at the call site of Runtime.inline_ops.
         """
         # TODO: should validate somehow?
         self._fn = fn
         self._args = args
+        self._user_loc = user_loc
         RuntimeTask.__init__(self, task_group)
 
     @staticmethod
@@ -92,6 +99,7 @@ class InlineOpRuntimeTask(RuntimeTask):
         loc: ir.Location | None = None,
         ip: ir.InsertionPoint | None = None,
     ) -> None:
-        for arg in self._args:
-            InlineOpRuntimeTask._resolve_buffers(arg, loc, ip)
-        self._fn(*self._args)
+        with loc_or_unknown(self._user_loc):
+            for arg in self._args:
+                InlineOpRuntimeTask._resolve_buffers(arg, loc, ip)
+            self._fn(*self._args)

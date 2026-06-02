@@ -38,6 +38,7 @@ from .task import (
     InlineOpRuntimeTask,
     FinishTaskGroupTask,
 )
+from .._loc import capture_user_loc, loc_or_unknown
 
 
 class Runtime(Resolvable):
@@ -173,7 +174,16 @@ class Runtime(Resolvable):
 
         in_fifo.endpoint = rt_endpoint
         self._fifos.add(in_fifo)
-        self._tasks.append(DMATask(in_fifo, source, tap, task_group, wait))
+        self._tasks.append(
+            DMATask(
+                in_fifo,
+                source,
+                tap,
+                task_group,
+                wait,
+                user_loc=capture_user_loc(name=f"fill({in_fifo.name})"),
+            )
+        )
 
     def drain(
         self,
@@ -210,7 +220,16 @@ class Runtime(Resolvable):
 
         out_fifo.endpoint = rt_endpoint
         self._fifos.add(out_fifo)
-        self._tasks.append(DMATask(out_fifo, dest, tap, task_group, wait))
+        self._tasks.append(
+            DMATask(
+                out_fifo,
+                dest,
+                tap,
+                task_group,
+                wait,
+                user_loc=capture_user_loc(name=f"drain({out_fifo.name})"),
+            )
+        )
 
     def start(self, *args: Worker):
         """A placeholder operation to indicate that one or more Worker should be started on the device.
@@ -237,7 +256,14 @@ class Runtime(Resolvable):
             inline_args (list): The state the function needs to execute.
         """
         # TODO: should filter args based on some criteria??
-        self._tasks.append(InlineOpRuntimeTask(inline_func, inline_args))
+        fn_name = getattr(inline_func, "__name__", "inline_ops")
+        self._tasks.append(
+            InlineOpRuntimeTask(
+                inline_func,
+                inline_args,
+                user_loc=capture_user_loc(name=f"inline_ops({fn_name})"),
+            )
+        )
 
     def enable_trace(
         self,
@@ -289,7 +315,11 @@ class Runtime(Resolvable):
             barrier (WorkerRuntimeBarrier): The WorkerRuntimeBarrier to set.
             value (int): The value to set the barrier to.
         """
-        self._tasks.append(_BarrierSetOp(barrier, value))
+        self._tasks.append(
+            _BarrierSetOp(
+                barrier, value, user_loc=capture_user_loc(name="set_barrier")
+            )
+        )
 
     @property
     def workers(self) -> list[Worker]:
@@ -338,25 +368,28 @@ class Runtime(Resolvable):
 
                 # We want to keep order, EXCEPT do waits before frees
                 wait_tasks = [
-                    (fn, args) for (fn, args) in actions if fn == dma_await_task
+                    action for action in actions if action[0] == dma_await_task
                 ]
                 free_tasks = [
-                    (fn, args) for (fn, args) in actions if fn == dma_free_task
+                    action for action in actions if action[0] == dma_free_task
                 ]
 
                 # Check for anything known -- this shouldn't happen, but we'll catch it gracefully anyways.
                 if len(wait_tasks) + len(free_tasks) != len(actions):
                     unknown_actions = [
-                        (fn, args)
-                        for (fn, args) in actions
-                        if fn != dma_await_task and fn != dma_free_task
+                        action
+                        for action in actions
+                        if action[0] != dma_await_task
+                        and action[0] != dma_free_task
                     ]
                     raise Exception(
-                        f"Unknown action type detected: {','.join(unknown_actions)}"
+                        "Unknown action type detected: "
+                        f"{', '.join(str(action[0]) for action in unknown_actions)}"
                     )
 
-                for fn, args in wait_tasks + free_tasks:
-                    fn(*args)
+                for fn, args, user_loc in wait_tasks + free_tasks:
+                    with loc_or_unknown(user_loc):
+                        fn(*args)
                 task_group_actions[tg] = None
 
             default_task_group = self.task_group()
@@ -374,11 +407,11 @@ class Runtime(Resolvable):
                         current_task_group = default_task_group
                     if task.will_wait():
                         task_group_actions[current_task_group].append(
-                            (dma_await_task, [task.task])
+                            (dma_await_task, [task.task], task.user_loc)
                         )
                     else:
                         task_group_actions[current_task_group].append(
-                            (dma_free_task, [task.task])
+                            (dma_free_task, [task.task], task.user_loc)
                         )
                 if isinstance(task, FinishTaskGroupTask):
                     finish_task_group(task.task_group, task_group_actions)

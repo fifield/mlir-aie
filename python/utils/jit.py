@@ -153,7 +153,9 @@ def jit(function=None, use_cache=True):
             if not effective_use_cache or not xclbin_exists or not inst_exists:
                 try:
                     with open(mlir_path, "w", encoding="utf-8") as f:
-                        print(mlir_module, file=f)
+                        f.write(
+                            mlir_module.operation.get_asm(enable_debug_info=True)
+                        )
 
                     # Compile ExternalFunctions from inside the JIT compilation directory
                     for func in external_kernels:
