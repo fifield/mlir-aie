@@ -20,4 +20,4 @@
 // RUN: mkdir -p test_stx
 // RUN: cd test_stx
 //
-// RUN: env MDV6_BUILD_DIR=. %run_on_npu2% python3 %S/conv/test_rn3_pair_hw.py --layer tiny
+// RUN: env MDV6_BUILD_DIR=. %run_on_npu2% python3 %S/conv/test_rn3_pair_hw.py --layer all
