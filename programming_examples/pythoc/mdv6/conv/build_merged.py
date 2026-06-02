@@ -325,17 +325,21 @@ def build_merged(out_name, sub_names, build_dir=None, share_arg_idxs=None,
     # Stage both conv kernel .o files; aiecc resolves link_with relative to
     # the build cwd, so they need to be next to the MLIR. K-blocked GEMM uses
     # gemm_conv1x1_kblocked_bf16.o — staged too if present.
+    # Always-required kernels for the standard conv/gemm sub-devices.
     obj_names = ["conv3x3_fused_packed_bf16", "gemm_conv1x1_fused_packed_bf16"]
-    if kind == "gemm":
-        obj_names.append("gemm_conv1x1_kblocked_bf16")
+    # Optional kernels — staged if present in kernels/build/, ignored if not.
+    # The sub-device that actually link_with's one of these still fails at
+    # aiecc time if its specific .o is missing, but unrelated builds (e.g.
+    # an OCB conv build that doesn't touch GEMM) don't have to pay the
+    # bring-up cost of every optional kernel.
+    optional = ["gemm_conv1x1_kblocked_bf16", "rn3_pair_fused_bf16"]
     for k in obj_names:
+        _stage_kernel_obj(k, build_dir)
+    for k in optional:
         try:
             _stage_kernel_obj(k, build_dir)
         except FileNotFoundError:
-            # kblocked .o is only present when the kblocked kernel has been
-            # built; non-kblocked GEMM builds tolerate its absence.
-            if k != "gemm_conv1x1_kblocked_bf16":
-                raise
+            pass
 
     print(f"  {out_name}: generating {len(sub_names)} sub-MLIRs...")
     # Cache key includes the sub label AND any per-sub extra args so
