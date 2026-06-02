@@ -115,10 +115,22 @@ def test_rn3_pair_npu_matches_cpu_oracle(layer="tiny"):
     np.testing.assert_allclose(got, expected, rtol=2e-2, atol=2e-2)
 
 
+# Shapes whose (input + weight + output + stack) footprint fits in the
+# 64 KB L1 budget for the scalar prototype kernel. Larger shapes
+# (re6_tile, re6_oc8) need vectorized weights or K-block-style weight
+# streaming — out of scope for this correctness anchor.
+_L1_FITTING = ["tiny", "re6_oc4", "re4_tile"]
+
+
 if __name__ == "__main__":
     import argparse
     p = argparse.ArgumentParser()
-    p.add_argument("--layer", choices=list(build_rn3_pair._LAYERS), default="tiny")
+    p.add_argument("--layer",
+                   choices=list(build_rn3_pair._LAYERS) + ["all"],
+                   default="tiny",
+                   help="`all` runs every L1-fitting shape")
     args = p.parse_args()
-    test_rn3_pair_npu_matches_cpu_oracle(args.layer)
-    print(f"PASS: {args.layer} rn3-pair NPU smoke matches CPU oracle")
+    labels = _L1_FITTING if args.layer == "all" else [args.layer]
+    for label in labels:
+        test_rn3_pair_npu_matches_cpu_oracle(label)
+        print(f"PASS: {label} rn3-pair NPU smoke matches CPU oracle")
