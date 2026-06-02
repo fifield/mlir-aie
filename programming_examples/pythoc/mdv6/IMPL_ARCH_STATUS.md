@@ -210,7 +210,8 @@ mdv6/
 ├── profile_harness.py               # Profiler wrappers (_xrt_run_kernel hook for per-layer attribution)
 ├── run_tiled_mc.py                  # Dispatch entry + all _run_*_merged variants + registries
 ├── regime_config.py                 # Active-shape lookup (tile_h/oc_block/stride) per layer
-├── run_full_model.lit               # End-to-end CI test (build merged ELFs + run model)
+├── run_full_model.lit               # E2E CI: build merged ELFs + run model (default path)
+├── run_full_model_packed.lit        # E2E CI: same model + MDV6_USE_PACKED_GEMM=1 path
 ├── Makefile                         # build / profile / clean targets
 ├── .gitignore                       # Excludes mdv6_bf16_weights.pt + onnx graph + logs
 ├── lit.local.cfg                    # Sets mdv6_weights feature when weights.pt is present
@@ -254,10 +255,12 @@ mdv6/
 
 ## Testing gaps
 
-The full-model test (`test_full_model_mc.py`) provides end-to-end PASS/FAIL
-coverage. Six additional lit suites cover specific dispatch patterns and
-correctness anchors so a per-ELF regression surfaces before the full-model
-PASS gate trips.
+Two full-model lit gates anchor end-to-end PASS/FAIL — `run_full_model.lit`
+(default dispatch path) and `run_full_model_packed.lit`
+(MDV6_USE_PACKED_GEMM=1, every multi-batch GEMM routes through the packed
+[wt, packed_in, packed_out] ABI). Six standalone lit suites cover specific
+dispatch patterns and correctness anchors so a per-ELF regression surfaces
+before the full-model gate trips.
 
 | Lit test | Covers | What it checks |
 |---|---|---|
