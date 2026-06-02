@@ -1,0 +1,10 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// Build smoke for the rn3 pair fused PythoC kernel object
+// (Phase H step-2 prototype). Confirms the scalar fused conv3x3+conv3x3
+// kernel compiles and the .o lands in kernels/build/. No NPU.
+//
+// REQUIRES: peano, torch
+//
+// RUN: python3 %S/conv/test_rn3_pair_kernel_build.py
