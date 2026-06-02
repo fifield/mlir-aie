@@ -1,0 +1,23 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// Hardware smoke for the fused rn3 conv3x3+conv3x3 pair (Phase H step 2).
+//
+// Builds one fused-pair ELF (tiny shape, 8×8 tile / ic=mid=ocb=4) and
+// runs one xrt.run with a (T+4)×(T+4) input patch + concatenated
+// (w1, bn1, w2, bn2) weights. Compares the NPU output against a
+// scalar CPU oracle (rn3_pair_pythoc.rn3_pair_fused_bf16 reimplemented
+// in numpy, matched bf16 quantization on inputs/weights, kernel's SiLU
+// approximation). PASS within rtol=atol=2e-2.
+//
+// The on-device kernel is intentionally scalar (recomputes conv1 values
+// for every conv2 step) — this test anchors the geometry/layout before
+// the vectorized implementation lands.
+//
+// REQUIRES: ryzen_ai_npu2, peano, torch
+//
+// RUN: rm -rf test_stx
+// RUN: mkdir -p test_stx
+// RUN: cd test_stx
+//
+// RUN: env MDV6_BUILD_DIR=. %run_on_npu2% python3 %S/conv/test_rn3_pair_hw.py --layer tiny

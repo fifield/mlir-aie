@@ -266,7 +266,7 @@ PASS gate trips.
 | `test_fanout.lit` (`conv/test_fanout.py`) | 3 multi-clone fanout ELFs (`merged_ftconv0_x8`, `merged_ftconv1_p2_x4`, `merged_elan_c3_p4_x4`) | x4/x8 clone outputs == x1 single-sub ELF run N times |
 | `test_packed_gemm.lit` (`conv/test_packed_gemm.py`) | All GEMM 1x1 shapes with n_batches > 1 (5+ ELFs, mix of K-blocked and non-K-blocked) | packed-ABI ELF output == x1 ELF run n_batches times |
 | `test_packed_gemm_unit.lit` (`conv/test_packed_gemm_unit.py`) | Pure-Python (no NPU) | dispatcher-side packing helpers (ELF naming, batch concatenation layout) |
-| `test_gemm_truth.lit` (`conv/test_gemm_truth.py`) | One non-K-blocked + one K-blocked GEMM shape | NPU output matches a torch float-precision reference (BN-fold + kernel SiLU approximation) within bf16 tolerance — absolute-truth anchor that the bytewise tests don't provide |
+| `test_gemm_truth.lit` (`conv/test_gemm_truth.py`) | One non-K-blocked GEMM shape + every distinct K-blocked variant the model uses (kb={16, 32, 48, 64, 72, 128}) | NPU output matches a torch float-precision reference (BN-fold + kernel SiLU approximation) within bf16 tolerance — absolute-truth anchor that the bytewise tests don't provide |
 
 Each NPU test auto-builds any missing ELFs into `MDV6_BUILD_DIR/build_merged/`
 (per-lit-run temp dir under CI). Selection is `--layer/--shape/--variant
@@ -276,6 +276,5 @@ Remaining gaps (only covered by full-model PASS):
 
 | ELF set | Why no standalone test |
 |---|---|
-| K-blocked GEMM ELFs with n_batches=1 (re6_c1, re8_c1, spp_c1, re18_c1, re21_c1, etc.) | Used as the x1 reference in `test_packed_gemm.py` — covered transitively (any kernel bug would also fail the n_batches>1 packed comparison) and once absolutely via `test_gemm_truth.py` for the kb16 path. Other k_block values are only covered by the full-model PASS. |
 | `merged_re4_rn3_p4_x1`, `merged_aconv5_p4_x1` | Pre-OCB single-clone variants kept as fallback; full-model exercises them when MERGED_OCB=0 |
 | `ocb_re4_rn3_x1` | De-registered from `_MERGED_LAYERS_OCB_ALL` in Phase G after the silent oc_block mismatch; build target retained for diagnostic-only use |
