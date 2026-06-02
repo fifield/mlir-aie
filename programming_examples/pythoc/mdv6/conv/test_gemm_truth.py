@@ -32,9 +32,23 @@ _GEMM_SCRIPT = os.path.normpath(
 
 
 # (label, tile_m, ic, oc, k_block, ppc) — k_block=0 means non-K-blocked path.
+# One shape per distinct k_block value used by the model so the K-blocked
+# kernel has an absolute-truth anchor at every operating point:
+#
+#   kb16  → re4_c4   (n_kb=16, smallest k_block, longest accumulator chain)
+#   kb32  → re6_c1   (n_kb=6)
+#   kb48  → re6_c4   (n_kb=8, only kb48 layer in the model)
+#   kb64  → re8_c1   (n_kb=4)
+#   kb72  → re18_c1  (n_kb=4, only kb72 layer)
+#   kb128 → spp_c1   (n_kb=2, shortest accumulator chain)
 _SHAPES = [
     ("re6_rn1",  164,  96,  48,   0, 1),   # non-K-blocked
-    ("re4_c4",    68, 256, 128,  16, 1),   # K-blocked (n_k_blocks=16)
+    ("re4_c4",    68, 256, 128,  16, 1),
+    ("re6_c1",    56, 192, 192,  32, 1),
+    ("re6_c4",    32, 384, 192,  48, 2),
+    ("re8_c1",    20, 256, 256,  64, 1),
+    ("re18_c1",   28, 288, 192,  72, 2),
+    ("spp_c1",    28, 256, 128, 128, 1),
 ]
 
 

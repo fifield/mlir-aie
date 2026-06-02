@@ -1,0 +1,13 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// CPU-only geometry verification for the rn3 3x3+3x3 pair tile fusion
+// (Phase H prototype). Confirms that one (T+4)×(T+4) original-input patch
+// is sufficient to compute one T×T fused-pair output tile — the
+// pre-condition for an on-device dataflow-fused implementation.
+//
+// No NPU dispatch; sub-second.
+//
+// REQUIRES: peano, torch
+//
+// RUN: python3 %S/conv/test_rn3_pair_cpu.py
