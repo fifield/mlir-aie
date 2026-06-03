@@ -130,8 +130,8 @@ DEFAULT_DISPATCH_SEQUENCE = (
 )
 
 # Per-segment kernel object filenames.
-KO_MATVEC = "mv_pythoc.o"
-KO_MATVEC_RMS = "matvec_rms_pythoc.o"  # fused RMSNorm+matvec (air 3-device fold)
+KO_MATVEC = "mv_pythoc.ll"  # inlined (alwaysinline IR-merge)
+KO_MATVEC_RMS = "matvec_rms_pythoc.ll"  # inlined (alwaysinline IR-merge)  # fused RMSNorm+matvec (air 3-device fold)
 KO_MATVEC_K8192 = "mv_k8192_pythoc.o"
 KO_SWIGLU = "silu_and_mul_bf16.o"
 KO_RMS = "rms_norm_2048_bf16.o"
