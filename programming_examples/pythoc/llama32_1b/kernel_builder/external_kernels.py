@@ -33,7 +33,11 @@ _PYTHOC_KERNELS = [
     ("silu_and_mul_bf16.o", "compile_silu_and_mul"),
     ("rope_pythoc.o", "compile_rope"),
     ("mv_pythoc.o", "compile_matvec"),
+    ("mv_pythoc.ll", "compile_matvec_inline"),  # inlined alwaysinline matvec
     ("matvec_rms_pythoc.o", "compile_matvec_rms"),
+    # inlined alwaysinline .ll variant of rms_norm_packed (link_with=.ll
+    # -> aiecc llvm-links + inlines, no func.call).
+    ("matvec_rms_pythoc.ll", "compile_matvec_rms_inline"),
     ("mv_k8192_pythoc.o", "compile_matvec_k8192"),
     ("attn_pythoc.o", "compile_attn"),
     # Phase 4.5c: bf16 GEMM .o consumed by the placed-IRON v_matmul_seg
@@ -52,7 +56,9 @@ _PYTHOC_KERNELS = [
     # Phase 6 (Stage 2): packed-uint4 AWQ kernels.  Each .py kernel uses
     # the scalar per-nibble decode path; vectorization is deferred.
     ("awq_mv_pythoc.o", "compile_awq_mv"),
+    ("awq_mv_pythoc.ll", "compile_awq_mv_inline"),        # inlined (alwaysinline)
     ("awq_mv_k8192_pythoc.o", "compile_awq_mv_k8192"),
+    ("awq_mv_k8192_pythoc.ll", "compile_awq_mv_k8192_inline"),  # inlined
     ("awq_gemv_k2048_m32_g128_vecdeq_pythoc.o",
      "compile_awq_gemv_k2048_m32_g128_vecdeq"),
     ("awq_gemv_k8192_m8_g128_vecdeq_pythoc.o",

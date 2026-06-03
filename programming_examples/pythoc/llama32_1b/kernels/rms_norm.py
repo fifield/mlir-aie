@@ -21,18 +21,22 @@ from pythoc.aie import (
     aie_vector,
     broadcast,
     load_v,
+    reduce_add_reassoc,
     store_v,
-    vector_add,
     vector_mul,
     zeros,
 )
 
-# Lazy AIE2P scalar intrinsics. `invsqrt` is resolved on first attribute
-# access from pythoc.aie; this name binding lets PythoC's AST visitor see it
-# as a user_global. `build.py` must mirror this in extra_globals when invoking
-# `compile_pythoc_source` standalone (compile_pythoc_kernel ignores the source's
-# imports).
-from pythoc.aie import invsqrt  # noqa: F401
+# bf16 MAC that accumulates bf16*bf16 products into an f32 accumulator -- the
+# proven pythoc idiom for f32 accumulation (matvec.py uses the same op).
+from pythoc.aie import I1024_I1024_ACC2048_bf_mac_conf  # noqa: F401
+
+# Lazy AIE2P scalar intrinsics. `sqrtf` is the precise HW sqrt; we form
+# 1/sqrt(x) as 1.0/sqrtf(x) to mirror the AIR reference, whose math.rsqrt
+# lowers to `1.0 / llvm.intr.sqrt` (a precise reciprocal-sqrt) -- NOT the
+# AIE2P `invsqrt` hardware approximation. `build.py` mirrors these in
+# extra_globals when invoking `compile_pythoc_source`.
+from pythoc.aie import sqrtf  # noqa: F401
 
 
 @aie_kernel
@@ -42,30 +46,25 @@ def rms_norm_2048_bf16(
     y: ptr[bf16, True],       # output vector, 2048 bf16
     scratch: ptr[bf16, True], # 16 bf16 scratch for horizontal sum
 ) -> void:
-    # Pass 1 -- accumulate squared values into a 16-wide BF16 vector
-    accum: aie_vector[bf16, 16] = zeros(bf16, 16)
+    # Pass 1 -- sum of squares accumulated in F32 (matches the maintained AIR
+    # reference matvec_swiglu_rms: bf16 square -> extf to f32 -> f32 add;
+    # bf16 accumulation lost ~9% summing 2048 squared values). `scratch` is
+    # unused now (the f32 horizontal reduce replaces the scalar spill) but
+    # kept in the signature for ABI stability.
+    acc: aie_vector[f32, 64] = zeros(f32, 64)
+    conf: i32 = i32(60)
     p_x: ptr[bf16] = x
     i: i32 = 0
     while i < 2048:
-        xv: aie_vector[bf16, 16] = load_v(p_x, 16)
-        sq: aie_vector[bf16, 16] = vector_mul(xv, xv)
-        accum = vector_add(accum, sq)
-        p_x = p_x + 16
-        i = i + 16
+        xv: aie_vector[bf16, 64] = load_v(p_x, 64)
+        acc = I1024_I1024_ACC2048_bf_mac_conf(xv, xv, acc, conf)  # sum sq -> f32
+        p_x = p_x + 64
+        i = i + 64
 
-    # Horizontal sum: spill the 16-wide accumulator to scratch then scalar-sum.
-    store_v(scratch, accum)
-    s: bf16 = bf16(0.0)
-    j: i32 = 0
-    while j < 16:
-        s = s + scratch[j]
-        j = j + 1
-
-    # mean_sq + eps, invsqrt, broadcast back to vector.
-    # Match AIR-reference numerical sequence: bf16 mean+eps then f32 rsqrt.
-    mean: bf16 = s * bf16(0.00048828125)  # 1/2048
-    mean_eps: bf16 = mean + bf16(1.001360e-05)
-    inv_rms: bf16 = bf16(invsqrt(f32(mean_eps)))
+    total: f32 = reduce_add_reassoc(acc)                     # f32 horizontal reduce
+    mean: f32 = total / f32(2048.0)                          # f32 divf
+    mean_eps: f32 = mean + f32(1.0e-5)                       # f32, eps = 1e-5 (exact)
+    inv_rms: bf16 = bf16(f32(1.0) / f32(sqrtf(mean_eps)))    # 1/sqrt precise, trunc bf16
     scale: aie_vector[bf16, 16] = broadcast(bf16, 16, inv_rms)
 
     # Pass 2 -- y[i] = x[i] * scale * w[i]
