@@ -222,6 +222,51 @@ def compile_matvec(output_dir: Optional[str] = None, verbose: bool = False) -> P
         return dst
 
 
+def compile_matvec_rms(output_dir: Optional[str] = None, verbose: bool = False) -> Path:
+    """Compile kernels/matvec_rms.py -> matvec_rms_pythoc.o.
+
+    Fused RMSNorm + matvec (air's "broadcast res1, RMSNorm per-tile" design).
+    Helper `matvec_rms_linalg_fill_bf16` is defined FIRST so it lands in the
+    same .o as the named entry `matvec_rms_vectorized_bf16_bf16`. Needs the
+    same MAC/pipeline intrinsics as compile_matvec plus rms_norm's
+    `invsqrt` / `broadcast` / `vector_add` / `vector_mul`.
+    """
+    import shutil, tempfile
+    from pythoc.aie import (
+        I1024_I1024_ACC2048_bf_mac_conf,
+        broadcast,
+        invsqrt,
+        loop_range,
+        prepare_for_pipelining,
+        reduce_add_reassoc,
+        vector_add,
+        vector_mul,
+    )
+
+    with tempfile.TemporaryDirectory(prefix="matvec_rms_pythoc_") as tmp:
+        produced = compile_pythoc_source(
+            source_code=_read("matvec_rms.py"),
+            function_name="rms_norm_packed_bf16",
+            target_arch="aie2p",
+            output_dir=tmp,
+            verbose=verbose,
+            extra_globals={
+                "I1024_I1024_ACC2048_bf_mac_conf": I1024_I1024_ACC2048_bf_mac_conf,
+                "broadcast": broadcast,
+                "invsqrt": invsqrt,
+                "loop_range": loop_range,
+                "prepare_for_pipelining": prepare_for_pipelining,
+                "reduce_add_reassoc": reduce_add_reassoc,
+                "vector_add": vector_add,
+                "vector_mul": vector_mul,
+            },
+        )
+        dst_dir = Path(output_dir) if output_dir else Path.cwd()
+        dst = dst_dir / "matvec_rms_pythoc.o"
+        shutil.copy2(produced, dst)
+        return dst
+
+
 def compile_bf16_gemm(
     M_BLOCKS: int,
     N_BLOCKS: int,
