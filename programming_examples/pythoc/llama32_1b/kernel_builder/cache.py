@@ -43,8 +43,12 @@ _LINK_OBJS = [
     "silu_and_mul_bf16.o",
     "rope_pythoc.o",
     "mv_pythoc.o",
+    "mv_pythoc.ll",  # inlined (alwaysinline IR-merge)
     "matvec_rms_pythoc.o",
+    "matvec_rms_pythoc.ll",  # inlined alwaysinline IR-merge variant
     "mv_k8192_pythoc.o",
+    "awq_mv_pythoc.ll",        # inlined (alwaysinline)
+    "awq_mv_k8192_pythoc.ll",  # inlined (alwaysinline)
     "attn_pythoc.o",
     # Phase 4.5c: bf16 GEMM .o for the prefill v_matmul_seg (and later
     # k_matmul_seg / q_matmul_seg / o_ffn devices, all of which use the same
