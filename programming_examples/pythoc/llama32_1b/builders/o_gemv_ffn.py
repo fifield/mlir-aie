@@ -110,6 +110,11 @@ M_TILE_K8192 = 2    # rows processed per K=8192 matvec call
 # Inline-add per-tile chunk size (256 bf16 elements).
 ADD_CHUNK = 256
 
+# normed2 L2-chaining (pack_mode "d1d3d4_n2l2"): pinned col-0 mem-tile address
+# for the resident normed2 vector. Chosen high (256 KB) to clear D3's per-column
+# footprint (~64 KB); see L2_CROSS_COLUMN_ROUTING_SCOPE.md.
+_NORMED2_L2_ADDR = 0x40000
+
 # SwiGLU per-tile buffer size.
 SWIGLU_CHUNK = 1024
 
@@ -126,6 +131,7 @@ DEFAULT_DISPATCH_SEQUENCE = (
 
 # Per-segment kernel object filenames.
 KO_MATVEC = "mv_pythoc.o"
+KO_MATVEC_RMS = "matvec_rms_pythoc.o"  # fused RMSNorm+matvec (air 3-device fold)
 KO_MATVEC_K8192 = "mv_k8192_pythoc.o"
 KO_SWIGLU = "silu_and_mul_bf16.o"
 KO_RMS = "rms_norm_2048_bf16.o"
@@ -1968,7 +1974,7 @@ def _emit_eltwise_add_seg(sym: str, in0_arg_idx: int, in1_arg_idx: int,
 # Buffers in AIR order: buf67 (x, on S2MM 1), buf66 (out, on MM2S 0),
 #                       buf65 (w, on S2MM 0), buf64 (scratch 16xbf16).
 # ---------------------------------------------------------------------------
-def _emit_rm_rms_seg() -> None:
+def _emit_rm_rms_seg(normed2_l2: bool = False) -> None:
     sym = "rm_rms_seg"
     chans = _CHANNELS[sym]
 
@@ -1976,6 +1982,14 @@ def _emit_rm_rms_seg() -> None:
     def _dev():
         shim = tile(0, 0)
         ct = tile(0, 2)
+        # normed2 L2 capture (Step A): route the rms output through col-0
+        # mem-tile into a pinned resident buffer, then on to the shim/DDR. The
+        # DDR copy is unchanged (D3 still reads it); the L2 copy persists for a
+        # future Step B that re-sources the D3 broadcast from it.
+        mt = tile(0, 1) if normed2_l2 else None
+        if normed2_l2:
+            n2_empty = lock(mt, lock_id=0, init=1)
+            n2_full = lock(mt, lock_id=1, init=0)
 
         lk5 = lock(ct, lock_id=5, init=1)  # in2 avail (x in)
         lk4 = lock(ct, lock_id=4, init=0)  # in2 ready
@@ -1991,6 +2005,10 @@ def _emit_rm_rms_seg() -> None:
         buf_y = buffer(ct, datatype=_BF16_2048_L1)
         buf_w = buffer(ct, datatype=_BF16_2048_L1)
         buf_s = buffer(ct, datatype=_BF16_16_L1)
+        if normed2_l2:
+            normed2_l2_buf = buffer(
+                mt, datatype=bf16_memref(EMB_DIM, memory_space=1),
+                address=_NORMED2_L2_ADDR)
 
         _emit_external_buffers((EMB_DIM,), (EMB_DIM,), (EMB_DIM,))
 
@@ -2060,7 +2078,30 @@ def _emit_rm_rms_seg() -> None:
         # Flows.
         flow(shim, WireBundle.DMA, 0, ct, WireBundle.DMA, 0)
         flow(shim, WireBundle.DMA, 1, ct, WireBundle.DMA, 1)
-        flow(ct, WireBundle.DMA, 0, shim, WireBundle.DMA, 0)
+        if normed2_l2:
+            # normed2: ct -> mem-tile (capture into normed2_l2_buf) -> shim/DDR.
+            flow(ct, WireBundle.DMA, 0, mt, WireBundle.DMA, 0)
+            flow(mt, WireBundle.DMA, 0, shim, WireBundle.DMA, 0)
+
+            @memtile_dma(mt)
+            def _n2_mt(block):
+                dma_start(DMAChannelDir.S2MM, 0, dest=block[1], chain=block[2])
+                with block[1]:
+                    use_lock(n2_empty, LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(normed2_l2_buf, offset=0, len=EMB_DIM)
+                    use_lock(n2_full, LockAction.Release, value=1)
+                    next_bd(block[4])
+                with block[2]:
+                    dma_start(DMAChannelDir.MM2S, 0, dest=block[3], chain=block[4])
+                with block[3]:
+                    use_lock(n2_full, LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(normed2_l2_buf, offset=0, len=EMB_DIM)
+                    use_lock(n2_empty, LockAction.Release, value=1)
+                    next_bd(block[4])
+                with block[4]:
+                    EndOp()
+        else:
+            flow(ct, WireBundle.DMA, 0, shim, WireBundle.DMA, 0)
 
         shim_dma_allocation(f"air_channel_{chans['out']}", shim, DMAChannelDir.S2MM, 0)
         shim_dma_allocation(f"air_channel_{chans['in0']}", shim, DMAChannelDir.MM2S, 0)
@@ -2113,6 +2154,10 @@ def _emit_gg_ug_swiglu_pack(
     input_arg_idx: int = 6,
     output_arg_idx: int = 11,
     out_rows: int = HIDDEN_DIM,
+    normed2_l2: bool = False,
+    rms_fused: bool = False,
+    res1_arg_idx: int = 4,
+    normw_arg_idx: int = 5,
 ) -> None:
     """Pack gate/up K=2048 matvecs with the following SwiGLU.
 
@@ -2192,7 +2237,12 @@ def _emit_gg_ug_swiglu_pack(
             }
 
         _W_L1_TY = bf16_memref(K_TILE, EMB_DIM, memory_space=2)
-        _X_L1_TY = bf16_memref(EMB_DIM, memory_space=2)
+        # Fused RMS: the gate/up activation buffer is packed [res1 | norm_w]
+        # (2*EMB_DIM); else it's the single normed2 vector (EMB_DIM).
+        _X_LEN = 2 * EMB_DIM if rms_fused else EMB_DIM
+        _X_L1_TY = bf16_memref(_X_LEN, memory_space=2)
+        _NORMED_L1_TY = bf16_memref(EMB_DIM, memory_space=2)   # rms scratch
+        _RSCR_L1_TY = bf16_memref(16, memory_space=2)          # reduction spill
         _Y_L1_TY = bf16_memref(M_TILE, memory_space=2)
         _W_L2_TY = bf16_memref(1, M_TILE, EMB_DIM, memory_space=1)
         _Y_L2_TY = bf16_memref(1, M_TILE, memory_space=1)
@@ -2209,12 +2259,35 @@ def _emit_gg_ug_swiglu_pack(
             mem_buf_gg_y[col] = buffer(mem_tiles[col], datatype=_Y_L2_TY)
             mem_buf_ug_y[col] = buffer(mem_tiles[col], datatype=_Y_L2_TY)
 
+        # normed2 L2 chaining (Step B): col-0 mem-tile holds the resident
+        # normed2 vector (written by rm; persists across the swap) and
+        # broadcasts it to gg/ug matvec inputs, replacing the shim DDR read.
+        # Repeat the broadcast to match the shim's total deliveries
+        # (n_outer per-outer tasks x (x_repeat_count+1) each).
+        normed2_l2_buf = None
+        # Empirical (2026-05-29): the matvec consumes ~256 x-deliveries/col
+        # (matching the shim's n_outer*(x_repeat_count+1)=8*32). repeat=255 runs
+        # (does NOT deadlock) but races (non-deterministic garbage) because this
+        # broadcast is lock-free; repeat=127 (128) DEADLOCKS (starved). So 255 is
+        # the correct COUNT -- the open problem is SYNCHRONIZATION (the lock-free
+        # broadcast races the per-group consumption; the shim avoided this via
+        # its per-outer await/free pacing). TODO: lock-synchronize the broadcast.
+        n2_bcast_repeat = n_outer * (x_repeat_count + 1) - 1  # 255
+        if normed2_l2:
+            normed2_l2_buf = buffer(
+                mem_tiles[0], datatype=bf16_memref(EMB_DIM, memory_space=1),
+                address=_NORMED2_L2_ADDR)
+
         gg_buf_y = {}
         gg_buf_w = {}
         gg_buf_x = {}
+        gg_buf_normed = {}
+        gg_buf_rscr = {}
         ug_buf_y = {}
         ug_buf_w = {}
         ug_buf_x = {}
+        ug_buf_normed = {}
+        ug_buf_rscr = {}
         sw_buf_out = {}
         sw_buf_up = {}
         sw_buf_gate = {}
@@ -2225,6 +2298,11 @@ def _emit_gg_ug_swiglu_pack(
             ug_buf_y[col] = buffer(ug_tiles[col], datatype=_Y_L1_TY)
             ug_buf_w[col] = buffer(ug_tiles[col], datatype=_W_L1_TY)
             ug_buf_x[col] = buffer(ug_tiles[col], datatype=_X_L1_TY)
+            if rms_fused:
+                gg_buf_normed[col] = buffer(gg_tiles[col], datatype=_NORMED_L1_TY)
+                gg_buf_rscr[col] = buffer(gg_tiles[col], datatype=_RSCR_L1_TY)
+                ug_buf_normed[col] = buffer(ug_tiles[col], datatype=_NORMED_L1_TY)
+                ug_buf_rscr[col] = buffer(ug_tiles[col], datatype=_RSCR_L1_TY)
             sw_buf_out[col] = buffer(sw_tiles[col], datatype=_SW_TY)
             sw_buf_up[col] = buffer(sw_tiles[col], datatype=_SW_TY)
             sw_buf_gate[col] = buffer(sw_tiles[col], datatype=_SW_TY)
@@ -2234,6 +2312,11 @@ def _emit_gg_ug_swiglu_pack(
         from aie.extras import types as T
         from ml_dtypes import bfloat16 as _bf16
 
+        # Plain fill + matvec (bit-exact baseline kernels). For rms_fused the
+        # matvec reads the resident `normed` vector (computed once per token by
+        # rms_fn below) instead of the raw activation -- so its activation
+        # operand type is _NORMED_L1_TY (== EMB_DIM, same as the non-fused X).
+        _mv_act_ty = _NORMED_L1_TY if rms_fused else _X_L1_TY
         fill_fn = external_func(
             "linalg_fill_bf16",
             inputs=[_bf16, _Y_L1_TY],
@@ -2242,10 +2325,18 @@ def _emit_gg_ug_swiglu_pack(
         fill_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
         matvec_fn = external_func(
             "matvec_vectorized_bf16_bf16",
-            inputs=[np.int32, np.int32, np.int32, _W_L1_TY, _X_L1_TY, _Y_L1_TY],
+            inputs=[np.int32, np.int32, np.int32, _W_L1_TY, _mv_act_ty, _Y_L1_TY],
             link_with=KO_MATVEC,
         )
         matvec_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
+        if rms_fused:
+            # Packed [2,K] RMSNorm prologue, run ONCE per token per tile.
+            rms_fn = external_func(
+                "rms_norm_packed_bf16",
+                inputs=[_X_L1_TY, _NORMED_L1_TY, _RSCR_L1_TY],
+                link_with=KO_MATVEC_RMS,
+            )
+            rms_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
         silu_fn = external_func(
             "silu_and_mul_bf16",
             inputs=[_SW_TY, _SW_TY, _SW_TY, np.int32],
@@ -2269,7 +2360,7 @@ def _emit_gg_ug_swiglu_pack(
                         dma_start(DMAChannelDir.S2MM, 0, dest=block[4], chain=block[5])
                     with block[4]:
                         use_lock(_cl["x_avail"], LockAction.AcquireGreaterEqual, value=1)
-                        dma_bd(_xb, offset=0, len=EMB_DIM)
+                        dma_bd(_xb, offset=0, len=_X_LEN)
                         use_lock(_cl["x_ready"], LockAction.Release, value=1)
                         next_bd(block[4])
                     with block[5]:
@@ -2286,7 +2377,10 @@ def _emit_gg_ug_swiglu_pack(
                 ug_tiles[col], ug_locks[col], ug_buf_y[col], ug_buf_w[col], ug_buf_x[col]
             )
 
-            def _make_mat_core(_ct, _cl, _yb, _wb, _xb):
+            # Chunks (8-row matvec calls) per tile per token.
+            _N_CHUNKS = out_rows // N_COLS // M_TILE
+
+            def _make_mat_core(_ct, _cl, _yb, _wb, _xb, _normed=None, _rscr=None):
                 import sys as _sys
                 from aie.extras.dialects.arith import index_cast
 
@@ -2294,23 +2388,42 @@ def _emit_gg_ug_swiglu_pack(
                 def _core_body():
                     k_total = arith.constant(EMB_DIM, T.i32())
                     k_tile_c = arith.constant(K_TILE, T.i32())
+                    zero_off = arith.constant(0, T.i32())
                     zero_bf16 = arith.constant(0.0, T.bf16())
-                    for _ in range_(_sys.maxsize):
-                        use_lock(_cl["y_done"], LockAction.AcquireGreaterEqual, value=1)
-                        fill_fn(zero_bf16, _yb)
-                        for k_idx in range_(0, M_TILE, K_TILE):
-                            k_i32 = index_cast(k_idx, to=T.i32())
+                    if rms_fused:
+                        # air's fold: compute the RMSNorm ONCE per token into the
+                        # resident `normed` buffer, then matvec all output chunks
+                        # over it (re-acquiring only weights/outputs per chunk).
+                        for _ in range_(_sys.maxsize):
                             use_lock(_cl["x_ready"], LockAction.AcquireGreaterEqual, value=1)
-                            use_lock(_cl["w_ready"], LockAction.AcquireGreaterEqual, value=1)
-                            matvec_fn(k_tile_c, k_total, k_i32, _wb, _xb, _yb)
+                            rms_fn(_xb, _normed, _rscr)
                             use_lock(_cl["x_avail"], LockAction.Release, value=1)
-                            use_lock(_cl["w_avail"], LockAction.Release, value=1)
-                        use_lock(_cl["y_full"], LockAction.Release, value=1)
+                            for _c in range_(_N_CHUNKS):
+                                use_lock(_cl["y_done"], LockAction.AcquireGreaterEqual, value=1)
+                                fill_fn(zero_bf16, _yb)
+                                use_lock(_cl["w_ready"], LockAction.AcquireGreaterEqual, value=1)
+                                matvec_fn(k_tile_c, k_total, zero_off, _wb, _normed, _yb)
+                                use_lock(_cl["w_avail"], LockAction.Release, value=1)
+                                use_lock(_cl["y_full"], LockAction.Release, value=1)
+                    else:
+                        for _ in range_(_sys.maxsize):
+                            use_lock(_cl["y_done"], LockAction.AcquireGreaterEqual, value=1)
+                            fill_fn(zero_bf16, _yb)
+                            for k_idx in range_(0, M_TILE, K_TILE):
+                                k_i32 = index_cast(k_idx, to=T.i32())
+                                use_lock(_cl["x_ready"], LockAction.AcquireGreaterEqual, value=1)
+                                use_lock(_cl["w_ready"], LockAction.AcquireGreaterEqual, value=1)
+                                matvec_fn(k_tile_c, k_total, k_i32, _wb, _xb, _yb)
+                                use_lock(_cl["x_avail"], LockAction.Release, value=1)
+                                use_lock(_cl["w_avail"], LockAction.Release, value=1)
+                            use_lock(_cl["y_full"], LockAction.Release, value=1)
             _make_mat_core(
-                gg_tiles[col], gg_locks[col], gg_buf_y[col], gg_buf_w[col], gg_buf_x[col]
+                gg_tiles[col], gg_locks[col], gg_buf_y[col], gg_buf_w[col], gg_buf_x[col],
+                gg_buf_normed.get(col), gg_buf_rscr.get(col),
             )
             _make_mat_core(
-                ug_tiles[col], ug_locks[col], ug_buf_y[col], ug_buf_w[col], ug_buf_x[col]
+                ug_tiles[col], ug_locks[col], ug_buf_y[col], ug_buf_w[col], ug_buf_x[col],
+                ug_buf_normed.get(col), ug_buf_rscr.get(col),
             )
 
             def _make_sw_mem(_ct, _cl, _bo, _bup, _bgate):
@@ -2376,8 +2489,14 @@ def _emit_gg_ug_swiglu_pack(
                 dests={"dest": mem_tiles[col], "port": WireBundle.DMA, "channel": 2},
             )
         for col in range(N_COLS):
-            flow(shim_tiles[0], WireBundle.DMA, 1, gg_tiles[col], WireBundle.DMA, 0)
-            flow(shim_tiles[1], WireBundle.DMA, 1, ug_tiles[col], WireBundle.DMA, 0)
+            if normed2_l2:
+                # gg/ug input broadcast from col-0 L2 (mem-tile lateral) instead
+                # of the shim DDR read.
+                flow(mem_tiles[0], WireBundle.DMA, 4, gg_tiles[col], WireBundle.DMA, 0)
+                flow(mem_tiles[0], WireBundle.DMA, 5, ug_tiles[col], WireBundle.DMA, 0)
+            else:
+                flow(shim_tiles[0], WireBundle.DMA, 1, gg_tiles[col], WireBundle.DMA, 0)
+                flow(shim_tiles[1], WireBundle.DMA, 1, ug_tiles[col], WireBundle.DMA, 0)
         for col in range(N_COLS):
             flow(mem_tiles[col], WireBundle.DMA, 1, gg_tiles[col], WireBundle.DMA, 1)
             flow(mem_tiles[col], WireBundle.DMA, 2, ug_tiles[col], WireBundle.DMA, 1)
@@ -2409,18 +2528,19 @@ def _emit_gg_ug_swiglu_pack(
                 DMAChannelDir.MM2S,
                 0,
             )
-        shim_dma_allocation(
-            f"air_channel_{gg_input_chan}",
-            shim_tiles[0],
-            DMAChannelDir.MM2S,
-            1,
-        )
-        shim_dma_allocation(
-            f"air_channel_{ug_input_chan}",
-            shim_tiles[1],
-            DMAChannelDir.MM2S,
-            1,
-        )
+        if not normed2_l2:
+            shim_dma_allocation(
+                f"air_channel_{gg_input_chan}",
+                shim_tiles[0],
+                DMAChannelDir.MM2S,
+                1,
+            )
+            shim_dma_allocation(
+                f"air_channel_{ug_input_chan}",
+                shim_tiles[1],
+                DMAChannelDir.MM2S,
+                1,
+            )
         for col in range(N_COLS):
             shim_dma_allocation(
                 f"air_channel_{out_chan}_{col}",
@@ -2429,7 +2549,7 @@ def _emit_gg_ug_swiglu_pack(
                 0,
             )
 
-        def _make_memtile_dma(_col, _ml, _gg_w, _ug_w, _gg_y, _ug_y):
+        def _make_memtile_dma(_col, _ml, _gg_w, _ug_w, _gg_y, _ug_y, _bcast=None):
             @memtile_dma(mem_tiles[_col])
             def _mt(block):
                 dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
@@ -2483,12 +2603,37 @@ def _emit_gg_ug_swiglu_pack(
                     use_lock(_ml["ug_w_ready"], LockAction.Release, value=1)
                     next_bd(block[14])
                 with block[15]:
-                    dma_start(DMAChannelDir.S2MM, 3, dest=block[16], chain=block[2])
+                    dma_start(DMAChannelDir.S2MM, 3, dest=block[16],
+                              chain=(block[17] if _bcast is not None else block[2]))
                 with block[16]:
                     use_lock(_ml["ug_y_done"], LockAction.AcquireGreaterEqual, value=1)
                     dma_bd(_ug_y, offset=0, len=M_TILE)
                     use_lock(_ml["ug_y_ready"], LockAction.Release, value=1)
                     next_bd(block[16])
+                if _bcast is not None:
+                    # MM2S 4/5: lock-free broadcast of the resident normed2_l2
+                    # to gg/ug matvec inputs, repeated to match the shim total.
+                    # No lock: the data is resident from rm (prior PDI) and not
+                    # written in this device; the matvec paces via its own x
+                    # locks (stream backpressure).
+                    # AIE2 mem-tile BD/channel rule (xaie_dma_aieml.c): even
+                    # channels use bd_id 0..23, odd channels 24..47. Pin
+                    # top-of-pool ids so MM2S 4 (even) / 5 (odd) are valid and
+                    # don't collide with the gg/ug chains' auto-assigned low ids.
+                    with block[17]:
+                        dma_start(DMAChannelDir.MM2S, 4, dest=block[18],
+                                  chain=block[19], repeat_count=n2_bcast_repeat)
+                    with block[18]:
+                        dma_bd(_bcast, offset=0, len=EMB_DIM,
+                               dimensions=[(4, 512), (512, 1)], bd_id=23)
+                        next_bd(block[2])
+                    with block[19]:
+                        dma_start(DMAChannelDir.MM2S, 5, dest=block[20],
+                                  chain=block[2], repeat_count=n2_bcast_repeat)
+                    with block[20]:
+                        dma_bd(_bcast, offset=0, len=EMB_DIM,
+                               dimensions=[(4, 512), (512, 1)], bd_id=47)
+                        next_bd(block[2])
         for col in range(N_COLS):
             _make_memtile_dma(
                 col,
@@ -2497,6 +2642,7 @@ def _emit_gg_ug_swiglu_pack(
                 mem_buf_ug_w[col],
                 mem_buf_gg_y[col],
                 mem_buf_ug_y[col],
+                normed2_l2_buf if (normed2_l2 and col == 0) else None,
             )
 
         @runtime_sequence(*o_gemv_ffn_host_arg_types(), sym_name=f"{sym}_sequence")
@@ -2505,6 +2651,41 @@ def _emit_gg_ug_swiglu_pack(
             arg_ug_w = args[ug_weight_arg_idx]
             arg_x = args[input_arg_idx]
             arg_y = args[output_arg_idx]
+            # Fused RMS: broadcast [res1 | ffn_norm_w] (args 4,5) as a 2-BD
+            # chain on the existing input channel instead of the single normed2.
+            arg_res1 = args[res1_arg_idx]
+            arg_normw = args[normw_arg_idx]
+
+            def _emit_x_bds(_task):
+                with bds(_task) as bd:
+                    if rms_fused:
+                        with bd[0]:
+                            dma_bd(arg_res1, offset=0, len=EMB_DIM,
+                                   dimensions=[(4, 512), (512, 1)])
+                            next_bd(bd[1])
+                        with bd[1]:
+                            dma_bd(arg_normw, offset=0, len=EMB_DIM,
+                                   dimensions=[(4, 512), (512, 1)])
+                            EndOp()
+                    else:
+                        with bd[0]:
+                            dma_bd(arg_x, offset=0, len=EMB_DIM,
+                                   dimensions=[(4, 512), (512, 1)])
+                            EndOp()
+            # Fused RMS: res1+ffn_norm_w are constant for the whole kernel, and
+            # the gate/up core computes normed ONCE per token -- so deliver the
+            # packed [res1|norm_w] a single time (no per-outer repeat).
+            rms_gg_x_task = rms_ug_x_task = None
+            if rms_fused and not normed2_l2:
+                rms_gg_x_task = dma_configure_task_for(
+                    f"air_channel_{gg_input_chan}", repeat_count=0)
+                _emit_x_bds(rms_gg_x_task)
+                dma_start_task(rms_gg_x_task)
+                rms_ug_x_task = dma_configure_task_for(
+                    f"air_channel_{ug_input_chan}", repeat_count=0)
+                _emit_x_bds(rms_ug_x_task)
+                dma_start_task(rms_ug_x_task)
+
             for outer in range(n_outer):
                 gg_weight_tasks = []
                 for col in range(N_COLS):
@@ -2538,35 +2719,21 @@ def _emit_gg_ug_swiglu_pack(
                     dma_start_task(t)
                     ug_weight_tasks.append(t)
 
-                gg_x_task = dma_configure_task_for(
-                    f"air_channel_{gg_input_chan}",
-                    repeat_count=x_repeat_count,
-                )
-                with bds(gg_x_task) as bd:
-                    with bd[0]:
-                        dma_bd(
-                            arg_x,
-                            offset=0,
-                            len=EMB_DIM,
-                            dimensions=[(4, 512), (512, 1)],
-                        )
-                        EndOp()
-                dma_start_task(gg_x_task)
+                gg_x_task = ug_x_task = None
+                if not normed2_l2 and not rms_fused:
+                    gg_x_task = dma_configure_task_for(
+                        f"air_channel_{gg_input_chan}",
+                        repeat_count=x_repeat_count,
+                    )
+                    _emit_x_bds(gg_x_task)
+                    dma_start_task(gg_x_task)
 
-                ug_x_task = dma_configure_task_for(
-                    f"air_channel_{ug_input_chan}",
-                    repeat_count=x_repeat_count,
-                )
-                with bds(ug_x_task) as bd:
-                    with bd[0]:
-                        dma_bd(
-                            arg_x,
-                            offset=0,
-                            len=EMB_DIM,
-                            dimensions=[(4, 512), (512, 1)],
-                        )
-                        EndOp()
-                dma_start_task(ug_x_task)
+                    ug_x_task = dma_configure_task_for(
+                        f"air_channel_{ug_input_chan}",
+                        repeat_count=x_repeat_count,
+                    )
+                    _emit_x_bds(ug_x_task)
+                    dma_start_task(ug_x_task)
 
                 out_tasks = []
                 for col in range(N_COLS):
@@ -2588,12 +2755,18 @@ def _emit_gg_ug_swiglu_pack(
 
                 for t in reversed(out_tasks):
                     dma_await_task(t)
-                dma_free_task(ug_x_task)
-                dma_free_task(gg_x_task)
+                if not normed2_l2 and not rms_fused:
+                    dma_free_task(ug_x_task)
+                    dma_free_task(gg_x_task)
                 for t in reversed(ug_weight_tasks):
                     dma_free_task(t)
                 for t in reversed(gg_weight_tasks):
                     dma_free_task(t)
+
+            # Free the once-per-token fused input tasks after all outer iters.
+            if rms_gg_x_task is not None:
+                dma_free_task(rms_ug_x_task)
+                dma_free_task(rms_gg_x_task)
 
 
 # ---------------------------------------------------------------------------
@@ -2831,14 +3004,25 @@ def build_o_gemv_ffn_module(
             f"hidden_dim={hidden_dim}."
         )
 
-    if pack_mode not in {"none", "d1d4", "d1d3d4"}:
+    if pack_mode not in {"none", "d1d4", "d1d3d4", "d1d3d4_n2l2", "d1d3d4_rms"}:
         raise ValueError(f"unsupported o_gemv_ffn pack_mode={pack_mode!r}")
+    # "d1d3d4_n2l2" == d1d3d4 plus normed2 chained rm->D3 through col-0 L2.
+    # Step A (current): rm ALSO writes normed2 to L2 (DDR write kept, D3 still
+    # reads DDR -> hf-gate neutral). Step B will re-source the D3 broadcast.
+    _n2l2 = pack_mode == "d1d3d4_n2l2"
+    # "d1d3d4_rms" == air's 3-device fold: the separate rm_rms (D2) device is
+    # ELIMINATED; each gate/up tile receives the pre-norm res1 + ffn_norm_w
+    # (packed [2,K] on the existing input channel) and computes the RMSNorm
+    # itself via the fused matvec_rms kernel. normed2 (arg6) goes unused. This
+    # reuses the WORKING DDR broadcast (not the racy n2l2 L2 path) and drops a
+    # per-token device dispatch (3 devices: d1 / gg+ug+sw+rms / d4).
+    _rmsfuse = pack_mode == "d1d3d4_rms"
 
     with mlir_mod_ctx() as ctx:
         # AIR emit order is reverse pipeline order.  In d1d4 mode, D4 replaces
         # {dg,a2} and D1 replaces {og,a1}; the middle {rm,gg,ug,sw} remains
         # unchanged until the D3 pack lands.
-        if pack_mode in {"d1d4", "d1d3d4"}:
+        if pack_mode in {"d1d4", "d1d3d4", "d1d3d4_n2l2", "d1d3d4_rms"}:
             _emit_matvec_add_pack_k8192(
                 "d4_dg_a2_pack",
                 "dg_matvec_bf16_0",
@@ -2859,8 +3043,8 @@ def build_o_gemv_ffn_module(
         # slack), so doubling W has nowhere to go. We ping-pong at L2
         # instead -- memtile L2 has 512 KB to spare for the second W
         # slot (32 KB).
-        if pack_mode == "d1d3d4":
-            _emit_gg_ug_swiglu_pack()
+        if pack_mode in {"d1d3d4", "d1d3d4_n2l2", "d1d3d4_rms"}:
+            _emit_gg_ug_swiglu_pack(normed2_l2=_n2l2, rms_fused=_rmsfuse)
         else:
             _emit_sw_silu_mul_seg()
             _emit_matvec_seg_k2048(
@@ -2869,8 +3053,10 @@ def build_o_gemv_ffn_module(
             _emit_matvec_seg_k2048(
                 "gg_matvec_bf16_0", weight_arg_idx=7, input_arg_idx=6,
                 output_arg_idx=8, out_rows=HIDDEN_DIM)
-        _emit_rm_rms_seg()
-        if pack_mode in {"d1d4", "d1d3d4"}:
+        # air's fold eliminates the standalone rm_rms device entirely.
+        if not _rmsfuse:
+            _emit_rm_rms_seg(normed2_l2=_n2l2)
+        if pack_mode in {"d1d4", "d1d3d4", "d1d3d4_n2l2", "d1d3d4_rms"}:
             _emit_matvec_add_pack_k2048(
                 "d1_og_a1_pack",
                 "og_matvec_bf16_0",
@@ -2888,7 +3074,14 @@ def build_o_gemv_ffn_module(
                 "og_matvec_bf16_0", weight_arg_idx=0, input_arg_idx=1,
                 output_arg_idx=2, out_rows=EMB_DIM)
         if dispatch_sequence is None:
-            if pack_mode == "d1d3d4":
+            if pack_mode == "d1d3d4_rms":
+                # 3 devices: rm_rms folded into the gate/up stage.
+                dispatch_sequence = (
+                    "d1_og_a1_pack",
+                    "d3_gg_ug_sw_pack",
+                    "d4_dg_a2_pack",
+                )
+            elif pack_mode in {"d1d3d4", "d1d3d4_n2l2"}:
                 dispatch_sequence = (
                     "d1_og_a1_pack",
                     "rm_rms_seg",
@@ -2920,7 +3113,8 @@ if __name__ == "__main__":  # pragma: no cover
     import argparse
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--pack-mode", choices=["none", "d1d4", "d1d3d4"],
+    parser.add_argument("--pack-mode",
+                        choices=["none", "d1d4", "d1d3d4", "d1d3d4_n2l2"],
                         default="none", help="Experimental device packing mode")
     parser.add_argument("-o", "--output", help="Output path (default: stdout)",
                         default=None)
