@@ -89,10 +89,14 @@ _O_GEMV_FFN_PACK_DEFAULT = "d1d3d4"
 _RMS_GEMV_ROPE_PACK_DEFAULT = "rgr2_ddr"
 
 # AWQ O+FFN decode packing: validated on hardware (passes `make hf-gate
-# QUANT=awq`, +4.6% over the unpacked baseline), so it defaults to the full
-# d1d3d4 pack. Set the env var to "none" to revert.
+# QUANT=awq`). Defaults to the `d1d3d4_rms` pack -- air's 3-device fold that
+# additionally eliminates the standalone rm_rms device by computing the
+# RMSNorm once per token inside the gate/up tiles. Bit-exact vs the unpacked
+# baseline and a further ~4-5% over plain d1d3d4 (the redundant per-tile RMS
+# is cheap relative to the int4 dequant matvec). Set "d1d3d4" to keep the
+# separate rm_rms device, or "none" to revert packing entirely.
 _O_GEMV_FFN_AWQ_PACK_ENV = "PYTHOC_LLAMA_O_GEMV_FFN_AWQ_PACK_MODE"
-_O_GEMV_FFN_AWQ_PACK_DEFAULT = "d1d3d4"
+_O_GEMV_FFN_AWQ_PACK_DEFAULT = "d1d3d4_rms"
 
 # AWQ RMS+GEMV+RoPE decode packing: validated on hardware (passes `make
 # hf-gate QUANT=awq`; combined with the O+FFN pack, AWQ decode goes

@@ -226,3 +226,29 @@ def test_hf_answer_gate_unpacked_baseline():
         "PYTHOC_LLAMA_RMS_GEMV_ROPE_PACK_MODE": "none",
     })
     _assert_paris(head, text, "unpacked")
+
+
+@pytest.mark.skipif(
+    not _has_tokenizer(),
+    reason=(
+        "HuggingFace cache does not contain {model}; this gate requires "
+        "real weights."
+    ).format(model=HF_MODEL),
+)
+def test_hf_answer_gate_o_gemv_ffn_rms_fused():
+    """Gate for air's 3-device RMSNorm fold (`o_gemv_ffn=d1d3d4_rms`).
+
+    Eliminates the standalone rm_rms (D2) device: each gate/up tile receives
+    the pre-norm res1 + ffn_norm_w (packed [2,K]) and computes the RMSNorm
+    itself via the fused matvec_rms kernel, then matvecs -- collapsing the
+    decode FFN to 3 devices like the MLIR-AIR reference. Asserts the answer
+    is still correct (bit-identical to the packed/unpacked baselines).
+
+    Skipped under AWQ: device packing is BF16-only.
+    """
+    if HF_GATE_QUANT == "awq":
+        pytest.skip("device packing is BF16-only; no AWQ rms-fused variant")
+    head, text = _run_gate_and_detokenize(extra_env={
+        "PYTHOC_LLAMA_O_GEMV_FFN_PACK_MODE": "d1d3d4_rms",
+    })
+    _assert_paris(head, text, "rms_fused")
