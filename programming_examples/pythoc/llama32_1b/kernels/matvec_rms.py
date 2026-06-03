@@ -29,13 +29,19 @@ from pythoc.aie import (
     aie_vector,
     broadcast,
     load_v,
+    reduce_add_reassoc,
     store_v,
-    vector_add,
     vector_mul,
     zeros,
 )
 
-from pythoc.aie import invsqrt  # noqa: F401
+# bf16 MAC that accumulates bf16*bf16 products into an f32 accumulator -- the
+# proven pythoc idiom for f32 accumulation (matvec.py uses the same op).
+from pythoc.aie import I1024_I1024_ACC2048_bf_mac_conf  # noqa: F401
+
+# Precise 1/sqrt via sqrtf (mirrors AIR math.rsqrt -> 1.0/llvm.intr.sqrt),
+# not the AIE2P invsqrt hardware approximation.
+from pythoc.aie import sqrtf  # noqa: F401
 
 
 @aie_kernel
@@ -44,28 +50,24 @@ def rms_norm_packed_bf16(
     normed: ptr[bf16, True],   # [K] output normalized vector
     scratch: ptr[bf16, True],  # [16] horizontal-sum spill
 ) -> void:
-    # Pass 1: sum of squares of res1 (packed[0:2048]) -> 16-wide bf16 vector.
-    accum: aie_vector[bf16, 16] = zeros(bf16, 16)
+    # Pass 1: sum of squares of res1 (packed[0:2048]) accumulated in F32 to
+    # match the maintained AIR reference (bf16 square -> extf f32 -> f32 add).
+    # `scratch` is unused now (f32 reduce replaces the scalar spill); kept for
+    # ABI stability.
+    acc: aie_vector[f32, 64] = zeros(f32, 64)
+    conf: i32 = i32(60)
     p_x: ptr[bf16] = packed
     si: i32 = 0
     while si < 2048:
-        xv: aie_vector[bf16, 16] = load_v(p_x, 16)
-        sq: aie_vector[bf16, 16] = vector_mul(xv, xv)
-        accum = vector_add(accum, sq)
-        p_x = p_x + 16
-        si = si + 16
+        xv: aie_vector[bf16, 64] = load_v(p_x, 64)
+        acc = I1024_I1024_ACC2048_bf_mac_conf(xv, xv, acc, conf)  # sum sq -> f32
+        p_x = p_x + 64
+        si = si + 64
 
-    store_v(scratch, accum)
-    s: bf16 = bf16(0.0)
-    sj: i32 = 0
-    while sj < 16:
-        s = s + scratch[sj]
-        sj = sj + 1
-
-    # Match AIR-reference numerical sequence: bf16 mean+eps then f32 rsqrt.
-    mean: bf16 = s * bf16(0.00048828125)  # 1/2048
-    mean_eps: bf16 = mean + bf16(1.001360e-05)
-    inv_rms: bf16 = bf16(invsqrt(f32(mean_eps)))
+    total: f32 = reduce_add_reassoc(acc)                     # f32 horizontal reduce
+    mean: f32 = total / f32(2048.0)                          # f32 divf
+    mean_eps: f32 = mean + f32(1.0e-5)                       # f32, eps = 1e-5 (exact)
+    inv_rms: bf16 = bf16(f32(1.0) / f32(sqrtf(mean_eps)))    # 1/sqrt precise, trunc bf16
     scale: aie_vector[bf16, 16] = broadcast(bf16, 16, inv_rms)
 
     # Pass 2: normed[i] = res1[i] * scale * norm_w[i]. norm_w is packed[2048:4096].

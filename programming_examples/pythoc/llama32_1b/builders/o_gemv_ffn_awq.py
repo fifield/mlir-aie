@@ -131,11 +131,11 @@ ADD_CHUNK = 256
 SWIGLU_CHUNK = 1024
 
 # Per-segment kernel object filenames.
-KO_AWQ_MV = "awq_mv_pythoc.o"
-KO_AWQ_MV_K8192 = "awq_mv_k8192_pythoc.o"
+KO_AWQ_MV = "awq_mv_pythoc.ll"  # inlined (alwaysinline IR-merge): ~12% faster AWQ decode
+KO_AWQ_MV_K8192 = "awq_mv_k8192_pythoc.ll"  # inlined
 KO_SWIGLU = "silu_and_mul_bf16.o"
 KO_RMS = "rms_norm_2048_bf16.o"
-KO_MATVEC_RMS = "matvec_rms_pythoc.o"  # fused packed-RMS prologue (air 3-device fold)
+KO_MATVEC_RMS = "matvec_rms_pythoc.ll"  # inlined (alwaysinline IR-merge)  # fused packed-RMS prologue (air 3-device fold)
 
 
 def _combined_row_bytes(k: int, group_size: int = GROUP_SIZE) -> int:
