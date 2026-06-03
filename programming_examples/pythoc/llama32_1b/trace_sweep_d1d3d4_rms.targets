@@ -1,0 +1,8 @@
+# d1d3d4_rms = air's 3-device RMSNorm fold (rm_rms eliminated; RMS folded
+# into the d3 gate/up matvec prologue). Run with
+#   PYTHOC_LLAMA_O_GEMV_FFN_PACK_MODE=d1d3d4_rms
+# Three packed aie.devices; trace the representative compute tile (col 0,
+# row 2) per device. KERNEL:SUB_DEVICE:COL:ROW
+o_gemv_ffn:d1_og_a1_pack:0:2       # O-proj + attn (d1)
+o_gemv_ffn:d3_gg_ug_sw_pack:0:2    # FFN gate+up+swiglu + folded RMSNorm (d3)
+o_gemv_ffn:d4_dg_a2_pack:0:2       # FFN down, K=8192 (d4)
