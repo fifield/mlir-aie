@@ -127,9 +127,11 @@ matrix.
 
 ```bash
 make trace KERNEL=rms_gemv_rope SUBDEVICE=v_matvec_bf16_0 COL=0 ROW=2
-make trace KERNEL=o_gemv_ffn_awq SUBDEVICE=dg_awq_matvec_0 COL=0 ROW=2 \
+# packed default: trace a fused device (d1/d3/d4_*_pack), not the old per-matvec names
+make trace KERNEL=o_gemv_ffn_awq SUBDEVICE=d4_dg_a2_pack COL=0 ROW=2 \
     QUANT=awq AWQ_WEIGHTS=/path/to/awq_repacked
-python3 trace_summary.py build_peano/decode_kernel_cache/  # summary CSV/MD
+# trace_summary.py aggregates a SWEEP dir (per-target subdirs from trace_sweep.py):
+python3 trace_summary.py build_peano/trace_sweep/<sweep>  # summary CSV/MD
 ```
 
 The trace target instruments exactly one named sub-device with AIE
@@ -185,7 +187,7 @@ tokens, passes `hf-gate`):
 |---|---|---|---|
 | `o_gemv_ffn` (BF16) | `PYTHOC_LLAMA_O_GEMV_FFN_PACK_MODE` | `d1d3d4` | 8 → 4 devices/layer |
 | `rms_gemv_rope` (BF16) | `PYTHOC_LLAMA_RMS_GEMV_ROPE_PACK_MODE` | `rgr2_ddr` | 6 → 2 devices/layer |
-| `o_gemv_ffn_awq` (AWQ) | `PYTHOC_LLAMA_O_GEMV_FFN_AWQ_PACK_MODE` | `d1d3d4` | 8 → 4 devices/layer |
+| `o_gemv_ffn_awq` (AWQ) | `PYTHOC_LLAMA_O_GEMV_FFN_AWQ_PACK_MODE` | `d1d3d4_rms` | 8 → 3 devices/layer (RMS folded) |
 | `rms_gemv_rope_awq` (AWQ) | `PYTHOC_LLAMA_RMS_GEMV_ROPE_AWQ_PACK_MODE` | `rgr2_ddr` | 6 → 2 devices/layer |
 
 The AWQ packs mirror the BF16 ones with packed-uint4 weights; the AWQ
