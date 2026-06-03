@@ -43,6 +43,7 @@ _LINK_OBJS = [
     "silu_and_mul_bf16.o",
     "rope_pythoc.o",
     "mv_pythoc.o",
+    "matvec_rms_pythoc.o",
     "mv_k8192_pythoc.o",
     "attn_pythoc.o",
     # Phase 4.5c: bf16 GEMM .o for the prefill v_matmul_seg (and later
