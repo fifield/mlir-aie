@@ -863,6 +863,7 @@ struct AIEInsertTraceFlowsPass
                               // lock_acq_val, lock_acq_id
             0, 0, 0, 0, 0, 0, // d0_zero_before, d1_zero_before, d2_zero_before,
                               // d0_zero_after, d1_zero_after, d2_zero_after
+            0, 0,               // d3_size, d3_stride
             clTraceBurstLength, // burst_length
             // axcache left unset: the blockwrite lowering resolves the
             // target default, so baking it here would only duplicate it.

@@ -44,6 +44,7 @@ from ..ir import (
 
 # noinspection PyUnresolvedReferences
 from ..extras import types as T
+from ..extras.util import find_parent_of_type
 from ..helpers.util import try_convert_np_type_to_mlir_type
 from ..helpers.taplib import TensorAccessPattern
 from ..helpers.taplib._symbolic import is_sym, si32, sprod
@@ -319,6 +320,19 @@ def dma_start_bd_chain_for(symbol, args, alloc, *pyargs, **kwargs):
     )
 
 
+def _shim_has_d3(sizes) -> bool:
+    """True when a 5-dim shim access pattern is [iteration, d3, d2, d1, d0].
+
+    Only AIE4 shim BDs have a D3 addressing dimension; elsewhere every
+    dimension before the last three iterates.
+    """
+    if sizes is None or len(sizes) != 5:
+        return False
+    dev = find_parent_of_type(lambda op: isinstance(op.opview, aie.DeviceOp))
+    arch = aie.get_target_model(dev.opview.device.value).get_target_arch()
+    return arch == aie.AIEArch.AIE4
+
+
 def shim_dma_bd(
     mem,
     tap: TensorAccessPattern | None = None,
@@ -350,11 +364,16 @@ def shim_dma_bd(
     if strides is None:
         strides = [0] * (len(sizes) - 1) + [1]
 
-    if not any(is_sym(s) for s in sizes[-3:]):
+    # The per-iteration transfer length is the product of the addressing
+    # dimensions. For the historical <=4-dim access patterns that is the lowest
+    # three dimensions [d2, d1, d0]; on AIE4 a 5-dim pattern additionally has a
+    # real D3 addressing dimension that must be included.
+    addr_sizes = sizes[1:] if _shim_has_d3(sizes) else sizes[-3:]
+    if not any(is_sym(s) for s in addr_sizes):
         if transfer_len is None:
-            transfer_len = sprod(sizes[-3:])
+            transfer_len = sprod(addr_sizes)
         if length_parameter is not None and length_unit is None:
-            length_unit = sprod(sizes[-3:])
+            length_unit = sprod(addr_sizes)
 
     dma_bd(
         mem,
@@ -463,14 +482,38 @@ def shim_dma_single_bd_task(
                 if strides is not None:
                     strides = [0] + list(strides)
 
-        # The outer dimensions become the queue-push repeat_count. Constants fold to
-        # the repeat_count attribute; a runtime sizes[0] (4 dims at most) flows into
-        # the repeat_count_val operand so a dynamic tile count is supported.
+        # The outermost size is the iteration/repeat dimension. The AIE4 shim itself
+        # DOES support an advancing iteration -- the arch spec defines an
+        # iteration-offset applied between transfers, the simulator applies
+        # iteration_stepsize, and the raw dma_configure_task path uses it (covered
+        # E2E by 16_shim_dma_4d). The limitation is specific to THIS objectfifo
+        # helper: a strided outer dimension lowers to a self-repeating task
+        # (repeat_count), which does not compose with the objectfifo's object/token
+        # model -- empirically the repeats re-read the first block instead of
+        # advancing (cert sim). So reject a strided outer here and ask the caller to
+        # express the access as a single descriptor (outermost size 1, with the data
+        # layout in d0..d3, letting the consuming objectfifo chunk it). A pure
+        # (zero-stride) repeat is fine and lowers to a queue repeat_count; for a
+        # genuinely advancing iteration, use the raw dma_configure_task path.
+        outer_stride = strides[0] if strides else 0
         if sizes:
-            outer = sizes[:-3]
+            # On AIE4 a 5-dim pattern's sizes[1] is the D3 addressing dimension,
+            # so only sizes[0] repeats.
+            outer = sizes[:1] if _shim_has_d3(sizes) else sizes[:-3]
             if all(isinstance(v, (int, np.integer)) for v in outer):
                 runs = int(np.prod([int(v) for v in outer]))
                 if runs > 1:
+                    if outer_stride != 0 and len(outer) == 1:
+                        raise ValueError(
+                            "shim_dma_single_bd_task: a strided outermost (iteration) "
+                            "dimension (sizes[0] > 1 with a nonzero stride) is not supported "
+                            "through this objectfifo helper; the repeats do not advance "
+                            "through the objectfifo and the transfer would silently re-read "
+                            "the same block. Express the access as a single descriptor "
+                            "(outermost size 1, data layout in d0..d3) and let the consuming "
+                            "objectfifo chunk it, use a zero outer stride for a pure repeat, "
+                            "or use the raw dma_configure_task path for an advancing iteration."
+                        )
                     repeat_count = runs - 1
             else:
                 # Runtime: a zero sizes[0] wraps to a huge count, which the

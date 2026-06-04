@@ -30,7 +30,7 @@ module {
       // CHECK: 00580002
       // CHECK: 000C0005
       // CHECK: 00100007
-      // CHECK: 00000009
+      // CHECK: 00020009
       // CHECK: 00000000
       // CHECK: 059A000C
       // CHECK: 84038201

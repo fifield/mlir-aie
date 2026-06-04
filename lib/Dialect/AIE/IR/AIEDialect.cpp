@@ -208,20 +208,34 @@ std::string xilinx::AIE::NamedOpTable::uniqueName(llvm::StringRef prefix,
 
 LogicalResult
 xilinx::AIE::myVerifyOffsetSizeAndStrideOp(OffsetSizeAndStrideOpInterface op) {
+  // Unlike the upstream OffsetSizeAndStrideOpInterface verifier, the AIEX
+  // memcpy ops treat the access pattern rank as variadic: the offsets, sizes
+  // and strides lists may each carry between 1 and getArrayAttrMaxRanks()
+  // entries. We only require that (a) all three lists agree in rank and
+  // (b) none exceeds its maximum. The per-op verifier applies any tighter
+  // (target-specific) bounds, and verifyListOfOperandsOrIntegers still checks
+  // that the dynamic operands match the dynamic placeholders in each list.
   std::array<unsigned, 3> maxRanks = op.getArrayAttrMaxRanks();
-  // Count checks FIRST, matching mlir::detail::verifyOffsetSizeAndStrideOp.
-  // getMixedOffsets()/getMixedSizes() assert that the number of dynamic
-  // operands equals the number of kDynamic sentinels in the static list, so
-  // running the rank comparison before these validates nothing and aborts on
-  // malformed input instead of diagnosing it.
+  // Validate operand counts before constructing mixed lists, which assert on
+  // mismatched dynamic operands. Allow variadic ranks up to the op maximum.
+  if (op.getStaticOffsets().size() > maxRanks[0] ||
+      op.getStaticSizes().size() > maxRanks[1] ||
+      op.getStaticStrides().size() > maxRanks[2])
+    return op->emitError("expected at most ")
+           << maxRanks[1] << " offset/size/stride dimensions.";
   if (failed(verifyListOfOperandsOrIntegers(
-          op, "offset", maxRanks[0], op.getStaticOffsets(), op.getOffsets())))
+          op, "offset", op.getStaticOffsets().size(), op.getStaticOffsets(),
+          op.getOffsets())))
     return failure();
-  if (failed(verifyListOfOperandsOrIntegers(
-          op, "size", maxRanks[1], op.getStaticSizes(), op.getSizes())))
+  if (failed(verifyListOfOperandsOrIntegers(op, "size",
+                                            op.getStaticSizes().size(),
+                                            op.getStaticSizes(),
+                                            op.getSizes())))
     return failure();
-  if (failed(verifyListOfOperandsOrIntegers(
-          op, "stride", maxRanks[2], op.getStaticStrides(), op.getStrides())))
+  if (failed(verifyListOfOperandsOrIntegers(op, "stride",
+                                            op.getStaticStrides().size(),
+                                            op.getStaticStrides(),
+                                            op.getStrides())))
     return failure();
   // Each getMixed* call rebuilds its list, so read them once.
   const size_t numMixedOffsets = op.getMixedOffsets().size();
@@ -3820,9 +3834,18 @@ LogicalResult PacketFlowOp::verify() {
   if (body.empty())
     return emitOpError("should have non-empty body");
 
+  int numSources = 0, numDests = 0;
   for (auto &ops : body.front()) {
-    if (!isa<PacketSourceOp, PacketDestOp, EndOp>(ops))
+    if (isa<PacketSourceOp>(ops))
+      ++numSources;
+    else if (isa<PacketDestOp>(ops))
+      ++numDests;
+    else if (!isa<EndOp>(ops))
       return ops.emitOpError("cannot be contained in a PacketFlow op");
+    if (isa<PacketSourceOp>(ops))
+      ++numSources;
+    if (isa<PacketDestOp>(ops))
+      ++numDests;
   }
 
   if (numSources < 1)

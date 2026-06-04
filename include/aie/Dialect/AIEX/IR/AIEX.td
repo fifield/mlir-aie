@@ -630,11 +630,29 @@ def AIE_NpuDmaMemcpyNdOp
     The hardware only supports a single static offset, and this offset is calculated at compile time.
     Thus, all offsets can be equivalently expressed with the lowest dimension only.
 
+    #### Variadic Number of Dimensions
+
+    The `offsets`, `sizes` and `strides` access pattern is variadic and may have
+    between 1 and 5 dimensions. The dimensions are given outermost-first, so the
+    last (innermost) entry is `d0` and the first (outermost) entry is the
+    repeat/iteration dimension. Dimensions that are not specified default to a
+    size-1, stride-0 no-op, so a shorter access pattern is always equivalent to a
+    longer one padded with leading `1`s.
+
+    Prior versions were not variadic, but older programs with 3-data-dimension transfers
+    written as `[repeat, d2, d1, d0]` (4 entries) continue to work unchanged, and
+    they may also be simplified by dropping interior size-1 dimensions, e.g.
+    `[1, 1, H, W]` may be written as `[1, H, W]` or, for a pure contiguous
+    transfer, `[1, 1, 1, N]` may be written as `[N]`.
+
+    The 5-entry form `[repeat, d3, d2, d1, d0]` adds a fourth data dimension `d3`,
+    which is only supported on AIE4 Shim tiles.
+
     #### Automatic Linearization of Contiguous Accesses
 
     A canonicalization pattern automatically folds a contiguous row-major access pattern into
     the canonical linear form `[s3, 1, 1, N][st3, 0, 0, 1]`, where N is the product of the
-    inner three sizes. An access is contiguous when `strides[0] == 1` and each outer stride
+    inner sizes. An access is contiguous when `strides[0] == 1` and each outer stride
     equals the product of the inner sizes (i.e. a standard row-major scan).
 
     This means users can express naturally multidimensional accesses such as a 2D image
@@ -667,9 +685,15 @@ def AIE_NpuDmaMemcpyNdOp
       Variadic<AnySignlessIntegerOrIndex>:$offsets,
       Variadic<AnySignlessIntegerOrIndex>:$sizes,
       Variadic<AnySignlessIntegerOrIndex>:$strides,
-      ConfinedAttr<DenseI64ArrayAttr, [DenseArrayCount<4>]>:$static_offsets,
-      ConfinedAttr<DenseI64ArrayAttr, [DenseArrayCount<4>]>:$static_sizes,
-      ConfinedAttr<DenseI64ArrayAttr, [DenseArrayCount<4>]>:$static_strides,
+      // The access pattern is variadic: between 1 and 5 dimensions may be
+      // given. The interface enforces the upper bound through
+      // getArrayAttrMaxRanks(); the op verifier enforces the lower bound and
+      // that all three arrays agree in rank. A short access pattern is
+      // normalized internally by padding interior data dimensions with
+      // size-1/stride-0 no-ops (see normalizeMemcpyNdDimVector).
+      DenseI64ArrayAttr:$static_offsets,
+      DenseI64ArrayAttr:$static_sizes,
+      DenseI64ArrayAttr:$static_strides,
       OptionalAttr<PacketInfoAttr>:$packet, SymbolRefAttr:$metadata,
       I64Attr:$id, DefaultValuedOptionalAttr<BoolAttr, "false">:$issue_token,
       DefaultValuedOptionalAttr<I64Attr, "0">:$d0_zero_before,
@@ -774,7 +798,7 @@ def AIE_NpuDmaMemcpyNdOp
 
   let extraClassDefinition = [{
     unsigned $cppClass::getOffsetSizeAndStrideStartOperandIndex() { return 1; }
-    std::array<unsigned, 3> $cppClass::getArrayAttrMaxRanks() { return {4, 4, 4}; }
+    std::array<unsigned, 3> $cppClass::getArrayAttrMaxRanks() { return {5, 5, 5}; }
     uint64_t $cppClass::getElementTypeBitwidth() {
       DataLayout dataLayout = DataLayout::closest(*this);
       return dataLayout.getTypeSizeInBits(getMemref().getType().getElementType());
@@ -1332,6 +1356,8 @@ def AIE_NpuWriteBdOp : AIEX_Op<"npu.writebd", []> {
         I32Attr:$d0_zero_after,
         I32Attr:$d1_zero_after,
         I32Attr:$d2_zero_after,
+        DefaultValuedOptionalAttr<I32Attr, "0">:$d3_size,
+        DefaultValuedOptionalAttr<I32Attr, "0">:$d3_stride,
         DefaultValuedOptionalAttr<I32Attr, "0">:$burst_length,
         OptionalAttr<ConfinedAttr<I32Attr, [IntMinValue<0>,
                                             IntMaxValue<15>]>>:$axcache

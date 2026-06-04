@@ -98,16 +98,15 @@ module {
 
 // -----
 
-// dma_configure_task on a MemTile: the limit is the tile's ND width (4) with no
-// iteration hoist, so 4 dimensions are accepted and 5 runtime-valued ones are
-// rejected -- the same numeric cap as a shim, but reached through the MemTile
-// (no +1) branch.
+// dma_configure_task on a MemTile: a MemTile BD has 4 ND access dimensions
+// (AIETargetModel::getBDMaxDims) plus the leading iteration dimension, so up to
+// 5 dimensions are accepted (D0..D3 + iteration) -- one more than a shim.
 module {
   aie.device(npu1) {
     %memtile_0_1 = aie.tile(0, 1)
     aie.runtime_sequence(%arg0: memref<64xi32>) {
       %t = aiex.dma_configure_task(%memtile_0_1, MM2S, 0) {
-        aie.dma_bd(%arg0 : memref<64xi32> offset = 0 len = 64 sizes = [1, 1, 1, 64] strides = [0, 0, 0, 1])
+        aie.dma_bd(%arg0 : memref<64xi32> offset = 0 len = 64 sizes = [1, 1, 1, 1, 64] strides = [0, 0, 0, 0, 1])
         aie.end
       }
     }
@@ -116,14 +115,15 @@ module {
 
 // -----
 
-// dma_configure_task on a MemTile: 5 dimensions, one runtime -> rejected.
+// dma_configure_task on a MemTile: 6 dimensions, one runtime -> rejected
+// (exceeds the 5-dim D0..D3 + iteration limit).
 module {
   aie.device(npu1) {
     %memtile_0_1 = aie.tile(0, 1)
     aie.runtime_sequence(%arg0: memref<64xi32>, %n: i64) {
       %t = aiex.dma_configure_task(%memtile_0_1, MM2S, 0) {
-        // expected-error@+1 {{Cannot give more than 4 dimensions}}
-        aie.dma_bd(%arg0 : memref<64xi32> offset = 0 len = 64 sizes = [%n, 1, 1, 1, 1] strides = [0, 0, 0, 0, 1])
+        // expected-error@+1 {{Cannot give more than 5 dimensions}}
+        aie.dma_bd(%arg0 : memref<64xi32> offset = 0 len = 64 sizes = [%n, 1, 1, 1, 1, 1] strides = [0, 0, 0, 0, 0, 1])
         aie.end
       }
     }

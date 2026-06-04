@@ -888,8 +888,8 @@ static DmaBdLayout makeAIE2ShimBdLayout() {
   return l;
 }
 
-// D2_Wrap and D3_Stepsize are left out: the lowering never programs them, and
-// the d2 extent is carried by buffer_length as on the other tiles.
+// D2_Wrap and D3_Stepsize are only programmed for D3 addressing; otherwise the
+// d2 extent is carried by buffer_length as on the other tiles.
 static DmaBdLayout makeAIE2MemTileBdLayout() {
   DmaBdLayout l;
   l.numWords = 8;
@@ -908,10 +908,12 @@ static DmaBdLayout makeAIE2MemTileBdLayout() {
   l.d1Size = {3, 17, 10};
   l.d1Stride = {3, 0, 17};
   l.d2ZeroBefore = {4, 27, 4};
+  l.d2Size = {4, 17, 10};
   l.d2Stride = {4, 0, 17};
   l.d2ZeroAfter = {5, 28, 4};
   l.d1ZeroAfter = {5, 23, 5};
   l.d0ZeroAfter = {5, 17, 6};
+  l.d3Stride = {5, 0, 17};
   l.iterationCurrent = {6, 23, 6};
   l.iterationSize = {6, 17, 6};
   l.iterationStride = {6, 0, 17};

@@ -40,18 +40,20 @@ namespace AIEX {
 void getHardwareStridesWraps(const AIE::AIETargetModel &targetModel,
                              mlir::Operation *op,
                              mlir::BaseMemRefType referencedBufType,
-                             llvm::SmallVector<int64_t, 4> inputSizes,
-                             llvm::SmallVector<int64_t, 4> inputStrides,
-                             llvm::SmallVector<int64_t, 4> &sizes,
-                             llvm::SmallVector<int64_t, 4> &strides);
+                             llvm::SmallVector<int64_t, 5> inputSizes,
+                             llvm::SmallVector<int64_t, 5> inputStrides,
+                             llvm::SmallVector<int64_t, 5> &sizes,
+                             llvm::SmallVector<int64_t, 5> &strides);
+void normalizeMemcpyNdDimVector(llvm::SmallVectorImpl<int64_t> &values,
+                                int64_t d3Value);
 mlir::LogicalResult
 verifyStridesWraps(mlir::Operation *forOp,
                    llvm::function_ref<mlir::InFlightDiagnostic()> emitError,
                    mlir::BaseMemRefType referencedBufType, int tileCol,
-                   int tileRow, llvm::SmallVector<int64_t, 4> inputSizes,
-                   llvm::SmallVector<int64_t, 4> inputStrides,
-                   llvm::SmallVector<int64_t, 4> hardwareSizes,
-                   llvm::SmallVector<int64_t, 4> hardwareStrides,
+                   int tileRow, llvm::SmallVector<int64_t, 5> inputSizes,
+                   llvm::SmallVector<int64_t, 5> inputStrides,
+                   llvm::SmallVector<int64_t, 5> hardwareSizes,
+                   llvm::SmallVector<int64_t, 5> hardwareStrides,
                    bool skipTransformationChecks = false);
 bool isLinearTransfer(llvm::ArrayRef<int64_t> sizes,
                       llvm::ArrayRef<int64_t> strides);
@@ -59,8 +61,8 @@ bool isLinearTransfer(llvm::ArrayRef<int64_t> sizes,
 // Returns true when sizes/strides (innermost-first, same convention as
 // NpuDmaMemcpyNdOp) describe a contiguous row-major scan:
 //   strides[0] == 1
-//   for i in 1..2: if sizes[i] > 1 then strides[i] == product of sizes[0..i-1]
-// The repeat dimension (index 3) is excluded.
+//   for i in 1..3: if sizes[i] > 1 then strides[i] == product of sizes[0..i-1]
+// The repeat dimension (index 4) is excluded.
 // Size-1 dimensions are allowed to carry any stride value because that stride
 // is never applied during the transfer (the loop runs only once).
 // This is the vector-form counterpart of AIE::isContiguousBDTransfer.

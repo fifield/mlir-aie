@@ -29,7 +29,7 @@ module {
         row = 1 : i32,
         channel = 0 : i32,
         direction = 0 : i32,
-        d0_stride = 564 : i32,
+        d0_stride = 0 : i32,
         d0_size = 62 : i32,
         d0_zero_after = 0 : i32,
         d0_zero_before = 0 : i32,

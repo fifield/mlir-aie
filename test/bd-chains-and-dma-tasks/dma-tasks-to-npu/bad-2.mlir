@@ -17,7 +17,7 @@ module {
 
     aie.runtime_sequence(%arg0: memref<32xi8>) {
       %t1 = aiex.dma_configure_task(%tile_0_0, MM2S, 0) {
-          // expected-error@+1 {{At most four data layout transformation dimensions may be provided; aie-decompose-large-dma-bd splits a longer one.}}
+          // expected-error@+1 {{At most 4 data layout transformation dimensions may be provided on this tile; aie-decompose-large-dma-bd splits a longer one.}}
           aie.dma_bd(%arg0 : memref<32xi8> offset = 4 len = 32 sizes = [1, 1, 2, 2, 4] strides = [4, 4, 4, 8, 1]) {bd_id = 0 : i32}
           aie.end
       }

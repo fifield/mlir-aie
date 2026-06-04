@@ -30,6 +30,7 @@
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/TypeSize.h"
 
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <numeric>
@@ -75,6 +76,36 @@ using xilinx::AIE::printTypedDynamicIndexList;
 #define GET_OP_CLASSES
 #include "aie/Dialect/AIEX/IR/AIEX.cpp.inc"
 
+// Normalize a variadic (1..5 dimension) access-pattern vector, expressed
+// innermost-first (index 0 == d0), to the canonical 5-entry hardware form
+// [d0, d1, d2, d3, iteration].
+//
+// The op exposes a variadic number of dimensions. By convention the outermost
+// (last, here highest-index) user dimension is the repeat/iteration dimension,
+// and the remaining dimensions are the innermost data dimensions d0, d1, ...
+// Missing interior data dimensions are filled with `padValue`, which the caller
+// sets to 1 for sizes and 0 for strides/offsets so the inserted dimensions are
+// size-1, stride-0 no-ops.
+//
+// A length-1 vector is special-cased: a single dimension is the contiguous d0
+// transfer (with no repeat), not a degenerate repeat-only pattern.
+void AIEX::normalizeMemcpyNdDimVector(llvm::SmallVectorImpl<int64_t> &values,
+                                      int64_t padValue) {
+  if (values.size() >= 5)
+    return;
+  if (values.size() <= 1) {
+    // d0 only (or empty); pad the higher dimensions with no-ops.
+    values.resize(5, padValue);
+    return;
+  }
+  // Keep the outermost entry as the iteration/repeat dimension and pad the
+  // interior data dimensions just below it.
+  int64_t iteration = values.back();
+  values.pop_back();
+  values.resize(4, padValue);
+  values.push_back(iteration);
+}
+
 /* Return the correct values to write to the hardware registers to configure
   strides and wraps given the input user-facing strides and wraps.
 
@@ -88,9 +119,12 @@ using xilinx::AIE::printTypedDynamicIndexList;
    - By default, stride 0 and size 1 is assumed if unspecified.
    - If only N strides/wraps are defined, those define the lowest N dimensions.
 
-  inputStride[3]        == iteration_stride / elemSizeFac + 1
-  inputWrap[3]          == iteration_size + 1
+  inputStride[4]        == iteration_stride / elemSizeFac + 1
+  inputWrap[4]          == iteration_size + 1
     Highest-dimension stride/wrap is iteration count / iteration stride.
+  inputStride[3]        == d3_stride / elemSizeFac + 1
+                           Note: d3_size is not specified in hardware as it is
+                           implicit from the total buffer transfer length
   inputStride[2]        == d2_stride / elemSizeFac + 1
                            Note: d2_size is not specified in hardware as it is
                            implicit from the total buffer transfer length
@@ -105,24 +139,28 @@ using xilinx::AIE::printTypedDynamicIndexList;
   where addressGranularity == transfer granularity in hardware, which is
                               4 bytes for all current hardware
 
-  Note: strides are expressed offset by one from user input strides, because the
-  hardware does not support a 0 stride (repeat).
+  Note: before AIE4, strides are expressed offset by one from user input strides,
+  because the hardware does not support a 0 stride (repeat). AIE4 programmable
+  step fields are actual values. AIE4 has no D0_Stepsize field; D0 is implied
+  contiguous.
   */
 void AIEX::getHardwareStridesWraps(const AIE::AIETargetModel &targetModel,
                                    mlir::Operation *op,
                                    mlir::BaseMemRefType referencedBufType,
-                                   llvm::SmallVector<int64_t, 4> inputSizes,
-                                   llvm::SmallVector<int64_t, 4> inputStrides,
-                                   llvm::SmallVector<int64_t, 4> &sizes,
-                                   llvm::SmallVector<int64_t, 4> &strides) {
+                                   llvm::SmallVector<int64_t, 5> inputSizes,
+                                   llvm::SmallVector<int64_t, 5> inputStrides,
+                                   llvm::SmallVector<int64_t, 5> &sizes,
+                                   llvm::SmallVector<int64_t, 5> &strides) {
   assert(inputSizes.size() == inputStrides.size());
-  assert(sizes.size() == 4);
-  assert(strides.size() == 4);
+  assert(sizes.size() == 5);
+  assert(strides.size() == 5);
 
   DataLayout dataLayout = DataLayout::closest(op);
   auto elemWidth =
       dataLayout.getTypeSizeInBits(referencedBufType.getElementType());
   auto addressGranularity = targetModel.getAddressGenGranularity();
+  bool isAIE4 = isa<AIE::AIE4TargetModel>(targetModel);
+  int64_t strideOffset = isAIE4 ? 0 : 1;
 
   // Output strides and sizes are default-initialized to 0
   llvm::fill(sizes, 0);
@@ -134,16 +172,77 @@ void AIEX::getHardwareStridesWraps(const AIE::AIETargetModel &targetModel,
     return;
   }
 
-  ConstStridePolicy policy;
-  int64_t inS[4] = {inputSizes[0], inputSizes[1], inputSizes[2], inputSizes[3]};
-  int64_t inT[4] = {inputStrides[0], inputStrides[1], inputStrides[2],
-                    inputStrides[3]};
-  int64_t outS[4], outT[4];
-  encodeHardwareStridesWraps(policy, elemWidth, addressGranularity, inS, inT,
-                             outS, outT);
-  for (int i = 0; i < 4; i++) {
-    sizes[i] = outS[i];
-    strides[i] = outT[i];
+  // d0_size, d0_stride
+  sizes[0] = inputSizes[0] * elemWidth / addressGranularity;
+  if (isAIE4) {
+    // AIE4 has no D0_Stepsize field; hardware always uses contiguous D0
+    // accesses. Verification rejects any non-contiguous D0 stride that would
+    // actually be applied.
+    strides[0] = 0;
+  } else if (inputStrides[0] * elemWidth < addressGranularity ||
+      (elemWidth > addressGranularity)) {
+    // First check:
+    // While the hardware cannot transfer less than addressGranularity bits at
+    // a time, the user may expresses a contiguous transfer of multiple
+    // elements with a stride smaller than addressGranularity. We can thus set
+    // the stride to 1 (encoded in hardware as 0) here to allow such transfers.
+    // The verification function should ensure that
+    //    inputStrides[0] * elemWidth < addressGranularity
+    //    iff. inputSize[0] * elemWidth > addressGranularity.
+    // Second check:
+    // If the element width is larger than addressGranularity, we need to make
+    // sure that all bytes are properly copied and therefore the stride must be
+    // set to 1 (encoded in hardware as 0).
+    // The verification function should ensure that
+    //     inputStrides[0] * elemWidth % addressGranularity == 0
+    //     && inputStrides[0] == 1 if elemWidth > addressGranularity
+    // This makes it impossible to have a stride greater than 1 for
+    // elemWidths bigger than addressGranularity, even if they are a multiple of
+    // it. Such operations should make use of an additional dimension instead.
+    strides[0] = 0;
+  } else {
+    strides[0] =
+        inputStrides[0] * elemWidth / addressGranularity - strideOffset;
+  }
+
+  // d1_size, d1_stride
+  sizes[1] = inputSizes[1];
+  if (inputSizes[1] > 1) {
+    // Stride only matters if we have more than one iteration.
+    strides[1] =
+        inputStrides[1] * elemWidth / addressGranularity - strideOffset;
+  }
+
+  // d2_size, d2_stride
+  sizes[2] = inputSizes[2];
+  if (inputSizes[2] > 1) {
+    // Stride only matters if we have more than one iteration.
+    strides[2] =
+        inputStrides[2] * elemWidth / addressGranularity - strideOffset;
+  }
+
+  // d3_size, d3_stride. D3 has no wrap field; buffer_length terminates it.
+  sizes[3] = inputSizes[3];
+  if (inputSizes[3] > 1) {
+    // Stride only matters if we have more than one iteration.
+    strides[3] =
+        inputStrides[3] * elemWidth / addressGranularity - strideOffset;
+  }
+
+  // iteration_size, iteration_stride
+  if (inputSizes[4] > 1) {
+    // Stride only matters if we have more than one iteration.
+    sizes[4] = inputSizes[4] - 1;
+    // Note that the iteration_stride must be positive, just like the other
+    // dimensions. However, one can encode a zero-stride "repeat" of the same
+    // transfer by setting a positive repeat_count on the pushToQueue instr,
+    // and setting the size here to 1. This causes the BD to "wrap" at every
+    // single iteration, effectively never adding the specified stride, in turn
+    // equalling a repeat without stride.
+    if (inputStrides[4] > 0) {
+      strides[4] =
+          inputStrides[4] * elemWidth / addressGranularity - strideOffset;
+    }
   }
 }
 
@@ -151,10 +250,10 @@ mlir::LogicalResult AIEX::verifyStridesWraps(
     mlir::Operation *forOp,
     llvm::function_ref<mlir::InFlightDiagnostic()> emitError,
     mlir::BaseMemRefType referencedBufType, int tileCol, int tileRow,
-    llvm::SmallVector<int64_t, 4> inputSizes,
-    llvm::SmallVector<int64_t, 4> inputStrides,
-    llvm::SmallVector<int64_t, 4> hardwareSizes,
-    llvm::SmallVector<int64_t, 4> hardwareStrides,
+    llvm::SmallVector<int64_t, 5> inputSizes,
+    llvm::SmallVector<int64_t, 5> inputStrides,
+    llvm::SmallVector<int64_t, 5> hardwareSizes,
+    llvm::SmallVector<int64_t, 5> hardwareStrides,
     bool skipTransformationChecks) {
   const auto &targetModel = AIE::getTargetModel(forOp);
   auto addressGranularity = targetModel.getAddressGenGranularity();
@@ -169,14 +268,56 @@ mlir::LogicalResult AIEX::verifyStridesWraps(
     return emitError() << "Unsupported tile type at (" << tileCol << ", "
                        << tileRow << ") Must be ShimNOC, Mem or Core.";
 
-  uint32_t wrap_bits = targetModel.getDmaBdWrapBits(tileCol, tileRow);
-  uint32_t step_bits = targetModel.getDmaBdStepBits(tileCol, tileRow);
+  bool isAIE4 = isa<AIE::AIE4TargetModel>(targetModel);
+  bool isShim = targetModel.isShimNOCTile(tileCol, tileRow);
+  bool isMemTile = targetModel.isMemTile(tileCol, tileRow);
+  // Pre-AIE4 step sizes are encoded offset-by-one (a hardware value of N means
+  // a user step of N+1); AIE4 step fields hold actual values. This offset is
+  // the inclusive lower bound of the user-facing step/iteration range.
+  int64_t strideOffset = isAIE4 ? 0 : 1;
+  std::array<uint64_t, 5> maxWrap = {0, 0, 0, 0, 0};
+  std::array<uint64_t, 5> maxStep = {0, 0, 0, 0, 0};
+  auto mask = [](uint32_t bits) -> uint64_t { return (1ULL << bits) - 1; };
+  uint64_t dimWrap = mask(targetModel.getDmaBdWrapBits(tileCol, tileRow));
+  uint64_t dimStep = mask(targetModel.getDmaBdStepBits(tileCol, tileRow));
+  uint64_t iteration = mask(targetModel.getDmaBdIterBits(tileCol, tileRow));
 
-  for (int i = 0; i < 4; i++) {
+  if (isShim) {
+    if (isAIE4) {
+      maxWrap = {dimWrap, dimWrap, dimWrap, 0, iteration};
+      maxStep = {dimStep, dimStep, dimStep, dimStep, dimStep};
+    } else {
+      maxWrap = {dimWrap, dimWrap, 0, 0, iteration};
+      maxStep = {dimStep, dimStep, dimStep, 0, dimStep};
+    }
+  } else if (isMemTile) {
+    // MemTiles have a D3 addressing dimension on all generations. D3 has no
+    // wrap register (its extent is implied by the buffer length), so maxWrap[3]
+    // stays 0; its stepsize shares the width of the other data dimensions.
+    if (isAIE4) {
+      maxWrap = {dimWrap, dimWrap, dimWrap, 0, iteration};
+    } else {
+      maxWrap = {dimWrap, dimWrap, 0, 0, iteration};
+    }
+    maxStep = {dimStep, dimStep, dimStep, dimStep, dimStep};
+  } else {
+    maxWrap = {dimWrap, dimWrap, 0, 0, iteration};
+    maxStep = {dimStep, dimStep, dimStep, 0, dimStep};
+  }
+
+  for (int i = 0; i < 5; i++) {
     if (inputSizes[i] <= 0) {
       return emitError() << "Size " << i << " must be a positive integer.";
     }
   }
+
+  if (inputSizes[3] > 1 && !(isAIE4 && isShim) && !isMemTile)
+    return forOp->emitOpError("D3 addressing is not supported on ")
+           << stringifyAIEArch(targetModel.getTargetArch()) << ".";
+
+  if (isAIE4 && inputStrides[0] != 1)
+    return forOp->emitOpError("AIE4 D0 stride is fixed by hardware and must "
+                              "be 1.");
 
   if (!isConstMultipleOfGranule(inputSizes[0], elemWidth, addressGranularity)) {
     std::stringstream msg;
@@ -188,7 +329,7 @@ mlir::LogicalResult AIEX::verifyStridesWraps(
     return emitError() << msg.str();
   }
 
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < 4; i++) {
     if (inputSizes[i] > 1 && inputStrides[i] < 1) {
       // If inputSize[i] == 1, anything is allowable in the stride, since that
       // stride will never be applied. For any larger size, we must verify that
@@ -196,13 +337,13 @@ mlir::LogicalResult AIEX::verifyStridesWraps(
       return emitError() << "Stride " << i << " must be a positive integer.";
     }
   }
-  // A value of zero is allowable for the fourth-dimension stride
+  // A value of zero is allowable for the iteration stride
   // (this indicates an interation stride for the repeat of 0)
-  if (inputSizes[3] > 1 && inputStrides[3] < 0) {
-    return emitError() << "Stride 3 must be a non-negative integer.";
+  if (inputSizes[4] > 1 && inputStrides[4] < 0) {
+    return emitError() << "Stride 4 must be a non-negative integer.";
   }
 
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < 5; i++) {
     // strides[0] == 1 is ok iff the transfer size is a multiple of
     // addressGranularity, which is checked below
     if (i == 0 && inputStrides[i] == 1)
@@ -233,34 +374,33 @@ mlir::LogicalResult AIEX::verifyStridesWraps(
                        << lo << ":" << hi << "] range.";
   };
 
-  int64_t maxWrap = (1 << wrap_bits) - 1;
-  int64_t maxStep = 1 << step_bits;
-
-  for (int dim : {0, 1}) {
-    if (!skipTransformationChecks && hardwareSizes[dim] > maxWrap)
-      return outOfRange("Size", dim, inputSizes[dim], hardwareSizes[dim], 0,
-                        maxWrap);
+  for (int i = 0; i < 4; ++i) {
+    if (maxWrap[i] && !skipTransformationChecks &&
+        hardwareSizes[i] > static_cast<int64_t>(maxWrap[i]))
+      return outOfRange("Size", i, inputSizes[i], hardwareSizes[i], 0,
+                        maxWrap[i]);
   }
-  // A zero d3 stride is a pure repeat: the lowerings leave the iteration fields
-  // 0 and carry the count on the queue push, so the repeat limit applies.
-  bool pureRepeat = inputStrides[3] == 0;
-  int64_t maxCount =
-      pureRepeat ? targetModel.getMaxRepeatCount() + 1
-                 : 1LL << targetModel.getDmaBdIterBits(tileCol, tileRow);
-  if (inputSizes[3] > maxCount)
-    return emitError() << (pureRepeat ? "repeat count " : "iteration count ")
-                       << inputSizes[3] << " exceeds the [1:" << maxCount
-                       << "] range.";
-  for (int dim : {0, 1, 2}) {
-    if (hardwareStrides[dim] > maxStep - 1)
-      return outOfRange("Stride", dim, inputStrides[dim], hardwareStrides[dim],
-                        1, maxStep);
+  // A zero iteration stride is a pure repeat: the lowerings leave the
+  // iteration fields 0 and carry the count on the queue push, so the repeat
+  // limit applies.
+  bool pureRepeat = inputStrides[4] == 0;
+  int64_t maxCount = pureRepeat
+                         ? targetModel.getMaxRepeatCount() + 1
+                         : static_cast<int64_t>(maxWrap[4]) + 1;
+  if (inputSizes[4] > maxCount)
+    return emitError()
+           << (pureRepeat ? "repeat count " : "iteration count ")
+           << inputSizes[4] << " exceeds the [1:" << maxCount << "] range.";
+  for (int i = 0; i < 5; ++i) {
+    if (!maxStep[i])
+      continue;
+    // Iteration stride exceeding the range is ok iff iteration_size is one.
+    if (i == 4 && hardwareSizes[4] == 0)
+      continue;
+    if (hardwareStrides[i] > static_cast<int64_t>(maxStep[i]))
+      return outOfRange("Stride", i, inputStrides[i], hardwareStrides[i],
+                        strideOffset, maxStep[i] + strideOffset);
   }
-  // strides[3] exceeding the range is ok iff the sizes[3] is one, which is
-  // checked below
-  if (hardwareStrides[3] > maxStep - 1 && hardwareSizes[3] > 0)
-    return outOfRange("Stride", 3, inputStrides[3], hardwareStrides[3], 1,
-                      maxStep);
 
   return success();
 }
@@ -331,7 +471,7 @@ uint32_t AIEX::NpuDmaMemcpyNdOp::getAxcacheOrDefault() {
 }
 
 int64_t AIEX::NpuDmaMemcpyNdOp::getOffsetInBytes() {
-  llvm::SmallVector<int64_t, 4> offsets =
+  llvm::SmallVector<int64_t, 5> offsets =
       llvm::map_to_vector(llvm::reverse(getMixedOffsets()), [](OpFoldResult s) {
         return getConstantIntValue(s).value();
       });
@@ -360,16 +500,16 @@ int64_t AIEX::NpuDmaMemcpyNdOp::getOffsetInBytes() {
 
 // Returns true when sizes/strides describe a plain contiguous transfer with
 // no data layout transformation (d1/d2 sizes == 1, d0 stride == 1).
-// d3 (repeat) is intentionally excluded.
+// d4 (repeat) is intentionally excluded.
 bool AIEX::isLinearTransfer(llvm::ArrayRef<int64_t> sizes,
                             llvm::ArrayRef<int64_t> strides) {
-  return sizes[1] == 1 && sizes[2] == 1 && strides[0] == 1 && strides[1] == 0 &&
-         strides[2] == 0;
+  return sizes[1] == 1 && sizes[2] == 1 && sizes[3] == 1 && strides[0] == 1 &&
+         strides[1] == 0 && strides[2] == 0 && strides[3] == 0;
 }
 
 // Returns true when sizes/strides (innermost-first) describe a contiguous
 // row-major scan: innermost stride == 1 and each outer stride equals the
-// product of all inner sizes.  The repeat dimension (index 3) is excluded.
+// product of all inner sizes.  The repeat dimension (index 4) is excluded.
 // Size-1 dimensions are allowed to carry any stride value because that stride
 // is never applied during the transfer (the loop runs only once).
 // This is the vector-form counterpart of AIE::isContiguousBDTransfer.
@@ -380,6 +520,8 @@ bool AIEX::isContiguousTransfer(llvm::ArrayRef<int64_t> sizes,
   if (sizes[1] > 1 && strides[1] != sizes[0])
     return false;
   if (sizes[2] > 1 && strides[2] != sizes[0] * sizes[1])
+    return false;
+  if (sizes[3] > 1 && strides[3] != sizes[0] * sizes[1] * sizes[2])
     return false;
   return true;
 }
@@ -392,32 +534,40 @@ bool AIEX::isLinearModeTransfer(const AIE::AIETargetModel &targetModel, int col,
           isContiguousTransfer(sizes, strides));
 }
 
-// dma_memcpy_nd transfers of the form [*, 1, 1, len][*, 0, 0, 1] do not
+// dma_memcpy_nd transfers of the form [*, 1, 1, 1, len][*, 0, 0, 0, 1] do not
 // specify any data layout transformation, but simply express a contiguous
 // transfer of `len`. The 4th dimension is excluded because a repeat count
 // is still compatible with a linear transfer.
 bool AIEX::NpuDmaMemcpyNdOp::isLinearTransferWithoutTransformation() {
-  llvm::SmallVector<int64_t, 4> inputSizes =
+  llvm::SmallVector<int64_t, 5> inputSizes =
       llvm::map_to_vector(llvm::reverse(getMixedSizes()), [](OpFoldResult s) {
         return getConstantIntValue(s).value();
       });
-  llvm::SmallVector<int64_t, 4> inputStrides =
+  normalizeMemcpyNdDimVector(inputSizes, 1);
+  llvm::SmallVector<int64_t, 5> inputStrides =
       llvm::map_to_vector(llvm::reverse(getMixedStrides()), [](OpFoldResult s) {
         return getConstantIntValue(s).value();
       });
+  normalizeMemcpyNdDimVector(inputStrides, 0);
   return isLinearTransfer(inputSizes, inputStrides);
 }
 
 // Canonicalization pattern: rewrite a contiguous row-major access pattern to
 // the canonical linear form [s3, 1, 1, N][st3, 0, 0, 1].
 //
-// Using outermost-first index notation (matching the IR syntax), a 4D access
-// [s3, s2, s1, s0][st3, st2, st1, st0] is a contiguous linear scan when:
+// The access pattern is first normalized to the 5-entry hardware form
+// [d0, d1, d2, d3, iteration] (innermost-first).  A contiguous linear scan
+// satisfies:
 //   st0 == 1
 //   s1 == 1  ||  st1 == s0          (stride irrelevant when size is 1)
 //   s2 == 1  ||  st2 == s0 * s1
-// yielding a total of N = s0 * s1 * s2 contiguous elements.  The repeat
-// dimension s3 / stride st3 is unchanged by the fold.
+//   s3 == 1  ||  st3 == s0 * s1 * s2
+// yielding a total of N = s0 * s1 * s2 * s3 contiguous elements.  The repeat
+// dimension / iteration stride is unchanged by the fold.
+//
+// The result is emitted as the minimal 4-entry linear form [repeat, 1, 1, N];
+// the (AIE4-shim-only) d3 dimension always folds into N, so a fourth data
+// dimension is never needed in the canonical output.
 //
 // Note: this pattern applies only to NpuDmaMemcpyNdOp.  The analogous
 // dimensionsToStream / dimensionsFromStreamPerConsumer attributes on
@@ -457,38 +607,42 @@ struct LinearizeContiguousTransfer
       return mlir::failure();
 
     // getMixedSizes/Strides/Offsets return outermost-first; reverse to
-    // innermost-first so index 0 = d0 (innermost) and index 3 = repeat.
-    llvm::SmallVector<int64_t, 4> sizes = llvm::map_to_vector(
+    // innermost-first so index 0 = d0 (innermost) and index 4 = repeat.
+    llvm::SmallVector<int64_t, 5> sizes = llvm::map_to_vector(
         llvm::reverse(op.getMixedSizes()), [](mlir::OpFoldResult s) {
           return mlir::getConstantIntValue(s).value();
         });
-    llvm::SmallVector<int64_t, 4> strides = llvm::map_to_vector(
+    AIEX::normalizeMemcpyNdDimVector(sizes, 1);
+    llvm::SmallVector<int64_t, 5> strides = llvm::map_to_vector(
         llvm::reverse(op.getMixedStrides()), [](mlir::OpFoldResult s) {
           return mlir::getConstantIntValue(s).value();
         });
-    llvm::SmallVector<int64_t, 4> offsets = llvm::map_to_vector(
+    AIEX::normalizeMemcpyNdDimVector(strides, 0);
+    llvm::SmallVector<int64_t, 5> offsets = llvm::map_to_vector(
         llvm::reverse(op.getMixedOffsets()), [](mlir::OpFoldResult s) {
           return mlir::getConstantIntValue(s).value();
         });
+    AIEX::normalizeMemcpyNdDimVector(offsets, 0);
 
     // Require a contiguous row-major scan.
     if (!AIEX::isContiguousTransfer(sizes, strides))
       return mlir::failure();
 
-    // Fold d0/d1/d2 into one linear count; keep the repeat dimension intact.
-    // Build directly in outermost-first order for the replacement op.
-    int64_t N = sizes[0] * sizes[1] * sizes[2];
-    llvm::SmallVector<int64_t, 4> newSizesOuter = {sizes[3], 1, 1, N};
-    llvm::SmallVector<int64_t, 4> newStridesOuter = {strides[3], 0, 0, 1};
+    // Fold d0/d1/d2/d3 into one linear count; keep the repeat dimension intact.
+    // Build directly in outermost-first order for the replacement op, using the
+    // minimal 4-entry linear form [repeat, 1, 1, N].
+    int64_t N = sizes[0] * sizes[1] * sizes[2] * sizes[3];
+    llvm::SmallVector<int64_t, 4> newSizesOuter = {sizes[4], 1, 1, N};
+    llvm::SmallVector<int64_t, 4> newStridesOuter = {strides[4], 0, 0, 1};
 
     // getOffsetInBytes() computes: sum(offsets[i] * strides[i] * elemSize).
     // After folding, the intermediate strides become 0, so any non-zero offset
     // in those dimensions would silently contribute 0 bytes.  Preserve the
-    // correct start address by collapsing the innermost three offset/stride
+    // correct start address by collapsing the innermost four offset/stride
     // pairs into a single linear element index at d0.
     int64_t linearOffset = offsets[0] * strides[0] + offsets[1] * strides[1] +
-                           offsets[2] * strides[2];
-    llvm::SmallVector<int64_t, 4> newOffsetsOuter = {offsets[3], 0, 0,
+                           offsets[2] * strides[2] + offsets[3] * strides[3];
+    llvm::SmallVector<int64_t, 4> newOffsetsOuter = {offsets[4], 0, 0,
                                                      linearOffset};
 
     rewriter.replaceOpWithNewOp<AIEX::NpuDmaMemcpyNdOp>(
@@ -654,6 +808,18 @@ LogicalResult AIEX::NpuDmaMemcpyNdOp::verify() {
     return emitOpError("Minimum data transfer size required is ")
            << addressGranularity << "bits. ";
   }
+  // The offsets/sizes/strides access pattern is variadic (1-5 dims). Enforce
+  // the rank bound and that the three lists agree in rank; this gates both the
+  // static and dynamic lowering paths (D3 addressing needs the full 5-dim
+  // [d0,d1,d2,d3,iteration] form).
+  size_t rank = getMixedSizes().size();
+  if (rank < 1 || rank > 5)
+    return emitOpError("Expected between 1 and 5 offset/size/stride "
+                       "dimensions.");
+  if (getMixedOffsets().size() != rank || getMixedStrides().size() != rank)
+    return emitOpError("Expected offsets, sizes and strides to have the same "
+                       "number of dimensions.");
+
   bool allStridesConstant = llvm::all_of(getMixedStrides(), [](OpFoldResult s) {
     return getConstantIntValue(s).has_value();
   });
@@ -677,14 +843,16 @@ LogicalResult AIEX::NpuDmaMemcpyNdOp::verify() {
   if (!allStridesConstant || !allSizesConstant || !allOffsetsConstant)
     return success();
 
-  llvm::SmallVector<int64_t, 4> inputSizes =
+  llvm::SmallVector<int64_t, 5> inputSizes =
       llvm::map_to_vector(llvm::reverse(getMixedSizes()), [](OpFoldResult s) {
         return getConstantIntValue(s).value();
       });
-  llvm::SmallVector<int64_t, 4> inputStrides =
+  normalizeMemcpyNdDimVector(inputSizes, 1);
+  llvm::SmallVector<int64_t, 5> inputStrides =
       llvm::map_to_vector(llvm::reverse(getMixedStrides()), [](OpFoldResult s) {
         return getConstantIntValue(s).value();
       });
+  normalizeMemcpyNdDimVector(inputStrides, 0);
   int64_t offset = getOffsetInBytes();
 
   auto errorMessage = checkBurstLength(targetModel, getBurstLength());
@@ -769,16 +937,18 @@ AIEX::NpuDmaMemcpyNdOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
       failed(AIE::verifyLengthParameterTile(*this, targetModel, col, row)))
     return failure();
 
-  llvm::SmallVector<int64_t, 4> inputSizes =
+  llvm::SmallVector<int64_t, 5> inputSizes =
       llvm::map_to_vector(llvm::reverse(getMixedSizes()), [](OpFoldResult s) {
         return getConstantIntValue(s).value();
       });
-  llvm::SmallVector<int64_t, 4> inputStrides =
+  llvm::SmallVector<int64_t, 5> inputStrides =
       llvm::map_to_vector(llvm::reverse(getMixedStrides()), [](OpFoldResult s) {
         return getConstantIntValue(s).value();
       });
-  llvm::SmallVector<int64_t, 4> hardwareSizes(4);
-  llvm::SmallVector<int64_t, 4> hardwareStrides(4);
+  normalizeMemcpyNdDimVector(inputSizes, 1);
+  normalizeMemcpyNdDimVector(inputStrides, 0);
+  llvm::SmallVector<int64_t, 5> hardwareSizes(5);
+  llvm::SmallVector<int64_t, 5> hardwareStrides(5);
   getHardwareStridesWraps(targetModel, getOperation(), buffer, inputSizes,
                           inputStrides, hardwareSizes, hardwareStrides);
 
@@ -799,10 +969,11 @@ AIEX::NpuDmaMemcpyNdOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
   // oversized strides) still fail below. isDecomposableNdDmaPattern
   // suppresses its own diagnostics, so no stray error is emitted for the
   // accepted case.
-  llvm::SmallVector<int64_t, 4> inputOffsets =
+  llvm::SmallVector<int64_t, 5> inputOffsets =
       llvm::map_to_vector(llvm::reverse(getMixedOffsets()), [](OpFoldResult s) {
         return getConstantIntValue(s).value();
       });
+  normalizeMemcpyNdDimVector(inputOffsets, 0);
   // aie-decompose-large-dma-bd leaves a transfer with a runtime length
   // alone, so it must be legal as written.
   // AIE1 patterns must fit directly, even when the decomposition pass is
@@ -887,8 +1058,9 @@ LogicalResult AIEX::NpuPushQueueOp::verify() {
 LogicalResult AIEX::NpuWriteBdOp::verify() {
   const auto &targetModel = AIE::getTargetModel(*this);
   auto numBds = targetModel.getNumBDs(getColumn(), getRow());
-  bool isLinearTransfer =
-      (getD0Size() >= 1) && (getD1Size() == 1) && (getIterationSize() == 0);
+  bool isLinearTransfer = (getD0Size() >= 1) && (getD1Size() == 1) &&
+                          (getD2Size() <= 1) && (getD3Size() <= 1) &&
+                          (getIterationSize() == 0);
   if (getBdId() >= numBds)
     return emitOpError("BD ID exceeds the maximum ID.");
   if (getPacketId() > 31)
@@ -907,6 +1079,8 @@ LogicalResult AIEX::NpuWriteBdOp::verify() {
   // fields unbiased, stepsize/iteration fields biased actual-1), so the
   // legal encoded range for a B-bit field is simply [0, 2^B - 1].
   bool isAIE4 = isa<AIE::AIE4TargetModel>(targetModel);
+  bool isShim = targetModel.isShimNOCTile(getColumn(), getRow());
+  bool isMemTile = targetModel.isMemTile(getColumn(), getRow());
   AIE::AIETileType tileType = targetModel.getTileType(getColumn(), getRow());
   uint32_t wrapBits = targetModel.getDmaBdWrapBits(tileType);
   uint32_t stepBits = targetModel.getDmaBdStepBits(tileType);
@@ -914,7 +1088,11 @@ LogicalResult AIEX::NpuWriteBdOp::verify() {
   uint32_t maxWrap = wrapBits > 0 ? (1u << wrapBits) - 1 : 0;
   uint32_t maxStep = stepBits > 0 ? (1u << stepBits) - 1 : 0;
   uint32_t maxIter = iterBits > 0 ? (1u << iterBits) - 1 : 0;
+  // The AIE4 MemTile D3_Stepsize field is 23 bits wide.
+  uint32_t maxD3Stride = (isAIE4 && isMemTile) ? 0x7FFFFF : maxStep;
 
+  if (isAIE4 && getD0Stride() != 0)
+    return emitOpError("AIE4 D0 stride is implied by hardware and must be 0.");
   if (!isLinearTransfer && getD0Size() > maxWrap)
     return emitOpError() << "D0 Size exceeds the [0:" << maxWrap << "] range.";
   if (getD0Stride() > maxStep)
@@ -928,6 +1106,14 @@ LogicalResult AIEX::NpuWriteBdOp::verify() {
   if (getD2Stride() > maxStep)
     return emitOpError() << "D2 Stride exceeds the [0:" << maxStep
                          << "] range.";
+  // MemTiles have a D3 addressing dimension on all generations; the shim
+  // gained one in AIE4.
+  if (getD3Size() > 1 && !(isMemTile || (isAIE4 && isShim)))
+    return emitOpError("D3 Size is only supported on MemTile and AIE4 Shim "
+                       "BDs.");
+  if (getD3Stride() > maxD3Stride)
+    return emitOpError() << "D3 Stride exceeds the [0:" << maxD3Stride
+                         << "] range.";
   if (getIterationSize() > maxIter)
     return emitOpError() << "Iteration Size exceeds the [0:" << maxIter
                          << "] range.";
@@ -940,13 +1126,13 @@ LogicalResult AIEX::NpuWriteBdOp::verify() {
   if (getBufferLength() > maxLen)
     return emitOpError() << "Buffer length exceeds the [0:" << maxLen
                          << "] range.";
-  if (targetModel.isShimNOCTile(getColumn(), getRow()) && !isAIE4 &&
-      getD2Size() != 0)
+  if (isShim && !isAIE4 && getD2Size() != 0)
     return emitOpError("ShimTile only supports 3 dimensions of sizes.");
-  if (targetModel.isShimNOCTile(getColumn(), getRow()) &&
-      (getD0ZeroBefore() != 0 || getD0ZeroAfter() != 0 ||
-       getD1ZeroBefore() != 0 || getD1ZeroAfter() != 0 ||
-       getD2ZeroBefore() != 0 || getD2ZeroAfter() != 0))
+  if (isShim && isAIE4 && getD2Size() > maxWrap)
+    return emitOpError() << "D2 Size exceeds the [0:" << maxWrap << "] range.";
+  if (isShim && (getD0ZeroBefore() != 0 || getD0ZeroAfter() != 0 ||
+                 getD1ZeroBefore() != 0 || getD1ZeroAfter() != 0 ||
+                 getD2ZeroBefore() != 0 || getD2ZeroAfter() != 0))
     return emitOpError("ShimTile doesn't support zero padding.");
 
   // Pad field widths (AIE2P ArchSpec Table 3-34, in 32-bit words): D0 is a
@@ -972,8 +1158,7 @@ LogicalResult AIEX::NpuWriteBdOp::verify() {
   if (getD2ZeroBefore() > 0xF || getD2ZeroAfter() > 0xF)
     return emitOpError("D2 pad_before/pad_after exceeds the [0:15] range.");
 
-  if (!targetModel.isShimNOCTile(getColumn(), getRow()) &&
-      getBurstLength() != 0)
+  if (!isShim && getBurstLength() != 0)
     return emitOpError("Only ShimTiles support burst length.");
   auto errorMessage = checkBurstLength(targetModel, getBurstLength());
   if (errorMessage.has_value()) {
@@ -1502,13 +1687,11 @@ AIEX::DMAConfigureTaskOp::canonicalize(AIEX::DMAConfigureTaskOp op,
 //
 // Every AIE2/AIE2P DMA BD register file carries getBDMaxDims ND address
 // dimensions (D0..) plus one separate iteration/repeat dimension: a core/shim
-// BD has D0..D2 + iteration, a MemTile BD has D0..D3 + iteration. On this path
-// aiex.shim_dma_single_bd_task hoists the leading tap dimension into that
-// iteration register, so a shim/core BD may carry one dimension beyond its ND
-// access limit (3 + 1). A MemTile is not given the +1: AIEDMATasksToNPU maps
-// the 4th task dimension onto the iteration register for every tile type and
-// caps the total at 4, which the MemTile's 4 ND dimensions already reach. Both
-// branches therefore land on the same uniform 4-dimension cap enforced later by
+// BD has D0..D2 + iteration, a MemTile BD has D0..D3 + iteration. On the
+// runtime-sequence path AIEDMATasksToNPU maps the leading task dimension onto
+// that iteration register for every tile type, so a BD may carry one dimension
+// beyond its ND access limit regardless of tile type (core/shim: 3 + 1 = 4;
+// MemTile / AIE4 shim: 4 + 1 = 5). This matches the cap enforced later by
 // AIEDMATasksToNPU.
 //
 // A BD whose sizes and strides are all constant may give more: every dimension
@@ -1521,9 +1704,8 @@ AIEX::DMAConfigureTaskOp::canonicalize(AIEX::DMAConfigureTaskOp op,
 static LogicalResult
 verifyTaskBDDimensions(const AIE::AIETargetModel &targetModel, int col, int row,
                        Region &body) {
-  size_t maxNDims = targetModel.getBDMaxDims(col, row);
-  if (!targetModel.isMemTile(col, row))
-    ++maxNDims; // leading dim is hoisted into the iteration/repeat register
+  // ND addressing dims plus the separate iteration/repeat dimension.
+  size_t maxNDims = targetModel.getBDMaxDims(col, row) + 1;
   LogicalResult result = success();
   body.walk([&](AIE::DMABDOp bd) {
     // The BD's own verifier skips it here, so nothing has yet established that

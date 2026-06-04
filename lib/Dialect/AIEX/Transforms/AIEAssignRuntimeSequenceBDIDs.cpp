@@ -692,8 +692,8 @@ struct AIEAssignRuntimeSequenceBDIDsPass
     if (awaitedConfigures.contains(task_op) || reclaimed.contains(task_op) ||
         unloaded.contains(task_op))
       return success();
-    BdIdGenerator &gen = getGeneratorForTile(task_op.getTileOp());
     AIE::TileOp tile = task_op.getTileOp();
+    BdIdGenerator &gen = getGeneratorForTile(tile);
     WalkResult result = task_op.walk<WalkOrder::PreOrder>([&](AIE::DMABDOp bd) {
       if (!bd.getBdId().has_value()) {
         bd.emitOpError("Free called on BD chain with unassigned IDs.");

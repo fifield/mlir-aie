@@ -373,6 +373,8 @@ public:
     auto d1_stride = zero;
     auto d2_size = zero;
     auto d2_stride = zero;
+    auto d3_size = zero;
+    auto d3_stride = zero;
     auto iteration_current = zero;
     auto iteration_size = zero;
     auto iteration_stride = zero;
@@ -396,12 +398,14 @@ public:
 
     auto issue_token = BoolAttr::get(ctx, false);
     auto repeat_count = zero;
-    llvm::SmallVector<int64_t, 4> inputSizes = llvm::map_to_vector(
+    llvm::SmallVector<int64_t, 5> inputSizes = llvm::map_to_vector(
         llvm::reverse(op.getMixedSizes()),
         [](OpFoldResult s) { return getConstantIntValue(s).value(); });
-    llvm::SmallVector<int64_t, 4> inputStrides = llvm::map_to_vector(
+    normalizeMemcpyNdDimVector(inputSizes, 1);
+    llvm::SmallVector<int64_t, 5> inputStrides = llvm::map_to_vector(
         llvm::reverse(op.getMixedStrides()),
         [](OpFoldResult s) { return getConstantIntValue(s).value(); });
+    normalizeMemcpyNdDimVector(inputStrides, 0);
     // A contiguous row-major ND access on a shim NOC tile is lowered to linear
     // mode (d0_size=d1_size=0) just like an already-canonical linear transfer.
     // This allows naturally-expressed multidimensional transfers (e.g., a 2D
@@ -410,8 +414,8 @@ public:
                                          inputSizes, inputStrides);
     if (!isLinear && op.getLengthStateTableIdxAttr())
       AIE::placeRuntimeLengthDimension(inputSizes, inputStrides);
-    llvm::SmallVector<int64_t, 4> sizes(4);
-    llvm::SmallVector<int64_t, 4> strides(4);
+    llvm::SmallVector<int64_t, 5> sizes(5);
+    llvm::SmallVector<int64_t, 5> strides(5);
     getHardwareStridesWraps(targetModel, op, bufferType, inputSizes,
                             inputStrides, sizes, strides);
 
@@ -434,7 +438,11 @@ public:
     uint64_t buffer_length_val = inputSizes[0] * op.getElementTypeBitwidth() /
                                  targetModel.getAddressGenGranularity();
     if (inputSizes.size() > 1) {
-      for (size_t i = 1; i < std::min(inputSizes.size(), (size_t)3); i++) {
+      size_t numAddressDims = (isa<AIE::AIE4TargetModel>(targetModel) &&
+                               targetModel.isShimNOCTile(tileCol, tileRow))
+                                  ? 4
+                                  : 3;
+      for (size_t i = 1; i < std::min(inputSizes.size(), numAddressDims); i++) {
         buffer_length_val *= inputSizes[i];
       }
     }
@@ -467,16 +475,24 @@ public:
       d2_stride = IntegerAttr::get(i32ty, strides[2]);
 
       // d2_size
-      if (targetModel.isMemTile(tileCol, 0)) // Need to be any row
+      if (targetModel.isMemTile(tileCol, 0) ||
+          (isa<AIE::AIE4TargetModel>(targetModel) &&
+           targetModel.isShimNOCTile(tileCol, tileRow)))
         d2_size = IntegerAttr::get(i32ty, sizes[2]);
       else
         d2_size = IntegerAttr::get(i32ty, 0);
+
+      if (isa<AIE::AIE4TargetModel>(targetModel) &&
+          targetModel.isShimNOCTile(tileCol, tileRow)) {
+        d3_size = IntegerAttr::get(i32ty, sizes[3]);
+        d3_stride = IntegerAttr::get(i32ty, strides[3]);
+      }
     }
     // iteration_current, iteration_size, iteration_stride, repeat_count
-    if (inputSizes[3] > 1) {
-      if (inputStrides[3] > 0) {
-        iteration_size = IntegerAttr::get(i32ty, sizes[3]);
-        iteration_stride = IntegerAttr::get(i32ty, strides[3]);
+    if (inputSizes[4] > 1) {
+      if (inputStrides[4] > 0) {
+        iteration_size = IntegerAttr::get(i32ty, sizes[4]);
+        iteration_stride = IntegerAttr::get(i32ty, strides[4]);
       } else {
         // We allow users to encode the repeat_count as a dimension 3 stride
         // of 0. This must lower to a iteration wrap of 0, so no stride is
@@ -486,7 +502,7 @@ public:
         iteration_stride = zero;
       }
     }
-    repeat_count = IntegerAttr::get(i32ty, sizes[3]);
+    repeat_count = IntegerAttr::get(i32ty, sizes[4]);
 
     // next_bd
 
@@ -560,8 +576,8 @@ public:
         iteration_current, iteration_size, iteration_stride, next_bd,
         use_next_bd, valid_bd, lock_rel_val, lock_rel_id, lock_acq_enable,
         lock_acq_val, lock_acq_id, d0_zero_before, d1_zero_before,
-        d2_zero_before, d0_zero_after, d1_zero_after, d2_zero_after,
-        burst_length, axcache);
+        d2_zero_before, d0_zero_after, d1_zero_after, d2_zero_after, d3_size,
+        d3_stride, burst_length, axcache);
 
     // Resolve the buffer's runtime-sequence arg and emit the address patch
     // (plus any offset-state update).
@@ -607,7 +623,8 @@ public:
   LogicalResult emitBufferAddressPatch(NpuDmaMemcpyNdOp op, OpAdaptor adaptor,
                                        ConversionPatternRewriter &rewriter,
                                        int tileCol, int tileRow, int channel,
-                                       int dir, int &argIdx) const {
+                                       AIE::DMAChannelDir dir,
+                                       int &argIdx) const {
     AIE::RuntimeSequenceOp seqOp =
         op->getParentOfType<AIE::RuntimeSequenceOp>();
     if (!seqOp)
@@ -726,6 +743,7 @@ public:
     // constant offset or builds a runtime arg_plus with arith as needed.
     int arg_idx = -1;
     if (failed(emitBufferAddressPatch(op, adaptor, rewriter, tileCol, tileRow,
+                                      infoOp.getChannelIndex(), channelDir,
                                       arg_idx)))
       return failure();
 
@@ -849,7 +867,7 @@ public:
 
       // DMA_S2MM_0_BD0_5
       // D3_Stepsize [22:0]
-      words[5] = 0; // D3_Stepsize not currently used
+      words[5] = op.getD3Stride() & 0x7fffff;
 
       // DMA_S2MM_0_BD0_6
       // TLAST_Suppress [31], Iteration_Stepsize [22:0]
@@ -992,8 +1010,10 @@ public:
       words[7] |= op.getIterationStride() & 0x3fffff;
 
       // DMA_BDX_8
-      // TODO: D3_Stepsize, IO_Coherence
-      words[8] = (op.getOutOfOrderId() & 0xf) << 5;
+      // D3_Stepsize [31:10], IO_Coherence [9], OoO BD ID [8:5],
+      // Packet ID [4:0]
+      words[8] = (op.getD3Stride() & 0x3fffff) << 10;
+      words[8] |= (op.getOutOfOrderId() & 0xf) << 5;
       words[8] |= op.getPacketId() & 0x1f;
     } else {
       const AIE::DmaBdLayout *layout = tm.getDmaBdLayout(col, row);
@@ -1024,6 +1044,11 @@ public:
       set(layout->d1Size, op.getD1Size());
       set(layout->d1Stride, op.getD1Stride());
       set(layout->d2Stride, op.getD2Stride());
+      // D2_Wrap and D3_Stepsize only matter when D3 addressing is in use.
+      if (op.getD3Size() != 0) {
+        set(layout->d2Size, op.getD2Size());
+        set(layout->d3Stride, op.getD3Stride());
+      }
       set(layout->iterationCurrent, op.getIterationCurrent());
       set(layout->iterationSize, op.getIterationSize());
       set(layout->iterationStride, op.getIterationStride());

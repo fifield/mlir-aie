@@ -53,6 +53,15 @@ static LogicalResult emitUnplacedTileError(Operation *op,
   return err;
 }
 
+// MemTiles (all generations) and AIE4 shim NOC tiles have a true D3 addressing
+// dimension that is independent of the iteration/repeat dimension. Only these
+// tiles may use the explicit 5-dim [d0,d1,d2,d3,iteration] access pattern.
+static bool tileHasD3AddressDim(const AIE::AIETargetModel &tm, int col,
+                                int row) {
+  return tm.isMemTile(col, row) ||
+         (isa<AIE::AIE4TargetModel>(tm) && tm.isShimNOCTile(col, row));
+}
+
 struct DMAStartTaskOpPattern : OpRewritePattern<DMAStartTaskOp> {
   DMAStartTaskOpPattern(MLIRContext *context,
                         llvm::DenseMap<Operation *, bool> &onlyPushedOnce)
@@ -257,8 +266,6 @@ struct AIEDMATasksToNPUPass
               [&](AIE::DMABDOp bd_op) { return WalkResult::advance(); })
           .Case<AIE::UseLockOp>(
               [&](AIE::UseLockOp lock_op) { return WalkResult::advance(); })
-          .Case<arith::ConstantOp>(
-              [&](arith::ConstantOp const_op) { return WalkResult::advance(); })
           .Case<AIE::NextBDOp>(
               [&](AIE::NextBDOp lock_op) { return WalkResult::advance(); })
           .Case<AIE::EndOp>(
@@ -325,7 +332,7 @@ struct AIEDMATasksToNPUPass
     // A buffer descriptor can refer to a statically allocated aie.buffer, or to
     // a DDR buffer which will be passed as a runtime argument (block
     // argument). Try to find the root block argument, either directly or
-    // through supported subview/view/cast chains.
+    // through subviews/casts.
     mlir::BlockArgument buf_arg = nullptr;
     int64_t offset = 0;
 
@@ -470,10 +477,8 @@ struct AIEDMATasksToNPUPass
     } else {
       return bd_op->emitOpError(
           "Buffer argument must be a constant aie.buffer, a runtime sequence "
-          "input argument, or a supported chain of memref.subview, "
-          "memref.view, memref.cast, or memref.reinterpret_cast operations "
-          "rooted at a block argument. Subviews must be static and contiguous; "
-          "views must have a constant byte shift and no dynamic result sizes.");
+          "input argument, or a (chain of) subview(s) or cast(s) of a block "
+          "argument with constant offsets and strides equal to one.");
     }
 
     // If this BD has an offset_state_table_idx, emit update_from_scratchpad to
@@ -867,8 +872,10 @@ struct AIEDMATasksToNPUPass
     std::optional<llvm::ArrayRef<AIE::BDDimLayoutAttr>> dims;
     if (!dimsStorage->empty())
       dims = llvm::ArrayRef<AIE::BDDimLayoutAttr>(*dimsStorage);
-    llvm::SmallVector<int64_t, 4> sizes = llvm::SmallVector<int64_t, 4>(4, 0);
-    llvm::SmallVector<int64_t, 4> strides = llvm::SmallVector<int64_t, 4>(4, 0);
+    // 5-dim [d0,d1,d2,d3,iteration] to carry D3 addressing (MemTile any gen,
+    // AIE4 shim); a 4-dim pattern still lowers to [d0,d1,d2,iteration].
+    llvm::SmallVector<int64_t, 5> sizes = llvm::SmallVector<int64_t, 5>(5, 0);
+    llvm::SmallVector<int64_t, 5> strides = llvm::SmallVector<int64_t, 5>(5, 0);
 
     // Padding
     std::optional<llvm::ArrayRef<AIE::BDPadLayoutAttr>> padDims =
@@ -886,34 +893,59 @@ struct AIEDMATasksToNPUPass
     auto d1stride = 0;
     auto d2size = 0;
     auto d2stride = 0;
+    auto d3size = 0;
+    auto d3stride = 0;
     auto iteration_size = 0;
     auto iteration_stride = 0;
 
     if (dims && !dims->empty()) {
-      llvm::SmallVector<int64_t, 4> input_sizes =
-          llvm::SmallVector<int64_t, 4>(4, 1);
-      llvm::SmallVector<int64_t, 4> input_strides =
-          llvm::SmallVector<int64_t, 4>(4, 0);
-      if (dims->size() > 4) {
+      llvm::SmallVector<int64_t, 5> input_sizes =
+          llvm::SmallVector<int64_t, 5>(5, 1);
+      llvm::SmallVector<int64_t, 5> input_strides =
+          llvm::SmallVector<int64_t, 5>(5, 0);
+      // ND addressing dims plus the iteration/repeat dimension, the cap
+      // verifyTaskBDDimensions enforces.
+      size_t maxDims = tm.getBDMaxDims(tile.getCol(), tile.getRow()) + 1;
+      if (dims->size() > maxDims) {
+        return bd_op->emitOpError()
+               << "At most " << maxDims
+               << " data layout transformation dimensions may be provided on "
+                  "this tile; aie-decompose-large-dma-bd splits a longer one.";
+      }
+      if (dims->size() == 5 &&
+          !tileHasD3AddressDim(tm, tile.getCol(), tile.getRow())) {
         return bd_op->emitOpError(
-            "At most four data layout transformation dimensions may be "
-            "provided; aie-decompose-large-dma-bd splits a longer one.");
+            "5-dimensional transfers (D3 addressing) are only supported on "
+            "MemTile and AIE4 Shim BDs.");
       }
 
+      // D3 is the 5th data dimension. The canonical access pattern is
+      // [d0,d1,d2,d3,iteration], so D3 addressing is reached only through an
+      // explicit 5-dim pattern -- matching aiex.npu.dma_memcpy_nd. A 4-dim
+      // pattern keeps its long-standing [d0,d1,d2,iteration] meaning on every
+      // tile (including AIE4 shim) for backward compatibility.
+      // A BD's iteration attribute takes the iteration slot, leaving all of
+      // its dims as data dims.
+      bool useD3AddressDim = dims->size() == 5 || (iter && dims->size() == 4);
+      if (useD3AddressDim &&
+          !tileHasD3AddressDim(tm, tile.getCol(), tile.getRow()))
+        return bd_op->emitOpError(
+            "D3 addressing is only supported on MemTile and AIE4 Shim BDs.");
       for (size_t i = 0; i < dims->size(); i++) {
         // Pass down dimensions in reverse order; in the MLIR, this allows
         // us to specify step sizes/wraps in the same order as we would
         // access a multi-dim C array, with the highest dimension first.
         int j = dims->size() - i - 1;
-        input_sizes[i] = (*dims)[j].getSize();
-        input_strides[i] = (*dims)[j].getStride();
+        size_t dimIdx = (!useD3AddressDim && i == 3) ? 4 : i;
+        input_sizes[dimIdx] = (*dims)[j].getSize();
+        input_strides[dimIdx] = (*dims)[j].getStride();
       }
       if (iter) {
-        input_sizes[3] = iter->getSize();
-        input_strides[3] = iter->getStride();
+        input_sizes[4] = iter->getSize();
+        input_strides[4] = iter->getStride();
       }
 
-      // d3 (repeat) is excluded; a repeated linear transfer is still linear.
+      // d4 (repeat) is excluded; a repeated linear transfer is still linear.
       // A contiguous row-major ND access on a shim NOC tile is also lowered
       // using the wide buffer_length register, exempt from the 10-bit ND
       // wrap-size limit.  Canonicalization zeroes size-1 strides before this
@@ -961,8 +993,8 @@ struct AIEDMATasksToNPUPass
         return failure();
       }
 
-      iteration_size = sizes[3];
-      iteration_stride = strides[3];
+      iteration_size = sizes[4];
+      iteration_stride = strides[4];
 
       if (!treatAsLinear) {
         // d0_size, d0_stride
@@ -980,22 +1012,36 @@ struct AIEDMATasksToNPUPass
         // never writes it (see its `// TODO: D2Size`); the real D2 repeat
         // count is carried entirely by buffer_length, same as on shim tiles.
         d2size = (tm.isMemTile(tile.getCol(), tile.getRow())) ? sizes[2] : 0;
+
+        // AIE4 shim tiles do have a real D2 wrap plus a D3 address dimension.
+        if (useD3AddressDim) {
+          d2size = sizes[2];
+          d3size = sizes[3];
+          d3stride = strides[3];
+        }
       }
-      if (input_sizes[3] > 1 && input_strides[3] == 0) {
-        // We allow users to encode the repeat_count as a dimension 3 stride
-        // of 0. This must lower to a iteration wrap of 0, so no stride is
-        // ever added. We then repeat the BD using the repeat_count in
-        // NpuPushQueueOp.
+      if (input_sizes[4] > 1 && input_strides[4] == 0) {
+        // A size>1 outermost dimension with stride 0 is a pure repeat: it must
+        // lower to an iteration wrap of 0 so no stride is ever added. Unlike
+        // the npu.dma_memcpy_nd path (AIEDmaToNpu), this task path does NOT
+        // derive the queue repeat_count from the access pattern -- repeat_count
+        // comes verbatim from the DMAConfigureTaskOp/DMAStartTaskOp attribute
+        // (default 0 = run once). The caller is responsible for setting it to
+        // actually repeat the BD via NpuPushQueueOp; this is intentional, so
+        // that an explicit repeat_count on the task is never silently
+        // overridden.
         iteration_size = 0;
         iteration_stride = 0;
       }
 
       // Ensure the total transfer length and the length expressed in the
-      // lowest three dimensions of strides/wraps agree. (Fourth dimension is
-      // iteration/repeat count and repeats the whole BD, so should not be
-      // incorporated in length of a single BD invocation.)
+      // strides/wraps agree. The iteration/repeat dimension repeats the whole
+      // BD and is excluded from the length of a single BD invocation. When D3
+      // addressing is active (AIE4 shim 4-dim, or any D3-capable tile 5-dim)
+      // there are four address dimensions (D0..D3); otherwise three.
       uint64_t len_dims_addr_granularity = 1;
-      for (size_t i = 0; i < 3; i++) {
+      size_t numAddressDims = useD3AddressDim ? 4 : 3;
+      for (size_t i = 0; i < numAddressDims; i++) {
         len_dims_addr_granularity *= sizes[i];
       }
       // A runtime length from zero keeps the pattern for the units it adds.
@@ -1010,11 +1056,13 @@ struct AIEDMATasksToNPUPass
                 "transformation strides/wraps. ")
             << "BD length is " << (len_addr_granularity * addr_granularity / 8)
             << " bytes. "
-            << "Lowest three dimensions of data layout transformation would "
+            << "Addressing dimensions of data layout transformation would "
                "result in transfer of "
             << (len_dims_addr_granularity * addr_granularity / 8) << " bytes. ";
-        err.attachNote() << "Do not include the highest dimension size in "
-                            "transfer length, as this is the BD repeat count.";
+        if (!useD3AddressDim)
+          err.attachNote() << "Do not include the highest dimension size in "
+                              "transfer length, as this is the BD repeat "
+                              "count.";
         return failure();
       }
     } else {
@@ -1061,6 +1109,7 @@ struct AIEDMATasksToNPUPass
         /*d1_zero_before=*/padBefore[1], /*d2_zero_before=*/padBefore[2],
         /*d0_zero_after=*/padAfter[0], /*d1_zero_after=*/padAfter[1],
         /*d2_zero_after=*/padAfter[2],
+        /*d3_size=*/d3size, /*d3_stride=*/d3stride,
         /*burst_length=*/bd_op.getBurstLength(),
         /*axcache=*/
         tm.isShimNOCTile(tile.getCol(), tile.getRow())

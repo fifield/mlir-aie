@@ -73,7 +73,7 @@ struct DmaBdLayout {
   uint8_t numWords = 0;
   DmaBdField bufferLength, bufferOffset;
   DmaBdField enablePacket, packetType, packetId, outOfOrderId;
-  DmaBdField d0Size, d0Stride, d1Size, d1Stride, d2Stride;
+  DmaBdField d0Size, d0Stride, d1Size, d1Stride, d2Size, d2Stride, d3Stride;
   DmaBdField iterationCurrent, iterationSize, iterationStride;
   DmaBdField d0ZeroBefore, d1ZeroBefore, d2ZeroBefore;
   DmaBdField d0ZeroAfter, d1ZeroAfter, d2ZeroAfter;
@@ -1485,6 +1485,15 @@ public:
     if (tileType == AIETileType::MemTile)
       return 16 * 10 * 8;
     return 16;
+  }
+
+  uint32_t getBDMaxDims(AIETileType tileType) const override {
+    // AIE4 supports D3 (4 ND dimensions) on MemTile and Shim BDs; core BDs
+    // support 3.
+    if (tileType == AIETileType::MemTile ||
+        tileType == AIETileType::ShimNOCTile)
+      return 4;
+    return 3;
   }
 
   uint32_t getBdPoolId(int col, int row, int channel,
