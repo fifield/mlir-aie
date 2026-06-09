@@ -123,10 +123,44 @@ def run_rn_mc(repncsp, inp, H, W, ic, oc,
         # back-to-back conv pair stays in memtile L2 with no host
         # reshape between them. fuse_repconv is the host-side prep that
         # makes that future fusion drop-in. See PHASE_C_PLAN.md.
-        repconv_out = rt(mc_rn3, sc_rn3, current, fuse_repconv(bn_block.conv1),
-                         H, W, neck, trn3, trn3, orn3, 1, 3, 1)
-        conv2_out = rt(mc_rn3, sc_rn3, repconv_out, fuse_bn(bn_block.conv2),
-                       H, W, neck, trn3, trn3, orn3, 1, 3, 1)
+        use_rn3pair_memtile = (os.environ.get('MDV6_USE_RN3PAIR_MEMTILE', '0') not in ('', '0', 'false', 'False')
+                and mc_rn3 == 'mc_re6_rn3' and H == 40 and W == 40 and neck == 48)
+        compare_rn3pair_memtile = (os.environ.get('MDV6_COMPARE_RN3PAIR_MEMTILE', '0') not in ('', '0', 'false', 'False')
+                and mc_rn3 == 'mc_re6_rn3' and H == 40 and W == 40 and neck == 48)
+        if use_rn3pair_memtile or compare_rn3pair_memtile:
+            from conv.rn3_pair_vector_memtile_runner import run_re6_rn3_pair, last_stats
+            w_rep = fuse_repconv(bn_block.conv1)
+            w_c2 = fuse_bn(bn_block.conv2)
+            fused_out = run_re6_rn3_pair(current, w_rep, w_c2)
+            if os.environ.get('MDV6_RN3PAIR_MEMTILE_VERBOSE', '0') not in ('', '0', 'false', 'False'):
+                st = last_stats()
+                if st is not None:
+                    print(f" rn3pair_memtile kernel={st.kernel_ms:.3f}ms total={st.total_ms:.3f}ms", end="", flush=True)
+            if compare_rn3pair_memtile:
+                # Compare against the ordinary x1 production path, not the
+                # OCB-unrolled mc_re6_rn3 artifact. The OCB artifact is known
+                # to emit zeroed/suppressed small activations for some edge/OCB
+                # positions; x1 matches the packed-weight CPU oracle and the
+                # fused memtile path exactly at rn3pair sites.
+                _saved_ocb = mcr._MERGED_LAYERS_OCB.pop(mc_rn3, None)
+                try:
+                    repconv_out = rt(mc_rn3, sc_rn3, current, w_rep,
+                                     H, W, neck, trn3, trn3, orn3, 1, 3, 1)
+                    baseline_out = rt(mc_rn3, sc_rn3, repconv_out, w_c2,
+                                      H, W, neck, trn3, trn3, orn3, 1, 3, 1)
+                finally:
+                    if _saved_ocb is not None:
+                        mcr._MERGED_LAYERS_OCB[mc_rn3] = _saved_ocb
+                d = (fused_out.float() - baseline_out.float()).abs()
+                print(f" rn3pair_compare max={float(d.max()):.6f} mean={float(d.mean()):.6f}", end="", flush=True)
+                conv2_out = baseline_out
+            else:
+                conv2_out = fused_out
+        else:
+            repconv_out = rt(mc_rn3, sc_rn3, current, fuse_repconv(bn_block.conv1),
+                             H, W, neck, trn3, trn3, orn3, 1, 3, 1)
+            conv2_out = rt(mc_rn3, sc_rn3, repconv_out, fuse_bn(bn_block.conv2),
+                           H, W, neck, trn3, trn3, orn3, 1, 3, 1)
         current = (residual + conv2_out) if bn_block.residual else conv2_out
     concat = torch.cat([current, x2], dim=2)
     return rt(mc_rnm, sc_rnm, concat, fuse_bn(repncsp.conv3), H, W, oc, trnm, trnm, ornm, 1, 1, 0)
