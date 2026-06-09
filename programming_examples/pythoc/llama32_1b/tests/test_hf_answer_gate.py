@@ -252,3 +252,52 @@ def test_hf_answer_gate_o_gemv_ffn_rms_fused():
         "PYTHOC_LLAMA_O_GEMV_FFN_PACK_MODE": "d1d3d4_rms",
     })
     _assert_paris(head, text, "rms_fused")
+
+
+@pytest.mark.skipif(
+    not _has_tokenizer(),
+    reason=(
+        "HuggingFace cache does not contain {model}; this gate requires "
+        "real weights."
+    ).format(model=HF_MODEL),
+)
+def test_hf_answer_gate_rms_gemv_rope_fold():
+    """Gate for the RMS fold into the Q/K/V+RoPE pack (`rms_gemv_rope=rgr1_ddr`).
+
+    Absorbs the standalone r_rms_seg RMSNorm device into the packed Q/K/V+RoPE
+    device (decode call 1 = 1 device, one fewer full-device LoadPDI/layer).
+    Same kernels + same DDR handoff as rgr2_ddr, so the answer must stay
+    bit-identical to the packed/unpacked baselines. rgr1_ddr is the default,
+    so this also exercises an explicit-flag rebuild path.
+
+    Skipped under AWQ: device packing is BF16-only.
+    """
+    if HF_GATE_QUANT == "awq":
+        pytest.skip("device packing is BF16-only; no AWQ rgr1_ddr variant")
+    head, text = _run_gate_and_detokenize(extra_env={
+        "PYTHOC_LLAMA_RMS_GEMV_ROPE_PACK_MODE": "rgr1_ddr",
+    })
+    _assert_paris(head, text, "rgr1_ddr")
+
+
+@pytest.mark.skipif(
+    not _has_tokenizer(),
+    reason=(
+        "HuggingFace cache does not contain {model}; this gate requires "
+        "real weights."
+    ).format(model=HF_MODEL),
+)
+def test_hf_answer_gate_awq_rms_gemv_rope_fold():
+    """AWQ counterpart of the rgr1_ddr RMS fold (`rms_gemv_rope_awq=rgr1_ddr`).
+
+    Folds r_rms_awq_seg into the AWQ Q/K/V+RoPE pack (AWQ decode call 1 = 1
+    device). RMSNorm stays BF16; only Q/K/V are AWQ uint4. rgr1_ddr is the AWQ
+    default, so the QUANT=awq paris gate already exercises it -- this is the
+    explicit-flag counterpart. Runs only under AWQ (needs repacked weights).
+    """
+    if HF_GATE_QUANT != "awq":
+        pytest.skip("AWQ-only gate; run with `make hf-gate QUANT=awq AWQ_WEIGHTS=...`")
+    head, text = _run_gate_and_detokenize(extra_env={
+        "PYTHOC_LLAMA_RMS_GEMV_ROPE_AWQ_PACK_MODE": "rgr1_ddr",
+    })
+    _assert_paris(head, text, "awq_rgr1_ddr")
