@@ -39,6 +39,9 @@ _PYTHOC_KERNELS = [
     # -> aiecc llvm-links + inlines, no func.call).
     ("matvec_rms_pythoc.ll", "compile_matvec_rms_inline"),
     ("mv_k8192_pythoc.o", "compile_matvec_k8192"),
+    # Proj-engine probe: mode-switched matvec (K=2048 + K=8192 bodies, one
+    # mode RTP). Consumed by o_gemv_ffn pack_mode `d1d3d4_rms_fmv`.
+    ("matvec_fused_pythoc.o", "compile_matvec_fused"),
     ("attn_pythoc.o", "compile_attn"),
     # Phase 4.5c: bf16 GEMM .o consumed by the placed-IRON v_matmul_seg
     # device (and later k/q_matmul_seg + o_ffn).  Strides match the cached
