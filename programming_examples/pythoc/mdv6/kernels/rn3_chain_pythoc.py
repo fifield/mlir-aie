@@ -11,8 +11,8 @@
 
 from __future__ import annotations
 
-from pythoc import ptr, i32, bf16, f32, void
-from pythoc.aie import aie_vector, load_v, store_v, vector_add, zeros
+from pythoc import ptr, i16, i32, bf16, f32, void
+from pythoc.aie import aie_vector, load_v, store_v, vector_add, vector_cast, broadcast, zeros
 from pythoc.aie.mmul import acc_to_bf16
 from pythoc.aie.profiling import event0, event1
 
@@ -123,13 +123,16 @@ def chain_conv2_bf16(
         _store_bn_silu_4x8_rows(acc_to_bf16(acc2a), outp, bn2_w, bn2_b, sp2, 64, 48, block * 2)
         _store_bn_silu_4x8_rows(acc_to_bf16(acc2b), outp, bn2_w, bn2_b, sp2, 64, 48, block * 2 + 1)
         sp2 = sp2 + 4
+
     event1()
 
 
 @aie_kernel
 def chain_residual_bf16(
     arena_base: ptr[bf16, True],
+    weight: ptr[bf16, True],
     finals_base: ptr[bf16, True],
+    block: i32,
     t: i32,
 ) -> void:
     """finals(HWC 8x8x48) += center 8x8x48 of the 12x12x48 input patch."""
@@ -145,7 +148,7 @@ def chain_residual_bf16(
         while c16 < 3:
             cur: aie_vector[bf16, 16] = load_v(arena_in + in_off + c16 * 16, 16)
             fin: aie_vector[bf16, 16] = load_v(finals + rsp * 48 + c16 * 16, 16)
-            store_v(finals + rsp * 48 + c16 * 16, cur)
+            store_v(finals + rsp * 48 + c16 * 16, vector_add(fin, cur))
             c16 = c16 + 1
         rsp = rsp + 1
     event1()
