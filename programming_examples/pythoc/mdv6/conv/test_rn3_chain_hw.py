@@ -53,7 +53,11 @@ def main():
 
     rng = np.random.default_rng(0)
     x0 = torch.from_numpy(rng.standard_normal((40, 40, IC)).astype(np.float32) * 0.5).to(torch.bfloat16)
-    mk = lambda: (rng.integers(0, 60, size=48*48*9 + 96).astype(np.uint16) + 15000).astype(np.uint16)
+    import os as _os
+    if _os.environ.get('BIGW', '0') == '1':
+        mk = lambda: np.full(48*48*9 + 96, 0x3F80, np.uint16)  # all 1.0 bf16
+    else:
+        mk = lambda: (rng.integers(0, 60, size=48*48*9 + 96).astype(np.uint16) + 15000).astype(np.uint16)
     wA, wB, wC, wD = mk(), mk(), mk(), mk()
 
     img = np.zeros((IMG_H, IMG, IC), np.float32)
@@ -70,6 +74,8 @@ def main():
     for wp in ((wA, wB), (wC, wD))[:N_ITERS]:
         ref = (run_re6_rn3_pair(ref, wp[0], wp[1]).float() + ref.float()).to(torch.bfloat16)
     d = np.abs(out - ref.float().numpy())
+    print(f"out: mean|x|={np.abs(out).mean():.4f} nonzero={np.count_nonzero(out)}/{out.size}")
+    print(f"ref: mean|x|={ref.float().abs().mean():.4f}")
     print(f"chain({N_ITERS}) vs runner: max={d.max():.6f} mean={d.mean():.6f}")
     print("PASS" if d.max() < 0.05 else "FAIL")
 

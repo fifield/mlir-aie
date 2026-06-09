@@ -145,7 +145,7 @@ def chain_residual_bf16(
         while c16 < 3:
             cur: aie_vector[bf16, 16] = load_v(arena_in + in_off + c16 * 16, 16)
             fin: aie_vector[bf16, 16] = load_v(finals + rsp * 48 + c16 * 16, 16)
-            store_v(finals + rsp * 48 + c16 * 16, vector_add(fin, cur))
+            store_v(finals + rsp * 48 + c16 * 16, cur)
             c16 = c16 + 1
         rsp = rsp + 1
     event1()
