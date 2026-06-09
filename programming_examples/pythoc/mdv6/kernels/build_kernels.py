@@ -49,6 +49,7 @@ KERNELS = (
     "conv3x3_fused_packed_bf16",
     "gemm_conv1x1_fused_packed_bf16",
     "gemm_conv1x1_kblocked_bf16",
+    "conv3x3_kblocked_accum_bf16",
     "residual_add_silu_bf16",
 )
 
