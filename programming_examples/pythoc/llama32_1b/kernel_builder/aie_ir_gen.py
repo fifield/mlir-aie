@@ -75,8 +75,8 @@ def _placed_builder_enabled(name: str) -> bool:
 # DEVICE_PACKING_ANALYSIS.md §14/§15 (bit-exact tokens, passes hf-gate,
 # +6.7% decode throughput from 232 -> 104 segment dispatches/token):
 #
-#   o_gemv_ffn    -> "d1d3d4"  (8 -> 4 devices)
-#   rms_gemv_rope -> "rgr2_ddr" (6 -> 2 devices)
+#   o_gemv_ffn    -> "d1d3d4_rms" (8 -> 3 devices; d1d3d4 4-dev + RMS fold)
+#   rms_gemv_rope -> "rgr1_ddr" (6 -> 1 device; rgr2_ddr 6->2 + RMS fold)
 #
 # Set the corresponding env var to "none" to revert a kernel to its unpacked
 # baseline (e.g. for A/B regression-testing). The resolved mode is recorded
@@ -85,8 +85,19 @@ def _placed_builder_enabled(name: str) -> bool:
 # ---------------------------------------------------------------------------
 _O_GEMV_FFN_PACK_ENV = "PYTHOC_LLAMA_O_GEMV_FFN_PACK_MODE"
 _RMS_GEMV_ROPE_PACK_ENV = "PYTHOC_LLAMA_RMS_GEMV_ROPE_PACK_MODE"
-_O_GEMV_FFN_PACK_DEFAULT = "d1d3d4"
-_RMS_GEMV_ROPE_PACK_DEFAULT = "rgr2_ddr"
+# d1d3d4_rms folds the standalone rm_rms_seg RMSNorm device into the gate/up
+# tiles (decode call 2: 4->3 devices). BF16-wash on throughput (per-tile RMS
+# recompute offsets the dropped dispatch) but a structural step toward the
+# resident layer -- completes the "Path A floor" together with rgr1_ddr on
+# call 1. Bit-exact vs d1d3d4 / unpacked. Set the env var to "d1d3d4" for the
+# 4-device pack or "none" to revert packing entirely.
+_O_GEMV_FFN_PACK_DEFAULT = "d1d3d4_rms"
+# rgr1_ddr folds the standalone r_rms_seg RMSNorm device into the Q/K/V+RoPE
+# pack (6->1 device for decode call 1), one fewer full-device LoadPDI/layer.
+# Bit-exact + perf-neutral vs rgr2_ddr (same kernels, same DDR handoff); the
+# value is structural -- another stage made device-resident on the path to a
+# persistent spatial layer. Set the env var to "rgr2_ddr" or "none" to revert.
+_RMS_GEMV_ROPE_PACK_DEFAULT = "rgr1_ddr"
 
 # AWQ O+FFN decode packing: validated on hardware (passes `make hf-gate
 # QUANT=awq`). Defaults to the `d1d3d4_rms` pack -- air's 3-device fold that
@@ -103,7 +114,10 @@ _O_GEMV_FFN_AWQ_PACK_DEFAULT = "d1d3d4_rms"
 # 9.90 -> 10.75 tok/s, +8.6%), so it defaults to the 6->2 rgr2_ddr pack.
 # Set the env var to "none" to revert.
 _RMS_GEMV_ROPE_AWQ_PACK_ENV = "PYTHOC_LLAMA_RMS_GEMV_ROPE_AWQ_PACK_MODE"
-_RMS_GEMV_ROPE_AWQ_PACK_DEFAULT = "rgr2_ddr"
+# rgr1_ddr folds r_rms_awq_seg into the AWQ Q/K/V+RoPE pack (call 1 -> 1
+# device), the AWQ counterpart of the BF16 rgr1_ddr fold. RMSNorm stays BF16;
+# bit-exact + structural. Set to "rgr2_ddr" (2 dev) or "none" (6 dev) to revert.
+_RMS_GEMV_ROPE_AWQ_PACK_DEFAULT = "rgr1_ddr"
 
 
 def _resolve_pack_mode(env_var: str, default: str) -> str:
