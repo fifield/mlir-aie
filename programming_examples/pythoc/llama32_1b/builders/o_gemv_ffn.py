@@ -2255,6 +2255,7 @@ def _emit_gg_ug_swiglu_pack(
     normed2_l2: bool = False,
     rms_fused: bool = False,
     result_pkt: bool = False,
+    fused_mv: bool = False,
     res1_arg_idx: int = 4,
     normw_arg_idx: int = 5,
 ) -> None:
@@ -2439,6 +2440,33 @@ def _emit_gg_ug_swiglu_pack(
             link_with=KO_MATVEC,
         )
         matvec_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
+        # Proj-engine: route the gate/up matvec through the SAME mode-switched
+        # matvec_fused_bf16 as O (D1) and down (D4), mode 0 (K=2048 / lr 32),
+        # so all four projections run on one kernel. RMS prologue is unchanged.
+        gg_mode_rtp = {}
+        ug_mode_rtp = {}
+        if fused_mv:
+            matvec_fused_fn = external_func(
+                "matvec_fused_bf16",
+                inputs=[np.int32, np.int32, np.int32, np.int32,
+                        _W_L1_TY, _mv_act_ty, _Y_L1_TY],
+                link_with=KO_MATVEC_FUSED,
+            )
+            matvec_fused_fn.operation.attributes["llvm.emit_c_interface"] = \
+                UnitAttr.get()
+            for col in range(N_COLS):
+                gg_mode_rtp[col] = buffer(
+                    gg_tiles[col],
+                    np.ndarray[(1,), np.dtype[np.int32]],
+                    f"{sym}_gg_mvmode_{col}",
+                    use_write_rtp=True,
+                )
+                ug_mode_rtp[col] = buffer(
+                    ug_tiles[col],
+                    np.ndarray[(1,), np.dtype[np.int32]],
+                    f"{sym}_ug_mvmode_{col}",
+                    use_write_rtp=True,
+                )
         if rms_fused:
             # Packed [2,K] RMSNorm prologue, run ONCE per token per tile.
             rms_fn = external_func(
@@ -2490,7 +2518,8 @@ def _emit_gg_ug_swiglu_pack(
             # Chunks (8-row matvec calls) per tile per token.
             _N_CHUNKS = out_rows // N_COLS // M_TILE
 
-            def _make_mat_core(_ct, _cl, _yb, _wb, _xb, _normed=None, _rscr=None):
+            def _make_mat_core(_ct, _cl, _yb, _wb, _xb, _normed=None, _rscr=None,
+                               _mode=None):
                 import sys as _sys
                 from aie.extras.dialects.arith import index_cast
 
@@ -2500,6 +2529,8 @@ def _emit_gg_ug_swiglu_pack(
                     k_tile_c = arith.constant(K_TILE, T.i32())
                     zero_off = arith.constant(0, T.i32())
                     zero_bf16 = arith.constant(0.0, T.bf16())
+                    # Proj-engine: read the mode RTP once (0 -> K=2048 / lr 32).
+                    mode_v = _mode[0] if _mode is not None else None
                     if rms_fused:
                         # air's fold: compute the RMSNorm ONCE per token into the
                         # resident `normed` buffer, then matvec all output chunks
@@ -2512,7 +2543,11 @@ def _emit_gg_ug_swiglu_pack(
                                 use_lock(_cl["y_done"], LockAction.AcquireGreaterEqual, value=1)
                                 fill_fn(zero_bf16, _yb)
                                 use_lock(_cl["w_ready"], LockAction.AcquireGreaterEqual, value=1)
-                                matvec_fn(k_tile_c, k_total, zero_off, _wb, _normed, _yb)
+                                if _mode is not None:
+                                    matvec_fused_fn(mode_v, k_tile_c, k_total,
+                                                    zero_off, _wb, _normed, _yb)
+                                else:
+                                    matvec_fn(k_tile_c, k_total, zero_off, _wb, _normed, _yb)
                                 use_lock(_cl["w_avail"], LockAction.Release, value=1)
                                 use_lock(_cl["y_full"], LockAction.Release, value=1)
                     else:
@@ -2523,17 +2558,23 @@ def _emit_gg_ug_swiglu_pack(
                                 k_i32 = index_cast(k_idx, to=T.i32())
                                 use_lock(_cl["x_ready"], LockAction.AcquireGreaterEqual, value=1)
                                 use_lock(_cl["w_ready"], LockAction.AcquireGreaterEqual, value=1)
-                                matvec_fn(k_tile_c, k_total, k_i32, _wb, _xb, _yb)
+                                if _mode is not None:
+                                    matvec_fused_fn(mode_v, k_tile_c, k_total,
+                                                    k_i32, _wb, _xb, _yb)
+                                else:
+                                    matvec_fn(k_tile_c, k_total, k_i32, _wb, _xb, _yb)
                                 use_lock(_cl["x_avail"], LockAction.Release, value=1)
                                 use_lock(_cl["w_avail"], LockAction.Release, value=1)
                             use_lock(_cl["y_full"], LockAction.Release, value=1)
             _make_mat_core(
                 gg_tiles[col], gg_locks[col], gg_buf_y[col], gg_buf_w[col], gg_buf_x[col],
                 gg_buf_normed.get(col), gg_buf_rscr.get(col),
+                gg_mode_rtp.get(col) if fused_mv else None,
             )
             _make_mat_core(
                 ug_tiles[col], ug_locks[col], ug_buf_y[col], ug_buf_w[col], ug_buf_x[col],
                 ug_buf_normed.get(col), ug_buf_rscr.get(col),
+                ug_mode_rtp.get(col) if fused_mv else None,
             )
 
             def _make_sw_mem(_ct, _cl, _bo, _bup, _bgate):
@@ -2782,6 +2823,11 @@ def _emit_gg_ug_swiglu_pack(
             # chain on the existing input channel instead of the single normed2.
             arg_res1 = args[res1_arg_idx]
             arg_normw = args[normw_arg_idx]
+            # Proj-engine: gate/up matvec mode RTP = 0 (K=2048) before any DMA.
+            if fused_mv:
+                for col in range(N_COLS):
+                    gg_mode_rtp[col][0] = 0
+                    ug_mode_rtp[col][0] = 0
 
             def _emit_x_bds(_task):
                 with bds(_task) as bd:
@@ -3189,7 +3235,7 @@ def build_o_gemv_ffn_module(
         if pack_mode in {"d1d3d4", "d1d3d4_n2l2", "d1d3d4_rms",
                          "d1d3d4_rms_pkt", "d1d3d4_rms_fmv"}:
             _emit_gg_ug_swiglu_pack(normed2_l2=_n2l2, rms_fused=_rmsfuse,
-                                    result_pkt=_result_pkt)
+                                    result_pkt=_result_pkt, fused_mv=_fused_mv)
         else:
             _emit_sw_silu_mul_seg()
             _emit_matvec_seg_k2048(
