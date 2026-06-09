@@ -47,6 +47,7 @@ _LINK_OBJS = [
     "matvec_rms_pythoc.o",
     "matvec_rms_pythoc.ll",  # inlined alwaysinline IR-merge variant
     "mv_k8192_pythoc.o",
+    "matvec_fused_pythoc.o",   # mode-switched K2048+K8192 (proj-engine probe)
     "awq_mv_pythoc.ll",        # inlined (alwaysinline)
     "awq_mv_k8192_pythoc.ll",  # inlined (alwaysinline)
     "attn_pythoc.o",

@@ -133,6 +133,7 @@ DEFAULT_DISPATCH_SEQUENCE = (
 KO_MATVEC = "mv_pythoc.ll"  # inlined (alwaysinline IR-merge)
 KO_MATVEC_RMS = "matvec_rms_pythoc.ll"  # inlined (alwaysinline IR-merge)  # fused RMSNorm+matvec (air 3-device fold)
 KO_MATVEC_K8192 = "mv_k8192_pythoc.o"
+KO_MATVEC_FUSED = "matvec_fused_pythoc.o"  # mode-switched K2048+K8192 (proj-engine probe)
 KO_SWIGLU = "silu_and_mul_bf16.o"
 KO_RMS = "rms_norm_2048_bf16.o"
 
@@ -931,12 +932,19 @@ def _emit_matvec_add_pack_k2048(
     residual_arg_idx: int,
     output_arg_idx: int,
     out_rows: int = EMB_DIM,
+    fused_mv: bool = False,
 ) -> None:
     """Pack one K=2048 matvec with its following residual add.
 
     The add consumes the matvec's per-column strided output partition in L2
     and writes the global output with the matvec output BD dimensions. This is
     the D1 shape: og(r2) -> a1_add(r3).
+
+    ``fused_mv`` (proj-engine probe): run the O matvec on the SAME
+    `matvec_fused_bf16` kernel as the K=8192 down matvec, selecting the
+    K=2048 / loop_range-32 arm via a per-tile `mode` RTP the runtime sequence
+    hard-codes to 0. This proves one ELF (matvec_fused_pythoc.o) serves both
+    K-roles; bit-exact (runs the same 32-iter body as the dedicated kernel).
     """
     mat_chans = _CHANNELS[matvec_sym]
     add_chans = _CHANNELS[add_sym]
@@ -1028,18 +1036,44 @@ def _emit_matvec_add_pack_k2048(
         from aie.ir import AffineDimExpr, AffineMap
         from ml_dtypes import bfloat16 as _bf16
 
-        fill_fn = external_func(
-            "linalg_fill_bf16",
-            inputs=[_bf16, _Y_L1_TY],
-            link_with=KO_MATVEC,
-        )
-        fill_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
-        matvec_fn = external_func(
-            "matvec_vectorized_bf16_bf16",
-            inputs=[np.int32, np.int32, np.int32, _W_L1_TY, _X_L1_TY, _Y_L1_TY],
-            link_with=KO_MATVEC,
-        )
-        matvec_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
+        # Proj-engine probe: same mode-switched matvec + per-tile mode RTP as
+        # the K=8192 down pack, but hard-coded to 0 (K=2048 / loop_range-32).
+        mat_mode_rtp = {}
+        if fused_mv:
+            fill_fn = external_func(
+                "mvf_linalg_fill_bf16",
+                inputs=[_bf16, _Y_L1_TY],
+                link_with=KO_MATVEC_FUSED,
+            )
+            fill_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
+            matvec_fused_fn = external_func(
+                "matvec_fused_bf16",
+                inputs=[np.int32, np.int32, np.int32, np.int32,
+                        _W_L1_TY, _X_L1_TY, _Y_L1_TY],
+                link_with=KO_MATVEC_FUSED,
+            )
+            matvec_fused_fn.operation.attributes["llvm.emit_c_interface"] = \
+                UnitAttr.get()
+            for col in range(N_COLS):
+                mat_mode_rtp[col] = buffer(
+                    mat_tiles[col],
+                    np.ndarray[(1,), np.dtype[np.int32]],
+                    f"{sym}_mvmode_{col}",
+                    use_write_rtp=True,
+                )
+        else:
+            fill_fn = external_func(
+                "linalg_fill_bf16",
+                inputs=[_bf16, _Y_L1_TY],
+                link_with=KO_MATVEC,
+            )
+            fill_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
+            matvec_fn = external_func(
+                "matvec_vectorized_bf16_bf16",
+                inputs=[np.int32, np.int32, np.int32, _W_L1_TY, _X_L1_TY, _Y_L1_TY],
+                link_with=KO_MATVEC,
+            )
+            matvec_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
 
         for col in reversed(range(N_COLS)):
             ct_op = mat_tiles[col]
@@ -1075,7 +1109,7 @@ def _emit_matvec_add_pack_k2048(
                         next_bd(block[6])
             _make_mat_mem(ct_op, cl, y_buf, w_buf, x_buf)
 
-            def _make_mat_core(_ct, _cl, _yb, _wb, _xb):
+            def _make_mat_core(_ct, _cl, _yb, _wb, _xb, _mode=None):
                 import sys as _sys
                 from aie.extras.dialects.arith import index_cast
 
@@ -1084,6 +1118,9 @@ def _emit_matvec_add_pack_k2048(
                     k_total = arith.constant(EMB_DIM, T.i32())
                     k_tile_c = arith.constant(K_TILE, T.i32())
                     zero_bf16 = arith.constant(0.0, T.bf16())
+                    # Read the mode RTP once (loop-invariant); the fused matvec
+                    # branches on it (0 -> K=2048 / loop_range 32).
+                    mode_v = _mode[0] if _mode is not None else None
                     for _ in range_(_sys.maxsize):
                         use_lock(_cl["y_done"], LockAction.AcquireGreaterEqual, value=1)
                         fill_fn(zero_bf16, _yb)
@@ -1091,11 +1128,16 @@ def _emit_matvec_add_pack_k2048(
                             k_i32 = index_cast(k_idx, to=T.i32())
                             use_lock(_cl["x_ready"], LockAction.AcquireGreaterEqual, value=1)
                             use_lock(_cl["w_ready"], LockAction.AcquireGreaterEqual, value=1)
-                            matvec_fn(k_tile_c, k_total, k_i32, _wb, _xb, _yb)
+                            if _mode is not None:
+                                matvec_fused_fn(mode_v, k_tile_c, k_total, k_i32,
+                                                _wb, _xb, _yb)
+                            else:
+                                matvec_fn(k_tile_c, k_total, k_i32, _wb, _xb, _yb)
                             use_lock(_cl["x_avail"], LockAction.Release, value=1)
                             use_lock(_cl["w_avail"], LockAction.Release, value=1)
                         use_lock(_cl["y_full"], LockAction.Release, value=1)
-            _make_mat_core(ct_op, cl, y_buf, w_buf, x_buf)
+            _make_mat_core(ct_op, cl, y_buf, w_buf, x_buf,
+                           mat_mode_rtp.get(col) if fused_mv else None)
 
         for col in reversed(range(N_COLS)):
             ct_op = add_tiles[col]
@@ -1267,6 +1309,11 @@ def _emit_matvec_add_pack_k2048(
             arg_x = args[input_arg_idx]
             arg_res = args[residual_arg_idx]
             arg_y = args[output_arg_idx]
+            # Proj-engine probe: hard-code the matvec mode RTP to 0 (K=2048)
+            # before any data movement, so each mat core reads mode=0 at start.
+            if fused_mv:
+                for col in range(N_COLS):
+                    mat_mode_rtp[col][0] = 0
             for outer in range(n_outer):
                 weight_tasks = []
                 for col in range(N_COLS):
@@ -1351,8 +1398,18 @@ def _emit_matvec_add_pack_k8192(
     input_arg_idx: int,
     residual_arg_idx: int,
     output_arg_idx: int,
+    fused_mv: bool = False,
 ) -> None:
-    """Pack the K=8192 down matvec with a2_add (D4)."""
+    """Pack the K=8192 down matvec with a2_add (D4).
+
+    ``fused_mv`` (proj-engine probe): replace the dedicated K=8192 matvec
+    (`dg_matvec_vectorized_bf16_bf16`) with the mode-switched
+    `matvec_fused_bf16` kernel, whose mode is read from a per-tile RTP that
+    the runtime sequence hard-codes to 1 (the K=8192 / loop_range-128 arm).
+    Functionally identical (runs the same 128-iter body) -- the point is to
+    measure the cost of carrying both core bodies behind one mode RTP, the
+    primitive the single packet-fed proj-engine needs.
+    """
     mat_chans = _CHANNELS[matvec_sym]
     add_chans = _CHANNELS[add_sym]
     n_outer = EMB_DIM // 256
@@ -1444,18 +1501,46 @@ def _emit_matvec_add_pack_k8192(
         from aie.ir import AffineDimExpr, AffineMap
         from ml_dtypes import bfloat16 as _bf16
 
-        fill_fn = external_func(
-            "dg_linalg_fill_bf16",
-            inputs=[_bf16, _Y_L1_TY],
-            link_with=KO_MATVEC_K8192,
-        )
-        fill_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
-        matvec_fn = external_func(
-            "dg_matvec_vectorized_bf16_bf16",
-            inputs=[np.int32, np.int32, np.int32, _W_L1_TY, _X_L1_TY, _Y_L1_TY],
-            link_with=KO_MATVEC_K8192,
-        )
-        matvec_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
+        # Proj-engine probe: mode-switched matvec + a per-tile `mode` RTP that
+        # the runtime sequence hard-codes to 1 (K=8192 / loop_range-128 arm).
+        # In fused mode the core links ONLY matvec_fused_pythoc.o (which also
+        # carries its own fill), so its program-memory size is clean.
+        mat_mode_rtp = {}
+        if fused_mv:
+            fill_fn = external_func(
+                "mvf_linalg_fill_bf16",
+                inputs=[_bf16, _Y_L1_TY],
+                link_with=KO_MATVEC_FUSED,
+            )
+            fill_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
+            matvec_fused_fn = external_func(
+                "matvec_fused_bf16",
+                inputs=[np.int32, np.int32, np.int32, np.int32,
+                        _W_L1_TY, _X_L1_TY, _Y_L1_TY],
+                link_with=KO_MATVEC_FUSED,
+            )
+            matvec_fused_fn.operation.attributes["llvm.emit_c_interface"] = \
+                UnitAttr.get()
+            for col in range(N_COLS):
+                mat_mode_rtp[col] = buffer(
+                    mat_tiles[col],
+                    np.ndarray[(1,), np.dtype[np.int32]],
+                    f"{sym}_mvmode_{col}",
+                    use_write_rtp=True,
+                )
+        else:
+            fill_fn = external_func(
+                "dg_linalg_fill_bf16",
+                inputs=[_bf16, _Y_L1_TY],
+                link_with=KO_MATVEC_K8192,
+            )
+            fill_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
+            matvec_fn = external_func(
+                "dg_matvec_vectorized_bf16_bf16",
+                inputs=[np.int32, np.int32, np.int32, _W_L1_TY, _X_L1_TY, _Y_L1_TY],
+                link_with=KO_MATVEC_K8192,
+            )
+            matvec_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
 
         for col in reversed(range(N_COLS)):
             ct_op = mat_tiles[col]
@@ -1491,7 +1576,7 @@ def _emit_matvec_add_pack_k8192(
                         next_bd(block[6])
             _make_mat_mem(ct_op, cl, y_buf, w_buf, x_buf)
 
-            def _make_mat_core(_ct, _cl, _yb, _wb, _xb):
+            def _make_mat_core(_ct, _cl, _yb, _wb, _xb, _mode=None):
                 import sys as _sys
                 from aie.extras.dialects.arith import index_cast
 
@@ -1500,6 +1585,9 @@ def _emit_matvec_add_pack_k8192(
                     k_total = arith.constant(HIDDEN_DIM, T.i32())
                     k_tile_c = arith.constant(K_TILE_K8192, T.i32())
                     zero_bf16 = arith.constant(0.0, T.bf16())
+                    # Read the mode RTP once (loop-invariant); the fused matvec
+                    # branches on it (1 -> K=8192 / loop_range 128).
+                    mode_v = _mode[0] if _mode is not None else None
                     for _ in range_(_sys.maxsize):
                         use_lock(_cl["y_done"], LockAction.AcquireGreaterEqual, value=1)
                         fill_fn(zero_bf16, _yb)
@@ -1507,11 +1595,16 @@ def _emit_matvec_add_pack_k8192(
                             k_i32 = index_cast(k_idx, to=T.i32())
                             use_lock(_cl["x_ready"], LockAction.AcquireGreaterEqual, value=1)
                             use_lock(_cl["w_ready"], LockAction.AcquireGreaterEqual, value=1)
-                            matvec_fn(k_tile_c, k_total, k_i32, _wb, _xb, _yb)
+                            if _mode is not None:
+                                matvec_fused_fn(mode_v, k_tile_c, k_total, k_i32,
+                                                _wb, _xb, _yb)
+                            else:
+                                matvec_fn(k_tile_c, k_total, k_i32, _wb, _xb, _yb)
                             use_lock(_cl["x_avail"], LockAction.Release, value=1)
                             use_lock(_cl["w_avail"], LockAction.Release, value=1)
                         use_lock(_cl["y_full"], LockAction.Release, value=1)
-            _make_mat_core(ct_op, cl, y_buf, w_buf, x_buf)
+            _make_mat_core(ct_op, cl, y_buf, w_buf, x_buf,
+                           mat_mode_rtp.get(col) if fused_mv else None)
 
         for col in reversed(range(N_COLS)):
             ct_op = add_tiles[col]
@@ -1680,6 +1773,11 @@ def _emit_matvec_add_pack_k8192(
             arg_x = args[input_arg_idx]
             arg_res = args[residual_arg_idx]
             arg_y = args[output_arg_idx]
+            # Proj-engine probe: hard-code the matvec mode RTP to 1 (K=8192)
+            # before any data movement, so each mat core reads mode=1 at start.
+            if fused_mv:
+                for col in range(N_COLS):
+                    mat_mode_rtp[col][0] = 1
             for outer in range(n_outer):
                 weight_tasks = []
                 for col in range(N_COLS):
@@ -2156,6 +2254,7 @@ def _emit_gg_ug_swiglu_pack(
     out_rows: int = HIDDEN_DIM,
     normed2_l2: bool = False,
     rms_fused: bool = False,
+    result_pkt: bool = False,
     res1_arg_idx: int = 4,
     normw_arg_idx: int = 5,
 ) -> None:
@@ -2164,7 +2263,18 @@ def _emit_gg_ug_swiglu_pack(
     Gate runs on row 2, up runs on row 3, and SwiGLU runs on row 4. The
     post-op consumes the matvec per-column output stream directly in 128-elt
     chunks and writes the global hidden vector using the matvec output layout.
+
+    ``result_pkt`` (proj-engine step 1a) routes the SwiGLU result stream
+    (sw row 4 -> shim) over a single-ID ``packetflow`` instead of a
+    circuit-switched ``flow``, with the SAME destination. This is a pure
+    structural convergence: the packet header is stripped at the destination
+    port, so lengths and data are unchanged and the HF gate stays bit-exact.
+    It proves the compute-tile-sourced packet-result primitive that the
+    collapsed engine needs to demux O/gate/up/down outputs by packet ID.
     """
+    # Single result packet ID for step 1a (same dest, bit-exact). Later
+    # sub-steps vary this ID per projection role to demux the engine output.
+    _RESULT_PKT_ID = 0
     gg_chans = _CHANNELS[gg_sym]
     ug_chans = _CHANNELS[ug_sym]
     sw_chans = _CHANNELS[sw_sym]
@@ -2432,7 +2542,12 @@ def _emit_gg_ug_swiglu_pack(
                     dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
                     with block[1]:
                         use_lock(_cl["out_full"], LockAction.AcquireGreaterEqual, value=1)
-                        dma_bd(_bo, offset=0, len=post_chunk)
+                        if result_pkt:
+                            # Step 1a: emit the result over a packet route.
+                            dma_bd(_bo, offset=0, len=post_chunk,
+                                   packet=(0, _RESULT_PKT_ID))
+                        else:
+                            dma_bd(_bo, offset=0, len=post_chunk)
                         use_lock(_cl["out_done"], LockAction.Release, value=1)
                         next_bd(block[1])
                     with block[2]:
@@ -2507,7 +2622,19 @@ def _emit_gg_ug_swiglu_pack(
             flow(mem_tiles[col], WireBundle.DMA, 0, sw_tiles[col], WireBundle.DMA, 0)
             flow(mem_tiles[col], WireBundle.DMA, 3, sw_tiles[col], WireBundle.DMA, 1)
         for col in range(N_COLS):
-            flow(sw_tiles[col], WireBundle.DMA, 0, shim_tiles[col], WireBundle.DMA, 0)
+            if result_pkt:
+                # Step 1a: result path sw(row4) -> shim over a single-ID
+                # packetflow (same dest as the circuit-switched flow).
+                packetflow(
+                    pkt_id=_RESULT_PKT_ID,
+                    source=sw_tiles[col],
+                    source_port=WireBundle.DMA,
+                    source_channel=0,
+                    dests={"dest": shim_tiles[col], "port": WireBundle.DMA,
+                           "channel": 0},
+                )
+            else:
+                flow(sw_tiles[col], WireBundle.DMA, 0, shim_tiles[col], WireBundle.DMA, 0)
 
         gg_weight_base = gg_chans["weight_base"]
         ug_weight_base = ug_chans["weight_base"]
@@ -3004,7 +3131,8 @@ def build_o_gemv_ffn_module(
             f"hidden_dim={hidden_dim}."
         )
 
-    if pack_mode not in {"none", "d1d4", "d1d3d4", "d1d3d4_n2l2", "d1d3d4_rms"}:
+    if pack_mode not in {"none", "d1d4", "d1d3d4", "d1d3d4_n2l2", "d1d3d4_rms",
+                         "d1d3d4_rms_pkt", "d1d3d4_rms_fmv"}:
         raise ValueError(f"unsupported o_gemv_ffn pack_mode={pack_mode!r}")
     # "d1d3d4_n2l2" == d1d3d4 plus normed2 chained rm->D3 through col-0 L2.
     # Step A (current): rm ALSO writes normed2 to L2 (DDR write kept, D3 still
@@ -3016,13 +3144,27 @@ def build_o_gemv_ffn_module(
     # itself via the fused matvec_rms kernel. normed2 (arg6) goes unused. This
     # reuses the WORKING DDR broadcast (not the racy n2l2 L2 path) and drops a
     # per-token device dispatch (3 devices: d1 / gg+ug+sw+rms / d4).
-    _rmsfuse = pack_mode == "d1d3d4_rms"
+    # "d1d3d4_rms_pkt" == d1d3d4_rms (RMS-fused, 3 devices) plus proj-engine
+    # step 1a: the D3 result path (SwiGLU -> shim) is carried over a single-ID
+    # packetflow instead of a circuit-switched flow, same destination. Pure
+    # convergence toward the packet-fed proj-engine; bit-exact, still 3 devices,
+    # still host-dispatched.
+    # "d1d3d4_rms_fmv" == d1d3d4_rms plus proj-engine probe: the K=8192 down
+    # matvec (D4) runs the mode-switched matvec_fused kernel (both K=2048 and
+    # K=8192 bodies compiled in) selected by a per-tile mode RTP hard-coded to
+    # 1. Runs the same 128-iter body -> bit-exact; measures the perf/size cost
+    # of carrying both core bodies behind one mode RTP (the proj-engine
+    # primitive). Still 3 devices, still host-dispatched.
+    _rmsfuse = pack_mode in {"d1d3d4_rms", "d1d3d4_rms_pkt", "d1d3d4_rms_fmv"}
+    _result_pkt = pack_mode == "d1d3d4_rms_pkt"
+    _fused_mv = pack_mode == "d1d3d4_rms_fmv"
 
     with mlir_mod_ctx() as ctx:
         # AIR emit order is reverse pipeline order.  In d1d4 mode, D4 replaces
         # {dg,a2} and D1 replaces {og,a1}; the middle {rm,gg,ug,sw} remains
         # unchanged until the D3 pack lands.
-        if pack_mode in {"d1d4", "d1d3d4", "d1d3d4_n2l2", "d1d3d4_rms"}:
+        if pack_mode in {"d1d4", "d1d3d4", "d1d3d4_n2l2", "d1d3d4_rms",
+                         "d1d3d4_rms_pkt", "d1d3d4_rms_fmv"}:
             _emit_matvec_add_pack_k8192(
                 "d4_dg_a2_pack",
                 "dg_matvec_bf16_0",
@@ -3031,6 +3173,7 @@ def build_o_gemv_ffn_module(
                 input_arg_idx=11,
                 residual_arg_idx=4,
                 output_arg_idx=14,
+                fused_mv=_fused_mv,
             )
         else:
             _emit_eltwise_add_seg(
@@ -3043,8 +3186,10 @@ def build_o_gemv_ffn_module(
         # slack), so doubling W has nowhere to go. We ping-pong at L2
         # instead -- memtile L2 has 512 KB to spare for the second W
         # slot (32 KB).
-        if pack_mode in {"d1d3d4", "d1d3d4_n2l2", "d1d3d4_rms"}:
-            _emit_gg_ug_swiglu_pack(normed2_l2=_n2l2, rms_fused=_rmsfuse)
+        if pack_mode in {"d1d3d4", "d1d3d4_n2l2", "d1d3d4_rms",
+                         "d1d3d4_rms_pkt", "d1d3d4_rms_fmv"}:
+            _emit_gg_ug_swiglu_pack(normed2_l2=_n2l2, rms_fused=_rmsfuse,
+                                    result_pkt=_result_pkt)
         else:
             _emit_sw_silu_mul_seg()
             _emit_matvec_seg_k2048(
@@ -3056,7 +3201,8 @@ def build_o_gemv_ffn_module(
         # air's fold eliminates the standalone rm_rms device entirely.
         if not _rmsfuse:
             _emit_rm_rms_seg(normed2_l2=_n2l2)
-        if pack_mode in {"d1d4", "d1d3d4", "d1d3d4_n2l2", "d1d3d4_rms"}:
+        if pack_mode in {"d1d4", "d1d3d4", "d1d3d4_n2l2", "d1d3d4_rms",
+                         "d1d3d4_rms_pkt", "d1d3d4_rms_fmv"}:
             _emit_matvec_add_pack_k2048(
                 "d1_og_a1_pack",
                 "og_matvec_bf16_0",
@@ -3066,6 +3212,7 @@ def build_o_gemv_ffn_module(
                 residual_arg_idx=3,
                 output_arg_idx=4,
                 out_rows=EMB_DIM,
+                fused_mv=_fused_mv,
             )
         else:
             _emit_eltwise_add_seg(
@@ -3074,7 +3221,7 @@ def build_o_gemv_ffn_module(
                 "og_matvec_bf16_0", weight_arg_idx=0, input_arg_idx=1,
                 output_arg_idx=2, out_rows=EMB_DIM)
         if dispatch_sequence is None:
-            if pack_mode == "d1d3d4_rms":
+            if pack_mode in {"d1d3d4_rms", "d1d3d4_rms_pkt", "d1d3d4_rms_fmv"}:
                 # 3 devices: rm_rms folded into the gate/up stage.
                 dispatch_sequence = (
                     "d1_og_a1_pack",
