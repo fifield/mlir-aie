@@ -85,7 +85,7 @@ def rn3_pair_vector_chain(dev=None, n_iters: int = 2, stack_size: int = 4096, n_
                          extra_globals=KERNEL_EXTRA_GLOBALS, helpers=[]),
             PythocKernel(chain_conv2_bf16, [scratch_ty, wslot_ty, final_ty(nt), np.int32, np.int32],
                          extra_globals=KERNEL_EXTRA_GLOBALS, helpers=[]),
-            PythocKernel(chain_residual_bf16, [patch_ty(nt), final_ty(nt), np.int32],
+            PythocKernel(chain_residual_bf16, [patch_ty(nt), wslot_ty, final_ty(nt), np.int32, np.int32],
                          extra_globals=KERNEL_EXTRA_GLOBALS, helpers=[]),
         )
 
@@ -115,10 +115,10 @@ def rn3_pair_vector_chain(dev=None, n_iters: int = 2, stack_size: int = 4096, n_
                     ew = w.acquire(1)
                     if t < n_tiles and stages >= 3 and stages < 5:
                         kc2(scratch, ew, eout, ob, t)
+                    if t < n_tiles and stages >= 4 and ob == 2:
+                        kr(ein, ew, eout, 0, t)
                     w.release(1)
                     ob = ob + 1
-                if t < n_tiles and stages >= 4:
-                    kr(ein, eout, t)
                 t = t + 1
             a.release(1)
             o.release(1)
