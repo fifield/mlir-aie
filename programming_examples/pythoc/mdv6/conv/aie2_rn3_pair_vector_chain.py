@@ -104,16 +104,16 @@ def rn3_pair_vector_chain(dev=None, n_iters: int = 2, stack_size: int = 4096, n_
                 mb = 0
                 while mb < 3:
                     ew = w.acquire(1)
-                    if t < n_tiles and stages >= 1:
+                    if t < n_tiles and stages >= 1 and stages < 5:
                         kc1(ein, ew, scratch, mb, t)
                     w.release(1)
                     mb = mb + 1
-                if t < n_tiles and stages >= 2:
+                if t < n_tiles and stages >= 2 and stages < 5:
                     km(scratch, (base_row + t) * 8, gcol)
                 ob = 0
                 while ob < 3:
                     ew = w.acquire(1)
-                    if t < n_tiles and stages >= 3:
+                    if t < n_tiles and stages >= 3 and stages < 5:
                         kc2(scratch, ew, eout, ob, t)
                     w.release(1)
                     ob = ob + 1
@@ -174,8 +174,10 @@ def rn3_pair_vector_chain(dev=None, n_iters: int = 2, stack_size: int = 4096, n_
                 out_tap = (TensorAccessPattern((IMG_ELEMS,), offset=0,
                            sizes=[1, TILES_PER_COL * TILE * TILE * IC], strides=[0, 1]) if linear else
                            TensorAccessPattern((IMG_ELEMS,), offset=(PAD * IMG + PAD + 8 * c) * IC,
-                           sizes=[TILES_PER_COL, TILE, TILE * IC],
-                           strides=[8 * IMG * IC, IMG * IC, 1]))
+                           # leading size-1 dim: shim S2MM BDs with <4 dims hang
+                           # (see test_dualtap_micro_hw.py)
+                           sizes=[1, TILES_PER_COL, TILE, TILE * IC],
+                           strides=[0, 8 * IMG * IC, IMG * IC, 1]))
                 rt.drain(col_out[c].cons(), IMGB, out_tap, task_group=tg, wait=True)
             rt.finish_task_group(tg)
 
