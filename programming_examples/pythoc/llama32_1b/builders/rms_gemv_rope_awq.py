@@ -830,7 +830,7 @@ def _emit_awq_matvec_seg(sym: str, weight_arg_idx: int, output_arg_idx: int,
 # ---------------------------------------------------------------------------
 # Experimental RGR2 6->2 packing device (AWQ).
 # ---------------------------------------------------------------------------
-def _emit_awq_qkv_rope_pack(sym: str = RGR2_PACK_SYM) -> None:
+def _emit_awq_qkv_rope_pack(sym: str = RGR2_PACK_SYM, fold_rms: bool = False) -> None:
     """Emit a single RGR2 device for AWQ Q/K/V matvecs plus Q/K RoPE.
 
     AWQ counterpart of ``builders/rms_gemv_rope.py::_emit_qkv_rope_pack``.
@@ -841,10 +841,20 @@ def _emit_awq_qkv_rope_pack(sym: str = RGR2_PACK_SYM) -> None:
     single runtime_sequence, then runs the existing one-core RoPE kernels for Q
     and K before returning to the host dispatcher.  The outer dispatcher thus
     has only two device runs: r_rms_awq_seg and this packed RGR2 sequence.
+
+    ``fold_rms=True`` (pack_mode ``rgr1_ddr``) absorbs the standalone
+    ``r_rms_awq_seg`` device as one more tile (col 0, row 3) so the dispatcher
+    has a single device run -- the exact AWQ counterpart of the BF16
+    ``_emit_qkv_rope_pack(fold_rms=True)`` fold. The RMSNorm stays BF16
+    (``rms_norm_2048_bf16``); only the Q/K/V matvecs are AWQ uint4. Same
+    arg->buffer mapping and DDR handoff as the standalone (arg0->buf_w,
+    arg1->buf_x, buf_y->arg2); the herd reads the normed vector back from DDR
+    (arg2), with the RMS run awaited before the matvec broadcast.
     """
     mat_chans = _CHANNELS["q_matvec_awq_bf16_0"]
     rq_chans = _CHANNELS["rq_rope_awq_seg"]
     rk_chans = _CHANNELS["rk_rope_awq_seg"]
+    rms_chans = _CHANNELS["r_rms_awq_seg"]
     row_bytes = ROW_BYTES  # 1088
 
     @device(AIEDevice.npu2, sym_name=sym)
@@ -854,6 +864,7 @@ def _emit_awq_qkv_rope_pack(sym: str = RGR2_PACK_SYM) -> None:
         mat_tiles = [tile(c, 2) for c in range(N_COLS)]
         rq_tile = tile(2, 3)
         rk_tile = tile(5, 3)
+        rms_tile = tile(0, 3) if fold_rms else None
 
         # Matvec locks and buffers: one reusable Q/K/V herd.
         mem_locks = {}
@@ -935,6 +946,28 @@ def _emit_awq_qkv_rope_pack(sym: str = RGR2_PACK_SYM) -> None:
         rq_bufs = _rope_buffers(rq_tile)
         rk_bufs = _rope_buffers(rk_tile)
 
+        # RMS tile (fold_rms): BF16 RMSNorm, copied from the standalone
+        # r_rms_awq_seg. 6 locks (ids 5..0) + 4 L1 bf16 buffers.
+        rms_locks = None
+        rms_bufs = None
+        if fold_rms:
+            _BF16_2048_L1 = bf16_memref(EMB_DIM, memory_space=2)
+            _BF16_16_L1 = bf16_memref(16, memory_space=2)
+            rms_locks = {
+                "w_avail": lock(rms_tile, lock_id=5, init=1),
+                "w_ready": lock(rms_tile, lock_id=4, init=0),
+                "x_avail": lock(rms_tile, lock_id=3, init=1),
+                "x_ready": lock(rms_tile, lock_id=2, init=0),
+                "y_done":  lock(rms_tile, lock_id=1, init=1),
+                "y_full":  lock(rms_tile, lock_id=0, init=0),
+            }
+            rms_bufs = {
+                "w": buffer(rms_tile, datatype=_BF16_2048_L1),  # <- arg0
+                "y": buffer(rms_tile, datatype=_BF16_2048_L1),  # -> arg2
+                "x": buffer(rms_tile, datatype=_BF16_2048_L1),  # <- arg1
+                "s": buffer(rms_tile, datatype=_BF16_16_L1),    # scratch
+            }
+
         _emit_external_buffers(
             ((EMB_DIM, row_bytes), "ui8"),
             ((EMB_DIM,), "bf16"),
@@ -961,6 +994,17 @@ def _emit_awq_qkv_rope_pack(sym: str = RGR2_PACK_SYM) -> None:
             link_with=KO_ROPE,
         )
         rope_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
+
+        rms_fn = None
+        if fold_rms:
+            _BF16_2048_L1 = bf16_memref(EMB_DIM, memory_space=2)
+            _BF16_16_L1 = bf16_memref(16, memory_space=2)
+            rms_fn = external_func(
+                "rms_norm_2048_bf16",
+                inputs=[_BF16_2048_L1, _BF16_2048_L1, _BF16_2048_L1, _BF16_16_L1],
+                link_with=KO_RMS,
+            )
+            rms_fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
 
         for col in reversed(range(N_COLS)):
             ct_op = mat_tiles[col]
@@ -1061,6 +1105,48 @@ def _emit_awq_qkv_rope_pack(sym: str = RGR2_PACK_SYM) -> None:
         _make_rope_tile(rq_tile, rq_locks, rq_bufs, EMB_DIM // HEAD_DIM)
         _make_rope_tile(rk_tile, rk_locks, rk_bufs, KV_DIM // HEAD_DIM)
 
+        # RMS tile (fold_rms): BF16, copy of the standalone r_rms_awq_seg.
+        if fold_rms:
+            _l = rms_locks
+            _b = rms_bufs
+
+            @mem(rms_tile)
+            def _rms_mem(block):
+                dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
+                with block[1]:
+                    use_lock(_l["y_full"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_b["y"], offset=0, len=EMB_DIM)
+                    use_lock(_l["y_done"], LockAction.Release, value=1)
+                    next_bd(block[1])
+                with block[2]:
+                    EndOp()
+                with block[3]:
+                    dma_start(DMAChannelDir.S2MM, 0, dest=block[4], chain=block[5])
+                with block[4]:
+                    use_lock(_l["x_avail"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_b["x"], offset=0, len=EMB_DIM)
+                    use_lock(_l["x_ready"], LockAction.Release, value=1)
+                    next_bd(block[4])
+                with block[5]:
+                    dma_start(DMAChannelDir.S2MM, 1, dest=block[6], chain=block[2])
+                with block[6]:
+                    use_lock(_l["w_avail"], LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(_b["w"], offset=0, len=EMB_DIM)
+                    use_lock(_l["w_ready"], LockAction.Release, value=1)
+                    next_bd(block[6])
+
+            @core(rms_tile)
+            def _rms_core():
+                import sys as _sys
+                for _ in range_(_sys.maxsize):
+                    use_lock(_l["y_done"], LockAction.AcquireGreaterEqual, value=1)
+                    use_lock(_l["x_ready"], LockAction.AcquireGreaterEqual, value=1)
+                    use_lock(_l["w_ready"], LockAction.AcquireGreaterEqual, value=1)
+                    rms_fn(_b["w"], _b["x"], _b["y"], _b["s"])
+                    use_lock(_l["w_avail"], LockAction.Release, value=1)
+                    use_lock(_l["y_full"], LockAction.Release, value=1)
+                    use_lock(_l["x_avail"], LockAction.Release, value=1)
+
         # Matvec flows.
         for col in range(N_COLS):
             flow(shim_tiles[col], WireBundle.DMA, 0, mem_tiles[col], WireBundle.DMA, 0)
@@ -1084,6 +1170,13 @@ def _emit_awq_qkv_rope_pack(sym: str = RGR2_PACK_SYM) -> None:
         flow(shim_tiles[5], WireBundle.DMA, 1, rk_tile, WireBundle.DMA, 0)
         flow(shim_tiles[6], WireBundle.DMA, 1, rk_tile, WireBundle.DMA, 1)
         flow(rk_tile, WireBundle.DMA, 0, shim_tiles[7], WireBundle.DMA, 1)
+
+        # RMS flows (fold_rms): spare shim channels (shim1 MM2S1/S2MM1,
+        # shim4 MM2S1), unused by the herd, the broadcast, and RoPE.
+        if fold_rms:
+            flow(shim_tiles[1], WireBundle.DMA, 1, rms_tile, WireBundle.DMA, 0)  # x in
+            flow(shim_tiles[4], WireBundle.DMA, 1, rms_tile, WireBundle.DMA, 1)  # weight in
+            flow(rms_tile, WireBundle.DMA, 0, shim_tiles[1], WireBundle.DMA, 1)  # normed out
 
         def _make_memtile_dma(_col, _ml, _w, _y):
             @memtile_dma(mem_tiles[_col])
@@ -1150,6 +1243,12 @@ def _emit_awq_qkv_rope_pack(sym: str = RGR2_PACK_SYM) -> None:
         shim_dma_allocation(f"air_channel_{rk_chans['out']}", shim_tiles[7], DMAChannelDir.S2MM, 1)
         shim_dma_allocation(f"air_channel_{rk_chans['in0']}", shim_tiles[5], DMAChannelDir.MM2S, 1)
         shim_dma_allocation(f"air_channel_{rk_chans['in1']}", shim_tiles[6], DMAChannelDir.MM2S, 1)
+        if fold_rms:
+            # in0 (id 0) <- arg1 (x); in1 (id 1) <- arg0 (weight);
+            # out (id 2) -> arg2 (normed broadcast input read by the herd).
+            shim_dma_allocation(f"air_channel_{rms_chans['in0']}", shim_tiles[1], DMAChannelDir.MM2S, 1)
+            shim_dma_allocation(f"air_channel_{rms_chans['in1']}", shim_tiles[4], DMAChannelDir.MM2S, 1)
+            shim_dma_allocation(f"air_channel_{rms_chans['out']}", shim_tiles[1], DMAChannelDir.S2MM, 1)
 
         @runtime_sequence(*rms_gemv_rope_awq_host_arg_types(),
                           sym_name=f"{sym}_sequence")
@@ -1246,6 +1345,34 @@ def _emit_awq_qkv_rope_pack(sym: str = RGR2_PACK_SYM) -> None:
                 dma_free_task(t0)
                 dma_free_task(t1)
 
+            if fold_rms:
+                # RMS first: BF16 RMSNorm writes normed (arg2) to DDR, awaited
+                # before the herd reads it back via the input broadcast.
+                # in0<-arg1 (x), in1<-arg0 (weight), out->arg2 (normed).
+                _rms_dims = [(4, 512), (512, 1)]
+                t_rx = dma_configure_task_for(f"air_channel_{rms_chans['in0']}")
+                with bds(t_rx) as bd:
+                    with bd[0]:
+                        dma_bd(args[1], offset=0, len=EMB_DIM, dimensions=_rms_dims)
+                        EndOp()
+                dma_start_task(t_rx)
+                t_rw = dma_configure_task_for(f"air_channel_{rms_chans['in1']}")
+                with bds(t_rw) as bd:
+                    with bd[0]:
+                        dma_bd(args[0], offset=0, len=EMB_DIM, dimensions=_rms_dims)
+                        EndOp()
+                dma_start_task(t_rw)
+                t_ro = dma_configure_task_for(
+                    f"air_channel_{rms_chans['out']}", issue_token=True)
+                with bds(t_ro) as bd:
+                    with bd[0]:
+                        dma_bd(args[2], offset=0, len=EMB_DIM, dimensions=_rms_dims)
+                        EndOp()
+                dma_start_task(t_ro)
+                dma_await_task(t_ro)
+                dma_free_task(t_rx)
+                dma_free_task(t_rw)
+
             _run_matvec(
                 args[3],
                 args[4],
@@ -1341,7 +1468,7 @@ def build_rms_gemv_rope_awq_module(emb_dim: int = EMB_DIM,
     del n_heads, n_kv_heads
 
     pack_mode = (pack_mode or "none").strip()
-    valid_pack_modes = {"none", "rgr2_ddr"}
+    valid_pack_modes = {"none", "rgr2_ddr", "rgr1_ddr"}
     if pack_mode not in valid_pack_modes:
         raise ValueError(
             f"unknown rms_gemv_rope_awq pack_mode={pack_mode!r}; "
@@ -1349,7 +1476,10 @@ def build_rms_gemv_rope_awq_module(emb_dim: int = EMB_DIM,
         )
 
     with mlir_mod_ctx() as ctx:
-        if pack_mode == "rgr2_ddr":
+        if pack_mode == "rgr1_ddr":
+            # Single device: RMS folded into the AWQ Q/K/V+RoPE pack.
+            _emit_awq_qkv_rope_pack(fold_rms=True)
+        elif pack_mode == "rgr2_ddr":
             _emit_awq_qkv_rope_pack()
         else:
             _emit_rope_seg("rk_rope_awq_seg",
@@ -1372,12 +1502,15 @@ def build_rms_gemv_rope_awq_module(emb_dim: int = EMB_DIM,
             _emit_awq_matvec_seg("q_matvec_awq_bf16_0",
                                   weight_arg_idx=3, output_arg_idx=4,
                                   out_rows=EMB_DIM)
-        _emit_r_rms_seg()
-        dispatch_sequence = (
-            ("r_rms_awq_seg", RGR2_PACK_SYM)
-            if pack_mode == "rgr2_ddr"
-            else DEFAULT_DISPATCH_SEQUENCE
-        )
+        # rgr1_ddr absorbs RMS into the pack device; no standalone r_rms_awq_seg.
+        if pack_mode != "rgr1_ddr":
+            _emit_r_rms_seg()
+        if pack_mode == "rgr1_ddr":
+            dispatch_sequence = (RGR2_PACK_SYM,)
+        elif pack_mode == "rgr2_ddr":
+            dispatch_sequence = ("r_rms_awq_seg", RGR2_PACK_SYM)
+        else:
+            dispatch_sequence = DEFAULT_DISPATCH_SEQUENCE
         _emit_dispatcher_device(dispatch_sequence)
         module = ctx.module
         attach_loop_annotation_to_all_scf_for(module)
@@ -1398,7 +1531,7 @@ if __name__ == "__main__":  # pragma: no cover
         help="Output path (default: stdout)",
         default=None,
     )
-    parser.add_argument("--pack-mode", choices=("none", "rgr2_ddr"),
+    parser.add_argument("--pack-mode", choices=("none", "rgr2_ddr", "rgr1_ddr"),
                         default="none",
                         help="Experimental device packing mode")
     args = parser.parse_args()
