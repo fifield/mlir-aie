@@ -19,7 +19,8 @@ Kernels
 1. ``conv3x3_fused_packed_bf16``        — 3x3 conv + BN + SiLU
 2. ``gemm_conv1x1_fused_packed_bf16``   — 1x1 conv as GEMM + BN + SiLU
 3. ``gemm_conv1x1_kblocked_bf16``       — K-blocked GEMM (partial-accum chain)
-4. ``residual_add_silu_bf16``           — scalar residual add + SiLU
+4. ``conv3x3_kblocked_accum_bf16``      — 3x3 K-blocked partial accumulation
+5. ``residual_add_silu_bf16``           — scalar residual add + SiLU
 
 The three matmul kernels share a single inline bf16 ``mmul<4,8,8>``
 emulation chain — 1 ``mul_elem_32`` + 7 ``mac_elem_32`` calls plus the
@@ -58,11 +59,17 @@ import numpy as np
 
 from aie.iron.pythoc import aie_kernel, PythocKernel
 
-from pythoc import ptr, i32, bf16, f32, void
+from pythoc import ptr, i16, i32, bf16, f32, void, inline
 from pythoc.aie import (
     aie_vector,
     load_v,
     store_v,
+    vector_add,
+    vector_mul,
+    vector_sub,
+    vector_and,
+    broadcast,
+    replicate_4x,
     vector_cast,
     vshuffle,
     vector_extract,
@@ -122,6 +129,7 @@ _KERNEL_NAMES = (
     "conv3x3_fused_packed_bf16",
     "gemm_conv1x1_fused_packed_bf16",
     "gemm_conv1x1_kblocked_bf16",
+    "conv3x3_kblocked_accum_bf16",
     "residual_add_silu_bf16",
 )
 
@@ -142,6 +150,8 @@ def _obj_path(kernel_name: str, build_dir: Optional[Path] = None) -> Path:
 
 KERNEL_EXTRA_GLOBALS = {
     "vector_cast": vector_cast,
+    "_mul_4x8x8_bf16": None,  # filled after defs below
+    "_mac_4x8x8_bf16": None,
     "vshuffle": vshuffle,
     "vector_extract": vector_extract,
     "vector_insert": vector_insert,
@@ -434,6 +444,219 @@ def gemm_conv1x1_kblocked_bf16(
 
 
 # ──────────────────────────────────────────────────────────────────────
+# conv3x3_kblocked_accum_bf16 — 3x3 partial accumulation chain
+# ──────────────────────────────────────────────────────────────────────
+#
+# Weight layout per chunk: [OC/8, K_BLOCK/8, 9, 8ic, 8oc] + bn_w(OC) + bn_b(OC).
+# Input is a compact patch whose channel dimension is k_block, not full_ic. This
+# is intended for rn3 pair fusion: conv1 materialises one mid_block slice of the
+# 10x10 intermediate, then conv2 accumulates that slice into the 8x8 final tile.
+# Non-last chunks write bf16 partial sums back to output; the last chunk applies
+# BN+SiLU. This mirrors gemm_conv1x1_kblocked_bf16 but uses 3x3 A loading.
+
+
+@aie_kernel
+def conv3x3_kblocked_accum_bf16(
+    input: ptr[bf16, True],
+    wt_chunk: ptr[bf16, True],
+    output: ptr[bf16, True],
+    tile_h: i32,
+    tile_w: i32,
+    k_block: i32,
+    oc: i32,
+    k_start: i32,
+    full_ic: i32,
+    stride: i32,
+    padding: i32,
+) -> void:
+    event0()
+
+    is_first: i32 = 0
+    if k_start == 0:
+        is_first = 1
+    is_last: i32 = 0
+    if k_start + k_block >= full_ic:
+        is_last = 1
+
+    # For the rn3 vector-fused conv2 stage, input is already the compact
+    # halo-sized intermediate patch for this k_block. Its logical patch width
+    # follows the standard 3x3 formula for this output tile.
+    patch_w: i32 = (tile_w - 1) * stride + 3
+    spatial_out: i32 = tile_h * tile_w
+    kb_blocks: i32 = k_block // 8
+    oc_blocks: i32 = oc // 8
+    wt_size: i32 = oc * k_block * 9
+    bn_w_ptr: ptr[bf16] = wt_chunk + wt_size
+    bn_b_ptr: ptr[bf16] = bn_w_ptr + oc
+
+    oc_blk: i32 = 0
+    while oc_blk < oc_blocks:
+        wt_base_off: i32 = oc_blk * kb_blocks * 9 * 64
+        sp: i32 = 0
+        while sp < spatial_out:
+            acc: aie_vector[f32, 32]
+            kk_start: i32 = 0
+            if is_first == 1:
+                A0: aie_vector[bf16, 32] = _build_a32_3x3(
+                    input, sp, tile_w, stride, patch_w, k_block, 0, 0, 0
+                )
+                B0: aie_vector[bf16, 64] = load_v(wt_chunk + wt_base_off, 64)
+                acc = _mul_4x8x8_bf16(A0, B0)
+                kk_start = 1
+            else:
+                p0: aie_vector[bf16, 8] = load_v(output + (sp + 0) * oc + oc_blk * 8, 8)
+                p1: aie_vector[bf16, 8] = load_v(output + (sp + 1) * oc + oc_blk * 8, 8)
+                p2: aie_vector[bf16, 8] = load_v(output + (sp + 2) * oc + oc_blk * 8, 8)
+                p3: aie_vector[bf16, 8] = load_v(output + (sp + 3) * oc + oc_blk * 8, 8)
+                p01: aie_vector[bf16, 16] = concat(p0, p1)
+                p23: aie_vector[bf16, 16] = concat(p2, p3)
+                partial32: aie_vector[bf16, 32] = concat(p01, p23)
+                acc = _bf16_to_acc(partial32)
+                kk_start = 0
+
+            kk: i32 = kk_start
+            total_k: i32 = kb_blocks * 9
+            while kk < total_k:
+                ic_blk: i32 = kk // 9
+                kk_in_blk: i32 = kk - ic_blk * 9
+                kh: i32 = kk_in_blk // 3
+                kw: i32 = kk_in_blk - kh * 3
+                A: aie_vector[bf16, 32] = _build_a32_3x3(
+                    input, sp, tile_w, stride, patch_w, k_block, ic_blk, kh, kw
+                )
+                B: aie_vector[bf16, 64] = load_v(
+                    wt_chunk + wt_base_off + kk * 64, 64
+                )
+                acc = _mac_4x8x8_bf16(A, B, acc)
+                kk = kk + 1
+
+            result32: aie_vector[bf16, 32] = acc_to_bf16(acc)
+            if is_last == 1:
+                _store_bn_silu_4x8_rows(
+                    result32, output, bn_w_ptr, bn_b_ptr, sp, spatial_out, oc, oc_blk
+                )
+            else:
+                r0: aie_vector[bf16, 8] = vector_extract(result32, 0, 8)
+                r1: aie_vector[bf16, 8] = vector_extract(result32, 8, 8)
+                r2: aie_vector[bf16, 8] = vector_extract(result32, 16, 8)
+                r3: aie_vector[bf16, 8] = vector_extract(result32, 24, 8)
+                store_v(output + (sp + 0) * oc + oc_blk * 8, r0)
+                store_v(output + (sp + 1) * oc + oc_blk * 8, r1)
+                store_v(output + (sp + 2) * oc + oc_blk * 8, r2)
+                store_v(output + (sp + 3) * oc + oc_blk * 8, r3)
+
+            sp = sp + 4
+        oc_blk = oc_blk + 1
+
+    event1()
+
+
+# ──────────────────────────────────────────────────────────────────────
+# rn3_pair_vector_stage_bf16 — staged shared-conv1 vector rn3pair kernel
+# ──────────────────────────────────────────────────────────────────────
+#
+# One fixed signature for all calls, avoiding duplicate external declarations
+# and duplicate code objects. ``arena_in`` is either a padded input patch
+# (mode=0/conv1) or the arena itself (mode=1/conv2). ``arena_out`` holds:
+#   [0:4800)       scratch: 3 * 10*10*16 bf16 mid chunks
+#   [4800:7872)    final:   3 * 8*8*16 bf16 output OC blocks
+# ``block`` is the mid block index [0,2]; ``oc_block_idx`` is the output OC
+# block index [0,2] for mode=1 and ignored for mode=0.
+
+@aie_kernel
+def rn3_pair_vector_stage_bf16(
+    arena_in: ptr[bf16, True],
+    weight: ptr[bf16, True],
+    arena_out: ptr[bf16, True],
+    mode: i32,
+    block: i32,
+    oc_block_idx: i32,
+) -> void:
+    event0()
+
+    scratch_base: i32 = 0
+    final_base: i32 = 4800
+
+    if mode == 0:
+        # Conv1: 12x12x48 -> selected 10x10x16 scratch block.
+        scratch: ptr[bf16] = arena_out + scratch_base + block * 1600
+        bn1_w: ptr[bf16] = weight + 16 * 48 * 9
+        bn1_b: ptr[bf16] = bn1_w + 16
+        # Both 8-OC halves share every A vector; build A once per (sp, kk)
+        # and feed two accumulators so the inlined transpose/broadcast chain
+        # CSEs across the pair.
+        sp: i32 = 0
+        while sp < 100:
+            A0: aie_vector[bf16, 32] = _build_a32_3x3(arena_in, sp, 10, 1, 12, 48, 0, 0, 0)
+            acc_a: aie_vector[f32, 32] = _mul_4x8x8_bf16(A0, load_v(weight, 64))
+            acc_b: aie_vector[f32, 32] = _mul_4x8x8_bf16(A0, load_v(weight + 3456, 64))
+            kk: i32 = 1
+            while kk < 54:
+                ic_blk: i32 = kk // 9
+                kk_in_blk: i32 = kk - ic_blk * 9
+                kh: i32 = kk_in_blk // 3
+                kw: i32 = kk_in_blk - kh * 3
+                A: aie_vector[bf16, 32] = _build_a32_3x3(arena_in, sp, 10, 1, 12, 48, ic_blk, kh, kw)
+                acc_a = _mac_4x8x8_bf16(A, load_v(weight + kk * 64, 64), acc_a)
+                acc_b = _mac_4x8x8_bf16(A, load_v(weight + 3456 + kk * 64, 64), acc_b)
+                kk = kk + 1
+            _store_bn_silu_4x8_rows(acc_to_bf16(acc_a), scratch, bn1_w, bn1_b, sp, 100, 16, 0)
+            _store_bn_silu_4x8_rows(acc_to_bf16(acc_b), scratch, bn1_w, bn1_b, sp, 100, 16, 1)
+            sp = sp + 4
+
+        # Match the baseline two-conv semantics at full-image boundaries:
+        # conv2 sees zero padding outside the conv1 output domain. A per-patch
+        # 10x10 bf16 mask lives at arena offset 7872; 1.0 means keep conv1
+        # scratch, 0.0 means zero this intermediate spatial position.
+        mask: ptr[bf16] = arena_in + 7872
+        z16: aie_vector[bf16, 16] = zeros(bf16, 16)
+        mz: i32 = 0
+        while mz < 100:
+            mv: f32 = f32(mask[mz])
+            if mv < 0.5:
+                store_v(scratch + mz * 16, z16)
+                store_v(scratch + 1600 + mz * 16, z16)
+                store_v(scratch + 3200 + mz * 16, z16)
+            mz = mz + 1
+    else:
+        # Conv2: full 10x10x48 scratch -> selected 8x8x16 final block.
+        # `block` is the output-channel block index. Accumulate all 48 input
+        # channels in f32 before BN/SiLU; do not spill bf16 partial sums between
+        # mid blocks, or the fused path numerically diverges from mc_re6_rn3.
+        final_base: i32 = 4800
+        outp: ptr[bf16] = arena_out + final_base + block * 1024
+        bn2_w: ptr[bf16] = weight + 16 * 48 * 9
+        bn2_b: ptr[bf16] = bn2_w + 16
+        # Scratch layout is three contiguous 10x10x16 planes, not
+        # HWC-interleaved 10x10x48. Map full-48 IC block index to
+        # (mid-plane, 8-channel block within that plane). A shared per
+        # (sp, kk) across both 8-OC halves, as in conv1.
+        sp2: i32 = 0
+        while sp2 < 64:
+            A02: aie_vector[bf16, 32] = _build_a32_3x3(arena_in, sp2, 8, 1, 10, 16, 0, 0, 0)
+            acc2a: aie_vector[f32, 32] = _mul_4x8x8_bf16(A02, load_v(weight, 64))
+            acc2b: aie_vector[f32, 32] = _mul_4x8x8_bf16(A02, load_v(weight + 3456, 64))
+            kk2: i32 = 1
+            while kk2 < 54:
+                ic_blk2: i32 = kk2 // 9
+                kk_in_blk2: i32 = kk2 - ic_blk2 * 9
+                mid_plane2: i32 = ic_blk2 // 2
+                sub_ic_blk2: i32 = ic_blk2 - mid_plane2 * 2
+                kh2: i32 = kk_in_blk2 // 3
+                kw2: i32 = kk_in_blk2 - kh2 * 3
+                plane2: ptr[bf16] = arena_in + mid_plane2 * 1600
+                A2: aie_vector[bf16, 32] = _build_a32_3x3(plane2, sp2, 8, 1, 10, 16, sub_ic_blk2, kh2, kw2)
+                acc2a = _mac_4x8x8_bf16(A2, load_v(weight + kk2 * 64, 64), acc2a)
+                acc2b = _mac_4x8x8_bf16(A2, load_v(weight + 3456 + kk2 * 64, 64), acc2b)
+                kk2 = kk2 + 1
+            _store_bn_silu_4x8_rows(acc_to_bf16(acc2a), outp, bn2_w, bn2_b, sp2, 64, 16, 0)
+            _store_bn_silu_4x8_rows(acc_to_bf16(acc2b), outp, bn2_w, bn2_b, sp2, 64, 16, 1)
+            sp2 = sp2 + 4
+
+    event1()
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Helper @aie_kernels — these are compiled alongside the main kernels via
 # the ``helpers=[...]`` parameter on ``PythocKernel``.
 # ──────────────────────────────────────────────────────────────────────
@@ -528,7 +751,7 @@ def _build_a32_kblocked(
     return concat(a01, a23)
 
 
-@aie_kernel
+@inline
 def _mul_4x8x8_bf16(
     A: aie_vector[bf16, 32],
     B: aie_vector[bf16, 64],
@@ -614,7 +837,7 @@ def _mul_4x8x8_bf16(
     return acc
 
 
-@aie_kernel
+@inline
 def _mac_4x8x8_bf16(
     A: aie_vector[bf16, 32],
     B: aie_vector[bf16, 64],
@@ -718,32 +941,47 @@ def _store_bn_silu_4x8_rows(
 ) -> void:
     """Apply per-channel BN (bn_w*x + bn_b) + SiLU and store 4 rows × 8 cols.
 
-    Matches the C++ tail:
-      bn_acc = mul(row, bn_w_vec)
-      bn_out = add(bn_acc.to_vector<bf16>(), bn_b_vec)
-      for j in 0..7:
-        x  = (float)bn_out[j]
-        ax = |x|
-        out[j] = bf16(x * (0.5 + x / (2 + 2*ax)))
+    Fully vectorized over the 4x8 tile. SiLU uses the same rational sigmoid
+    as the C++ tail, x * (0.5 + x / (2 + 2|x|)), with the division replaced
+    by a bf16 reciprocal: exponent-flip seed (0x7EF4 - bits) + two Newton
+    steps r = r*(2 - d*r). bf16 output precision, no soft-float libcalls.
     """
-    # Extract the 4 rows upfront with compile-time constant indices.
-    row0: aie_vector[bf16, 8] = vector_extract(result32, 0, 8)
-    row1: aie_vector[bf16, 8] = vector_extract(result32, 8, 8)
-    row2: aie_vector[bf16, 8] = vector_extract(result32, 16, 8)
-    row3: aie_vector[bf16, 8] = vector_extract(result32, 24, 8)
-
-    # Load BN params for this OC block once.
     bn_w8: aie_vector[bf16, 8] = load_v(bn_w_ptr + oc_blk * 8, 8)
     bn_b8: aie_vector[bf16, 8] = load_v(bn_b_ptr + oc_blk * 8, 8)
+    bn_w16: aie_vector[bf16, 16] = concat(bn_w8, bn_w8)
+    bn_b16: aie_vector[bf16, 16] = concat(bn_b8, bn_b8)
+    bnw32: aie_vector[bf16, 32] = concat(bn_w16, bn_w16)
+    bnb32: aie_vector[bf16, 32] = concat(bn_b16, bn_b16)
+
+    two32: aie_vector[bf16, 32] = vector_cast(broadcast(i16, 32, 0x4000), bf16, 32)
+    one32: aie_vector[bf16, 32] = vector_cast(broadcast(i16, 32, 0x3F80), bf16, 32)
+
+    t1: aie_vector[bf16, 32] = vector_mul(result32, bnw32)
+    t2: aie_vector[bf16, 32] = vector_add(t1, bnb32)
+
+    # |t2| via sign-bit mask, d = 2 + 2|t2|
+    abits: aie_vector[i16, 32] = vector_and(vector_cast(t2, i16, 32), broadcast(i16, 32, 0x7FFF))
+    a: aie_vector[bf16, 32] = vector_cast(abits, bf16, 32)
+    d: aie_vector[bf16, 32] = vector_add(vector_add(a, a), two32)
+
+    # r ≈ 1/d: exponent-flip seed + 2 Newton steps (d >= 2, so r in (0, 0.5])
+    rbits: aie_vector[i16, 32] = vector_sub(broadcast(i16, 32, 0x7EF4), vector_cast(d, i16, 32))
+    r: aie_vector[bf16, 32] = vector_cast(rbits, bf16, 32)
+    r = vector_mul(r, vector_sub(two32, vector_mul(d, r)))
+    r = vector_mul(r, vector_sub(two32, vector_mul(d, r)))
+
+    # sig = 0.5 + t2/d == (1 + |t2| + t2) * r, cancellation-free in bf16
+    n: aie_vector[bf16, 32] = vector_add(vector_add(a, t2), one32)
+    out32: aie_vector[bf16, 32] = vector_mul(t2, vector_mul(n, r))
 
     if sp + 0 < spatial_out:
-        _bn_silu_row(row0, bn_w8, bn_b8, output, (sp + 0) * oc + oc_blk * 8)
+        store_v(output + (sp + 0) * oc + oc_blk * 8, vector_extract(out32, 0, 8))
     if sp + 1 < spatial_out:
-        _bn_silu_row(row1, bn_w8, bn_b8, output, (sp + 1) * oc + oc_blk * 8)
+        store_v(output + (sp + 1) * oc + oc_blk * 8, vector_extract(out32, 8, 8))
     if sp + 2 < spatial_out:
-        _bn_silu_row(row2, bn_w8, bn_b8, output, (sp + 2) * oc + oc_blk * 8)
+        store_v(output + (sp + 2) * oc + oc_blk * 8, vector_extract(out32, 16, 8))
     if sp + 3 < spatial_out:
-        _bn_silu_row(row3, bn_w8, bn_b8, output, (sp + 3) * oc + oc_blk * 8)
+        store_v(output + (sp + 3) * oc + oc_blk * 8, vector_extract(out32, 24, 8))
 
 
 @aie_kernel
@@ -787,9 +1025,6 @@ _MMUL_HELPERS = [
     _build_a32_3x3,
     _build_a32_1x1,
     _build_a32_kblocked,
-    _mul_4x8x8_bf16,
-    _mac_4x8x8_bf16,
-    _bn_silu_row,
     _store_bn_silu_4x8_rows,
 ]
 
@@ -842,6 +1077,24 @@ def make_gemm_conv1x1_kblocked_bf16(
         [
             in_ty, wt_chunk_ty, out_ty,
             np.int32, np.int32, np.int32, np.int32, np.int32, np.int32,
+        ],
+        extra_globals=KERNEL_EXTRA_GLOBALS,
+        helpers=_MMUL_HELPERS,
+    )
+
+
+def make_conv3x3_kblocked_accum_bf16(
+    in_ty,
+    wt_chunk_ty,
+    out_ty,
+    build_dir: Optional[Path] = None,
+) -> PythocKernel:
+    """3x3 K-blocked partial accumulation. Scalar args: tile_h, tile_w, k_block, oc, k_start, full_ic, stride, padding."""
+    return PythocKernel(
+        conv3x3_kblocked_accum_bf16,
+        [
+            in_ty, wt_chunk_ty, out_ty,
+            np.int32, np.int32, np.int32, np.int32, np.int32, np.int32, np.int32, np.int32,
         ],
         extra_globals=KERNEL_EXTRA_GLOBALS,
         helpers=_MMUL_HELPERS,
@@ -906,6 +1159,11 @@ def build_all_objs(build_dir: Optional[Path] = None) -> list[Path]:
     _materialise_kernel_obj(kk, dst)
     outputs.append(dst)
 
+    kc3k = make_conv3x3_kblocked_accum_bf16(patch_ty, weight_ty, out_ty, build_dir=build_dir)
+    dst = build_dir / "conv3x3_kblocked_accum_bf16.o"
+    _materialise_kernel_obj(kc3k, dst)
+    outputs.append(dst)
+
     kr = make_residual_add_silu_bf16(patch_ty, patch_ty, out_ty, build_dir=build_dir)
     dst = build_dir / "residual_add_silu_bf16.o"
     _materialise_kernel_obj(kr, dst)
@@ -927,3 +1185,7 @@ __all__ = [
     "make_residual_add_silu_bf16",
     "build_all_objs",
 ]
+
+
+KERNEL_EXTRA_GLOBALS["_mul_4x8x8_bf16"] = _mul_4x8x8_bf16
+KERNEL_EXTRA_GLOBALS["_mac_4x8x8_bf16"] = _mac_4x8x8_bf16

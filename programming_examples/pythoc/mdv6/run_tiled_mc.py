@@ -219,6 +219,10 @@ def _drop_merged_kernel(elf_name):
     for key in list(_MERGED_BO_POOL.keys()):
         if key[0] == elf_name:
             _MERGED_BO_POOL.pop(key, None)
+    # Cached run objects may reference this ELF's kernel/BOs; rare path, so
+    # just flush the whole pool.
+    _RUN_CACHE.clear()
+    _RUN_CACHE_REFS.clear()
 
 
 def _trim_merged_kernel_cache():
@@ -269,6 +273,13 @@ def _get_merged_kernel(elf_name):
 # this to attribute NPU time + launch_gap to a specific model layer.
 _CURRENT_LAYER = None
 
+# xrt.run object pool: (id(kernel), id(arg0), ...) -> prepared run. BOs are
+# pooled per (elf, role, size), so for a given dispatch site the arg tuple is
+# stable across frames and the run object (including set_arg state) can be
+# reused. _RUN_CACHE_REFS pins kernel + arg BOs so dict ids stay valid.
+_RUN_CACHE = {}
+_RUN_CACHE_REFS = {}
+
 
 def _xrt_run_kernel(kernel, args):
     """One xrt.run launch: set_arg per positional, start(), wait2().
@@ -279,9 +290,15 @@ def _xrt_run_kernel(kernel, args):
     it without touching each merged dispatch site.
     """
     import pyxrt as _xrt
-    run = _xrt.run(kernel)
-    for i, a in enumerate(args):
-        run.set_arg(i, a)
+    key = (id(kernel),) + tuple(id(a) for a in args)
+    run = _RUN_CACHE.get(key)
+    if run is None:
+        run = _xrt.run(kernel)
+        for i, a in enumerate(args):
+            run.set_arg(i, a)
+        _RUN_CACHE[key] = run
+        # keep arg BOs alive as long as the cached run object
+        _RUN_CACHE_REFS[key] = (kernel, args)
     run.start()
     run.wait2()
     return run
@@ -308,7 +325,8 @@ def _xrt_fill_bo(bo, arr):
         np.frombuffer(arr, dtype=np.uint8),
         casting="no",
     )
-    bo.sync(_xrt.xclBOSyncDirection.XCL_BO_SYNC_BO_TO_DEVICE)
+    # Sync only the bytes written, not the whole (pooled, possibly larger) BO.
+    bo.sync(_xrt.xclBOSyncDirection.XCL_BO_SYNC_BO_TO_DEVICE, arr.nbytes, 0)
 
 
 # Per-layer merged-ELF registry. Maps mc_name → (elf_name, n_batches).
