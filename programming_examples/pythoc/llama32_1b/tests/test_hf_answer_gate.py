@@ -261,6 +261,61 @@ def test_hf_answer_gate_o_gemv_ffn_rms_fused():
         "real weights."
     ).format(model=HF_MODEL),
 )
+def test_hf_answer_gate_o_gemv_ffn_result_pkt():
+    """Gate for proj-engine step 1a (`o_gemv_ffn=d1d3d4_rms_pkt`).
+
+    Identical to `d1d3d4_rms` except the D3 result path (SwiGLU row 4 -> shim)
+    is carried over a single-ID `packetflow` instead of a circuit-switched
+    `flow`, with the SAME destination. Pure convergence toward the packet-fed
+    proj-engine: still 3 devices, still host-dispatched, no DDR handoff change.
+    The packet header is stripped at the destination port, so the answer must
+    stay bit-identical to the `d1d3d4_rms` / packed / unpacked baselines.
+
+    Skipped under AWQ: device packing is BF16-only.
+    """
+    if HF_GATE_QUANT == "awq":
+        pytest.skip("device packing is BF16-only; no AWQ result-pkt variant")
+    head, text = _run_gate_and_detokenize(extra_env={
+        "PYTHOC_LLAMA_O_GEMV_FFN_PACK_MODE": "d1d3d4_rms_pkt",
+    })
+    _assert_paris(head, text, "result_pkt")
+
+
+@pytest.mark.skipif(
+    not _has_tokenizer(),
+    reason=(
+        "HuggingFace cache does not contain {model}; this gate requires "
+        "real weights."
+    ).format(model=HF_MODEL),
+)
+def test_hf_answer_gate_o_gemv_ffn_fused_matvec():
+    """Gate for the proj-engine matvec fusion (`o_gemv_ffn=d1d3d4_rms_fmv`).
+
+    Both the O matvec (D1, K=2048) and the down matvec (D4, K=8192) run on the
+    SAME `matvec_fused_bf16` kernel (one ELF, both loop_range bodies), selecting
+    their K-role via a per-tile `mode` RTP the runtime sequence hard-codes (0 for
+    O, 1 for down). Each arm keeps its compile-time loop_range, so this runs the
+    same math as the dedicated kernels -> the answer must stay bit-identical to
+    the `d1d3d4_rms` / packed / unpacked baselines. Proves core-reuse-by-mode-RTP
+    (the packet-fed proj-engine primitive) is correct and perf-neutral.
+
+    Skipped under AWQ: device packing is BF16-only.
+    """
+    if HF_GATE_QUANT == "awq":
+        pytest.skip("device packing is BF16-only; no AWQ fused-matvec variant")
+    head, text = _run_gate_and_detokenize(extra_env={
+        "PYTHOC_LLAMA_O_GEMV_FFN_PACK_MODE": "d1d3d4_rms_fmv",
+    })
+    _assert_paris(head, text, "fused_matvec")
+
+
+@pytest.mark.skipif(
+    not _has_tokenizer(),
+    reason=(
+        "HuggingFace cache does not contain {model}; this gate requires "
+        "real weights."
+    ).format(model=HF_MODEL),
+)
 def test_hf_answer_gate_rms_gemv_rope_fold():
     """Gate for the RMS fold into the Q/K/V+RoPE pack (`rms_gemv_rope=rgr1_ddr`).
 
