@@ -189,6 +189,41 @@ def compile_matvec_k8192(output_dir: Optional[str] = None, verbose: bool = False
         return dst
 
 
+def compile_matvec_fused(output_dir: Optional[str] = None, verbose: bool = False) -> Path:
+    """Compile kernels/matvec_fused.py -> matvec_fused_pythoc.o.
+
+    Single mode-switched matvec carrying both the K=2048 (loop_range 32) and
+    K=8192 (loop_range 128) inner loops; the core selects via a `mode` RTP.
+    Used by o_gemv_ffn pack_mode `d1d3d4_rms_fmv` to measure the cost of
+    concatenating both core bodies behind one mode RTP (proj-engine probe).
+    """
+    import shutil, tempfile
+    from pythoc.aie import (
+        I1024_I1024_ACC2048_bf_mac_conf,
+        loop_range,
+        prepare_for_pipelining,
+        reduce_add_reassoc,
+    )
+    with tempfile.TemporaryDirectory(prefix="matvec_fused_pythoc_") as tmp:
+        produced = compile_pythoc_source(
+            source_code=_read("matvec_fused.py"),
+            function_name="matvec_fused_bf16",
+            target_arch="aie2p",
+            output_dir=tmp,
+            verbose=verbose,
+            extra_globals={
+                "I1024_I1024_ACC2048_bf_mac_conf": I1024_I1024_ACC2048_bf_mac_conf,
+                "loop_range": loop_range,
+                "prepare_for_pipelining": prepare_for_pipelining,
+                "reduce_add_reassoc": reduce_add_reassoc,
+            },
+        )
+        dst_dir = Path(output_dir) if output_dir else Path.cwd()
+        dst = dst_dir / "matvec_fused_pythoc.o"
+        shutil.copy2(produced, dst)
+        return dst
+
+
 def compile_matvec(output_dir: Optional[str] = None, verbose: bool = False) -> Path:
     """Compile kernels/matvec.py -> mv_pythoc.o.
 
