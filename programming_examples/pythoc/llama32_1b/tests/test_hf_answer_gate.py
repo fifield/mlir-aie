@@ -342,6 +342,51 @@ def test_hf_answer_gate_o_gemv_ffn_c1_merged():
         "real weights."
     ).format(model=HF_MODEL),
 )
+def test_hf_answer_gate_o_gemv_ffn_c2_rms():
+    """Gate for C2a (`o_gemv_ffn=c2_rms`): C1 + RMS folded into the reused
+    row-2 gate/up waves (rms tile gone); down+add2 stay as the separate D4
+    device (call 2 = 2 LoadPDIs). The mat activation ships per-column via the
+    mem-tiles (no shim-row broadcast fan), and the mem/add/swiglu outputs use
+    distinct packet ids (1/5/6) so the shim S2MM0 convergence has no
+    multi-producer routing conflict. Tokens must stay bit-identical.
+    """
+    if HF_GATE_QUANT == "awq":
+        pytest.skip("device packing is BF16-only; no AWQ c2 variant")
+    head, text = _run_gate_and_detokenize(extra_env={
+        "PYTHOC_LLAMA_O_GEMV_FFN_PACK_MODE": "c2_rms",
+    })
+    _assert_paris(head, text, "c2_rms")
+
+
+@pytest.mark.skipif(
+    not _has_tokenizer(),
+    reason=(
+        "HuggingFace cache does not contain {model}; this gate requires "
+        "real weights."
+    ).format(model=HF_MODEL),
+)
+def test_hf_answer_gate_o_gemv_ffn_c2_merged():
+    """Gate for C2b (`o_gemv_ffn=c2_merged`): the full call-2 collapse — O,
+    add1, gate, up, swiglu, down, add2 all in ONE device / ONE aiex.configure
+    (decode call 2 = 1 LoadPDI, was 3). Distinct output packet ids
+    (matvec-y=1, add=5, swiglu=6, down=7) keep the shim S2MM0 convergence
+    conflict-free. Tokens must stay bit-identical.
+    """
+    if HF_GATE_QUANT == "awq":
+        pytest.skip("device packing is BF16-only; no AWQ c2 variant")
+    head, text = _run_gate_and_detokenize(extra_env={
+        "PYTHOC_LLAMA_O_GEMV_FFN_PACK_MODE": "c2_merged",
+    })
+    _assert_paris(head, text, "c2_merged")
+
+
+@pytest.mark.skipif(
+    not _has_tokenizer(),
+    reason=(
+        "HuggingFace cache does not contain {model}; this gate requires "
+        "real weights."
+    ).format(model=HF_MODEL),
+)
 def test_hf_answer_gate_rms_gemv_rope_fold():
     """Gate for the RMS fold into the Q/K/V+RoPE pack (`rms_gemv_rope=rgr1_ddr`).
 
