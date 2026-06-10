@@ -199,7 +199,6 @@ def chain_wt_arm(slot_i32: i32) -> void:
 
     Writes ch1 CTRL=0 (enable, clear reset) each arm — iron's CDO only
     configures ch0 and may leave ch1 reset."""
-    write_tm(0, DMA_S2MM_1_START_QUEUE - 4)
     bd: i32 = DMA_BD_BASE + WT_BD * 32
     write_tm(((WT_BUF_ADDR // 4) << 14) | slot_i32, bd)
     write_tm(0, bd + 4)

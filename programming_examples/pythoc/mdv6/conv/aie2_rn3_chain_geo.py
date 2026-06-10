@@ -431,7 +431,8 @@ def rn3_chain_raster(geo: str, n_iters: int = 2, stack_size: int = 4096, compute
     return Program(dev, rt).resolve_program()
 
 
-def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, compute: int = 1):
+def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, compute: int = 1,
+                        static_wt: int = 0):
     """Raster chain with memtile weight replay: slots fill the memtile once per
     iter (shim MM2S ch1), a raw memtile MM2S ch1 BD replays them TPR times to
     the column's cores; cores arm their own S2MM ch1 per slot into a fixed
@@ -491,7 +492,8 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
                 while mb < N_BLK:
                     if compute:
                         arm(SLOT_I32)
-                        wait()
+                        if compute < 3:
+                            wait()
                         if real and compute == 1:
                             c1(ein, wbuf, scratch, mb, 0, IC)
                     mb = mb + 1
@@ -501,7 +503,8 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
                 while ob < N_BLK:
                     if compute:
                         arm(SLOT_I32)
-                        wait()
+                        if compute < 3:
+                            wait()
                         if real and compute == 1:
                             c2r(scratch, wbuf, eout, ein, ob, 0, IC, grow, gcol, GBOUND)
                     ob = ob + 1
@@ -552,11 +555,13 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
                 rt.finish_task_group(tg)
 
     module = Program(dev, rt).resolve_program()
-    _patch_wt_replay(module, COLS, NWORK, TPR, n_iters, MEM_STREAM, WT_BUF_ADDR)
+    _patch_wt_replay(module, COLS, NWORK, TPR, n_iters, MEM_STREAM, WT_BUF_ADDR,
+                     static_wt=static_wt)
     return module
 
 
-def _patch_wt_replay(module, cols, nwork, tpr, n_iters, mem_stream, wbuf_addr):
+def _patch_wt_replay(module, cols, nwork, tpr, n_iters, mem_stream, wbuf_addr,
+                     static_wt=0):
     """Post-resolve patch: fixed wbuf addresses; per col memtile slot buffer +
     locks + S2MM1 fill / MM2S1 replay DMA + flows + shim alloc + per-iter
     runtime fills of WT (sequence arg 1)."""
@@ -611,27 +616,39 @@ def _patch_wt_replay(module, cols, nwork, tpr, n_iters, mem_stream, wbuf_addr):
             shim_t = shims[c]
             # explicit high address — the post-resolve allocator gives
             # patched buffers address 0, overlapping the FIFO buffers
-            msrc = buffer(mem_t, datatype=src_ty, name=f"wt_src_{c}", address=0x70000)
+            init = np.arange(100, 100 + mem_n, dtype=np.int32) if static_wt else None
+            msrc = buffer(mem_t, datatype=src_ty, name=f"wt_src_{c}", address=0x70000,
+                          initial_value=init)
             lk_e = lock(mem_t, lock_id=30, init=tpr, sym_name=f"wt_e_{c}")
             lk_f = lock(mem_t, lock_id=31, init=0, sym_name=f"wt_f_{c}")
-            flow(shim_t, WireBundle.DMA, 1, mem_t, WireBundle.DMA, 1)
+            flow(shim_t, WireBundle.DMA, 1, mem_t, WireBundle.DMA, 5)
             for w in range(nwork):
-                flow(mem_t, WireBundle.DMA, 1, tiles[(c, 2 + w)], WireBundle.DMA, 1)
+                flow(mem_t, WireBundle.DMA, 5, tiles[(c, 2 + w)], WireBundle.DMA, 1)
             shim_dma_allocation(f"wt_in_{c}", shim_t, DMAChannelDir.MM2S, 1)
 
             def _mk(msrc, lk_e, lk_f):
                 @memtile_dma(mem_t)
                 def mt(block):
-                    _mt_body(block, msrc, lk_e, lk_f)
+                    if static_wt:
+                        # ungated replay of the CDO-initialized buffer
+                        dma_start(DMAChannelDir.MM2S, 5, dest=block[1], chain=block[2],
+                                  repeat_count=n_iters * tpr - 1)
+                        with block[1]:
+                            dma_bd(msrc, offset=0, len=mem_n)
+                            next_bd(block[2])
+                        with block[2]:
+                            EndOp()
+                    else:
+                        _mt_body(block, msrc, lk_e, lk_f)
             def _mt_body(block, msrc, lk_e, lk_f):
-                dma_start(DMAChannelDir.S2MM, 1, dest=block[1], chain=block[2])
+                dma_start(DMAChannelDir.S2MM, 5, dest=block[1], chain=block[2])
                 with block[1]:
                     use_lock(lk_e, LockAction.AcquireGreaterEqual, value=tpr)
                     dma_bd(msrc, offset=0, len=mem_n)
                     use_lock(lk_f, LockAction.Release, value=tpr)
                     next_bd(block[1])
                 with block[2]:
-                    dma_start(DMAChannelDir.MM2S, 1, dest=block[3], chain=block[4])
+                    dma_start(DMAChannelDir.MM2S, 5, dest=block[3], chain=block[4])
                 with block[3]:
                     use_lock(lk_f, LockAction.AcquireGreaterEqual, value=1)
                     dma_bd(msrc, offset=0, len=mem_n)
@@ -644,7 +661,7 @@ def _patch_wt_replay(module, cols, nwork, tpr, n_iters, mem_stream, wbuf_addr):
     seq_block = seq_op.regions[0].blocks[0]
     wt_arg = seq_block.arguments[1]
     with InsertionPoint.at_block_begin(seq_block), Location.unknown(module.context):
-        for c in range(cols):
+        for c in range(0 if static_wt else cols):
             for it in range(n_iters):
                 t = shim_dma_single_bd_task(
                     f"wt_in_{c}", wt_arg, offset=it * mem_stream,
