@@ -123,10 +123,10 @@ def run_rn_mc(repncsp, inp, H, W, ic, oc,
                 and oc == 2 * neck and _chain_geo == 're6'):
             return run_rn3_chain_geo(_chain_geo, current, pairs,
                                      x2_hwc=x2, rnm_w_u16=fuse_bn(repncsp.conv3))
-        if (_chain_geo == 're6'
+        if (_chain_geo in ('re6', 're4')
                 and os.environ.get('MDV6_RN3RASTER', '0') not in ('', '0', 'false', 'False')):
             from conv.rn3_chain_runner import run_rn3_chain_raster
-            current = run_rn3_chain_raster('re6w', current, pairs)
+            current = run_rn3_chain_raster(_chain_geo + 'w', current, pairs)
         elif _chain_geo == 're6':
             current = run_re6_rn3_chain(current, pairs)
         else:
