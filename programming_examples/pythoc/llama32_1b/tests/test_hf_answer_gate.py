@@ -316,6 +316,32 @@ def test_hf_answer_gate_o_gemv_ffn_fused_matvec():
         "real weights."
     ).format(model=HF_MODEL),
 )
+def test_hf_answer_gate_o_gemv_ffn_c1_merged():
+    """Gate for the C1 device collapse (`o_gemv_ffn=c1_merged`).
+
+    Merges D1 (O+add1), rm_rms and D3 (gate/up/swiglu) into ONE device:
+    a reused row-2 matvec herd runs O -> gate -> up as sequential waves, with
+    add1/swiglu/rms on rows 3/4/5, all shim channels packet-demuxed. D4 stays
+    separate, so decode call 2 goes 3 -> 2 LoadPDIs. DDR handoffs are kept,
+    so the math is unchanged and tokens must stay bit-identical.
+
+    Skipped under AWQ: device packing is BF16-only.
+    """
+    if HF_GATE_QUANT == "awq":
+        pytest.skip("device packing is BF16-only; no AWQ c1_merged variant")
+    head, text = _run_gate_and_detokenize(extra_env={
+        "PYTHOC_LLAMA_O_GEMV_FFN_PACK_MODE": "c1_merged",
+    })
+    _assert_paris(head, text, "c1_merged")
+
+
+@pytest.mark.skipif(
+    not _has_tokenizer(),
+    reason=(
+        "HuggingFace cache does not contain {model}; this gate requires "
+        "real weights."
+    ).format(model=HF_MODEL),
+)
 def test_hf_answer_gate_rms_gemv_rope_fold():
     """Gate for the RMS fold into the Q/K/V+RoPE pack (`rms_gemv_rope=rgr1_ddr`).
 
