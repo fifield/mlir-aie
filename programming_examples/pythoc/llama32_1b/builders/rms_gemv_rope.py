@@ -84,6 +84,7 @@ from ._emit import (
     attach_loop_annotation_to_all_scf_for,
     bf16_memref,
     bf16_np,
+    matvec_herd_descriptors,
     rms_gemv_rope_host_arg_types,
 )
 
@@ -236,7 +237,7 @@ def _emit_r_rms_seg() -> None:
 
         # external_func decl + core body.
         rms_fn = external_func(
-            "rms_norm_2048_bf16",
+            f"rms_norm_{EMB_DIM}_bf16",
             inputs=[_BF16_2048_L1, _BF16_2048_L1, _BF16_2048_L1, _BF16_16_L1],
             link_with=KO_RMS,
         )
@@ -284,7 +285,7 @@ def _emit_r_rms_seg() -> None:
             with bds(t0) as bd:
                 with bd[0]:
                     dma_bd(arg1, offset=0, len=EMB_DIM,
-                           dimensions=[(4, 512), (512, 1)])
+                           dimensions=[(EMB_DIM // 512, 512), (512, 1)])
                     EndOp()
             dma_start_task(t0)
             # in1 (MM2S 1) <- arg0 (weight), 4 chunks of 512
@@ -292,7 +293,7 @@ def _emit_r_rms_seg() -> None:
             with bds(t1) as bd:
                 with bd[0]:
                     dma_bd(arg0, offset=0, len=EMB_DIM,
-                           dimensions=[(4, 512), (512, 1)])
+                           dimensions=[(EMB_DIM // 512, 512), (512, 1)])
                     EndOp()
             dma_start_task(t1)
             # out (S2MM 0) -> arg2 (y), 4 chunks of 512
@@ -300,7 +301,7 @@ def _emit_r_rms_seg() -> None:
             with bds(t2) as bd:
                 with bd[0]:
                     dma_bd(arg2, offset=0, len=EMB_DIM,
-                           dimensions=[(4, 512), (512, 1)])
+                           dimensions=[(EMB_DIM // 512, 512), (512, 1)])
                     EndOp()
             dma_start_task(t2)
             dma_await_task(t2)
@@ -429,9 +430,10 @@ def _emit_rope_seg(sym: str, x_arg_idx: int, freqs_arg_idx: int,
             arg_y = args[out_arg_idx]
 
             # rq variant: 4 chunks of 512 dims (for emb_dim=2048).
-            # rk variant: single 512-element contig (for kv_dim=512).
-            if vec_size == EMB_DIM:
-                dims = [(4, 512), (512, 1)]
+            # multi-chunk for vec_size>512 (Q, and kv_dim>512 e.g. Qwen3 kv=1024);
+            # single contig for vec_size==512 (llama kv).
+            if vec_size > 512:
+                dims = [(vec_size // 512, 512), (512, 1)]
             else:
                 dims = [(512, 1)]
 
@@ -505,38 +507,19 @@ def _emit_matvec_seg(sym: str, weight_arg_idx: int, output_arg_idx: int,
     #   8 cols * 128 = 1024 per outer iter, with 2 outer iters -> 2048
     #   (= EMB_DIM).
 
-    if out_rows == KV_DIM:
-        # K/V: 512-element output, 1 outer iter.
-        n_outer = 1
-        y_dims = [(8, 64), (8, 1)]
-        y_len = 64
-        x_repeat_count = 15
-        # Weight stride pattern: 8 mini-rows of 32x512 contig.
-        w_dims = [(8, 131072), (32, 512), (512, 1)]
-        w_len = 131072
-        weight_col_stride = M_TILE * EMB_DIM  # 16_384
-        weight_outer_stride = 0  # unused (only 1 outer)
-        output_col_stride = M_TILE  # 8
-        output_outer_stride = 0  # unused
-    else:
-        # Q: 2048-element output, 2 outer iters.
-        assert out_rows == EMB_DIM
-        n_outer = 2
-        y_dims = [(16, 64), (8, 1)]
-        y_len = 128
-        x_repeat_count = 31
-        # Weight stride pattern: 16 mini-rows of 32x512 contig.
-        w_dims = [(16, 131072), (32, 512), (512, 1)]
-        w_len = 262144
-        weight_col_stride = M_TILE * EMB_DIM  # 16_384
-        # Outer stride spans the row band one core covers per outer iter.
-        # AIR: 8 cores * 8 mini-rows per outer * 2048 emb = 131072 per col
-        # multiplied across cols gives 8 * 16384 = 131072 row-band height
-        # in bf16 elements... actually the dma_bd offset jumps by 2_097_152
-        # = ROWS_PER_OUTER * EMB_DIM = 1024 * 2048.
-        weight_outer_stride = 1024 * EMB_DIM
-        output_col_stride = M_TILE  # 8
-        output_outer_stride = 1024
+    # Output/weight DMA descriptors via the shared herd-descriptor helper.
+    # rms_gemv_rope's GEMV contracts over EMB_DIM (k_dim = EMB_DIM).
+    _d = matvec_herd_descriptors(out_rows, EMB_DIM, N_COLS, M_TILE)
+    n_outer = _d["n_outer"]
+    y_dims = _d["y_dims"]
+    y_len = _d["y_len"]
+    x_repeat_count = _d["x_repeat_count"]
+    w_dims = _d["w_dims"]
+    w_len = _d["w_len"]
+    weight_col_stride = _d["weight_col_stride"]
+    weight_outer_stride = _d["weight_outer_stride"]
+    output_col_stride = _d["output_col_stride"]
+    output_outer_stride = _d["output_outer_stride"]
 
     @device(AIEDevice.npu2, sym_name=sym)
     def _dev():
@@ -826,7 +809,7 @@ def _emit_matvec_seg(sym: str, weight_arg_idx: int, output_arg_idx: int,
                             arg_x,
                             offset=0,
                             len=EMB_DIM,
-                            dimensions=[(4, 512), (512, 1)],
+                            dimensions=[(EMB_DIM // 512, 512), (512, 1)],
                         )
                         EndOp()
                 dma_start_task(x_task)
@@ -1315,7 +1298,7 @@ def _emit_qkv_rope_pack(sym: str = RGR2_PACK_SYM, fold_rms: bool = False) -> Non
                                 arg_x,
                                 offset=0,
                                 len=EMB_DIM,
-                                dimensions=[(4, 512), (512, 1)],
+                                dimensions=[(EMB_DIM // 512, 512), (512, 1)],
                             )
                             EndOp()
                     dma_start_task(x_task)
@@ -1345,8 +1328,8 @@ def _emit_qkv_rope_pack(sym: str = RGR2_PACK_SYM, fold_rms: bool = False) -> Non
                         dma_free_task(t)
 
             def _run_rope(chans, arg_x_rope, arg_f, arg_y_rope, vec_size):
-                if vec_size == EMB_DIM:
-                    dims = [(4, 512), (512, 1)]
+                if vec_size > 512:
+                    dims = [(vec_size // 512, 512), (512, 1)]
                 else:
                     dims = [(512, 1)]
 
@@ -1476,13 +1459,49 @@ def build_rms_gemv_rope_module(emb_dim: int = EMB_DIM,
     2-device dispatcher: standalone RMS followed by one packed Q/K/V+RoPE
     runtime sequence.
     """
-    if emb_dim != EMB_DIM or kv_dim != KV_DIM or head_dim != HEAD_DIM:
-        raise ValueError(
-            f"rms_gemv_rope builder is fixed to emb_dim={EMB_DIM}, "
-            f"kv_dim={KV_DIM}, head_dim={HEAD_DIM}; got "
-            f"emb_dim={emb_dim}, kv_dim={kv_dim}, head_dim={head_dim}."
-        )
-    del n_heads, n_kv_heads
+    # Shape parameterization (backward-compatible). The emit helpers read the
+    # module-level EMB_DIM/KV_DIM/HEAD_DIM/KO_RMS globals; rebind them from the
+    # args for the duration of this build, then restore (see the try/finally on
+    # the emit below). With the llama-3.2-1B defaults this is a strict no-op
+    # (byte-identical IR). The N_COLS=8 herd + K_TILE/M_TILE=8 tiling are fixed,
+    # so the shape must satisfy their divisibility invariants.
+    #
+    # NOTE (decoupled dims): llama has n_heads*head_dim == emb_dim (32*64==2048),
+    # a coincidence. In general the Q-projection output rows = n_heads*head_dim
+    # and K/V output rows = n_kv_heads*head_dim (== kv_dim), both independent of
+    # emb_dim (the GEMV inner/contraction dim K). The matvec-seg tiling + weight
+    # DMA descriptors below still assume the llama coincidences (q_out==emb_dim,
+    # emb==4*512, K==emb); generalizing those is the remaining Qwen3 work.
+    _HERD = N_COLS * M_TILE  # 64 rows per (col, m_tile) band
+    if kv_dim != n_kv_heads * head_dim:
+        raise ValueError(f"kv_dim={kv_dim} must equal n_kv_heads*head_dim="
+                         f"{n_kv_heads*head_dim}")
+    for _nm, _v in (("emb_dim", emb_dim), ("kv_dim", kv_dim),
+                    ("q_out", n_heads * head_dim)):
+        if _v % _HERD:
+            raise ValueError(f"{_nm}={_v} not divisible by N_COLS*M_TILE={_HERD}")
+        if _v % 512:
+            raise ValueError(f"{_nm}={_v} not divisible by the 512-elt broadcast chunk")
+        if _v % head_dim:
+            raise ValueError(f"{_nm}={_v} not divisible by head_dim={head_dim}")
+    # Fail closed on shapes the matvec-seg tiling cannot yet emit CORRECTLY.
+    # The seg currently bakes in three llama coincidences: (1) Q output rows ==
+    # emb_dim (n_heads*head_dim==emb_dim), (2) the weight/X DMA descriptors assume
+    # emb==4*512 and inner-K==emb, (3) a fixed rms_norm_2048 compute kernel. With
+    # the rebind above the size substitutions follow, but Q-output decoupling and
+    # the DMA-descriptor generalization are NOT done -- emitting anyway would yield
+    # silently-wrong IR (e.g. a half-size Q projection). Refuse until generalized.
+    # (Tracked: npu-skillopt-integration-8tz.2 Stage 1.)
+    # Q-projection output rows = n_heads*head_dim (decoupled from emb_dim for GQA;
+    # they coincide for llama). The matvec-seg descriptors are now formula-driven
+    # (see _emit_matvec_seg), so q_out != emb_dim is supported.
+    q_out = n_heads * head_dim
+    _saved_shape = (EMB_DIM, KV_DIM, HEAD_DIM, KO_RMS)
+    globals()["EMB_DIM"] = emb_dim
+    globals()["KV_DIM"] = kv_dim
+    globals()["HEAD_DIM"] = head_dim
+    globals()["KO_RMS"] = f"rms_norm_{emb_dim}_bf16.o"
+    del n_kv_heads
 
     pack_mode = (pack_mode or "none").strip()
     valid_pack_modes = {"none", "rgr2_ddr", "rgr1_ddr"}
@@ -1505,7 +1524,7 @@ def build_rms_gemv_rope_module(emb_dim: int = EMB_DIM,
                            vec_size=KV_DIM)
             _emit_rope_seg("rq_rope_seg",
                            x_arg_idx=4, freqs_arg_idx=9, out_arg_idx=11,
-                           vec_size=EMB_DIM)
+                           vec_size=q_out)
             _emit_matvec_seg("v_matvec_bf16_0",
                              weight_arg_idx=7, output_arg_idx=8,
                              out_rows=KV_DIM)
@@ -1530,7 +1549,10 @@ def build_rms_gemv_rope_module(emb_dim: int = EMB_DIM,
         module = ctx.module
         attach_loop_annotation_to_all_scf_for(module)
 
-    return str(module)
+    result = str(module)
+    globals()["EMB_DIM"], globals()["KV_DIM"], globals()["HEAD_DIM"], \
+        globals()["KO_RMS"] = _saved_shape
+    return result
 
 
 # ---------------------------------------------------------------------------

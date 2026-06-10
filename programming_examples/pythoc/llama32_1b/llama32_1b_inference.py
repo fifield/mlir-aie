@@ -938,7 +938,9 @@ def build_session(args) -> Session:
 
         from transformers import AutoTokenizer
 
-        tokenizer = AutoTokenizer.from_pretrained(args.awq_weights)
+        tokenizer = AutoTokenizer.from_pretrained(
+            args.awq_weights, clean_up_tokenization_spaces=False
+        )
     else:
         if args.hf_model_id:
             model_id = args.hf_model_id
@@ -953,7 +955,9 @@ def build_session(args) -> Session:
 
         from transformers import AutoTokenizer
 
-        tokenizer = AutoTokenizer.from_pretrained(model_id)
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_id, clean_up_tokenization_spaces=False
+        )
 
     rope_lut_bf16 = generate_rope_lut(
         config=config,
