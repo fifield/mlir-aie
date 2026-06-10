@@ -246,6 +246,18 @@ def chain_wt_arm_nq(dummy: i32) -> void:
 
 
 @aie_kernel
+def chain_wt_stamp(eout: ptr[bf16, True], t: i32, nslot: i32) -> void:
+    """Telemetry: stamp [magic, slot count, lock12 value, guard exits] into
+    the tile's finals — drains carry the stuck stage to DDR."""
+    o16: ptr[i16] = eout + t * 64
+    o16[0] = 0x77AA
+    o16[1] = nslot
+    v: i32 = read_tm(0x0001F000 + WT_LOCK * 16)
+    o16[2] = v
+    o16[3] = 0x1234
+
+
+@aie_kernel
 def chain_wt_wait(target: i32) -> void:
     """Spin until lock 12 value >= target (proven micro recipe; cumulative —
     OK below the 63 cap; swap to lock_acquire token once chain validates)."""
