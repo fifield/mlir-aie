@@ -684,7 +684,9 @@ def _run_tiled_mc_inner_merged(merged_entry, elf_name, n_batches, ppc,
             out_bos[batch_idx].sync(_xrt.xclBOSyncDirection.XCL_BO_SYNC_BO_FROM_DEVICE)
             out_data = np.frombuffer(
                 out_bos[batch_idx].map(), dtype=np.uint16, count=output_per_batch
-            ).copy()
+            )
+            # one bf16 conversion per batch instead of one per tile
+            out_f = uint16_to_bf16(out_data)
             batch_start = batch_idx * patches_per_call
             batch_end = min(batch_start + patches_per_call, len(all_patches))
             for j in range(batch_end - batch_start):
@@ -695,7 +697,7 @@ def _run_tiled_mc_inner_merged(merged_entry, elf_name, n_batches, ppc,
                 core = j // ppc
                 slot = j % ppc
                 start = (core * ppc + slot) * output_tile_size
-                tile_out = uint16_to_bf16(out_data[start:start + output_tile_size])
+                tile_out = out_f[start:start + output_tile_size]
                 tile_out = tile_out.reshape(tile_h, tile_w, oc_block)
                 output[oh_s:oh_e, ow_s:ow_e, oc_start:oc_end] = \
                     tile_out[:oh_e - oh_s, :ow_e - ow_s, :actual_oc]
