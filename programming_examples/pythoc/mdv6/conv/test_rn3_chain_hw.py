@@ -67,7 +67,8 @@ def main():
     weights = np.concatenate(([s1, s1, s2, s2])[: 2 * N_ITERS])
 
     runner = ResidentXCLBinRunner(xclbin, insts)
-    res = runner.run(img_u16.copy(), weights, bo_key="chain", output_indices={0})
+    res = runner.run(img_u16.copy(), weights, np.zeros(IMG_ELEMS, np.uint16),
+                     bo_key="chain", output_indices={0}, inout_indices={0})
     out = bf16_u16_to_f32(res[0]).reshape(IMG_H, IMG, IC)[PAD:PAD+40, PAD:PAD+40, :]
 
     ref = x0
