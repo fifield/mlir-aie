@@ -29,6 +29,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from aie.iron import Buffer, ObjectFifo, Program, Runtime, Worker
+from aie.iron.controlflow import range_
 from aie.iron.device import NPU2
 from aie.iron.pythoc import PythocKernel
 from aie.helpers.taplib import TensorAccessPattern
@@ -58,8 +59,11 @@ WSLOT = 16 * 48 * 9 + 32             # 6944 u16
 N_WSLOTS = 6                         # per tile-iteration (3 conv1 + 3 conv2)
 IMG_ELEMS = IMG_H * IMG * IC
 
-TILES_PER_COL = 8
-WORKER_TILES = (2, 2, 2, 2)
+# 6 tile rows per column (interior 0..4 + one junk row, 3 workers); compute on
+# the junk tile is skipped on-core, and tiles 6..7 are no longer DMA'd at all.
+TILES_PER_COL = 6
+WORKER_TILES = (2, 2, 2)
+N_WORKERS = len(WORKER_TILES)
 
 
 def rn3_pair_vector_chain(dev=None, n_iters: int = 2, stack_size: int = 4096, n_cols: int = GRID, stages: int = 4, linear: int = 0, sep_out: int = 0):
@@ -101,42 +105,43 @@ def rn3_pair_vector_chain(dev=None, n_iters: int = 2, stack_size: int = 4096, n_
     workers = []
     col_in, col_out, col_wt = [], [], []
 
-    def core_fn(a, w, o, scratch, kc1, km, kc2, kr, kwp, kc2r, n_tiles, iters, base_row, gcol):
-        it = 0
-        while it < iters:
+    def core_fn(a, w, o, scratch, kc1, km, kc2r, n_tiles, iters, base_row, gcol):
+        # range_ = runtime loop; a python while would unroll all iterations
+        # and overflow core program memory at n_iters=12
+        for it in range_(iters):
             ein = a.acquire(1)
             eout = o.acquire(1)
             t = 0
             while t < 2:
+                # tiles at grid row >= GRID are junk rows: keep the uniform
+                # weight-FIFO consumption but skip their compute
+                real = t < n_tiles and base_row + t < GRID
                 mb = 0
                 while mb < 3:
                     ew = w.acquire(1)
-                    if t < n_tiles and stages >= 1 and stages < 5:
+                    if real and stages >= 1 and stages < 5:
                         kc1(ein, ew, scratch, mb, t)
-                    if t < n_tiles and stages == 7:
-                        kwp(ew, eout, mb, t)
+                    if real and stages == 7:
+                        kc2r(ew, eout, mb, t)  # wt probe wired via kc2r slot
                     w.release(1)
                     mb = mb + 1
-                if t < n_tiles and stages >= 2 and stages < 5:
+                if real and stages >= 2 and stages < 5:
                     km(scratch, (base_row + t) * 8, gcol)
                 ob = 0
                 while ob < 3:
                     ew = w.acquire(1)
-                    if t < n_tiles and stages == 3:
-                        kc2(scratch, ew, eout, ob, t)
-                    if t < n_tiles and stages == 4:
+                    if real and stages == 4:
                         kc2r(scratch, ew, eout, ein, ob, t)
-                    if t < n_tiles and stages == 6:
-                        kwp(ew, eout, ob, t)
+                    if real and stages == 6:
+                        kc2r(ew, eout, ob, t)  # wt probe wired via kc2r slot
                     w.release(1)
                     ob = ob + 1
                 t = t + 1
             a.release(1)
             o.release(1)
-            it = it + 1
 
     for c in range(n_cols):
-        fin = ObjectFifo(np.ndarray[(4 * 20 * 12 * IC,), np.dtype[np.uint16]], depth=1, name=f"ch_in_{c}")
+        fin = ObjectFifo(np.ndarray[(N_WORKERS * 20 * 12 * IC,), np.dtype[np.uint16]], depth=1, name=f"ch_in_{c}")
         fout = ObjectFifo(final_ty(TILES_PER_COL), depth=1, name=f"ch_out_{c}")
         fwt = ObjectFifo(wslot_ty, depth=1, name=f"ch_wt_{c}")
 
@@ -148,9 +153,9 @@ def rn3_pair_vector_chain(dev=None, n_iters: int = 2, stack_size: int = 4096, n_
             base_rows.append(acc)
             acc += nt
         in_sp = fin.cons().split(offsets=p_off, obj_types=[patch_ty(n) for n in WORKER_TILES],
-                                 depths=[1] * 4, names=[f"ch_in_{c}_{i}" for i in range(4)])
+                                 depths=[1] * N_WORKERS, names=[f"ch_in_{c}_{i}" for i in range(N_WORKERS)])
         out_j = fout.prod().join(offsets=f_off, obj_types=[final_ty(n) for n in WORKER_TILES],
-                                 depths=[1] * 4, names=[f"ch_out_{c}_{i}" for i in range(4)])
+                                 depths=[1] * N_WORKERS, names=[f"ch_out_{c}_{i}" for i in range(N_WORKERS)])
 
         col_in.append(fin)
         col_out.append(fout)
@@ -158,11 +163,13 @@ def rn3_pair_vector_chain(dev=None, n_iters: int = 2, stack_size: int = 4096, n_
 
         for i, nt in enumerate(WORKER_TILES):
             scratch = Buffer(scratch_ty, name=f"ch_scr_{c}_{i}")
-            kc1, km, kc2, kr, kwp, kc2r = kernel_sets[nt]
+            kc1, km, kc2, kr, kwp, kc2r_full = kernel_sets[nt]
+            # link only the kernels the selected stage actually calls
+            kc2r = kwp if stages in (6, 7) else kc2r_full
             workers.append(Worker(
                 core_fn,
                 [in_sp[i].cons(), fwt.cons(), out_j[i].prod(),
-                 scratch, kc1, km, kc2, kr, kwp, kc2r, nt, n_iters, base_rows[i], 8 * c],
+                 scratch, kc1, km, kc2r, nt, n_iters, base_rows[i], 8 * c],
                 stack_size=stack_size,
             ))
 
@@ -174,7 +181,7 @@ def rn3_pair_vector_chain(dev=None, n_iters: int = 2, stack_size: int = 4096, n_
             tg = rt.task_group()
             for c in range(n_cols):
                 in_tap = (TensorAccessPattern((IMG_ELEMS,), offset=0,
-                          sizes=[1, 4 * 20 * 12 * IC], strides=[0, 1]) if linear else
+                          sizes=[1, N_WORKERS * 20 * 12 * IC], strides=[0, 1]) if linear else
                           TensorAccessPattern((IMG_ELEMS,), offset=8 * c * IC,
                           sizes=[TILES_PER_COL // 2, 20, 12, IC],
                           strides=[16 * IMG * IC, IMG * IC, IC, 1]))
