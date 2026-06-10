@@ -3805,9 +3805,13 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
     a second W chain (MM2S2/S2MM2) -- call 2 = ONE configure.
 
     Stages: O / add1 / gate / up / swiglu [/ down / add2].
-    Packet IDs: matvec W/x and ALL outputs = 1, add = 8, swiglu = 12,
-    down = 13 (mask-clean: {8,12} excl 13 at row1; {8,12,13} = 8..15 at row2;
-    {12,13} exact at row3; 13 exact at row4).
+    Packet IDs are DISTINCT SINGLE BITS so no two roles can alias under any
+    subset mask the pathfinder picks: matvec W/x = 1, add = 2, swiglu = 4,
+    down = 8; ALL outputs converge to the shim on id 1 (no demux needed).
+    (Earlier {8,12,13} aliased: on shared shim ports the router emitted
+    rule(mask=27, val=8) which drops bit 2, merging add=8 and swiglu=12, so
+    col-0's add input -- the only column also carrying the X broadcast --
+    starved. Single-bit ids force the mask to include each role's bit.)
     """
     W_CH, A0_CH, SG_CH = 60, 61, 62                     # MM2S 0 demux
     X_CH, A1_CH, SU_CH = 64, 65, 66                     # MM2S 1 demux
@@ -3844,6 +3848,8 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
         add_tiles = [tile(c, 3) for c in range(N_COLS)]
         sw_tiles = [tile(c, 4) for c in range(N_COLS)]
         dn_tiles = [tile(c, 5) for c in range(N_COLS)] if with_down else None
+        import os as _os
+        _xcol = int(_os.environ.get("PYTHOC_C2_XCOL", "0"))  # X-broadcast src col
 
         mem_locks = {}
         for col in reversed(range(N_COLS)):
@@ -4258,18 +4264,18 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
                 dests={"dest": mem_tiles[col], "port": WireBundle.DMA, "channel": 0},
             )
             packetflow(
-                pkt_id=8,
+                pkt_id=2,
                 source=shim_tiles[col], source_port=WireBundle.DMA, source_channel=0,
                 dests={"dest": add_tiles[col], "port": WireBundle.DMA, "channel": 0},
             )
             packetflow(
-                pkt_id=12,
+                pkt_id=4,
                 source=shim_tiles[col], source_port=WireBundle.DMA, source_channel=0,
                 dests={"dest": sw_tiles[col], "port": WireBundle.DMA, "channel": 0},
             )
             if with_down:
                 packetflow(
-                    pkt_id=13,
+                    pkt_id=8,
                     source=shim_tiles[col], source_port=WireBundle.DMA,
                     source_channel=0,
                     dests={"dest": mem_tiles[col], "port": WireBundle.DMA,
@@ -4277,25 +4283,25 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
                 )
         packetflow(
             pkt_id=1,
-            source=shim_tiles[0], source_port=WireBundle.DMA, source_channel=1,
+            source=shim_tiles[_xcol], source_port=WireBundle.DMA, source_channel=1,
             dests=[{"dest": mat_tiles[c], "port": WireBundle.DMA, "channel": 0}
                    for c in range(N_COLS)],
         )
         if with_down:
             packetflow(
-                pkt_id=13,
+                pkt_id=8,
                 source=shim_tiles[0], source_port=WireBundle.DMA, source_channel=1,
                 dests=[{"dest": dn_tiles[c], "port": WireBundle.DMA, "channel": 0}
                        for c in range(N_COLS)],
             )
         for col in range(N_COLS):
             packetflow(
-                pkt_id=8,
+                pkt_id=2,
                 source=shim_tiles[col], source_port=WireBundle.DMA, source_channel=1,
                 dests={"dest": add_tiles[col], "port": WireBundle.DMA, "channel": 1},
             )
             packetflow(
-                pkt_id=12,
+                pkt_id=4,
                 source=shim_tiles[col], source_port=WireBundle.DMA, source_channel=1,
                 dests={"dest": sw_tiles[col], "port": WireBundle.DMA, "channel": 1},
             )
@@ -4354,7 +4360,7 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
                 shim_dma_allocation(f"air_channel_{DO_CH}_{col}",
                                     shim_tiles[col], DMAChannelDir.S2MM, 0)
         shim_dma_allocation(f"air_channel_{X_CH}",
-                            shim_tiles[0], DMAChannelDir.MM2S, 1)
+                            shim_tiles[_xcol], DMAChannelDir.MM2S, 1)
         if with_down:
             shim_dma_allocation(f"air_channel_{DX_CH}",
                                 shim_tiles[0], DMAChannelDir.MM2S, 1)
@@ -4545,7 +4551,7 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
                 return
             # 2: add1   proj + x_resid -> res1
             _eltwise_wave(A0_CH, A1_CH, AO_CH, args[2], args[3], args[4],
-                          ADD_CHUNK, [(ADD_CHUNK, 1)], 8)
+                          ADD_CHUNK, [(ADD_CHUNK, 1)], 2)
             if _n_stages < 3:
                 return
             # 3/4: gate, up (rms fused on-core from [res1|norm_w])
@@ -4557,14 +4563,14 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
                 return
             # 5: swiglu  SiLU(gate) * up -> swiglu
             _eltwise_wave(SG_CH, SU_CH, SO_CH, args[8], args[10], args[11],
-                          SWIGLU_CHUNK, [(2, 512), (512, 1)], 12)
+                          SWIGLU_CHUNK, [(2, 512), (512, 1)], 4)
             if not with_down or _n_stages < 6:
                 return
             # 6: down  wdown x swiglu -> down
             def _down_x(bd):
                 with bd[0]:
                     dma_bd(args[11], offset=0, len=HIDDEN_DIM,
-                           dimensions=[(16, 512), (512, 1)], packet=(0, 13))
+                           dimensions=[(16, 512), (512, 1)], packet=(0, 8))
                     EndOp()
             dx_task = _x_once(f"air_channel_{DX_CH}", _down_x)
             for outer in range(d_n_outer):
@@ -4576,7 +4582,7 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
                             dma_bd(
                                 args[12],
                                 offset=outer * d_w_outer_stride + col * d_w_col_stride,
-                                len=w_len, dimensions=w_dims, packet=(0, 13))
+                                len=w_len, dimensions=w_dims, packet=(0, 8))
                             EndOp()
                     dma_start_task(t)
                     dw_tasks.append(t)
@@ -4598,7 +4604,7 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
             dma_free_task(dx_task)
             # 7: add2   down + res1 -> output
             _eltwise_wave(A0_CH, A1_CH, AO_CH, args[13], args[4], args[14],
-                          ADD_CHUNK, [(ADD_CHUNK, 1)], 8)
+                          ADD_CHUNK, [(ADD_CHUNK, 1)], 2)
 
 
 # ---------------------------------------------------------------------------
