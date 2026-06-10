@@ -547,12 +547,24 @@ IR-clean (c2_merged = 1 LoadPDI). Two findings:
      *not* what unblocked the deadlock; the output-id fix was. (c2_merged
      keeps the old broadcast: its mem channels 2/3 hold the down chains.)
 
-   **C2 is now functionally complete:** `c2_merged` = decode call 2 in ONE
-   device / ONE `aiex.configure` = **1 LoadPDI** (was 3). Per-token decode
-   ≈ call1(1) + CPU attn + call2(1) + lm_head(1). ~87 ms/token (perf-neutral;
-   the win is structural). Reproducer `tools/test_c2_add_starve.py` now reports
-   no starvation. Still behind the pack flag pending a perf/A-B pass before
-   making it default.
+   **C2 is now functionally complete and the BF16 default (2026-06-10):**
+   `c2_merged` = decode call 2 in ONE device / ONE `aiex.configure` =
+   **1 LoadPDI** (was 3). Per-token BF16 decode ≈ call1(1) + CPU attn +
+   call2(1) + lm_head(1) ≈ **~49 LoadPDIs/token** (was ~65 at the Path A
+   floor, ~104 pre-C1). ~83 ms/token, bit-exact (hf-gate 9/9). Default set in
+   `aie_ir_gen.py` (`_O_GEMV_FFN_PACK_DEFAULT = "c2_merged"`); step back with
+   `PYTHOC_LLAMA_O_GEMV_FFN_PACK_MODE=d1d3d4_rms|d1d3d4|none`.
+
+   **AWQ is NOT yet collapsed.** `builders/o_gemv_ffn_awq.py` tops out at
+   `d1d3d4_rms` (3 devices, the Path A floor) — it has no c1/c2. Porting the
+   collapse is separate work: the AWQ matvec dequants uint4 weights with
+   per-group scales/zeros, so its per-matvec input streams, L1 buffers and
+   mem-tile staging differ from the BF16 matvec. The C2 *concepts* carry over
+   directly — reuse one matvec core across O/gate/up waves, fold RMS into
+   gate/up, distinct shim-S2MM0 output packet ids (the bug that blocked BF16
+   C2 will bite AWQ identically), per-column mem-tile activation — but the
+   row-map and wave bodies must be rebuilt against the AWQ kernels. AWQ
+   default stays `d1d3d4_rms` until then.
 
 ### Retraction (2026-06-10): minimal stale-master reproducers were invalid
 
