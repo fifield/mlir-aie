@@ -476,9 +476,10 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
     from kernels.rn3_chain_pythoc import WT_BD, WT_LOCK, DMA_BD_BASE, DMA_S2MM_1_START_QUEUE
     wt_globals = dict(KERNEL_EXTRA_GLOBALS,
                       WT_BD=WT_BD, WT_LOCK=WT_LOCK, WT_BUF_ADDR=WT_BUF_ADDR,
+                      WT_SLOT_I32=SLOT_I32,
                       DMA_BD_BASE=DMA_BD_BASE,
                       DMA_S2MM_1_START_QUEUE=DMA_S2MM_1_START_QUEUE)
-    karm = PythocKernel(chain_wt_arm, [np.int32], extra_globals=wt_globals, helpers=[])
+    karm = PythocKernel(chain_wt_arm, [], extra_globals=wt_globals, helpers=[])
     kwait = PythocKernel(chain_wt_wait, [], extra_globals=wt_globals, helpers=[])
 
     workers, col_in, col_out, wbufs = [], [], [], []
@@ -491,7 +492,7 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
                 mb = 0
                 while mb < N_BLK:
                     if compute:
-                        arm(SLOT_I32)
+                        arm()
                         if compute < 3:
                             wait()
                         if real and compute == 1:
@@ -502,7 +503,7 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
                 ob = 0
                 while ob < N_BLK:
                     if compute:
-                        arm(SLOT_I32)
+                        arm()
                         if compute < 3:
                             wait()
                         if real and compute == 1:
