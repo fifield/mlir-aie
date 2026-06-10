@@ -455,7 +455,7 @@ Staged, each bit-exact behind its own pack flag, default `d1d3d4_rms` untouched:
 |---|---|---|---|
 | C1 | merge D1+D3 -> one device: O/gate/up on reused matvec-A (row2), add1 (row3), swiglu (row4), rms (row5 col0); DDR intermediates; keep D4 separate | 3 -> 2 | bit-exact |
 | C2 | fold D4 (down + add2) into the same device: down on matvec-B (row3 -> needs relayout; add1/add2 reuse one add core) | 2 -> 1 | bit-exact |
-| C3 | drop DDR handoffs for the on-chip intermediates (proj/res1/normed2/gate/up/swiglu) -> core-to-core / L2 | 1 | bit-exact |
+| C3 | drop DDR handoffs for the on-chip intermediates (proj/res1/normed2/gate/up/swiglu) -> core-to-core / L2 — scoped 2026-06-10, see "C3 build plan" below | 1 | bit-exact per sub-step |
 
 ### C1 implementation spec (ready to build in a fresh session)
 
@@ -657,3 +657,85 @@ per-core output packet ids are the usual suspects. Budget several build/run iter
 Open implementation detail: row-1 mem-tile DMA channel budget when one column's
 mem tile stages weights for multiple sequential matvec waves (time-shared, but
 the @memtile_dma BD chains are compile-fixed -- may need a wave-agnostic chain).
+
+### C3 build plan (scoped 2026-06-10) — drop DDR handoffs inside c2_merged
+
+C1/C2 left every intermediate round-tripping DDR between waves as a deliberate
+safety net. C3 removes those round-trips **inside the single c2_merged device**.
+Two things changed since the original C3 scoping docs (RES1_CHAINING_SCOPE.md,
+L2_CROSS_COLUMN_ROUTING_SCOPE.md) were written, and they reshape the work:
+
+1. **Persistence is moot.** Those docs targeted the multi-PDI `d1d3d4` pipeline,
+   so cross-PDI mem-tile survival was the hard part. c2_merged is ONE device —
+   every handoff is intra-PDI. The proven L2-persistence machinery is no longer
+   needed; only the routing + ordering problems remain.
+2. **The bandwidth payoff is rounding error.** Intermediate DDR traffic is
+   ~136 KB/layer ≈ 2.2 MB/token (proj 8K, res1 16K, norm_w 8K, gate 32K, up
+   32K, swiglu 32K, down 8K). Weight streaming is ~2 GB/token BF16 (~0.5 GB
+   AWQ). C3 saves <0.1% of bytes. **The real payoff is (a) host work — fewer
+   per-stage tasks/awaits/barriers, ~25 await barriers/layer; (b) the
+   residency machinery for the 16-layer loop and call-1 collapse (a layer
+   loop in one runtime_sequence is impossible while every stage re-stages DDR
+   buffers).**
+
+#### Handoff inventory (c2_merged, host arg indices)
+
+| # | intermediate | producer (partition) | consumer (partition) | shape | class |
+|---|---|---|---|---|---|
+| H1 | proj a2 | mat y col-stride 8, outer 1024 | add1 in0 contig c*256 | 2048 | 8→8 permutation |
+| H2 | res1 a4 → gate/up X | add out contig c*256 | full-vec broadcast (×2 waves) | 2048 | 8→1 gather + 1→8 bcast |
+| H2b | res1 a4 → add2 in1 | add out contig c*256 | add in1 contig c*256 | 2048 | **same tile, same slice** |
+| H3/H4 | gate a8 / up a10 | mat y col-stride 8 | swiglu in contig c*1024 | 8192 | 8→8 permutation |
+| H5 | swiglu a11 → down X | sw out contig c*1024 | full-vec broadcast | 8192 | 8→1 gather + 1→8 bcast |
+| H6 | down a13 | dn y col-stride 2, outer 256 | add2 in0 contig c*256 | 2048 | 8→8 permutation |
+
+Mem tiles have no E/W ports, so all cross-column legs detour via shim-lateral
+(proven, `test_normed2_broadcast.py`) or the compute rows. **Permutations
+(H1/H3/H4/H6) stay on DDR** — DDR reconciles any partition for free via strided
+BD dims, the bytes are noise, and an 8→8 on-chip shuffle is the §11.2 hardest
+case for zero real win. C3 targets the same-tile and broadcast legs only.
+
+#### Free resources in c2_merged (the budget)
+
+- mem tiles: MM2S 4/5 + S2MM 4/5 (W/y on 0/1, down W/y on 2/3); odd ch ⇒ BD 24–47
+- compute tiles: one MM2S1 each (mat/add/sw/dn)
+- shim: S2MM1 free; pkt ids in use: in 1/2/4/8/16, out 1/5/6/7 (5-bit max 31; remaining single bits exhausted; pairs must obey mask-merge rules)
+
+#### Sub-steps, ordered (each behind a flag, hf-gate bit-exact, default off; cache delete first)
+
+- **C3.0 — bound it. DONE (2026-06-10): C3's latency ceiling is ~1.2 ms/token.**
+  Measured with `tools/profile_c30.py` (wraps `load_and_run` + cpu attn with
+  timers) + `tools/c30_build_stage_elves.py` / `run_c30_stage_timing.sh`
+  (rebuild ogf at PYTHOC_C2_STAGES=1..7, stash + time each; core compiles
+  cached so each variant builds in 4 s). BF16, 80 ms/token: ogf 49.3, rgr
+  14.2, lm_head 13.0, cpu_attn 3.0 ms. Per-stage increments (ms/token, 16
+  layers): O 12.7, **add1 0.24**, gate 11.7, up 12.3, **swiglu 0.99**, down
+  12.5, **add2 ≈0** (−1.0, noise ±1). gate/up/down sit at the weight-stream
+  floor (~536 MB / ~45 GB/s ≈ 12 ms — nothing for C3 there). The eltwise
+  stages C3 would eliminate total **~1.2 ms/token (1.5%)**. The real
+  overhead is per-launch/host: O wave runs 12.7 vs ~3 floor (~10 ms) and rgr
+  14.2 vs ~0.3 floor — launch-count collapse (16-layer loop, attention),
+  not DDR intermediates. **Decision: skip C3.4/C3.5 (probe not worth it);
+  do C3.1–C3.3 only as cheap residency steps; jump to attention/loop.**
+- **C3.1 — up-wave xp reuse.** Gate and up receive the IDENTICAL packed
+  [res1|norm_w]; mat core is already 2× unrolled. Skip the up-wave delivery +
+  rms (normed unchanged): drop BD slot 3 (ring O/EMB → gate/2EMB), skip
+  x-locks + rms in wave 2, drop the up-wave X tasks. `PYTHOC_C3_XREUSE`. ≤1 d.
+- **C3.2 — res1 resident for add2 (H2b).** Same tile, same 256-slice. Add
+  `res1_keep` L1 buf; add core 2× unroll: wave1 copies in1→keep, wave2 reads
+  keep; in1 BD chain alternates DDR/skip. Drops 4 KB + 8 tasks. `PYTHOC_C3_RES1KEEP`. ≤1 d.
+- **C3.3 — port `_memx` to c2_merged** on mem ch 4/5 (down owns 2/3; bd_id
+  pool 24–47 collision check). Frees shim MM2S1 of the broadcast; prereq for
+  C3.4. 1 d.
+- **C3.4 — res1 gather→L2→broadcast (H2).** The only on-chip cross-column leg
+  worth doing; needs ORDERED 8→1 gather into mem[0] (single S2MM4 BD chain =
+  fixed slot order vs arbitrary col completion; producers are add MM2S1,
+  free). Probe ordering (credit ring / col-order pacing) standalone first.
+  Then broadcast packed X from mem[0] L2 — lock-synced, NOT lock-free (n2l2's
+  count-255 race is the lesson). DDR write stays (output unchanged). Gated:
+  probe fails ⇒ wontfix. 3–5 d. H5 (16 KB) only after H2 works; same shape.
+- **C3.5 — permutations:** stay on DDR (see above), wontfix.
+- **AWQ port** after C3.1–3 (call shape identical; same flags), then defaults.
+
+**Recommended:** C3.0–C3.3 (~3 days, low risk). Treat C3.4 as a probe; reassess
+against on-NPU attention (the bigger lever) after C3.0 numbers.
