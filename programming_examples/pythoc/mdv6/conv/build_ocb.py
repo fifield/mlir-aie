@@ -80,7 +80,11 @@ _LAYERS = {
     "aconv19":     (32, 4, 4, 96, 8, 16, 3, 2, 1,  4, 96, 8),
     # aconv5 (out 40×40, ic=96, oc=192) at oc_block=8 has 24 OCBs × ppc=4
     # = 96 iter → compile fails. oc_block=16 would still be 12×4=48 iter.
-    # oc_block=24 doesn't align to 8-wide SIMD. Skip OCB for aconv5.
+    # oc_block=24 doesn't align to 8-wide SIMD. Full-layer OCB infeasible —
+    # instead build a HALF-layer ELF (n_ocb=6 covers 96 of 192 channels,
+    # 6×4=24 iter, same as aconv16) and dispatch it twice via the chunked
+    # OCB path in run_tiled_mc (n_chunks=2): 24 launches → 2.
+    "aconv5h":     (32, 4, 4, 96, 16, 6, 3, 2, 4,  4, 96, 16),
 
     # ---- diagnostic-only ----
     # re4_rn3 was the Phase E shipped config that had a silent oc_block
