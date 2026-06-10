@@ -182,7 +182,8 @@ def run_rn3_chain_raster(geo: str, inp_hwc: torch.Tensor, weight_pairs) -> torch
     key = (geo, "raster") + tuple(id(a) for pr in weight_pairs for a in pr)
     cached = _WEIGHT_CACHE.get(key)
     if cached is None:
-        blocks = [_pack_geo_iter(w1, w2, ic, p["WSLOT"], p["N_BLK"])
+        # one slot block per round (TPR rounds per iter consume identical slots)
+        blocks = [np.tile(_pack_geo_iter(w1, w2, ic, p["WSLOT"], p["N_BLK"]), p["TPR"])
                   for w1, w2 in weight_pairs]
         cached = (np.concatenate(blocks), list(weight_pairs))
         _WEIGHT_CACHE[key] = cached
