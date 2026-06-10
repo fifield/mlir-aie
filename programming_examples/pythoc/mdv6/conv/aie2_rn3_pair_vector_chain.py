@@ -38,7 +38,10 @@ from kernels.rn3_chain_pythoc import (
     chain_conv1_bf16,
     chain_mask_bf16,
     chain_conv2_bf16,
+    chain_conv2res_bf16,
     chain_residual_bf16,
+    chain_wtprobe_bf16,
+    _store_bn_silu_res_4x8_rows,
 )
 
 IC = 48
@@ -59,7 +62,7 @@ TILES_PER_COL = 8
 WORKER_TILES = (2, 2, 2, 2)
 
 
-def rn3_pair_vector_chain(dev=None, n_iters: int = 2, stack_size: int = 4096, n_cols: int = GRID, stages: int = 4, linear: int = 0):
+def rn3_pair_vector_chain(dev=None, n_iters: int = 2, stack_size: int = 4096, n_cols: int = GRID, stages: int = 4, linear: int = 0, sep_out: int = 0):
     dev = NPU2() if dev is None else dev
 
     def patch_ty(n):
@@ -85,8 +88,12 @@ def rn3_pair_vector_chain(dev=None, n_iters: int = 2, stack_size: int = 4096, n_
                          extra_globals=KERNEL_EXTRA_GLOBALS, helpers=[]),
             PythocKernel(chain_conv2_bf16, [scratch_ty, wslot_ty, final_ty(nt), np.int32, np.int32],
                          extra_globals=KERNEL_EXTRA_GLOBALS, helpers=[]),
-            PythocKernel(chain_residual_bf16, [patch_ty(nt), wslot_ty, final_ty(nt), np.int32, np.int32],
+            PythocKernel(chain_residual_bf16, [patch_ty(nt), final_ty(nt), np.int32, np.int32],
                          extra_globals=KERNEL_EXTRA_GLOBALS, helpers=[]),
+            PythocKernel(chain_wtprobe_bf16, [wslot_ty, final_ty(nt), np.int32, np.int32],
+                         extra_globals=KERNEL_EXTRA_GLOBALS, helpers=[]),
+            PythocKernel(chain_conv2res_bf16, [scratch_ty, wslot_ty, final_ty(nt), patch_ty(nt), np.int32, np.int32],
+                         extra_globals=KERNEL_EXTRA_GLOBALS, helpers=[_store_bn_silu_res_4x8_rows]),
         )
 
     kernel_sets = {2: kernels_for(2)}
@@ -94,7 +101,7 @@ def rn3_pair_vector_chain(dev=None, n_iters: int = 2, stack_size: int = 4096, n_
     workers = []
     col_in, col_out, col_wt = [], [], []
 
-    def core_fn(a, w, o, scratch, kc1, km, kc2, kr, n_tiles, iters, base_row, gcol):
+    def core_fn(a, w, o, scratch, kc1, km, kc2, kr, kwp, kc2r, n_tiles, iters, base_row, gcol):
         it = 0
         while it < iters:
             ein = a.acquire(1)
@@ -106,6 +113,8 @@ def rn3_pair_vector_chain(dev=None, n_iters: int = 2, stack_size: int = 4096, n_
                     ew = w.acquire(1)
                     if t < n_tiles and stages >= 1 and stages < 5:
                         kc1(ein, ew, scratch, mb, t)
+                    if t < n_tiles and stages == 7:
+                        kwp(ew, eout, mb, t)
                     w.release(1)
                     mb = mb + 1
                 if t < n_tiles and stages >= 2 and stages < 5:
@@ -113,10 +122,12 @@ def rn3_pair_vector_chain(dev=None, n_iters: int = 2, stack_size: int = 4096, n_
                 ob = 0
                 while ob < 3:
                     ew = w.acquire(1)
-                    if t < n_tiles and stages >= 3 and stages < 5:
+                    if t < n_tiles and stages == 3:
                         kc2(scratch, ew, eout, ob, t)
-                    if t < n_tiles and stages >= 4 and ob == 2:
-                        kr(ein, ew, eout, 0, t)
+                    if t < n_tiles and stages == 4:
+                        kc2r(scratch, ew, eout, ein, ob, t)
+                    if t < n_tiles and stages == 6:
+                        kwp(ew, eout, ob, t)
                     w.release(1)
                     ob = ob + 1
                 t = t + 1
@@ -147,18 +158,19 @@ def rn3_pair_vector_chain(dev=None, n_iters: int = 2, stack_size: int = 4096, n_
 
         for i, nt in enumerate(WORKER_TILES):
             scratch = Buffer(scratch_ty, name=f"ch_scr_{c}_{i}")
-            kc1, km, kc2, kr = kernel_sets[nt]
+            kc1, km, kc2, kr, kwp, kc2r = kernel_sets[nt]
             workers.append(Worker(
                 core_fn,
                 [in_sp[i].cons(), fwt.cons(), out_j[i].prod(),
-                 scratch, kc1, km, kc2, kr, nt, n_iters, base_rows[i], 8 * c],
+                 scratch, kc1, km, kc2, kr, kwp, kc2r, nt, n_iters, base_rows[i], 8 * c],
                 stack_size=stack_size,
             ))
 
     rt = Runtime()
-    with rt.sequence(img_ty, wt_host_ty) as (IMGB, WT):
+    with rt.sequence(img_ty, wt_host_ty, img_ty) as (IMGB, WT, OUTB):
         rt.start(*workers)
         for it in range(n_iters):
+            drain_buf = OUTB if (sep_out and it == n_iters - 1) else IMGB
             tg = rt.task_group()
             for c in range(n_cols):
                 in_tap = (TensorAccessPattern((IMG_ELEMS,), offset=0,
@@ -168,9 +180,10 @@ def rn3_pair_vector_chain(dev=None, n_iters: int = 2, stack_size: int = 4096, n_
                           strides=[16 * IMG * IC, IMG * IC, IC, 1]))
                 rt.fill(col_in[c].prod(), IMGB, in_tap, task_group=tg)
                 # weights: 6 slots streamed twice (both worker tile passes)
+                # linear one-shot (no iteration/repeat lowering): 12 slots per iter
                 rt.fill(col_wt[c].prod(), WT, TensorAccessPattern(
                     (n_iters * 2 * N_WSLOTS * WSLOT,), offset=it * 2 * N_WSLOTS * WSLOT,
-                    sizes=[2 * N_WSLOTS, WSLOT], strides=[WSLOT, 1]), task_group=tg)
+                    sizes=[1, 2 * N_WSLOTS * WSLOT], strides=[0, 1]), task_group=tg)
                 out_tap = (TensorAccessPattern((IMG_ELEMS,), offset=0,
                            sizes=[1, TILES_PER_COL * TILE * TILE * IC], strides=[0, 1]) if linear else
                            TensorAccessPattern((IMG_ELEMS,), offset=(PAD * IMG + PAD + 8 * c) * IC,
@@ -178,7 +191,7 @@ def rn3_pair_vector_chain(dev=None, n_iters: int = 2, stack_size: int = 4096, n_
                            # (see test_dualtap_micro_hw.py)
                            sizes=[1, TILES_PER_COL, TILE, TILE * IC],
                            strides=[0, 8 * IMG * IC, IMG * IC, 1]))
-                rt.drain(col_out[c].cons(), IMGB, out_tap, task_group=tg, wait=True)
+                rt.drain(col_out[c].cons(), drain_buf, out_tap, task_group=tg, wait=True)
             rt.finish_task_group(tg)
 
     return Program(dev, rt).resolve_program()
