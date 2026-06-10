@@ -496,17 +496,35 @@ IR-clean (c2_merged = 1 LoadPDI). Two findings:
 1. **Inline rms depth bug:** `rms_norm_packed_bf16` (matvec_rms .ll inline)
    deadlocks the core when called inside an `scf.for` wave loop at depth 3;
    unrolling gate/up straight-line (depth 2, as d3) fixes it.
-2. **BLOCKER — stale circuit masters across PDI swap:** c2 runs clean on a
-   blank device (post-timeout) but deadlocks when its PDI follows rgr's:
-   col-1 add starves (`tools/test_c2_rgr_swap.py` + per-col stall probe).
-   At shim (1,0) rgr leaves `West:3 -> East:1` (circuit broadcast tree).
-   c2 routes its x broadcast as a packetflow through slave West:3 but never
-   writes the East:1 master, so the stale fork persists and shunts c2's
-   packets into rgr's parked tree. C1 escaped only because its route tree
-   doesn't overlap. LoadPDI does NOT reset unwritten masters -- the fix is
-   compiler-level (emit clears for unused masters in configured switchboxes,
-   or a reset PDI), i.e. step-6 work arriving early. Until then C2 stays
-   off-default behind its pack flags.
+2. **BLOCKER — c2 deadlocks when its PDI follows rgr's.** `c2_rms` runs
+   bit-clean as a standalone swap on a device reached via timeout-reset
+   (`tools/test_c2_rgr_swap.py`, 3/3) but deadlocks in the full pipeline
+   where rgr's PDI precedes it; per-col stall probe shows col-1's add
+   starving. Working hypothesis was a stale circuit master (rgr leaves
+   `West:3 -> East:1` at shim (1,0); c2 routes x as a packetflow through
+   slave West:3 without writing East:1, so the parked fork shunts c2's
+   packets). **This hypothesis is NOT yet isolated** — see the retraction
+   note below; the minimal reproducers that claimed to prove it were invalid.
+   Until the mechanism is pinned down, C2 stays off-default behind its flags.
+
+### Retraction (2026-06-10): minimal stale-master reproducers were invalid
+
+Two earlier commits (`6eba6697e`, `1962fb23b`) added
+`tools/test_stale_master_repro.py` claiming to isolate the blocker with tiny
+kernel-less passthrough "victim" devices that deadlock after a parking PDI.
+On re-examination those victims **never complete as standalone PDIs on this
+board at all** — they time out 4/4 even following themselves, and the
+absolute-simplest 1-tile shim→core→shim passthrough times out 3/3 standalone,
+while full decode runs fine. So "victim deadlocks after rgr" was confounded:
+the device shape simply never completes here, independent of any predecessor.
+The reproducer file is removed. Why a hand-built minimal IRON passthrough
+fails to dispatch standalone while the production builders' devices succeed is
+an open, separate question (candidate: some init/quiesce step the production
+path emits that the toy omits). The genuine, still-valid signal is the C2
+builder itself: a real-traffic device that completes standalone yet deadlocks
+after rgr in-pipeline (`test_c2_rgr_swap.py`). Isolating the blocker needs a
+*real* device as the victim, or a true blank-device baseline (driver reload /
+`xrt-smi reset`, neither available in this shared session).
 
 **New builder** `_emit_call2_merged(sym="c1_merged")` — ONE `@device` containing
 four core-sets, composed by copying the proven core/mem bodies verbatim from the
