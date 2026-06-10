@@ -38,10 +38,7 @@ from kernels.rep_elan_bf16_pythoc import KERNEL_EXTRA_GLOBALS, _MMUL_HELPERS
 from kernels.rn3_chain_pythoc import (
     chain_conv1_bf16,
     chain_mask_bf16,
-    chain_conv2_bf16,
     chain_conv2res_bf16,
-    chain_residual_bf16,
-    chain_wtprobe_bf16,
     _store_bn_silu_res_4x8_rows,
 )
 
@@ -86,17 +83,11 @@ def rn3_pair_vector_chain(dev=None, n_iters: int = 2, stack_size: int = 4096, n_
 
     def kernels_for(nt):
         return (
-            PythocKernel(chain_conv1_bf16, [patch_ty(nt), wslot_ty, scratch_ty, np.int32, np.int32],
+            PythocKernel(chain_conv1_bf16, [patch_ty(nt), wslot_ty, scratch_ty, np.int32, np.int32, np.int32],
                          extra_globals=KERNEL_EXTRA_GLOBALS, helpers=_MMUL_HELPERS),
-            PythocKernel(chain_mask_bf16, [scratch_ty, np.int32, np.int32],
+            PythocKernel(chain_mask_bf16, [scratch_ty, np.int32, np.int32, np.int32, np.int32],
                          extra_globals=KERNEL_EXTRA_GLOBALS, helpers=[]),
-            PythocKernel(chain_conv2_bf16, [scratch_ty, wslot_ty, final_ty(nt), np.int32, np.int32],
-                         extra_globals=KERNEL_EXTRA_GLOBALS, helpers=[]),
-            PythocKernel(chain_residual_bf16, [patch_ty(nt), final_ty(nt), np.int32, np.int32],
-                         extra_globals=KERNEL_EXTRA_GLOBALS, helpers=[]),
-            PythocKernel(chain_wtprobe_bf16, [wslot_ty, final_ty(nt), np.int32, np.int32],
-                         extra_globals=KERNEL_EXTRA_GLOBALS, helpers=[]),
-            PythocKernel(chain_conv2res_bf16, [scratch_ty, wslot_ty, final_ty(nt), patch_ty(nt), np.int32, np.int32],
+            PythocKernel(chain_conv2res_bf16, [scratch_ty, wslot_ty, final_ty(nt), patch_ty(nt), np.int32, np.int32, np.int32, np.int32, np.int32, np.int32],
                          extra_globals=KERNEL_EXTRA_GLOBALS, helpers=[_store_bn_silu_res_4x8_rows]),
         )
 
@@ -120,20 +111,16 @@ def rn3_pair_vector_chain(dev=None, n_iters: int = 2, stack_size: int = 4096, n_
                 while mb < 3:
                     ew = w.acquire(1)
                     if real and stages >= 1 and stages < 5:
-                        kc1(ein, ew, scratch, mb, t)
-                    if real and stages == 7:
-                        kc2r(ew, eout, mb, t)  # wt probe wired via kc2r slot
+                        kc1(ein, ew, scratch, mb, t, 48)
                     w.release(1)
                     mb = mb + 1
                 if real and stages >= 2 and stages < 5:
-                    km(scratch, (base_row + t) * 8, gcol)
+                    km(scratch, (base_row + t) * 8, gcol, 40, 3)
                 ob = 0
                 while ob < 3:
                     ew = w.acquire(1)
                     if real and stages == 4:
-                        kc2r(scratch, ew, eout, ein, ob, t)
-                    if real and stages == 6:
-                        kc2r(ew, eout, ob, t)  # wt probe wired via kc2r slot
+                        kc2r(scratch, ew, eout, ein, ob, t, 48, (base_row + t) * 8, gcol, 40)
                     w.release(1)
                     ob = ob + 1
                 t = t + 1
@@ -163,9 +150,7 @@ def rn3_pair_vector_chain(dev=None, n_iters: int = 2, stack_size: int = 4096, n_
 
         for i, nt in enumerate(WORKER_TILES):
             scratch = Buffer(scratch_ty, name=f"ch_scr_{c}_{i}")
-            kc1, km, kc2, kr, kwp, kc2r_full = kernel_sets[nt]
-            # link only the kernels the selected stage actually calls
-            kc2r = kwp if stages in (6, 7) else kc2r_full
+            kc1, km, kc2r = kernel_sets[nt]
             workers.append(Worker(
                 core_fn,
                 [in_sp[i].cons(), fwt.cons(), out_j[i].prod(),
