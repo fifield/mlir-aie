@@ -17,6 +17,7 @@ from pythoc.aie import (
     aie_vector, load_v, store_v, vector_add, vector_sub, vector_mul,
     vector_and, vector_cast, vector_extract, broadcast, concat, zeros,
 )
+from pythoc.aie.operations import write_tm, read_tm, lock_acquire
 from pythoc.aie.mmul import acc_to_bf16
 from pythoc.aie.profiling import event0, event1
 
@@ -181,6 +182,38 @@ def _store_bn_silu_res_4x8_rows(
         store_v(output + pos3 * oc + oc_blk * 8, vector_extract(sum32, 24, 8))
     else:
         store_v(output + pos3 * oc + oc_blk * 8, z8)
+
+
+# wt replay: the core arms its own S2MM ch1 into a fixed-address slot buffer
+# (address patched onto the buffer op post-resolve), released on lock WT_LOCK.
+WT_BD = 15
+WT_LOCK = 12              # core lock id; localized acquire id = 48 + 12
+WT_BUF_ADDR = 0xCBC0      # below the 4 KB stack at the top of L1
+DMA_BD_BASE = 0x0001D000
+DMA_S2MM_1_START_QUEUE = 0x0001DE0C
+
+
+@aie_kernel
+def chain_wt_arm(slot_i32: i32) -> void:
+    """Arm S2MM ch1: one weight slot into the fixed L1 buffer; release lock 12."""
+    bd: i32 = DMA_BD_BASE + WT_BD * 32
+    write_tm(((WT_BUF_ADDR // 4) << 14) | slot_i32, bd)
+    write_tm(0, bd + 4)
+    write_tm(0, bd + 8)
+    write_tm(0, bd + 12)
+    write_tm(0, bd + 16)
+    write_tm((1 << 25) | (1 << 18) | (WT_LOCK << 13), bd + 20)
+    write_tm(WT_BD, DMA_S2MM_1_START_QUEUE)
+
+
+@aie_kernel
+def chain_wt_wait(target: i32) -> void:
+    """Spin until lock 12 value >= target (cumulative slot count)."""
+    v: i32 = read_tm(0x0001F000 + WT_LOCK * 16)
+    guard: i32 = 0
+    while v < target and guard < 4000000:
+        v = read_tm(0x0001F000 + WT_LOCK * 16)
+        guard = guard + 1
 
 
 @aie_kernel
