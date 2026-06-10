@@ -39,6 +39,23 @@ def compile_rms_norm(output_dir: Optional[str] = None, verbose: bool = False) ->
     )
 
 
+def compile_rms_norm_1024(output_dir=None, verbose=False):
+    """Compile kernels/rms_norm.py -> rms_norm_1024_bf16.o (emb=1024, e.g. Qwen3-0.6B)."""
+    from pythoc.aie import sqrtf, reduce_add_reassoc, I1024_I1024_ACC2048_bf_mac_conf
+    return compile_pythoc_source(
+        source_code=_read("rms_norm.py"),
+        function_name="rms_norm_1024_bf16",
+        target_arch="aie2p",
+        output_dir=output_dir,
+        verbose=verbose,
+        extra_globals={
+            "sqrtf": sqrtf,
+            "reduce_add_reassoc": reduce_add_reassoc,
+            "I1024_I1024_ACC2048_bf_mac_conf": I1024_I1024_ACC2048_bf_mac_conf,
+        },
+    )
+
+
 def compile_silu_and_mul(output_dir: Optional[str] = None, verbose: bool = False) -> Path:
     """Compile kernels/silu_and_mul.py -> silu_and_mul_bf16.o for aiecc linking."""
     from pythoc.aie import getTanhBf16

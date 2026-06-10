@@ -153,16 +153,28 @@ def create_timeline(processes, threads, events, output_file, title="Trace Timeli
     ax.set_title(title, fontsize=12, weight="bold")
     ax.grid(True, axis="x", alpha=0.3)
 
-    # Add legend for event types (limit to most common)
+    # Aggregate per-event-type cumulative duration (cycles-in-state) and count.
+    # The legend reports % of the trace span, NOT raw event count: a counter
+    # like INSTR_VECTOR fires once per ~1-cycle instruction (huge count, tiny
+    # time), while LOCK_STALL fires rarely but each event spans thousands of
+    # cycles. Count badly misrepresents "where time goes"; cycles-in-state %
+    # is the honest metric and matches the trace_summary.py vec_util/lock_stall
+    # numbers.
+    event_durations = defaultdict(float)
     event_counts = defaultdict(int)
     for interval in intervals:
+        event_durations[interval["name"]] += interval["duration"]
         event_counts[interval["name"]] += 1
 
-    # Show legend for top events
-    top_events = sorted(event_counts.items(), key=lambda x: x[1], reverse=True)[:15]
+    span = time_range if time_range else 1
+    # Rank legend by time occupied (descending), not by count.
+    top_events = sorted(event_durations.items(), key=lambda x: x[1], reverse=True)[:15]
     legend_patches = [
-        mpatches.Patch(color=event_colors[name], label=f"{name} ({count})")
-        for name, count in top_events
+        mpatches.Patch(
+            color=event_colors[name],
+            label=f"{name} ({100 * dur / span:.1f}% of span, n={event_counts[name]})",
+        )
+        for name, dur in top_events
         if name in event_colors
     ]
 
@@ -193,9 +205,9 @@ def create_timeline(processes, threads, events, output_file, title="Trace Timeli
         f"  Duration: {max(i['end'] for i in intervals) - min(i['start'] for i in intervals)} cycles"
     )
 
-    print("\nTop Events:")
-    for name, count in top_events[:10]:
-        print(f"  {name}: {count}")
+    print("\nTop events by cycles-in-state (% of span):")
+    for name, dur in top_events[:10]:
+        print(f"  {name}: {100 * dur / span:.1f}%  ({int(dur)} cy, n={event_counts[name]})")
 
 
 def main():

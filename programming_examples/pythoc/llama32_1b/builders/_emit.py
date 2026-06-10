@@ -59,14 +59,21 @@ def bf16_memref(*shape, memory_space=None):
 # ``run_rms_gemv_rope`` -- see the cached IR's ``aiex.runtime_sequence
 # @rms_gemv_rope(...)`` block for the canonical ordering.
 # ---------------------------------------------------------------------------
-def o_gemv_ffn_host_arg_types(emb_dim: int = 2048, hidden_dim: int = 8192):
+def o_gemv_ffn_host_arg_types(emb_dim: int = 2048, hidden_dim: int = 8192,
+                              q_out: int | None = None):
     """Return the 15 host arg ``np.ndarray`` type specs for o_gemv_ffn.
+
+    ``q_out`` is the O-projection contraction dim (= n_heads*head_dim, the
+    attention output width). For Llama-3.2-1B it coincides with ``emb_dim``
+    (2048); for Qwen3-0.6B it is 2048 while ``emb_dim`` is 1024. When ``None``
+    it defaults to ``emb_dim`` (the llama coincidence), keeping the captured
+    real shapes: Wo[emb,q_out], attn_out[q_out], Wg/Wu[hidden,emb], Wd[emb,hidden].
 
     Layout (matches the cached dispatcher device's
     ``aiex.runtime_sequence @o_gemv_ffn``)::
 
-        arg0  : memref<emb_dim x emb_dim x bf16>      wo (O proj weight)
-        arg1  : memref<emb_dim x bf16>                attn_out
+        arg0  : memref<emb_dim x q_out x bf16>        wo (O proj weight)
+        arg1  : memref<q_out x bf16>                  attn_out
         arg2  : memref<emb_dim x bf16>                proj (intermediate)
         arg3  : memref<emb_dim x bf16>                x_residual
         arg4  : memref<emb_dim x bf16>                res1 (intermediate)
@@ -81,9 +88,11 @@ def o_gemv_ffn_host_arg_types(emb_dim: int = 2048, hidden_dim: int = 8192):
         arg13 : memref<emb_dim x bf16>                down (intermediate)
         arg14 : memref<emb_dim x bf16>                output
     """
+    if q_out is None:
+        q_out = emb_dim
     return [
-        bf16_np(emb_dim, emb_dim),
-        bf16_np(emb_dim),
+        bf16_np(emb_dim, q_out),
+        bf16_np(q_out),
         bf16_np(emb_dim),
         bf16_np(emb_dim),
         bf16_np(emb_dim),
@@ -196,3 +205,45 @@ def attach_loop_annotation_to_all_scf_for(module):
 
     for op in module.body:
         walk(op)
+
+
+def matvec_herd_descriptors(out_rows, k_dim, n_cols, m_tile, rows_per_outer_cap=1024):
+    """Output + weight DMA descriptors for an `n_cols`-column GEMV herd that
+    computes ``[out_rows, k_dim] @ x[k_dim] -> y[out_rows]``, splitting `out_rows`
+    across `n_cols` columns x `m_tile`-row bands and looping `n_outer` times over
+    `rows_per_outer` rows (capped at `rows_per_outer_cap` to bound the per-outer
+    L1 footprint). `k_dim` is the contraction (= the host weight's inner dim and
+    the broadcast-X length).
+
+    Returns a dict of the descriptors the matvec-seg runtime_sequence needs.
+    Verified to reproduce the llama hand-tuned constants exactly:
+      rms_gemv_rope K/V (out=512,k=2048,m=8) -> y_dims=[(8,64),(8,1)], w_dims=[(8,131072),(32,512),(512,1)]
+      rms_gemv_rope Q   (out=2048,k=2048,m=8) -> y_dims=[(16,64),(8,1)], w_len=262144, weight_outer_stride=1024*2048
+    Shapes must satisfy: out_rows % n_outer == 0; rows_per_outer % (n_cols*m_tile) == 0;
+    (m_tile*k_dim) % 512 == 0 (512 = the fixed broadcast chunk).
+    """
+    n_outer = max(1, -(-out_rows // rows_per_outer_cap))  # ceil
+    if out_rows % n_outer:
+        raise ValueError(f"out_rows={out_rows} not divisible into n_outer={n_outer}")
+    rows_per_outer = out_rows // n_outer
+    band = n_cols * m_tile
+    if rows_per_outer % band:
+        raise ValueError(f"rows_per_outer={rows_per_outer} not divisible by n_cols*m_tile={band}")
+    mtile_k = m_tile * k_dim
+    if mtile_k % 512:
+        raise ValueError(f"m_tile*k_dim={mtile_k} not divisible by the 512 broadcast chunk")
+    size_outer = rows_per_outer // band
+    return {
+        "n_outer": n_outer,
+        "rows_per_outer": rows_per_outer,
+        "size_outer": size_outer,
+        "y_len": rows_per_outer // n_cols,
+        "y_dims": [(size_outer, band), (m_tile, 1)],
+        "x_repeat_count": 2 * size_outer - 1,
+        "w_dims": [(size_outer, n_cols * mtile_k), (mtile_k // 512, 512), (512, 1)],
+        "w_len": size_outer * mtile_k,
+        "weight_col_stride": mtile_k,
+        "weight_outer_stride": (rows_per_outer * k_dim) if n_outer > 1 else 0,
+        "output_col_stride": m_tile,
+        "output_outer_stride": rows_per_outer if n_outer > 1 else 0,
+    }
