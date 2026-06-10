@@ -478,12 +478,11 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
                       DMA_BD_BASE=DMA_BD_BASE,
                       DMA_S2MM_1_START_QUEUE=DMA_S2MM_1_START_QUEUE)
     karm = PythocKernel(chain_wt_arm, [np.int32], extra_globals=wt_globals, helpers=[])
-    kwait = PythocKernel(chain_wt_wait, [np.int32], extra_globals=wt_globals, helpers=[])
+    kwait = PythocKernel(chain_wt_wait, [], extra_globals=wt_globals, helpers=[])
 
     workers, col_in, col_out, wbufs = [], [], [], []
 
     def core_fn(a, o, wbuf, scratch, c1, m, c2r, arm, wait, iters, coords):
-        nslot = 0
         for it in range_(iters):
             for (real, grow, gcol) in coords:
                 ein = a.acquire(1)
@@ -491,9 +490,8 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
                 mb = 0
                 while mb < N_BLK:
                     if compute:
-                        nslot = nslot + 1
                         arm(SLOT_I32)
-                        wait(nslot)
+                        wait()
                         if real and compute == 1:
                             c1(ein, wbuf, scratch, mb, 0, IC)
                     mb = mb + 1
@@ -502,9 +500,8 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
                 ob = 0
                 while ob < N_BLK:
                     if compute:
-                        nslot = nslot + 1
                         arm(SLOT_I32)
-                        wait(nslot)
+                        wait()
                         if real and compute == 1:
                             c2r(scratch, wbuf, eout, ein, ob, 0, IC, grow, gcol, GBOUND)
                     ob = ob + 1
