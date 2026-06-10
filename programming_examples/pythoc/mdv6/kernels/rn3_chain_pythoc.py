@@ -184,6 +184,72 @@ def _store_bn_silu_res_4x8_rows(
 
 
 @aie_kernel
+def chain_copy_bf16(
+    src: ptr[bf16, True],
+    dst: ptr[bf16, True],
+    ic: i32,
+) -> void:
+    """Park one x2 tile (8 rows x 12 x ic) in scratch for the rnm epilogue.
+
+    8 rows is all the 1x1 reads; fits the existing chain scratch (no L1
+    growth — the conv planes are dead during the epilogue).
+    """
+    n: i32 = 96 * ic
+    i: i32 = 0
+    while i < n:
+        store_v(dst + i, load_v(src + i, 16))
+        i = i + 16
+
+
+@aie_kernel
+def chain_gemm_bf16(
+    pa: ptr[bf16, True],
+    pb: ptr[bf16, True],
+    weight: ptr[bf16, True],
+    outp: ptr[bf16, True],
+    t: i32,
+    slot: i32,
+    ic: i32,
+) -> void:
+    """rnm epilogue: 1x1 GEMM over concat(cur, x2), one 16-oc slot per call.
+
+    pa = cur tile (12-wide rows, 8 valid cols at offset 2) from the patch
+    FIFO; pb = x2 tile (same layout) shipped through the wt FIFO; out is
+    8x8xic flat (one oc-pass of ic channels), slot picks 16 channels within
+    the pass. Weight slot = [2*(ic/8)][64] mmul blocks for oc 0-7 then 8-15,
+    + bn 16+16.
+    """
+    event0()
+    px2: ptr[bf16] = pb
+    kkh: i32 = ic // 8
+    woff_b: i32 = 2 * kkh * 64
+    bn_w: ptr[bf16] = weight + 2 * ic * 16
+    bn_b: ptr[bf16] = bn_w + 16
+    outt: ptr[bf16] = outp + t * (64 * ic) + slot * 16
+    sp: i32 = 0
+    while sp < 64:
+        A0: aie_vector[bf16, 32] = _build_a32_3x3(pa, sp, 8, 1, 12, ic, 0, 0, 2)
+        acc_a: aie_vector[f32, 32] = _mul_4x8x8_bf16(A0, load_v(weight, 64))
+        acc_b: aie_vector[f32, 32] = _mul_4x8x8_bf16(A0, load_v(weight + woff_b, 64))
+        kk: i32 = 1
+        while kk < kkh:
+            A: aie_vector[bf16, 32] = _build_a32_3x3(pa, sp, 8, 1, 12, ic, kk, 0, 2)
+            acc_a = _mac_4x8x8_bf16(A, load_v(weight + kk * 64, 64), acc_a)
+            acc_b = _mac_4x8x8_bf16(A, load_v(weight + woff_b + kk * 64, 64), acc_b)
+            kk = kk + 1
+        kk = 0
+        while kk < kkh:
+            A2: aie_vector[bf16, 32] = _build_a32_3x3(px2, sp, 8, 1, 12, ic, kk, 0, 2)
+            acc_a = _mac_4x8x8_bf16(A2, load_v(weight + (kkh + kk) * 64, 64), acc_a)
+            acc_b = _mac_4x8x8_bf16(A2, load_v(weight + woff_b + (kkh + kk) * 64, 64), acc_b)
+            kk = kk + 1
+        _store_bn_silu_4x8_rows(acc_to_bf16(acc_a), outt, bn_w, bn_b, sp, 64, ic, 0)
+        _store_bn_silu_4x8_rows(acc_to_bf16(acc_b), outt, bn_w, bn_b, sp, 64, ic, 1)
+        sp = sp + 4
+    event1()
+
+
+@aie_kernel
 def chain_conv2res_bf16(
     scratch: ptr[bf16, True],
     weight: ptr[bf16, True],
