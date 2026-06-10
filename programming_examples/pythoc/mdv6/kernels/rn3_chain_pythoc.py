@@ -188,9 +188,11 @@ def _store_bn_silu_res_4x8_rows(
 # (address patched onto the buffer op post-resolve), released on lock WT_LOCK.
 WT_BD = 15
 WT_LOCK = 12              # core lock id; localized acquire id = 48 + 12
-WT_BUF_ADDR = 0xCBC0      # below the 4 KB stack at the top of L1
-DMA_BD_BASE = 0x0001D000
-DMA_S2MM_1_START_QUEUE = 0x0001DE0C
+WT_BUF_ADDR = 0xD800     # in the free window after iron buffers (cw_out 0xC000+2K)
+# 0x80000-based own-tile alias: bare-micro-proven base. The raw 0x1D000
+# constants sext-lower to 0xFFF9xxxx pointers, which wedge the core.
+DMA_BD_BASE = 0x0009D000
+DMA_S2MM_1_START_QUEUE = 0x0009DE0C
 
 
 @aie_kernel
@@ -209,6 +211,12 @@ def chain_wt_arm() -> void:
     write_tm(0, bd + 16)
     write_tm((1 << 25) | (1 << 18) | (WT_LOCK << 13), bd + 20)
     write_tm(WT_BD, DMA_S2MM_1_START_QUEUE)
+
+
+@aie_kernel
+def chain_wt_arm_nq(dummy: i32) -> void:
+    """Empty probe kernel — isolates kernel-call vs BD-write wedge."""
+    z: i32 = dummy
 
 
 @aie_kernel
