@@ -496,16 +496,34 @@ IR-clean (c2_merged = 1 LoadPDI). Two findings:
 1. **Inline rms depth bug:** `rms_norm_packed_bf16` (matvec_rms .ll inline)
    deadlocks the core when called inside an `scf.for` wave loop at depth 3;
    unrolling gate/up straight-line (depth 2, as d3) fixes it.
-2. **BLOCKER — c2 deadlocks when its PDI follows rgr's.** `c2_rms` runs
-   bit-clean as a standalone swap on a device reached via timeout-reset
-   (`tools/test_c2_rgr_swap.py`, 3/3) but deadlocks in the full pipeline
-   where rgr's PDI precedes it; per-col stall probe shows col-1's add
-   starving. Working hypothesis was a stale circuit master (rgr leaves
-   `West:3 -> East:1` at shim (1,0); c2 routes x as a packetflow through
-   slave West:3 without writing East:1, so the parked fork shunts c2's
-   packets). **This hypothesis is NOT yet isolated** — see the retraction
-   note below; the minimal reproducers that claimed to prove it were invalid.
-   Until the mechanism is pinned down, C2 stays off-default behind its flags.
+2. **BLOCKER — c2 add1 wave starves on the X-broadcast fan's extreme
+   columns (ISOLATED 2026-06-10).** The deadlock is c2-internal, not a
+   cross-PDI stale-master effect (the earlier stale-master hypothesis is
+   withdrawn — see retraction below). Reproducer `tools/test_c2_add_starve.py`
+   + per-col res1 readback: the O matvec wave (proj) completes on all 8
+   columns, but the following add1 eltwise wave (proj + x_resid -> res1)
+   never produces output on specific columns, stalling everything downstream.
+   The starved columns track the **X-broadcast source column**
+   (`PYTHOC_C2_XCOL`), deterministically (3/3 each):
+
+   | XCOL | broadcast fan | starved add1 cols |
+   |---|---|---|
+   | 0 | east-going | **0** |
+   | 3 | both ways | **0 and 7** |
+   | 7 | west-going | none (add1 ok; a later stage still stalls) |
+
+   So the matvec X-broadcast transits the shim row on the **same MM2S1 lane**
+   that each column's add1 `in1` enters on; the fan's terminal columns lose
+   the arbitration and never receive `in1`. This is a structural shim-channel
+   conflict in the c2 row map (add reuses MM2S1, shared with the broadcast),
+   independent of packet ids. (Renumbering ids to distinct single bits —
+   matvec=1/add=2/swiglu=4/down=8 — landed and removes a *separate* rule-mask
+   aliasing hazard, `rule(27,8)` dropping bit 2 to merge add=8 & swiglu=12,
+   but does NOT fix the starvation.) **Fix direction:** give add1 `in1` a
+   physical path disjoint from the X-broadcast (e.g. deliver the broadcast via
+   a mem-tile, or move add inputs onto MM2S0-side channels), or stage the
+   broadcast so it fully retires before add1 claims MM2S1. Until then C2 stays
+   off-default behind its flags.
 
 ### Retraction (2026-06-10): minimal stale-master reproducers were invalid
 
