@@ -525,6 +525,35 @@ IR-clean (c2_merged = 1 LoadPDI). Two findings:
    broadcast so it fully retires before add1 claims MM2S1. Until then C2 stays
    off-default behind its flags.
 
+   **FIXED (2026-06-10): the cause was OUTPUT convergence, not the broadcast.**
+   Two changes, both landed; c2_rms and c2_merged now run bit-exact (Paris,
+   gate 9/9) and complete the rgr->ogf swap 3/3:
+
+   - **Root cause — distinct output packet ids.** Every producer drained to
+     its column's shim `S2MM0` with the *same* pkt id 1: matvec-y (mem),
+     add, swiglu (and down for c2_merged). Multiple producers wired to one
+     shim S2MM0 with one id is a static multi-producer routing conflict that
+     starved exactly one column's add drain (col 0). Giving each producer a
+     distinct id — **matvec-y=1, add=5, swiglu=6, down=7** — removes it and
+     `res1` fills all 8 columns. (This is the same shared-slave-port hazard as
+     the input-side `rule(27,8)` aliasing, but on the S2MM convergence side.)
+     The earlier `PYTHOC_C2_XCOL` sweep only shifted *which* column lost the
+     arbitration, which is why it looked like a broadcast-fan effect.
+   - **Mem-tile X delivery (the requested change, kept).** The matvec
+     activation ships per-column via each column's mem-tile (`shim[c] ->
+     mem[c] S2MM5 -> mat[c] DMA0`, pkt 16, 3-slot ring for the O/gate/up
+     lengths) instead of the shim-row broadcast fan — `_memx`, default on for
+     c2_rms. This removes the fan (the resident-engine-correct X path) but was
+     *not* what unblocked the deadlock; the output-id fix was. (c2_merged
+     keeps the old broadcast: its mem channels 2/3 hold the down chains.)
+
+   **C2 is now functionally complete:** `c2_merged` = decode call 2 in ONE
+   device / ONE `aiex.configure` = **1 LoadPDI** (was 3). Per-token decode
+   ≈ call1(1) + CPU attn + call2(1) + lm_head(1). ~87 ms/token (perf-neutral;
+   the win is structural). Reproducer `tools/test_c2_add_starve.py` now reports
+   no starvation. Still behind the pack flag pending a perf/A-B pass before
+   making it default.
+
 ### Retraction (2026-06-10): minimal stale-master reproducers were invalid
 
 Two earlier commits (`6eba6697e`, `1962fb23b`) added
