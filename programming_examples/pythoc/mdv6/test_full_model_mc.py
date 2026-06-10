@@ -108,6 +108,15 @@ def run_rn_mc(repncsp, inp, H, W, ic, oc,
                             fuse_bn(repncsp.conv1), fuse_bn(repncsp.conv2),
                             H, W, neck)
     current = x1
+    use_rn3chain = (os.environ.get('MDV6_USE_RN3CHAIN', '0') not in ('', '0', 'false', 'False')
+            and mc_rn3 == 'mc_re6_rn3' and H == 40 and W == 40 and neck == 48
+            and all(b.residual for b in repncsp.bottleneck))
+    if use_rn3chain:
+        from conv.rn3_chain_runner import run_re6_rn3_chain
+        pairs = [(fuse_repconv(b.conv1), fuse_bn(b.conv2)) for b in repncsp.bottleneck]
+        current = run_re6_rn3_chain(current, pairs)
+        concat = torch.cat([current, x2], dim=2)
+        return rt(mc_rnm, sc_rnm, concat, fuse_bn(repncsp.conv3), H, W, oc, trnm, trnm, ornm, 1, 1, 0)
     for bn_block in repncsp.bottleneck:
         residual = current.clone()
         # Phase D: RepConv on NPU via weight reparameterization.
