@@ -301,6 +301,8 @@ RASTER_GEOS = {
     # the pace, and removing them wedges (BD reuse before drains complete).
     # Chain pace is wt slot DMA (~83 KB/col/round vs 14 KB patches).
     "re4w": dict(IC=32, GBOUND=80, COLS=7, NWORK=4, TPR=4),
+    # 1-col bisect: 8x8 grid covered by 4 workers x 16 rounds
+    "re1w": dict(IC=32, GBOUND=8, COLS=1, NWORK=1, TPR=1),
 }
 
 
