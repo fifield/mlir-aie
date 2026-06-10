@@ -188,11 +188,37 @@ def _store_bn_silu_res_4x8_rows(
 # (address patched onto the buffer op post-resolve), released on lock WT_LOCK.
 WT_BD = 15
 WT_LOCK = 12              # core lock id; localized acquire id = 48 + 12
-WT_BUF_ADDR = 0xD800     # in the free window after iron buffers (cw_out 0xC000+2K)
+WT_BUF_ADDR = 0xC800     # after iron buffers (cw_out 0xC000+2K), ends 0xECC0 < counters 0xF000
 # 0x80000-based own-tile alias: bare-micro-proven base. The raw 0x1D000
 # constants sext-lower to 0xFFF9xxxx pointers, which wedge the core.
 DMA_BD_BASE = 0x0009D000
 DMA_S2MM_1_START_QUEUE = 0x0009DE0C
+DMA_MM2S_1_START_QUEUE = 0x0009DE1C
+TOK_ADDR = 0xEFE0          # 1-word credit source, between wbuf end and counters
+
+
+@aie_kernel
+def chain_wt_arm_tok(pkt_id: i32) -> void:
+    """Arm wt S2MM ch1 + send a 1-word credit packet (MM2S ch1, BD14).
+
+    The memtile emits one slot only when NWORK credits arrive — the stream
+    never parks (parked circuit beats head-of-line block the chain fills)."""
+    bd: i32 = DMA_BD_BASE + WT_BD * 32
+    write_tm(((WT_BUF_ADDR // 4) << 14) | WT_SLOT_I32, bd)
+    write_tm(0, bd + 4)
+    write_tm(0, bd + 8)
+    write_tm(0, bd + 12)
+    write_tm(0, bd + 16)
+    write_tm((1 << 25) | (1 << 18) | (WT_LOCK << 13), bd + 20)
+    write_tm(WT_BD, DMA_S2MM_1_START_QUEUE)
+    tb: i32 = DMA_BD_BASE + 14 * 32
+    write_tm(((TOK_ADDR // 4) << 14) | 1, tb)
+    write_tm((1 << 30) | (pkt_id << 19), tb + 4)
+    write_tm(0, tb + 8)
+    write_tm(0, tb + 12)
+    write_tm(0, tb + 16)
+    write_tm((1 << 25), tb + 20)
+    write_tm(14, DMA_MM2S_1_START_QUEUE)
 
 
 @aie_kernel
