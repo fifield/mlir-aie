@@ -282,6 +282,37 @@ _RUN_CACHE = {}
 _RUN_CACHE_REFS = {}
 
 
+# MDV6_SYNC_PROF=1: accumulate per-component sync costs (copy-in, sync-in,
+# kernel wait) keyed by layer; report via _sync_prof_report().
+_SYNC_PROF = os.environ.get("MDV6_SYNC_PROF", "0") not in ("", "0")
+_SYNC_STATS = {}
+
+
+def _sync_acc(bucket, dt):
+    k = (_CURRENT_LAYER or "?", bucket)
+    s = _SYNC_STATS.get(k)
+    if s is None:
+        _SYNC_STATS[k] = [dt, 1]
+    else:
+        s[0] += dt
+        s[1] += 1
+
+
+def _sync_prof_report():
+    by_bucket = {}
+    for (layer, bucket), (t, n) in _SYNC_STATS.items():
+        by_bucket.setdefault(bucket, [0.0, 0])
+        by_bucket[bucket][0] += t
+        by_bucket[bucket][1] += n
+    print("\n=== sync profile (totals) ===")
+    for b, (t, n) in sorted(by_bucket.items(), key=lambda kv: -kv[1][0]):
+        print(f"  {b:10s} {t*1e3:8.1f} ms  {n:5d} calls  {t/n*1e6:7.0f} us/call")
+    top = sorted(_SYNC_STATS.items(), key=lambda kv: -kv[1][0])[:12]
+    print("  --- top layer/bucket ---")
+    for (layer, b), (t, n) in top:
+        print(f"  {layer:18s} {b:10s} {t*1e3:7.1f} ms {n:4d}x")
+
+
 def _xrt_run_kernel(kernel, args):
     """One xrt.run launch: set_arg per positional, start(), wait2().
 
@@ -300,6 +331,15 @@ def _xrt_run_kernel(kernel, args):
         _RUN_CACHE[key] = run
         # keep arg BOs alive as long as the cached run object
         _RUN_CACHE_REFS[key] = (kernel, args)
+    if _SYNC_PROF:
+        t0 = time.perf_counter()
+        run.start()
+        t1 = time.perf_counter()
+        run.wait2()
+        t2 = time.perf_counter()
+        _sync_acc("start", t1 - t0)
+        _sync_acc("wait", t2 - t1)
+        return run
     run.start()
     run.wait2()
     return run
@@ -318,16 +358,38 @@ def _get_merged_bo(device, elf_name, role, nbytes):
     return bo
 
 
+def _xrt_read_bo(bo, count):
+    """Sync FROM device (only the bytes consumed) + copy out as uint16."""
+    import pyxrt as _xrt
+    if _SYNC_PROF:
+        t0 = time.perf_counter()
+    bo.sync(_xrt.xclBOSyncDirection.XCL_BO_SYNC_BO_FROM_DEVICE, count * 2, 0)
+    if _SYNC_PROF:
+        t1 = time.perf_counter()
+    out = np.frombuffer(bo.map(), dtype=np.uint16, count=count).copy()
+    if _SYNC_PROF:
+        _sync_acc("sync_out", t1 - t0)
+        _sync_acc("copy_out", time.perf_counter() - t1)
+    return out
+
+
 def _xrt_fill_bo(bo, arr):
     import pyxrt as _xrt
+    if _SYNC_PROF:
+        t0 = time.perf_counter()
     mv = bo.map()
     np.copyto(
         np.frombuffer(mv, dtype=np.uint8, count=arr.nbytes),
         np.frombuffer(arr, dtype=np.uint8),
         casting="no",
     )
+    if _SYNC_PROF:
+        t1 = time.perf_counter()
     # Sync only the bytes written, not the whole (pooled, possibly larger) BO.
     bo.sync(_xrt.xclBOSyncDirection.XCL_BO_SYNC_BO_TO_DEVICE, arr.nbytes, 0)
+    if _SYNC_PROF:
+        _sync_acc("copy_in", t1 - t0)
+        _sync_acc("sync_in", time.perf_counter() - t1)
 
 
 # Per-layer merged-ELF registry. Maps mc_name → (elf_name, n_batches).
@@ -718,10 +780,7 @@ def _run_tiled_mc_inner_merged(merged_entry, elf_name, n_batches, ppc,
         _xrt_run_kernel(kernel, args)
 
         for batch_idx in range(n_batches):
-            out_bos[batch_idx].sync(_xrt.xclBOSyncDirection.XCL_BO_SYNC_BO_FROM_DEVICE)
-            out_data = np.frombuffer(
-                out_bos[batch_idx].map(), dtype=np.uint16, count=output_per_batch
-            )
+            out_data = _xrt_read_bo(out_bos[batch_idx], output_per_batch)
             # one bf16 conversion per batch instead of one per tile
             out_f = uint16_to_bf16(out_data)
             batch_start = batch_idx * patches_per_call
@@ -914,10 +973,7 @@ def _run_tiled_mc_inner_ocb_merged(merged_entry, elf_name, n_ocb, ppc,
     # arg0=wt(big), arg1=in, arg2=out(big).
     _xrt_run_kernel(kernel, [big_wt_bo, in_bo, big_out_bo])
 
-    big_out_bo.sync(_xrt.xclBOSyncDirection.XCL_BO_SYNC_BO_FROM_DEVICE)
-    big_out_data = np.frombuffer(
-        big_out_bo.map(), dtype=np.uint16, count=big_out_nelem
-    ).copy()
+    big_out_data = _xrt_read_bo(big_out_bo, big_out_nelem)
 
     # Unpack tile-by-tile per OCB.
     for ocb in range(n_ocb):
@@ -1381,9 +1437,7 @@ def _run_gemm_packed_merged_common(merged_entry, elf_name, input_hwc, wt_u16,
     _xrt_fill_bo(wt_bo, wt_u16)
     _xrt_fill_bo(in_bo, packed_in)
     _xrt_run_kernel(kernel, [wt_bo, in_bo, out_bo])
-    out_bo.sync(_xrt.xclBOSyncDirection.XCL_BO_SYNC_BO_FROM_DEVICE)
-    packed_out = np.frombuffer(out_bo.map(), dtype=np.uint16,
-                               count=packed_out_nelem).copy()
+    packed_out = _xrt_read_bo(out_bo, packed_out_nelem)
 
     output = torch.zeros(out_h, out_w, out_ch, dtype=torch.bfloat16)
     output_flat = output.reshape(M, out_ch)
@@ -1475,10 +1529,7 @@ def _run_gemm_kblocked_merged(merged_entry, elf_name, input_hwc, weights_uint16,
 
         _xrt_fill_bo(in_bo, host_in)
         _xrt_run_kernel(kernel, [wt_bo, in_bo, out_bo])
-        out_bo.sync(_xrt.xclBOSyncDirection.XCL_BO_SYNC_BO_FROM_DEVICE)
-        out_data = np.frombuffer(
-            out_bo.map(), dtype=np.uint16, count=total_slots * output_size
-        ).copy()
+        out_data = _xrt_read_bo(out_bo, total_slots * output_size)
 
         for s in range(min(n_active_slots, total_slots)):
             pix_start = batch_start + s * tile_m
@@ -1543,10 +1594,7 @@ def _run_gemm_oc_blocked_merged(merged_entry, elf_name, input_hwc, weights_uint1
 
         _xrt_fill_bo(in_bo, host_in)
         _xrt_run_kernel(kernel, [wt_bo, in_bo, out_bo])
-        out_bo.sync(_xrt.xclBOSyncDirection.XCL_BO_SYNC_BO_FROM_DEVICE)
-        out_data = np.frombuffer(
-            out_bo.map(), dtype=np.uint16, count=total_slots * output_size
-        ).copy()
+        out_data = _xrt_read_bo(out_bo, total_slots * output_size)
 
         for s in range(min(n_active_slots, total_slots)):
             pix_start = batch_start + s * tile_m
@@ -1622,12 +1670,8 @@ def _run_gemm_oc_blocked_pair_merged(merged_entry, elf_name, input_hwc,
 
         _xrt_fill_bo(in_bo, host_in)
         _xrt_run_kernel(kernel, [in_bo, wt_a_bo, out_a_bo, wt_b_bo, out_b_bo])
-        out_a_bo.sync(_xrt.xclBOSyncDirection.XCL_BO_SYNC_BO_FROM_DEVICE)
-        out_b_bo.sync(_xrt.xclBOSyncDirection.XCL_BO_SYNC_BO_FROM_DEVICE)
-        out_a_data = np.frombuffer(out_a_bo.map(), dtype=np.uint16,
-                                    count=total_slots * output_size).copy()
-        out_b_data = np.frombuffer(out_b_bo.map(), dtype=np.uint16,
-                                    count=total_slots * output_size).copy()
+        out_a_data = _xrt_read_bo(out_a_bo, total_slots * output_size)
+        out_b_data = _xrt_read_bo(out_b_bo, total_slots * output_size)
 
         for s in range(min(n_active_slots, total_slots)):
             pix_start = batch_start + s * tile_m
