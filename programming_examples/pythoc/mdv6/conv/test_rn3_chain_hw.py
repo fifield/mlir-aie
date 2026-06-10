@@ -64,7 +64,7 @@ def main():
     img[PAD:PAD+40, PAD:PAD+40, :] = x0.float().numpy()
     img_u16 = f32_to_bf16_u16(img.reshape(-1))
     s1, s2 = pack_slots(wA, wB), pack_slots(wC, wD)
-    weights = np.concatenate(([s1, s1, s2, s2])[: 2 * N_ITERS])
+    weights = np.concatenate(([s1, s1, s2, s2] * ((N_ITERS + 1) // 2))[: 2 * N_ITERS])
 
     runner = ResidentXCLBinRunner(xclbin, insts)
     res = runner.run(img_u16.copy(), weights, np.zeros(IMG_ELEMS, np.uint16),
@@ -72,7 +72,7 @@ def main():
     out = bf16_u16_to_f32(res[0]).reshape(IMG_H, IMG, IC)[PAD:PAD+40, PAD:PAD+40, :]
 
     ref = x0
-    for wp in ((wA, wB), (wC, wD))[:N_ITERS]:
+    for wp in (((wA, wB), (wC, wD)) * ((N_ITERS + 1) // 2))[:N_ITERS]:
         ref = (run_re6_rn3_pair(ref, wp[0], wp[1]).float() + ref.float()).to(torch.bfloat16)
     d = np.abs(out - ref.float().numpy())
     print(f"out: mean|x|={np.abs(out).mean():.4f} nonzero={np.count_nonzero(out)}/{out.size}")
