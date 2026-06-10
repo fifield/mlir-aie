@@ -459,9 +459,32 @@ Staged, each bit-exact behind its own pack flag, default `d1d3d4_rms` untouched:
 
 ### C1 implementation spec (ready to build in a fresh session)
 
-Status: DESIGNED, NOT STARTED. Default `d1d3d4_rms` and the committed
-`d1d3d4_rms_fmv` are untouched. Build C1 behind a NEW pack mode (suggest
-`c1_merged`) in `builders/o_gemv_ffn.py`; everything else as for fmv.
+Status: **DONE (2026-06-09).** Landed as pack mode `c1_merged` in
+`builders/o_gemv_ffn.py` (`_emit_call2_merged`), exactly per this spec: one
+device, rows 2..5, sequential 6-stage runtime, DDR intermediates, D4 separate
+(call 2 = 2 configures). Bit-exact (`test_hf_answer_gate_o_gemv_ffn_c1_merged`
++ full gate 7/7); ~84 ms/token vs ~88 baseline (slight win). Per token: 65→33
+LoadPDIs. Three hard-won implementation notes (apply to anything packet-fed):
+
+1. **Packet IDs are mask-constrained, never reuse id 0.** All ids passing
+   the same slave port get merged into ONE masked `aie.rule`; chained
+   pass-throughs (rows 3/4/5) must mask exactly at every hop, and any id the
+   mask falsely captures fails routing. Working scheme: matvec/W/x = 1,
+   add = 8, swiglu = 12, rms = 13 ({8,12,13} → mask-clean at rows 1/3/4/5),
+   and ALL results share id 1 (the shim S2MM port needs no demux).
+2. **Exact delivery counts on shared channels.** The standalone matvec
+   shim broadcasts x with repeat 32/outer while cores consume 16 — harmless
+   standalone, but leftover stream data jams the shared MM2S1 queue and
+   deadlocks the next stage. C1 sets x repeat = 16/outer (exact).
+3. **A deadlocked run wedges the NPU partition for the NEXT process** (its
+   first command ERT-times-out; the timeout reset eventually clears it, but
+   the half-wedged state can persist a few runs and mimics flaky tests).
+   `tools/test_c1_wedge.py` = run+probe bisect harness; sequential c1 and
+   c1+D4 dispatch is wedge-free (verified 16x).
+
+Original spec follows. Default `d1d3d4_rms` and the committed
+`d1d3d4_rms_fmv` are untouched; C1 is selectable via
+`PYTHOC_LLAMA_O_GEMV_FFN_PACK_MODE=c1_merged`. Next: C2 (fold D4 in).
 
 **New builder** `_emit_call2_merged(sym="c1_merged")` — ONE `@device` containing
 four core-sets, composed by copying the proven core/mem bodies verbatim from the
