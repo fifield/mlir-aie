@@ -173,6 +173,45 @@ def _pack_geo_iter(w1_u16, w2_u16, ic, wslot, n_blk):
     return slots.reshape(-1)
 
 
+def run_rn3_chain_raster(geo: str, inp_hwc: torch.Tensor, weight_pairs) -> torch.Tensor:
+    """Raster chain: 1 tile/core over COLS*NWORK cores (re6w = 25 of 28)."""
+    from conv.aie2_rn3_chain_geo import raster_params
+    p = raster_params(geo)
+    ic, G = p["IC"], p["GBOUND"]
+    n_iters = len(weight_pairs)
+    key = (geo, "raster") + tuple(id(a) for pr in weight_pairs for a in pr)
+    cached = _WEIGHT_CACHE.get(key)
+    if cached is None:
+        blocks = [_pack_geo_iter(w1, w2, ic, p["WSLOT"], p["N_BLK"])
+                  for w1, w2 in weight_pairs]
+        cached = (np.concatenate(blocks), list(weight_pairs))
+        _WEIGHT_CACHE[key] = cached
+    weights = cached[0]
+    rkey = (geo, n_iters, "raster")
+    r = _RUNNERS.get(rkey)
+    if r is None:
+        bd = Path(__file__).parent / f"build_rn3_raster_{geo}_i{n_iters}"
+        xclbin, insts = bd / "final.xclbin", bd / "insts.bin"
+        if not (xclbin.exists() and insts.exists()):
+            from aie.utils.compile import compile_mlir_module
+            from conv.aie2_rn3_chain_geo import rn3_chain_raster
+            (bd / "work").mkdir(parents=True, exist_ok=True)
+            compile_mlir_module(mlir_module=rn3_chain_raster(geo, n_iters=n_iters),
+                                insts_path=str(insts), xclbin_path=str(xclbin),
+                                work_dir=str(bd / "work"), verbose=False)
+        r = ResidentXCLBinRunner(xclbin, insts)
+        _RUNNERS[rkey] = r
+    img = np.zeros((p["IMG_H"], p["IMG"], ic), np.float32)
+    img[PAD:PAD+G, PAD:PAD+G, :] = inp_hwc.float().numpy()
+    img_u16 = f32_to_bf16_u16(img.reshape(-1))
+    res = r.run(img_u16, weights, img_u16.copy(),
+                bo_key=f"rn3raster_{geo}_{id(weights)}", output_indices={0, 2},
+                inout_indices={0, 2}, static_indices={1})
+    final = res[0] if n_iters % 2 == 0 else res[2]
+    out = bf16_u16_to_f32(final).reshape(p["IMG_H"], p["IMG"], ic)[PAD:PAD+G, PAD:PAD+G, :]
+    return torch.from_numpy(out).to(torch.bfloat16)
+
+
 def run_rn3_chain_geo(geo: str, inp_hwc: torch.Tensor, weight_pairs,
                       x2_hwc: torch.Tensor | None = None,
                       rnm_w_u16: np.ndarray | None = None):
