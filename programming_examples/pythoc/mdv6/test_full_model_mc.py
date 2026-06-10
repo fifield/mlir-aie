@@ -116,6 +116,13 @@ def run_rn_mc(repncsp, inp, H, W, ic, oc,
     if use_rn3chain:
         from conv.rn3_chain_runner import run_re6_rn3_chain, run_rn3_chain_geo
         pairs = [(fuse_repconv(b.conv1), fuse_bn(b.conv2)) for b in repncsp.bottleneck]
+        # rnm epilogue fused into the chain launch (saves the rnm gemm launch)
+        # re6 only: re4 (TPC=12) needs 24 epilogue drain BDs > shim pool;
+        # re8 (20px) needs width-trimmed drains
+        if (os.environ.get('MDV6_USE_RNMCHAIN', '0') not in ('', '0', 'false', 'False')
+                and oc == 2 * neck and _chain_geo == 're6'):
+            return run_rn3_chain_geo(_chain_geo, current, pairs,
+                                     x2_hwc=x2, rnm_w_u16=fuse_bn(repncsp.conv3))
         if _chain_geo == 're6':
             current = run_re6_rn3_chain(current, pairs)
         else:
