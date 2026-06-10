@@ -641,9 +641,11 @@ def _patch_wt_replay(module, cols, nwork, tpr, n_iters, mem_stream, wbuf_addr,
     first_dma = next(o for o in body.operations if o.operation.name == "aie.memtile_dma")
     with _IP(first_dma), _Loc.unknown(module.context):
         for c in range(cols):
-            cred_locks.append(_lock(tiles[(c, 1)], lock_id=28, init=n_slot,
+            # credits start at 0: first credits come from the wt FILL (after
+            # patch fills queue), so nothing streams before cores arm at boot
+            cred_locks.append(_lock(tiles[(c, 1)], lock_id=28, init=0,
                                     sym_name=f"wt_cr_{c}"))
-            echo_locks.append(_lock(tiles[(c, 1)], lock_id=27, init=n_slot,
+            echo_locks.append(_lock(tiles[(c, 1)], lock_id=27, init=0,
                                     sym_name=f"wt_echo_{c}"))
     mem_n = mem_stream // 2  # i32 view of u16 stream
     src_ty = np.ndarray[(mem_n,), np.dtype[np.int32]]
@@ -656,7 +658,7 @@ def _patch_wt_replay(module, cols, nwork, tpr, n_iters, mem_stream, wbuf_addr,
             init = np.arange(100, 100 + mem_n, dtype=np.int32) if static_wt else None
             msrc = buffer(mem_t, datatype=src_ty, name=f"wt_src_{c}", address=0x70000,
                           initial_value=init)
-            lk_e = lock(mem_t, lock_id=30, init=tpr, sym_name=f"wt_e_{c}")
+            lk_e = lock(mem_t, lock_id=30, init=n_iters, sym_name=f"wt_e_{c}")
             lk_f = lock(mem_t, lock_id=31, init=0, sym_name=f"wt_f_{c}")
             flow(shim_t, WireBundle.DMA, 1, mem_t, WireBundle.DMA, 5)
             for w in range(nwork):
@@ -692,20 +694,25 @@ def _patch_wt_replay(module, cols, nwork, tpr, n_iters, mem_stream, wbuf_addr,
                     else:
                         _mt_body(block, msrc, lk_e, lk_f)
             def _mt_body(block, msrc, lk_e, lk_f):
+                # fill: paced by lk_e (init n_iters), releases first N_SLOT
+                # credits; slot ring acquires credits, releases echo; spliced
+                # join BDs convert echo -> credits for later rounds
                 dma_start(DMAChannelDir.S2MM, 5, dest=block[1], chain=block[2])
                 with block[1]:
-                    use_lock(lk_e, LockAction.AcquireGreaterEqual, value=tpr)
+                    use_lock(lk_e, LockAction.AcquireGreaterEqual, value=1)
                     dma_bd(msrc, offset=0, len=mem_n, bd_id=42)
-                    use_lock(lk_f, LockAction.Release, value=tpr)
+                    use_lock(lk_cr, LockAction.Release, value=N_SLOT_P)
                     next_bd(block[1])
                 with block[2]:
-                    dma_start(DMAChannelDir.MM2S, 5, dest=block[3], chain=block[4])
-                with block[3]:
-                    use_lock(lk_f, LockAction.AcquireGreaterEqual, value=1)
-                    dma_bd(msrc, offset=0, len=mem_n, bd_id=43)
-                    use_lock(lk_e, LockAction.Release, value=1)
-                    next_bd(block[3])
-                with block[4]:
+                    slot_n = mem_n // N_SLOT_P
+                    dma_start(DMAChannelDir.MM2S, 5, dest=block[3], chain=block[3 + N_SLOT_P])
+                    for si in range(N_SLOT_P):
+                        with block[3 + si]:
+                            use_lock(lk_cr, LockAction.AcquireGreaterEqual, value=1)
+                            dma_bd(msrc, offset=si * slot_n, len=slot_n, bd_id=44 + si)
+                            use_lock(echo_locks[c], LockAction.Release, value=1)
+                            next_bd(block[3 + (si + 1) % N_SLOT_P])
+                with block[3 + N_SLOT_P]:
                     EndOp()
             _mk(msrc, lk_e, lk_f)
 
