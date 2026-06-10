@@ -486,12 +486,18 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
     from kernels.rn3_chain_pythoc import TOK_ADDR, DMA_MM2S_1_START_QUEUE
     wt_globals["TOK_ADDR"] = TOK_ADDR
     wt_globals["DMA_MM2S_1_START_QUEUE"] = DMA_MM2S_1_START_QUEUE
-    karm = PythocKernel(chain_wt_arm_tok, [np.int32], extra_globals=wt_globals, helpers=[])
+    karm = PythocKernel(chain_wt_arm, [], extra_globals=wt_globals, helpers=[])
     kwait = PythocKernel(chain_wt_wait, [], extra_globals=wt_globals, helpers=[])
 
     workers, col_in, col_out, wbufs = [], [], [], []
 
     def core_fn(a, o, wbuf, scratch, c1, m, c2r, arm, wait, pkt_id, iters, coords):
+        # queue a full round of receives before any data flows: the stream
+        # must never park (parked beats head-of-line block chain fills)
+        arm()
+        arm()
+        arm()
+        arm()
         for it in range_(iters):
             for (real, grow, gcol) in coords:
                 ein = a.acquire(1)
@@ -499,8 +505,8 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
                 mb = 0
                 while mb < N_BLK:
                     if compute:
-                        arm(pkt_id)
                         wait()
+                        arm()
                         if real and compute == 1:
                             c1(ein, wbuf, scratch, mb, 0, IC)
                     mb = mb + 1
@@ -509,8 +515,8 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
                 ob = 0
                 while ob < N_BLK:
                     if compute:
-                        arm(pkt_id)
                         wait()
+                        arm()
                         if real and compute == 1:
                             c2r(scratch, wbuf, eout, ein, ob, 0, IC, grow, gcol, GBOUND)
                     ob = ob + 1
@@ -562,6 +568,14 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
                 rt.finish_task_group(tg)
 
     module = Program(dev, rt).resolve_program()
+    # lower placement + FIFOs first: the join BDs the credit pacing patches
+    # only exist after objectFifo-stateful-transform
+    from aie.passmanager import PassManager
+    PassManager.parse(
+        "builtin.module(canonicalize,aie-canonicalize-device,"
+        "aie.device(aie-place-tiles,aie-assign-lock-ids,aie-register-objectFifos,"
+        "aie-objectFifo-stateful-transform{dynamic-objFifos=true}))",
+        module.context).run(module.operation)
     _patch_wt_replay(module, COLS, NWORK, TPR, n_iters, MEM_STREAM, WT_BUF_ADDR,
                      static_wt=static_wt, n_slot=SLOTS_PER_PAIR)
     return module
@@ -583,32 +597,26 @@ def _patch_wt_replay(module, cols, nwork, tpr, n_iters, mem_stream, wbuf_addr,
     )
     from aie.ir import InsertionPoint
 
-    import re as _re
     dev_op = None
     for op in module.body.operations:
         if op.operation.name == "aie.device":
             dev_op = op
     body = dev_op.regions[0].blocks[0]
     tiles = {}
-    shims = []
     seq_op = None
     for op in body.operations:
         nm = op.operation.name
-        if nm == "aie.logical_tile":
-            txt = str(op)
-            mt = _re.search(r"<(\w+)>\((\?|\d+), (\?|\d+)\)", txt)
-            kind, c, r = mt.group(1), mt.group(2), mt.group(3)
-            if kind == "ShimNOCTile":
-                shims.append(op)
-            elif kind == "MemTile":
-                shims_dummy = None  # memtiles are unplaced; creation order = col
-                tiles.setdefault("mems", []).append(op)
-            elif c != "?":
-                tiles[(int(c), int(r))] = op
+        if nm == "aie.tile":
+            import re as _re
+            mt = _re.search(r"col\s*=\s*(\d+),\s*row\s*=\s*(\d+)", str(op))
+            tiles[(int(mt.group(1)), int(mt.group(2)))] = op
         if "runtime_sequence" in nm:
             seq_op = op
         if nm == "aie.buffer":
-            bname = str(op.attributes["sym_name"]).strip('"')
+            try:
+                bname = str(op.attributes["sym_name"]).strip('"')
+            except KeyError:
+                continue
             if bname.startswith("cw_wt_"):
                 from aie.ir import IntegerAttr, IntegerType
                 op.attributes["address"] = IntegerAttr.get(
@@ -616,12 +624,24 @@ def _patch_wt_replay(module, cols, nwork, tpr, n_iters, mem_stream, wbuf_addr,
 
     from aie.ir import Location
     last = list(body.operations)[-1]
+    # locks must precede their uses inside iron's memtile dma blocks
+    cred_locks = []
+    from aie.dialects.aie import lock as _lock
+    from aie.ir import InsertionPoint as _IP, Location as _Loc
+    echo_locks = []
+    first_dma = next(o for o in body.operations if o.operation.name == "aie.memtile_dma")
+    with _IP(first_dma), _Loc.unknown(module.context):
+        for c in range(cols):
+            cred_locks.append(_lock(tiles[(c, 1)], lock_id=28, init=n_slot,
+                                    sym_name=f"wt_cr_{c}"))
+            echo_locks.append(_lock(tiles[(c, 1)], lock_id=27, init=n_slot,
+                                    sym_name=f"wt_echo_{c}"))
     mem_n = mem_stream // 2  # i32 view of u16 stream
     src_ty = np.ndarray[(mem_n,), np.dtype[np.int32]]
     with InsertionPoint(last), Location.unknown(module.context):
         for c in range(cols):
-            mem_t = tiles["mems"][c]
-            shim_t = shims[c]
+            mem_t = tiles[(c, 1)]
+            shim_t = tiles[(c, 0)]
             # explicit high address — the post-resolve allocator gives
             # patched buffers address 0, overlapping the FIFO buffers
             init = np.arange(100, 100 + mem_n, dtype=np.int32) if static_wt else None
@@ -632,14 +652,9 @@ def _patch_wt_replay(module, cols, nwork, tpr, n_iters, mem_stream, wbuf_addr,
             flow(shim_t, WireBundle.DMA, 1, mem_t, WireBundle.DMA, 5)
             for w in range(nwork):
                 flow(mem_t, WireBundle.DMA, 5, tiles[(c, 2 + w)], WireBundle.DMA, 1)
-            # credit packets: core MM2S1 -> mem S2MM4 (fan-in, never id 0)
-            PKT_IDS = (1, 8, 12, 13)
-            tok_ty = np.ndarray[(4,), np.dtype[np.int32]]
-            tok = buffer(mem_t, datatype=tok_ty, name=f"wt_tok_{c}", address=0x7F000)
-            lk_cr = lock(mem_t, lock_id=28, init=0, sym_name=f"wt_cr_{c}")
-            for w in range(nwork):
-                packetflow(PKT_IDS[w], tiles[(c, 2 + w)], WireBundle.DMA, 1,
-                           {"dest": mem_t, "port": WireBundle.DMA, "channel": 5})
+            # join-paced credits: iron's finals-join BDs (one per drained
+            # tile) each release +1; init covers round 0 (N_SLOT slots ahead)
+            lk_cr = cred_locks[c]
             shim_dma_allocation(f"wt_in_{c}", shim_t, DMAChannelDir.MM2S, 1)
 
             def _mk(msrc, lk_e, lk_f):
@@ -650,22 +665,15 @@ def _patch_wt_replay(module, cols, nwork, tpr, n_iters, mem_stream, wbuf_addr,
                         # all NWORK cores have armed (credits via token packets)
                         slot_n = mem_n // N_SLOT_P
                         dma_start(DMAChannelDir.MM2S, 5, dest=block[1],
-                                  chain=block[N_SLOT_P + 2],
+                                  chain=block[N_SLOT_P + 1],
                                   repeat_count=n_iters * tpr - 1)
                         for si in range(N_SLOT_P):
                             with block[1 + si]:
-                                use_lock(lk_cr, LockAction.AcquireGreaterEqual, value=nwork)
+                                use_lock(lk_cr, LockAction.AcquireGreaterEqual, value=1)
                                 dma_bd(msrc, offset=si * slot_n, len=slot_n)
+                                use_lock(echo_locks[c], LockAction.Release, value=1)
                                 next_bd(block[2 + si] if si < N_SLOT_P - 1 else block[N_SLOT_P + 1])
                         with block[N_SLOT_P + 1]:
-                            EndOp()
-                        with block[N_SLOT_P + 2]:
-                            dma_start(DMAChannelDir.S2MM, 5, dest=block[N_SLOT_P + 3], chain=block[N_SLOT_P + 4])
-                        with block[N_SLOT_P + 3]:
-                            dma_bd(tok, offset=0, len=1)
-                            use_lock(lk_cr, LockAction.Release, value=1)
-                            next_bd(block[N_SLOT_P + 3])
-                        with block[N_SLOT_P + 4]:
                             EndOp()
                     else:
                         _mt_body(block, msrc, lk_e, lk_f)
@@ -686,6 +694,41 @@ def _patch_wt_replay(module, cols, nwork, tpr, n_iters, mem_stream, wbuf_addr,
                 with block[4]:
                     EndOp()
             _mk(msrc, lk_e, lk_f)
+
+    # join-paced credits: BD blocks allow only one release, so chain a
+    # zero-length credit BD after each join BD: join -> credit(+1) -> orig
+    from aie.ir import Block
+    targets = []  # (block, bd_op, next_bd_op, col)
+    for op in body.operations:
+        if op.operation.name != "aie.memtile_dma":
+            continue
+        for blk in list(op.regions[0].blocks):
+            ops = list(blk.operations)
+            for i, o in enumerate(ops):
+                if o.operation.name != "aie.dma_bd":
+                    continue
+                txt = str(o)
+                if "cw_out_" not in txt:
+                    continue
+                rel = next((o2 for o2 in ops[i:] if o2.operation.name == "aie.use_lock"
+                            and "Release" in str(o2)), None)
+                if rel is None or "_cons_lock" not in str(rel):
+                    continue
+                col = int(txt.split("cw_out_")[1].split("_")[0])
+                nxt = next(o2 for o2 in ops[i:] if o2.operation.name == "aie.next_bd")
+                targets.append((blk, o, nxt, col))
+    for blk, bd_op, nxt, col in targets:
+        orig_target = nxt.successors[0]
+        nb = Block.create_after(blk)
+        buf_val = bd_op.operands[0]
+        with InsertionPoint(nb), Location.unknown(module.context):
+            use_lock(echo_locks[col], LockAction.AcquireGreaterEqual, value=1)
+            dma_bd(buf_val, offset=0, len=0)
+            use_lock(cred_locks[col], LockAction.Release, value=1)
+            next_bd(orig_target)
+        nxt.operation.erase()
+        with InsertionPoint(blk), Location.unknown(module.context):
+            next_bd(nb)
 
     seq_block = seq_op.regions[0].blocks[0]
     wt_arg = seq_block.arguments[1]
