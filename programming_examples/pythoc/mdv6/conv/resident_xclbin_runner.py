@@ -90,6 +90,7 @@ class ResidentXCLBinRunner:
         output_indices: Iterable[int] | None = None,
         static_indices: Iterable[int] | None = None,
         intermediate_indices: Iterable[int] | None = None,
+        inout_indices: Iterable[int] | None = None,
     ):
         arrays = [self._as_array(a) for a in args]
         if not arrays:
@@ -97,6 +98,11 @@ class ResidentXCLBinRunner:
         out_set = {len(arrays) - 1} if output_indices is None else set(output_indices)
         static_set = set(static_indices or [])
         interm_set = set(intermediate_indices or [])
+        # inout BOs are synced to device before launch (unlike pure outputs)
+        # AND read back after — e.g. a DDR bounce image the design fills from
+        # and drains into.
+        inout_set = set(inout_indices or [])
+        out_set |= inout_set
 
         first_call = bo_key not in self._bo_cache
         if first_call:
@@ -116,7 +122,7 @@ class ResidentXCLBinRunner:
         n_written = 0
         bytes_written = 0
         for i, (tensor, arr) in enumerate(zip(tensors, arrays)):
-            if i in out_set:
+            if i in out_set and i not in inout_set:
                 continue
             if not first_call and (i in static_set or i in interm_set):
                 continue
