@@ -195,7 +195,11 @@ DMA_S2MM_1_START_QUEUE = 0x0001DE0C
 
 @aie_kernel
 def chain_wt_arm(slot_i32: i32) -> void:
-    """Arm S2MM ch1: one weight slot into the fixed L1 buffer; release lock 12."""
+    """Arm S2MM ch1: one weight slot into the fixed L1 buffer; release lock 12.
+
+    Writes ch1 CTRL=0 (enable, clear reset) each arm — iron's CDO only
+    configures ch0 and may leave ch1 reset."""
+    write_tm(0, DMA_S2MM_1_START_QUEUE - 4)
     bd: i32 = DMA_BD_BASE + WT_BD * 32
     write_tm(((WT_BUF_ADDR // 4) << 14) | slot_i32, bd)
     write_tm(0, bd + 4)
