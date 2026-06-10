@@ -292,6 +292,135 @@ def rn3_chain_geo(geo: str, n_iters: int = 2, stack_size: int = 4096, compute: i
     return Program(dev, rt).resolve_program()
 
 
+RASTER_GEOS = {
+    # raster: 1 tile per core, tiles rastered over COLS x NWORK cores.
+    "re6w": dict(IC=48, GBOUND=40, COLS=7, NWORK=4),
+}
+
+
+def raster_params(geo: str):
+    g = RASTER_GEOS[geo]
+    ic = g["IC"]
+    grid = (g["GBOUND"] + TILE - 1) // TILE
+    img_w = grid * TILE + 2 * PAD
+    img_h = img_w + TILE  # + junk drain band below the padded image
+    return dict(g, N_BLK=ic // 16, WSLOT=16 * ic * 9 + 32, GRID=grid,
+                IMG=img_w, IMG_H=img_h, IMG_ELEMS=img_h * img_w * ic,
+                FINAL=TILE * TILE * ic, SCRATCH=(ic // 16) * 1600)
+
+
+def rn3_chain_raster(geo: str, n_iters: int = 2, stack_size: int = 4096, compute: int = 1):
+    """1 tile per core: tile idx = col*NWORK + w rastered over the GRIDxGRID
+    image. vs column-major chain: every core computes 1 tile/iter instead of
+    NT — re6 uses 25 of 28 cores instead of 15 with 2 tiles."""
+    p = raster_params(geo)
+    IC, COLS, NWORK = p["IC"], p["COLS"], p["NWORK"]
+    GRID, IMG, IMG_ELEMS = p["GRID"], p["IMG"], p["IMG_ELEMS"]
+    FINAL, SCRATCH, N_BLK, WSLOT = p["FINAL"], p["SCRATCH"], p["N_BLK"], p["WSLOT"]
+    GBOUND = p["GBOUND"]
+    CHUNK = 12 * 12 * IC
+    SLOTS_PER_PAIR = 2 * N_BLK
+    JUNK_ROW = GRID * TILE + 2 * PAD
+
+    dev = NPU2()
+    patch_ty = np.ndarray[(CHUNK,), np.dtype[np.uint16]]
+    final_ty = np.ndarray[(FINAL,), np.dtype[np.uint16]]
+    col_out_ty = np.ndarray[(NWORK * FINAL,), np.dtype[np.uint16]]
+    col_in_ty = np.ndarray[(NWORK * CHUNK,), np.dtype[np.uint16]]
+    wslot_ty = np.ndarray[(WSLOT,), np.dtype[np.uint16]]
+    scratch_ty = np.ndarray[(SCRATCH,), np.dtype[np.uint16]]
+    img_ty = np.ndarray[(IMG_ELEMS,), np.dtype[np.uint16]]
+    wt_host_ty = np.ndarray[(n_iters * SLOTS_PER_PAIR * WSLOT,), np.dtype[np.uint16]]
+
+    kc1 = PythocKernel(chain_conv1_bf16, [patch_ty, wslot_ty, scratch_ty, np.int32, np.int32, np.int32],
+                       extra_globals=KERNEL_EXTRA_GLOBALS, helpers=_MMUL_HELPERS)
+    km = PythocKernel(chain_mask_bf16, [scratch_ty, np.int32, np.int32, np.int32, np.int32],
+                      extra_globals=KERNEL_EXTRA_GLOBALS, helpers=[])
+    kc2r = PythocKernel(chain_conv2res_bf16, [scratch_ty, wslot_ty, final_ty, patch_ty, np.int32, np.int32, np.int32, np.int32, np.int32, np.int32],
+                        extra_globals=KERNEL_EXTRA_GLOBALS, helpers=[_store_bn_silu_res_4x8_rows])
+
+    workers, col_in, col_out, col_wt = [], [], [], []
+
+    def core_fn(a, w, o, scratch, c1, m, c2r, iters, grow, gcol, real):
+        for it in range_(iters):
+            ein = a.acquire(1)
+            eout = o.acquire(1)
+            mb = 0
+            while mb < N_BLK:
+                ew = w.acquire(1)
+                if real and compute:
+                    c1(ein, ew, scratch, mb, 0, IC)
+                w.release(1)
+                mb = mb + 1
+            if real and compute:
+                m(scratch, grow, gcol, GBOUND, N_BLK)
+            ob = 0
+            while ob < N_BLK:
+                ew = w.acquire(1)
+                if real and compute:
+                    c2r(scratch, ew, eout, ein, ob, 0, IC, grow, gcol, GBOUND)
+                w.release(1)
+                ob = ob + 1
+            a.release(1)
+            o.release(1)
+
+    for c in range(COLS):
+        fin = ObjectFifo(col_in_ty, depth=1, name=f"cr_in_{c}")
+        fout = ObjectFifo(col_out_ty, depth=1, name=f"cr_out_{c}")
+        fwt = ObjectFifo(wslot_ty, depth=1, name=f"cr_wt_{c}")
+        in_sp = fin.cons().split(offsets=[w * CHUNK for w in range(NWORK)],
+                                 obj_types=[patch_ty] * NWORK, depths=[1] * NWORK,
+                                 names=[f"cr_in_{c}_{i}" for i in range(NWORK)])
+        out_j = fout.prod().join(offsets=[w * FINAL for w in range(NWORK)],
+                                 obj_types=[final_ty] * NWORK, depths=[1] * NWORK,
+                                 names=[f"cr_out_{c}_{i}" for i in range(NWORK)])
+        col_in.append(fin); col_out.append(fout); col_wt.append(fwt)
+        for i in range(NWORK):
+            idx = c * NWORK + i
+            real = idx < GRID * GRID
+            gr, gc = (idx // GRID) * TILE, (idx % GRID) * TILE
+            scratch = Buffer(scratch_ty, name=f"cr_scr_{c}_{i}")
+            workers.append(Worker(core_fn,
+                [in_sp[i].cons(), fwt.cons(), out_j[i].prod(),
+                 scratch, kc1, km, kc2r, n_iters, gr, gc, 1 if real else 0],
+                tile=Tile(c, 2 + i), stack_size=stack_size))
+
+    rt = Runtime()
+    with rt.sequence(img_ty, wt_host_ty, img_ty) as (A, WT, B):
+        rt.start(*workers)
+        for it in range(n_iters):
+            src, dst = (A, B) if it % 2 == 0 else (B, A)
+            tg = rt.task_group()
+            for c in range(COLS):
+                for w in range(NWORK):
+                    idx = c * NWORK + w
+                    real = idx < GRID * GRID
+                    gr = (idx // GRID) * TILE if real else 0
+                    gc = (idx % GRID) * TILE if real else 0
+                    rt.fill(col_in[c].prod(), src, TensorAccessPattern(
+                        (IMG_ELEMS,), offset=(gr * IMG + gc) * IC,
+                        sizes=[1, 12, 12 * IC],
+                        strides=[0, IMG * IC, 1]), task_group=tg)
+                rt.fill(col_wt[c].prod(), WT, TensorAccessPattern(
+                    (n_iters * SLOTS_PER_PAIR * WSLOT,), offset=it * SLOTS_PER_PAIR * WSLOT,
+                    sizes=[1, SLOTS_PER_PAIR * WSLOT], strides=[0, 1]), task_group=tg)
+                for w in range(NWORK):
+                    idx = c * NWORK + w
+                    real = idx < GRID * GRID
+                    if real:
+                        off = ((PAD + (idx // GRID) * TILE) * IMG + PAD + (idx % GRID) * TILE) * IC
+                    else:
+                        off = (JUNK_ROW * IMG + w * TILE) * IC
+                    rt.drain(col_out[c].cons(), dst, TensorAccessPattern(
+                        (IMG_ELEMS,), offset=off,
+                        sizes=[1, 1, TILE, TILE * IC],
+                        strides=[0, 0, IMG * IC, 1]), task_group=tg,
+                        wait=(c == COLS - 1 and w == NWORK - 1))
+            rt.finish_task_group(tg)
+
+    return Program(dev, rt).resolve_program()
+
+
 if __name__ == "__main__":
     import os
     print(rn3_chain_geo(os.environ.get("GEO", "re8"), int(os.environ.get("N_ITERS", "2"))))
