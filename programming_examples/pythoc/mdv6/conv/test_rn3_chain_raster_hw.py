@@ -22,7 +22,9 @@ N_ITERS = int(os.environ.get("N_ITERS", "3"))
 
 
 def main():
-    ic, G = 48, 40
+    from conv.aie2_rn3_chain_geo import raster_params
+    p = raster_params(GEO)
+    ic, G = p["IC"], p["GBOUND"]
     rng = np.random.default_rng(0)
     x0 = torch.from_numpy(rng.standard_normal((G, G, ic)).astype(np.float32) * 0.5).to(torch.bfloat16)
     mk = lambda: (rng.integers(0, 60, size=ic*ic*9 + 2*ic).astype(np.uint16) + 15000).astype(np.uint16)
