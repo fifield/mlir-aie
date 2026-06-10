@@ -17,7 +17,7 @@ from pythoc.aie import (
     aie_vector, load_v, store_v, vector_add, vector_sub, vector_mul,
     vector_and, vector_cast, vector_extract, broadcast, concat, zeros,
 )
-from pythoc.aie.operations import write_tm, read_tm, lock_acquire
+from pythoc.aie.operations import write_tm, read_tm, lock_acquire, lock_release
 from pythoc.aie.mmul import acc_to_bf16
 from pythoc.aie.profiling import event0, event1
 
@@ -207,13 +207,10 @@ def chain_wt_arm(slot_i32: i32) -> void:
 
 
 @aie_kernel
-def chain_wt_wait(target: i32) -> void:
-    """Spin until lock 12 value >= target (cumulative slot count)."""
-    v: i32 = read_tm(0x0001F000 + WT_LOCK * 16)
-    guard: i32 = 0
-    while v < target and guard < 4000000:
-        v = read_tm(0x0001F000 + WT_LOCK * 16)
-        guard = guard + 1
+def chain_wt_wait() -> void:
+    """Block until the armed slot landed: acquire-GE 1 then take the token
+    (lock stays 0/1 — cumulative counting saturates at 63 and wedges)."""
+    lock_acquire(48 + WT_LOCK, -1)
 
 
 @aie_kernel
