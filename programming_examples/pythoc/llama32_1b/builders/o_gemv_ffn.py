@@ -3850,6 +3850,15 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
         dn_tiles = [tile(c, 5) for c in range(N_COLS)] if with_down else None
         import os as _os
         _xcol = int(_os.environ.get("PYTHOC_C2_XCOL", "0"))  # X-broadcast src col
+        # FIX: deliver the mat activation (X) per-column via each column's own
+        # mem-tile (shim[c] -> mem[c] -> mat[c]) instead of a shim-row broadcast
+        # fan from shim[0]. The fan shared the MM2S1 lane with per-column add1
+        # in1 and starved the fan's terminal columns (see test_c2_add_starve).
+        # Per-column delivery has no E/W fan, so MM2S1 traffic is all local.
+        # Mem X ring uses odd channel 5 (BD pool 24-47, clear of the W/y even
+        # chains). Disabled for with_down (c2_merged) -- its mem channels 2/3
+        # are taken by the down W/y chains; that path keeps the old broadcast.
+        _memx = (not with_down) and _os.environ.get("PYTHOC_C2_MEMX", "1") == "1"
 
         mem_locks = {}
         for col in reversed(range(N_COLS)):
@@ -3866,6 +3875,12 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
                     "dw_ready":    lock(mt, lock_id=6, init=0),
                     "dy_done":     lock(mt, lock_id=5, init=1),
                     "dy_ready":    lock(mt, lock_id=4, init=0),
+                })
+            if _memx:
+                # X relay ring (ids 8/9 clear of the w/y ids 0-3).
+                mem_locks[col].update({
+                    "x_empty": lock(mt, lock_id=9, init=1),
+                    "x_full":  lock(mt, lock_id=8, init=0),
                 })
 
         def _six_locks(t):
@@ -3913,6 +3928,11 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
         mem_buf_y = {}
         mem_buf_dw = {}
         mem_buf_dy = {}
+        mem_buf_x = {}
+        _MX_L2_TY = bf16_memref(2 * EMB_DIM, memory_space=1)   # holds packed X
+        if _memx:
+            for col in reversed(range(N_COLS)):
+                mem_buf_x[col] = buffer(mem_tiles[col], datatype=_MX_L2_TY)
         for col in reversed(range(N_COLS)):
             mem_buf_w[col] = buffer(mem_tiles[col], datatype=_W_L2_TY)
         for col in reversed(range(N_COLS)):
@@ -4098,7 +4118,7 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
                     dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
                     with block[1]:
                         use_lock(_cl["out_full"], LockAction.AcquireGreaterEqual, value=1)
-                        dma_bd(_bo, offset=0, len=ADD_CHUNK, packet=(0, 1))
+                        dma_bd(_bo, offset=0, len=ADD_CHUNK, packet=(0, 5))
                         use_lock(_cl["out_done"], LockAction.Release, value=1)
                         next_bd(block[1])
                     with block[2]:
@@ -4163,7 +4183,7 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
                     dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
                     with block[1]:
                         use_lock(_cl["out_full"], LockAction.AcquireGreaterEqual, value=1)
-                        dma_bd(_bo, offset=0, len=SWIGLU_CHUNK, packet=(0, 1))
+                        dma_bd(_bo, offset=0, len=SWIGLU_CHUNK, packet=(0, 6))
                         use_lock(_cl["out_done"], LockAction.Release, value=1)
                         next_bd(block[1])
                     with block[2]:
@@ -4281,12 +4301,25 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
                     dests={"dest": mem_tiles[col], "port": WireBundle.DMA,
                            "channel": 2},
                 )
-        packetflow(
-            pkt_id=1,
-            source=shim_tiles[_xcol], source_port=WireBundle.DMA, source_channel=1,
-            dests=[{"dest": mat_tiles[c], "port": WireBundle.DMA, "channel": 0}
-                   for c in range(N_COLS)],
-        )
+        if _memx:
+            # Per-column X: shim[c] MM2S1 -> mem[c] S2MM5 (pkt 16, local, no
+            # E/W fan), then mem[c] MM2S5 -> mat[c] DMA0 (circuit). pkt 16 is a
+            # distinct single bit so it never aliases add(2)/sw(4) on MM2S1.
+            for col in range(N_COLS):
+                packetflow(
+                    pkt_id=16,
+                    source=shim_tiles[col], source_port=WireBundle.DMA,
+                    source_channel=1,
+                    dests={"dest": mem_tiles[col], "port": WireBundle.DMA,
+                           "channel": 5},
+                )
+        else:
+            packetflow(
+                pkt_id=1,
+                source=shim_tiles[_xcol], source_port=WireBundle.DMA, source_channel=1,
+                dests=[{"dest": mat_tiles[c], "port": WireBundle.DMA, "channel": 0}
+                       for c in range(N_COLS)],
+            )
         if with_down:
             packetflow(
                 pkt_id=8,
@@ -4308,6 +4341,9 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
         for col in range(N_COLS):
             flow(mem_tiles[col], WireBundle.DMA, 1, mat_tiles[col], WireBundle.DMA, 1)
             flow(mat_tiles[col], WireBundle.DMA, 0, mem_tiles[col], WireBundle.DMA, 1)
+            if _memx:
+                # X relay: mem[c] MM2S5 -> mat[c] DMA0 (the activation input).
+                flow(mem_tiles[col], WireBundle.DMA, 5, mat_tiles[col], WireBundle.DMA, 0)
             if with_down:
                 flow(mem_tiles[col], WireBundle.DMA, 2, dn_tiles[col], WireBundle.DMA, 1)
                 flow(dn_tiles[col], WireBundle.DMA, 0, mem_tiles[col], WireBundle.DMA, 3)
@@ -4318,18 +4354,18 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
                 dests={"dest": shim_tiles[col], "port": WireBundle.DMA, "channel": 0},
             )
             packetflow(
-                pkt_id=1,
+                pkt_id=5,
                 source=add_tiles[col], source_port=WireBundle.DMA, source_channel=0,
                 dests={"dest": shim_tiles[col], "port": WireBundle.DMA, "channel": 0},
             )
             packetflow(
-                pkt_id=1,
+                pkt_id=6,
                 source=sw_tiles[col], source_port=WireBundle.DMA, source_channel=0,
                 dests={"dest": shim_tiles[col], "port": WireBundle.DMA, "channel": 0},
             )
             if with_down:
                 packetflow(
-                    pkt_id=1,
+                    pkt_id=7,
                     source=mem_tiles[col], source_port=WireBundle.DMA,
                     source_channel=3,
                     dests={"dest": shim_tiles[col], "port": WireBundle.DMA,
@@ -4359,14 +4395,19 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
                                     shim_tiles[col], DMAChannelDir.MM2S, 0)
                 shim_dma_allocation(f"air_channel_{DO_CH}_{col}",
                                     shim_tiles[col], DMAChannelDir.S2MM, 0)
-        shim_dma_allocation(f"air_channel_{X_CH}",
-                            shim_tiles[_xcol], DMAChannelDir.MM2S, 1)
+        if _memx:
+            for col in range(N_COLS):
+                shim_dma_allocation(f"air_channel_{X_CH}_{col}",
+                                    shim_tiles[col], DMAChannelDir.MM2S, 1)
+        else:
+            shim_dma_allocation(f"air_channel_{X_CH}",
+                                shim_tiles[_xcol], DMAChannelDir.MM2S, 1)
         if with_down:
             shim_dma_allocation(f"air_channel_{DX_CH}",
                                 shim_tiles[0], DMAChannelDir.MM2S, 1)
 
         # --- mem tile DMAs: matvec W/y chains + (with_down) down W/y chains ---
-        def _make_memtile_dma(_col, _ml, _w, _y, _dw, _dy):
+        def _make_memtile_dma(_col, _ml, _w, _y, _dw, _dy, _mxb=None):
             @memtile_dma(mem_tiles[_col])
             def _mt(block):
                 end_blk = 2
@@ -4393,13 +4434,39 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
                     use_lock(_ml["w_ready"], LockAction.Release, value=1)
                     next_bd(block[6])
                 with block[7]:
-                    dma_start(DMAChannelDir.S2MM, 1, dest=block[8],
-                              chain=block[9] if _dw is not None else block[2])
+                    _after_y = block[9] if (_dw is not None or _mxb is not None) \
+                        else block[2]
+                    dma_start(DMAChannelDir.S2MM, 1, dest=block[8], chain=_after_y)
                 with block[8]:
                     use_lock(_ml["y_done"], LockAction.AcquireGreaterEqual, value=1)
                     dma_bd(_y, offset=0, len=M_TILE)
                     use_lock(_ml["y_ready"], LockAction.Release, value=1)
                     next_bd(block[8])
+                if _mxb is not None:
+                    # X relay ring: shim[c] -> mem[c] (S2MM5) -> mat[c] (MM2S5).
+                    # 3 slots/token matching the mat DMA0 chain lengths:
+                    # O=EMB (attn_out), gate=2*EMB, up=2*EMB ([res1|norm_w]).
+                    # Odd channel 5 -> BD ids in the 24-47 pool (clear of the
+                    # even W/y chains' low ids); pin them to avoid collisions.
+                    _xlens = [EMB_DIM, 2 * EMB_DIM, 2 * EMB_DIM]
+                    with block[9]:
+                        dma_start(DMAChannelDir.S2MM, 5, dest=block[10],
+                                  chain=block[13])
+                    for _i, _ln in enumerate(_xlens):
+                        with block[10 + _i]:
+                            use_lock(_ml["x_empty"], LockAction.AcquireGreaterEqual, value=1)
+                            dma_bd(_mxb, offset=0, len=_ln, bd_id=24 + _i)
+                            use_lock(_ml["x_full"], LockAction.Release, value=1)
+                            next_bd(block[10 + ((_i + 1) % 3)])
+                    with block[13]:
+                        dma_start(DMAChannelDir.MM2S, 5, dest=block[14],
+                                  chain=block[2])
+                    for _i, _ln in enumerate(_xlens):
+                        with block[14 + _i]:
+                            use_lock(_ml["x_full"], LockAction.AcquireGreaterEqual, value=1)
+                            dma_bd(_mxb, offset=0, len=_ln, bd_id=27 + _i)
+                            use_lock(_ml["x_empty"], LockAction.Release, value=1)
+                            next_bd(block[14 + ((_i + 1) % 3)])
                 if _dw is not None:
                     with block[9]:
                         dma_start(DMAChannelDir.MM2S, 2, dest=block[10], chain=block[11])
@@ -4412,7 +4479,7 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
                         dma_start(DMAChannelDir.MM2S, 3, dest=block[12], chain=block[13])
                     with block[12]:
                         use_lock(_ml["dy_ready"], LockAction.AcquireGreaterEqual, value=1)
-                        dma_bd(_dy, offset=0, len=M_TILE_K8192, packet=(0, 1))
+                        dma_bd(_dy, offset=0, len=M_TILE_K8192, packet=(0, 7))
                         use_lock(_ml["dy_done"], LockAction.Release, value=1)
                         next_bd(block[12])
                     with block[13]:
@@ -4431,20 +4498,27 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
                         next_bd(block[16])
         for col in range(N_COLS):
             _make_memtile_dma(col, mem_locks[col], mem_buf_w[col], mem_buf_y[col],
-                              mem_buf_dw.get(col), mem_buf_dy.get(col))
+                              mem_buf_dw.get(col), mem_buf_dy.get(col),
+                              mem_buf_x.get(col))
 
         # --- runtime sequence ---
         @runtime_sequence(*o_gemv_ffn_host_arg_types(), sym_name=f"{sym}_sequence")
         def _seq(*args):
-            def _x_once(chan_name, bd_emit):
+            def _x_once(chan_name, bd_emit, pid):
                 t = dma_configure_task_for(chan_name, repeat_count=0)
                 with bds(t) as bd:
-                    bd_emit(bd)
+                    bd_emit(bd, pid)
                 dma_start_task(t)
                 return t
 
             def _mat_wave(arg_w, arg_y, out_rows, x_emit):
-                x_task = _x_once(f"air_channel_{X_CH}", x_emit)
+                # X feed: per-column shim[c]->mem[c] (pkt 16) when _memx (the
+                # fan-free fix); else the single-source shim broadcast (pkt 1).
+                if _memx:
+                    x_tasks = [_x_once(f"air_channel_{X_CH}_{c}", x_emit, 16)
+                               for c in range(N_COLS)]
+                else:
+                    x_tasks = [_x_once(f"air_channel_{X_CH}", x_emit, 1)]
                 n_outer = out_rows // 1024
                 for outer in range(n_outer):
                     weight_tasks = []
@@ -4478,7 +4552,8 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
                         dma_await_task(t)
                     for t in reversed(weight_tasks):
                         dma_free_task(t)
-                dma_free_task(x_task)
+                for t in reversed(x_tasks):
+                    dma_free_task(t)
 
             def _eltwise_wave(in0_name, in1_name, out_name, arg_in0, arg_in1,
                               arg_out, chunk, dims, pkt_id):
@@ -4520,26 +4595,26 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
                 for t in reversed(in0_tasks):
                     dma_free_task(t)
 
-            def _o_x(bd):
+            def _o_x(bd, pid):
                 with bd[0]:
                     dma_bd(args[1], offset=0, len=EMB_DIM,
-                           dimensions=[(4, 512), (512, 1)], packet=(0, 1))
+                           dimensions=[(4, 512), (512, 1)], packet=(0, pid))
                     EndOp()
 
-            def _packed_x(bd):
+            def _packed_x(bd, pid):
                 if _plain_gate:
                     with bd[0]:
                         dma_bd(args[6], offset=0, len=EMB_DIM,
-                               dimensions=[(4, 512), (512, 1)], packet=(0, 1))
+                               dimensions=[(4, 512), (512, 1)], packet=(0, pid))
                         EndOp()
                     return
                 with bd[0]:
                     dma_bd(args[4], offset=0, len=EMB_DIM,
-                           dimensions=[(4, 512), (512, 1)], packet=(0, 1))
+                           dimensions=[(4, 512), (512, 1)], packet=(0, pid))
                     next_bd(bd[1])
                 with bd[1]:
                     dma_bd(args[5], offset=0, len=EMB_DIM,
-                           dimensions=[(4, 512), (512, 1)], packet=(0, 1))
+                           dimensions=[(4, 512), (512, 1)], packet=(0, pid))
                     EndOp()
 
             # Debug knob (deadlock bisect): number of stages to emit, 1..7.
@@ -4567,12 +4642,12 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
             if not with_down or _n_stages < 6:
                 return
             # 6: down  wdown x swiglu -> down
-            def _down_x(bd):
+            def _down_x(bd, pid):
                 with bd[0]:
                     dma_bd(args[11], offset=0, len=HIDDEN_DIM,
-                           dimensions=[(16, 512), (512, 1)], packet=(0, 8))
+                           dimensions=[(16, 512), (512, 1)], packet=(0, pid))
                     EndOp()
-            dx_task = _x_once(f"air_channel_{DX_CH}", _down_x)
+            dx_task = _x_once(f"air_channel_{DX_CH}", _down_x, 8)
             for outer in range(d_n_outer):
                 dw_tasks = []
                 for col in range(N_COLS):
