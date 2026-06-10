@@ -102,15 +102,15 @@ _O_GEMV_FFN_PACK_DEFAULT = "c2_merged"
 # persistent spatial layer. Set the env var to "rgr2_ddr" or "none" to revert.
 _RMS_GEMV_ROPE_PACK_DEFAULT = "rgr1_ddr"
 
-# AWQ O+FFN decode packing: validated on hardware (passes `make hf-gate
-# QUANT=awq`). Defaults to the `d1d3d4_rms` pack -- air's 3-device fold that
-# additionally eliminates the standalone rm_rms device by computing the
-# RMSNorm once per token inside the gate/up tiles. Bit-exact vs the unpacked
-# baseline and a further ~4-5% over plain d1d3d4 (the redundant per-tile RMS
-# is cheap relative to the int4 dequant matvec). Set "d1d3d4" to keep the
-# separate rm_rms device, or "none" to revert packing entirely.
+# AWQ O+FFN decode packing: validated on hardware (Paris, ~14.5 tok/s).
+# Defaults to `c2_merged` -- the full call-2 collapse ported from the BF16
+# builder: O / add1 / rms-fold / gate / up / swiglu / down / add2 all in ONE
+# aie.device / ONE aiex.configure = 1 LoadPDI (was 3 under d1d3d4_rms). Same
+# fixes as BF16 C2 (per-column mem-tile activation, distinct shim-S2MM0 output
+# packet ids matvec-y=1/add=5/swiglu=6/down=7) with uint4-dequant matvec
+# kernels. Step back with "d1d3d4_rms"/"d1d3d4"/"none".
 _O_GEMV_FFN_AWQ_PACK_ENV = "PYTHOC_LLAMA_O_GEMV_FFN_AWQ_PACK_MODE"
-_O_GEMV_FFN_AWQ_PACK_DEFAULT = "d1d3d4_rms"
+_O_GEMV_FFN_AWQ_PACK_DEFAULT = "c2_merged"
 
 # AWQ RMS+GEMV+RoPE decode packing: validated on hardware (passes `make
 # hf-gate QUANT=awq`; combined with the O+FFN pack, AWQ decode goes
