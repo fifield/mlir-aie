@@ -34,6 +34,8 @@ from aie.helpers.taplib import TensorAccessPattern
 
 from kernels.rep_elan_bf16_pythoc import KERNEL_EXTRA_GLOBALS, _MMUL_HELPERS
 from kernels.rn3_chain_pythoc import (
+    chain_wt_arm,
+    chain_wt_wait,
     chain_conv1_bf16,
     chain_mask_bf16,
     chain_conv2res_bf16,
@@ -427,6 +429,230 @@ def rn3_chain_raster(geo: str, n_iters: int = 2, stack_size: int = 4096, compute
                 rt.finish_task_group(tg)
 
     return Program(dev, rt).resolve_program()
+
+
+def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, compute: int = 1):
+    """Raster chain with memtile weight replay: slots fill the memtile once per
+    iter (shim MM2S ch1), a raw memtile MM2S ch1 BD replays them TPR times to
+    the column's cores; cores arm their own S2MM ch1 per slot into a fixed
+    L1 buffer (no wt ObjectFifo, no host TPR duplication)."""
+    from kernels.rn3_chain_pythoc import WT_BUF_ADDR
+    p = raster_params(geo)
+    IC, COLS, NWORK, TPR = p["IC"], p["COLS"], p["NWORK"], p["TPR"]
+    GRID, IMG, IMG_ELEMS = p["GRID"], p["IMG"], p["IMG_ELEMS"]
+    FINAL, SCRATCH, N_BLK, WSLOT = p["FINAL"], p["SCRATCH"], p["N_BLK"], p["WSLOT"]
+    GBOUND = p["GBOUND"]
+    CHUNK = 12 * 12 * IC
+    SLOTS_PER_PAIR = 2 * N_BLK
+    JUNK_ROW = GRID * TILE + 2 * PAD
+    N_TILES = GRID * GRID
+    MEM_STREAM = SLOTS_PER_PAIR * WSLOT          # u16 per iter, memtile resident
+    SLOT_I32 = WSLOT // 2
+
+    def tile_of(c, w, r):
+        idx = (c * NWORK + w) * TPR + r
+        if idx < N_TILES:
+            return True, (idx // GRID) * TILE, (idx % GRID) * TILE
+        k = idx - N_TILES
+        return False, JUNK_ROW + (k // GRID) * TILE - PAD, (k % GRID) * TILE - PAD
+
+    dev = NPU2()
+    patch_ty = np.ndarray[(CHUNK,), np.dtype[np.uint16]]
+    final_ty = np.ndarray[(FINAL,), np.dtype[np.uint16]]
+    col_out_ty = np.ndarray[(NWORK * FINAL,), np.dtype[np.uint16]]
+    col_in_ty = np.ndarray[(NWORK * CHUNK,), np.dtype[np.uint16]]
+    wslot_ty = np.ndarray[(WSLOT,), np.dtype[np.uint16]]
+    scratch_ty = np.ndarray[(SCRATCH,), np.dtype[np.uint16]]
+    img_ty = np.ndarray[(IMG_ELEMS,), np.dtype[np.uint16]]
+    wt_host_ty = np.ndarray[(n_iters * MEM_STREAM,), np.dtype[np.uint16]]
+
+    kc1 = PythocKernel(chain_conv1_bf16, [patch_ty, wslot_ty, scratch_ty, np.int32, np.int32, np.int32],
+                       extra_globals=KERNEL_EXTRA_GLOBALS, helpers=_MMUL_HELPERS)
+    km = PythocKernel(chain_mask_bf16, [scratch_ty, np.int32, np.int32, np.int32, np.int32],
+                      extra_globals=KERNEL_EXTRA_GLOBALS, helpers=[])
+    kc2r = PythocKernel(chain_conv2res_bf16, [scratch_ty, wslot_ty, final_ty, patch_ty, np.int32, np.int32, np.int32, np.int32, np.int32, np.int32],
+                        extra_globals=KERNEL_EXTRA_GLOBALS, helpers=[_store_bn_silu_res_4x8_rows])
+    from kernels.rn3_chain_pythoc import WT_BD, WT_LOCK, DMA_BD_BASE, DMA_S2MM_1_START_QUEUE
+    wt_globals = dict(KERNEL_EXTRA_GLOBALS,
+                      WT_BD=WT_BD, WT_LOCK=WT_LOCK, WT_BUF_ADDR=WT_BUF_ADDR,
+                      DMA_BD_BASE=DMA_BD_BASE,
+                      DMA_S2MM_1_START_QUEUE=DMA_S2MM_1_START_QUEUE)
+    karm = PythocKernel(chain_wt_arm, [np.int32], extra_globals=wt_globals, helpers=[])
+    kwait = PythocKernel(chain_wt_wait, [np.int32], extra_globals=wt_globals, helpers=[])
+
+    workers, col_in, col_out, wbufs = [], [], [], []
+
+    def core_fn(a, o, wbuf, scratch, c1, m, c2r, arm, wait, iters, coords):
+        nslot = 0
+        for it in range_(iters):
+            for (real, grow, gcol) in coords:
+                ein = a.acquire(1)
+                eout = o.acquire(1)
+                mb = 0
+                while mb < N_BLK:
+                    if compute:
+                        nslot = nslot + 1
+                        arm(SLOT_I32)
+                        wait(nslot)
+                        if real and compute == 1:
+                            c1(ein, wbuf, scratch, mb, 0, IC)
+                    mb = mb + 1
+                if real and compute == 1:
+                    m(scratch, grow, gcol, GBOUND, N_BLK)
+                ob = 0
+                while ob < N_BLK:
+                    if compute:
+                        nslot = nslot + 1
+                        arm(SLOT_I32)
+                        wait(nslot)
+                        if real and compute == 1:
+                            c2r(scratch, wbuf, eout, ein, ob, 0, IC, grow, gcol, GBOUND)
+                    ob = ob + 1
+                a.release(1)
+                o.release(1)
+
+    for c in range(COLS):
+        fin = ObjectFifo(col_in_ty, depth=1, name=f"cw_in_{c}")
+        fout = ObjectFifo(col_out_ty, depth=1, name=f"cw_out_{c}")
+        in_sp = fin.cons().split(offsets=[w * CHUNK for w in range(NWORK)],
+                                 obj_types=[patch_ty] * NWORK, depths=[1] * NWORK,
+                                 names=[f"cw_in_{c}_{i}" for i in range(NWORK)])
+        out_j = fout.prod().join(offsets=[w * FINAL for w in range(NWORK)],
+                                 obj_types=[final_ty] * NWORK, depths=[1] * NWORK,
+                                 names=[f"cw_out_{c}_{i}" for i in range(NWORK)])
+        col_in.append(fin); col_out.append(fout)
+        for i in range(NWORK):
+            coords = tuple(tile_of(c, i, r) for r in range(TPR))
+            scratch = Buffer(scratch_ty, name=f"cw_scr_{c}_{i}")
+            wbuf = Buffer(wslot_ty, name=f"cw_wt_{c}_{i}")
+            wbufs.append((c, i, f"cw_wt_{c}_{i}"))
+            workers.append(Worker(core_fn,
+                [in_sp[i].cons(), out_j[i].prod(), wbuf,
+                 scratch, kc1, km, kc2r, karm, kwait, n_iters, coords],
+                tile=Tile(c, 2 + i), stack_size=stack_size))
+
+    rt = Runtime()
+    with rt.sequence(img_ty, wt_host_ty, img_ty) as (A, WT, B):
+        rt.start(*workers)
+        for it in range(n_iters):
+            src, dst = (A, B) if it % 2 == 0 else (B, A)
+            for r in range(TPR):
+                tg = rt.task_group()
+                for c in range(COLS):
+                    for w in range(NWORK):
+                        _, gr, gc = tile_of(c, w, r)
+                        rt.fill(col_in[c].prod(), src, TensorAccessPattern(
+                            (IMG_ELEMS,), offset=(gr * IMG + gc) * IC,
+                            sizes=[1, 12, 12 * IC],
+                            strides=[0, IMG * IC, 1]), task_group=tg)
+                    for w in range(NWORK):
+                        _, gr, gc = tile_of(c, w, r)
+                        rt.drain(col_out[c].cons(), dst, TensorAccessPattern(
+                            (IMG_ELEMS,), offset=((PAD + gr) * IMG + PAD + gc) * IC,
+                            sizes=[1, 1, TILE, TILE * IC],
+                            strides=[0, 0, IMG * IC, 1]), task_group=tg,
+                            wait=(c == COLS - 1 and w == NWORK - 1))
+                rt.finish_task_group(tg)
+
+    module = Program(dev, rt).resolve_program()
+    _patch_wt_replay(module, COLS, NWORK, TPR, n_iters, MEM_STREAM, WT_BUF_ADDR)
+    return module
+
+
+def _patch_wt_replay(module, cols, nwork, tpr, n_iters, mem_stream, wbuf_addr):
+    """Post-resolve patch: fixed wbuf addresses; per col memtile slot buffer +
+    locks + S2MM1 fill / MM2S1 replay DMA + flows + shim alloc + per-iter
+    runtime fills of WT (sequence arg 1)."""
+    from aie.dialects.aie import (
+        DMAChannelDir, EndOp, LockAction, WireBundle, buffer, dma_bd,
+        dma_start, flow, lock, memtile_dma, next_bd, shim_dma_allocation,
+        use_lock,
+    )
+    from aie.dialects.aiex import (
+        shim_dma_single_bd_task, dma_start_task,
+    )
+    from aie.ir import InsertionPoint
+
+    import re as _re
+    dev_op = None
+    for op in module.body.operations:
+        if op.operation.name == "aie.device":
+            dev_op = op
+    body = dev_op.regions[0].blocks[0]
+    tiles = {}
+    shims = []
+    seq_op = None
+    for op in body.operations:
+        nm = op.operation.name
+        if nm == "aie.logical_tile":
+            txt = str(op)
+            mt = _re.search(r"<(\w+)>\((\?|\d+), (\?|\d+)\)", txt)
+            kind, c, r = mt.group(1), mt.group(2), mt.group(3)
+            if kind == "ShimNOCTile":
+                shims.append(op)
+            elif kind == "MemTile":
+                shims_dummy = None  # memtiles are unplaced; creation order = col
+                tiles.setdefault("mems", []).append(op)
+            elif c != "?":
+                tiles[(int(c), int(r))] = op
+        if "runtime_sequence" in nm:
+            seq_op = op
+        if nm == "aie.buffer":
+            bname = str(op.attributes["sym_name"]).strip('"')
+            if bname.startswith("cw_wt_"):
+                from aie.ir import IntegerAttr, IntegerType
+                op.attributes["address"] = IntegerAttr.get(
+                    IntegerType.get_signless(32, module.context), wbuf_addr)
+
+    from aie.ir import Location
+    last = list(body.operations)[-1]
+    mem_n = mem_stream // 2  # i32 view of u16 stream
+    src_ty = np.ndarray[(mem_n,), np.dtype[np.int32]]
+    with InsertionPoint(last), Location.unknown(module.context):
+        for c in range(cols):
+            mem_t = tiles["mems"][c]
+            shim_t = shims[c]
+            # explicit high address — the post-resolve allocator gives
+            # patched buffers address 0, overlapping the FIFO buffers
+            msrc = buffer(mem_t, datatype=src_ty, name=f"wt_src_{c}", address=0x70000)
+            lk_e = lock(mem_t, lock_id=30, init=tpr, sym_name=f"wt_e_{c}")
+            lk_f = lock(mem_t, lock_id=31, init=0, sym_name=f"wt_f_{c}")
+            flow(shim_t, WireBundle.DMA, 1, mem_t, WireBundle.DMA, 1)
+            for w in range(nwork):
+                flow(mem_t, WireBundle.DMA, 1, tiles[(c, 2 + w)], WireBundle.DMA, 1)
+            shim_dma_allocation(f"wt_in_{c}", shim_t, DMAChannelDir.MM2S, 1)
+
+            def _mk(msrc, lk_e, lk_f):
+                @memtile_dma(mem_t)
+                def mt(block):
+                    _mt_body(block, msrc, lk_e, lk_f)
+            def _mt_body(block, msrc, lk_e, lk_f):
+                dma_start(DMAChannelDir.S2MM, 1, dest=block[1], chain=block[2])
+                with block[1]:
+                    use_lock(lk_e, LockAction.AcquireGreaterEqual, value=tpr)
+                    dma_bd(msrc, offset=0, len=mem_n)
+                    use_lock(lk_f, LockAction.Release, value=tpr)
+                    next_bd(block[1])
+                with block[2]:
+                    dma_start(DMAChannelDir.MM2S, 1, dest=block[3], chain=block[4])
+                with block[3]:
+                    use_lock(lk_f, LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(msrc, offset=0, len=mem_n)
+                    use_lock(lk_e, LockAction.Release, value=1)
+                    next_bd(block[3])
+                with block[4]:
+                    EndOp()
+            _mk(msrc, lk_e, lk_f)
+
+    seq_block = seq_op.regions[0].blocks[0]
+    wt_arg = seq_block.arguments[1]
+    with InsertionPoint.at_block_begin(seq_block), Location.unknown(module.context):
+        for c in range(cols):
+            for it in range(n_iters):
+                t = shim_dma_single_bd_task(
+                    f"wt_in_{c}", wt_arg, offset=it * mem_stream,
+                    sizes=[1, 1, 1, mem_stream])
+                dma_start_task(t)
 
 
 if __name__ == "__main__":
