@@ -85,13 +85,16 @@ def _placed_builder_enabled(name: str) -> bool:
 # ---------------------------------------------------------------------------
 _O_GEMV_FFN_PACK_ENV = "PYTHOC_LLAMA_O_GEMV_FFN_PACK_MODE"
 _RMS_GEMV_ROPE_PACK_ENV = "PYTHOC_LLAMA_RMS_GEMV_ROPE_PACK_MODE"
-# d1d3d4_rms folds the standalone rm_rms_seg RMSNorm device into the gate/up
-# tiles (decode call 2: 4->3 devices). BF16-wash on throughput (per-tile RMS
-# recompute offsets the dropped dispatch) but a structural step toward the
-# resident layer -- completes the "Path A floor" together with rgr1_ddr on
-# call 1. Bit-exact vs d1d3d4 / unpacked. Set the env var to "d1d3d4" for the
-# 4-device pack or "none" to revert packing entirely.
-_O_GEMV_FFN_PACK_DEFAULT = "d1d3d4_rms"
+# c2_merged is the full call-2 collapse: O / add1 / rms-fold / gate / up /
+# swiglu / down / add2 all in ONE aie.device / ONE aiex.configure = 1 LoadPDI
+# (was 3 under d1d3d4_rms). Bit-exact vs d1d3d4_rms / unpacked (hf-gate 9/9),
+# ~87 ms/token (structural win, perf-neutral). The mat activation ships
+# per-column via the mem-tiles (no shim-row broadcast fan) and every shim
+# S2MM0 producer uses a distinct output packet id (matvec-y=1/add=5/swiglu=6/
+# down=7) so the output convergence has no multi-producer routing conflict.
+# Set the env var to "d1d3d4_rms"/"d1d3d4"/"none" to step back down the
+# collapse ladder (see RESIDENT_DEVICE_EVOLUTION.md).
+_O_GEMV_FFN_PACK_DEFAULT = "c2_merged"
 # rgr1_ddr folds the standalone r_rms_seg RMSNorm device into the Q/K/V+RoPE
 # pack (6->1 device for decode call 1), one fewer full-device LoadPDI/layer.
 # Bit-exact + perf-neutral vs rgr2_ddr (same kernels, same DDR handoff); the
