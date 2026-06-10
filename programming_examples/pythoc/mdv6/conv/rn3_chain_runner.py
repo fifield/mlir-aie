@@ -179,25 +179,30 @@ def run_rn3_chain_raster(geo: str, inp_hwc: torch.Tensor, weight_pairs) -> torch
     p = raster_params(geo)
     ic, G = p["IC"], p["GBOUND"]
     n_iters = len(weight_pairs)
-    key = (geo, "raster") + tuple(id(a) for pr in weight_pairs for a in pr)
+    import os as _os
+    wr = _os.environ.get("MDV6_WTREPLAY", "0") not in ("", "0", "false", "False")
+    key = (geo, "raster", wr) + tuple(id(a) for pr in weight_pairs for a in pr)
     cached = _WEIGHT_CACHE.get(key)
     if cached is None:
-        # one slot block per round (TPR rounds per iter consume identical slots)
-        blocks = [np.tile(_pack_geo_iter(w1, w2, ic, p["WSLOT"], p["N_BLK"]), p["TPR"])
+        # wt replay: memtile re-emits per round — no host TPR duplication
+        rep = 1 if wr else p["TPR"]
+        blocks = [np.tile(_pack_geo_iter(w1, w2, ic, p["WSLOT"], p["N_BLK"]), rep)
                   for w1, w2 in weight_pairs]
         cached = (np.concatenate(blocks), list(weight_pairs))
         _WEIGHT_CACHE[key] = cached
     weights = cached[0]
-    rkey = (geo, n_iters, "raster")
+    rkey = (geo, n_iters, "raster", wr)
     r = _RUNNERS.get(rkey)
     if r is None:
-        bd = Path(__file__).parent / f"build_rn3_raster_{geo}_i{n_iters}"
+        tag = "_wr" if wr else ""
+        bd = Path(__file__).parent / f"build_rn3_raster_{geo}_i{n_iters}{tag}"
         xclbin, insts = bd / "final.xclbin", bd / "insts.bin"
         if not (xclbin.exists() and insts.exists()):
             from aie.utils.compile import compile_mlir_module
-            from conv.aie2_rn3_chain_geo import rn3_chain_raster
+            from conv.aie2_rn3_chain_geo import rn3_chain_raster, rn3_chain_raster_wr
+            gen = rn3_chain_raster_wr if wr else rn3_chain_raster
             (bd / "work").mkdir(parents=True, exist_ok=True)
-            compile_mlir_module(mlir_module=rn3_chain_raster(geo, n_iters=n_iters),
+            compile_mlir_module(mlir_module=gen(geo, n_iters=n_iters),
                                 insts_path=str(insts), xclbin_path=str(xclbin),
                                 work_dir=str(bd / "work"), verbose=False)
         r = ResidentXCLBinRunner(xclbin, insts)
