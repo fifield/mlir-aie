@@ -486,6 +486,28 @@ Original spec follows. Default `d1d3d4_rms` and the committed
 `d1d3d4_rms_fmv` are untouched; C1 is selectable via
 `PYTHOC_LLAMA_O_GEMV_FFN_PACK_MODE=c1_merged`. Next: C2 (fold D4 in).
 
+### C2 status (2026-06-10): built, blocked on stale-PDI switch state
+
+Pack modes `c2_rms` (C2a: RMS folded into gate/up waves on the reused row-2
+core, rms tile/stage gone, D4 kept) and `c2_merged` (C2b: + row-5 K=8192 down
+herd, add herd runs add1+add2, ONE configure for call 2) are implemented and
+IR-clean (c2_merged = 1 LoadPDI). Two findings:
+
+1. **Inline rms depth bug:** `rms_norm_packed_bf16` (matvec_rms .ll inline)
+   deadlocks the core when called inside an `scf.for` wave loop at depth 3;
+   unrolling gate/up straight-line (depth 2, as d3) fixes it.
+2. **BLOCKER — stale circuit masters across PDI swap:** c2 runs clean on a
+   blank device (post-timeout) but deadlocks when its PDI follows rgr's:
+   col-1 add starves (`tools/test_c2_rgr_swap.py` + per-col stall probe).
+   At shim (1,0) rgr leaves `West:3 -> East:1` (circuit broadcast tree).
+   c2 routes its x broadcast as a packetflow through slave West:3 but never
+   writes the East:1 master, so the stale fork persists and shunts c2's
+   packets into rgr's parked tree. C1 escaped only because its route tree
+   doesn't overlap. LoadPDI does NOT reset unwritten masters -- the fix is
+   compiler-level (emit clears for unused masters in configured switchboxes,
+   or a reset PDI), i.e. step-6 work arriving early. Until then C2 stays
+   off-default behind its pack flags.
+
 **New builder** `_emit_call2_merged(sym="c1_merged")` — ONE `@device` containing
 four core-sets, composed by copying the proven core/mem bodies verbatim from the
 standalone emitters, only changing their tile row:

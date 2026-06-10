@@ -64,9 +64,10 @@ def run_once(workdir: Path, compile_: bool, name: str = NAME) -> None:
     os.chdir(obj_dir)
     cache = KernelCache(cache_dir=workdir, verbose=False)
     if compile_:
-        seq = ("c1_merged", "d4_dg_a2_pack") if os.environ.get(
-            "PYTHOC_C1_WITH_D4") else ("c1_merged",)
-        ir = build_o_gemv_ffn_module(pack_mode="c1_merged", dispatch_sequence=seq)
+        mode = os.environ.get("PYTHOC_WEDGE_MODE", "c1_merged")
+        seq = (mode, "d4_dg_a2_pack") if os.environ.get(
+            "PYTHOC_C1_WITH_D4") else (mode,)
+        ir = build_o_gemv_ffn_module(pack_mode=mode, dispatch_sequence=seq)
         cache.compile_and_cache(name, ir, instance_name="o_gemv_ffn")
         cache._save_manifest()
     else:
@@ -87,9 +88,10 @@ def main() -> int:
                    default=PROJECT_DIR / "build_peano" / "c1_wedge_cache")
     args = p.parse_args()
     os.environ["PYTHOC_C1_STAGES"] = str(args.stages)
+    os.environ["PYTHOC_C2_STAGES"] = str(args.stages)
     args.workdir.mkdir(parents=True, exist_ok=True)
 
-    name = f"{NAME}_s{args.stages}" + ("_d4" if os.environ.get("PYTHOC_C1_WITH_D4") else "")
+    name = f"{NAME}_{os.environ.get('PYTHOC_WEDGE_MODE', 'c1_merged')}_s{args.stages}" + ("_d4" if os.environ.get("PYTHOC_C1_WITH_D4") else "")
     if args.probe:
         run_once(args.workdir, compile_=False, name=name)
         return 0
