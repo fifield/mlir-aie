@@ -717,10 +717,17 @@ case for zero real win. C3 targets the same-tile and broadcast legs only.
   14.2 vs ~0.3 floor — launch-count collapse (16-layer loop, attention),
   not DDR intermediates. **Decision: skip C3.4/C3.5 (probe not worth it);
   do C3.1–C3.3 only as cheap residency steps; jump to attention/loop.**
-- **C3.1 — up-wave xp reuse.** Gate and up receive the IDENTICAL packed
-  [res1|norm_w]; mat core is already 2× unrolled. Skip the up-wave delivery +
-  rms (normed unchanged): drop BD slot 3 (ring O/EMB → gate/2EMB), skip
-  x-locks + rms in wave 2, drop the up-wave X tasks. `PYTHOC_C3_XREUSE`. ≤1 d.
+- **C3.1 — up-wave xp reuse. DONE (2026-06-10), bit-exact, perf-neutral.**
+  Gate and up receive the IDENTICAL packed [res1|norm_w]; deliver once. Landed
+  in `_emit_call2_c2` behind `PYTHOC_C3_XREUSE=1` (default OFF): mat X BD ring
+  3→2 slots, core acquires x_ready + runs rms on the gate wave only and holds
+  x_avail through the up wave (so the next token's O delivery can't clobber
+  normed mid-up), runtime drops the up-wave X tasks, memx mem-tile ring 2
+  slots. hf-gate 9/9 with the flag; ogf 49.7 vs 49.3 ms baseline (noise) — as
+  the C3.0 bound predicted. Value is residency only; flag default flips with
+  the AWQ port. Caveat: pack-mode cache signature doesn't include the flag —
+  rebuild/cache-delete when toggling. Incompatible with PYTHOC_C2_PLAINGATE
+  (plain mode redelivers normed2 per wave; flag auto-off).
 - **C3.2 — res1 resident for add2 (H2b).** Same tile, same 256-slice. Add
   `res1_keep` L1 buf; add core 2× unroll: wave1 copies in1→keep, wave2 reads
   keep; in1 BD chain alternates DDR/skip. Drops 4 KB + 8 tasks. `PYTHOC_C3_RES1KEEP`. ≤1 d.

@@ -3859,6 +3859,12 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
         # chains). Disabled for with_down (c2_merged) -- its mem channels 2/3
         # are taken by the down W/y chains; that path keeps the old broadcast.
         _memx = (not with_down) and _os.environ.get("PYTHOC_C2_MEMX", "1") == "1"
+        # C3.1: gate and up waves consume the IDENTICAL packed [res1|norm_w].
+        # Deliver it once (gate) and have the up wave reuse the resident
+        # xp/normed: X ring 2 slots (O, gate); core holds x_avail across the
+        # up wave and skips the second rms. NOT compatible with _plain_gate
+        # (plain mode reads normed2 per wave from DDR, not the packed reuse).
+        _xreuse = (not _pg) and _os.environ.get("PYTHOC_C3_XREUSE", "0") == "1"
 
         mem_locks = {}
         for col in reversed(range(N_COLS)):
@@ -4022,8 +4028,13 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
         N_CHUNKS_GU = HIDDEN_DIM // N_COLS // M_TILE   # 128
         for col in reversed(range(N_COLS)):
             def _make_mat_mem(_ct, _cl, _yb, _wb, _xpb, _nb):
+                # X BD ring: 3 slots (O, gate, up) — or 2 slots (O, gate)
+                # under _xreuse (the up wave reuses the resident xp/normed).
+                _n_x = 2 if _xreuse else 3
+
                 @mem(_ct)
                 def _core_mem(block):
+                    _w_blk = 4 + _n_x
                     dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[3])
                     with block[1]:
                         use_lock(_cl["y_full"], LockAction.AcquireGreaterEqual, value=1)
@@ -4033,7 +4044,7 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
                     with block[2]:
                         EndOp()
                     with block[3]:
-                        dma_start(DMAChannelDir.S2MM, 0, dest=block[4], chain=block[7])
+                        dma_start(DMAChannelDir.S2MM, 0, dest=block[4], chain=block[_w_blk])
                     with block[4]:
                         # O wave: attn_out -> normed (matvec reads it in place)
                         use_lock(_cl["x_avail"], LockAction.AcquireGreaterEqual, value=1)
@@ -4048,23 +4059,24 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
                         else:
                             dma_bd(_xpb, offset=0, len=2 * EMB_DIM)
                         use_lock(_cl["x_ready"], LockAction.Release, value=1)
-                        next_bd(block[6])
-                    with block[6]:
-                        # up wave: packed [res1|norm_w] again (or plain)
-                        use_lock(_cl["x_avail"], LockAction.AcquireGreaterEqual, value=1)
-                        if _plain_gate:
-                            dma_bd(_nb, offset=0, len=EMB_DIM)
-                        else:
-                            dma_bd(_xpb, offset=0, len=2 * EMB_DIM)
-                        use_lock(_cl["x_ready"], LockAction.Release, value=1)
-                        next_bd(block[4])
-                    with block[7]:
-                        dma_start(DMAChannelDir.S2MM, 1, dest=block[8], chain=block[2])
-                    with block[8]:
+                        next_bd(block[6] if not _xreuse else block[4])
+                    if not _xreuse:
+                        with block[6]:
+                            # up wave: packed [res1|norm_w] again (or plain)
+                            use_lock(_cl["x_avail"], LockAction.AcquireGreaterEqual, value=1)
+                            if _plain_gate:
+                                dma_bd(_nb, offset=0, len=EMB_DIM)
+                            else:
+                                dma_bd(_xpb, offset=0, len=2 * EMB_DIM)
+                            use_lock(_cl["x_ready"], LockAction.Release, value=1)
+                            next_bd(block[4])
+                    with block[_w_blk]:
+                        dma_start(DMAChannelDir.S2MM, 1, dest=block[_w_blk + 1], chain=block[2])
+                    with block[_w_blk + 1]:
                         use_lock(_cl["w_avail"], LockAction.AcquireGreaterEqual, value=1)
                         dma_bd(_wb, offset=0, len=K_TILE * EMB_DIM)
                         use_lock(_cl["w_ready"], LockAction.Release, value=1)
-                        next_bd(block[8])
+                        next_bd(block[_w_blk + 1])
             _make_mat_mem(mat_tiles[col], mat_locks[col], mat_buf_y[col],
                           mat_buf_w[col], mat_buf_xp[col], mat_buf_normed[col])
 
@@ -4092,12 +4104,17 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
                         # Unrolled straight-line (not for _w in range_(2)):
                         # keeps the inlined rms at the same loop depth as the
                         # proven d3 fold (deeper nesting miscompiles).
-                        for _ in range(2):
-                            use_lock(_cl["x_ready"], LockAction.AcquireGreaterEqual, value=1)
-                            if _alt_rms:
-                                rms_alt_fn(_nb, _nb, _nb, _scr)
-                            elif not _plain_gate and not _skip_rms:
-                                rms_fn(_xpb, _nb, _scr)
+                        # _xreuse: one packed delivery (gate); up reuses the
+                        # resident xp/normed — acquire on gate only, rms once,
+                        # release only after the up wave so the next token's O
+                        # delivery cannot clobber normed mid-up.
+                        for _w in range(2):
+                            if not _xreuse or _w == 0:
+                                use_lock(_cl["x_ready"], LockAction.AcquireGreaterEqual, value=1)
+                                if _alt_rms:
+                                    rms_alt_fn(_nb, _nb, _nb, _scr)
+                                elif not _plain_gate and not _skip_rms:
+                                    rms_fn(_xpb, _nb, _scr)
                             for _c in range_(N_CHUNKS_GU):
                                 use_lock(_cl["y_done"], LockAction.AcquireGreaterEqual, value=1)
                                 fill_fn(zero_bf16, _yb)
@@ -4105,7 +4122,8 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
                                 matvec_fn(k_tile_c, k_total, zero_off, _wb, _nb, _yb)
                                 use_lock(_cl["w_avail"], LockAction.Release, value=1)
                                 use_lock(_cl["y_full"], LockAction.Release, value=1)
-                            use_lock(_cl["x_avail"], LockAction.Release, value=1)
+                            if not _xreuse or _w == 1:
+                                use_lock(_cl["x_avail"], LockAction.Release, value=1)
             _make_mat_core(mat_tiles[col], mat_locks[col], mat_buf_y[col],
                            mat_buf_w[col], mat_buf_xp[col], mat_buf_normed[col],
                            mat_buf_rscr[col])
@@ -4444,29 +4462,33 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
                     next_bd(block[8])
                 if _mxb is not None:
                     # X relay ring: shim[c] -> mem[c] (S2MM5) -> mat[c] (MM2S5).
-                    # 3 slots/token matching the mat DMA0 chain lengths:
-                    # O=EMB (attn_out), gate=2*EMB, up=2*EMB ([res1|norm_w]).
+                    # Slots/token match the mat DMA0 chain lengths: O=EMB
+                    # (attn_out), gate=2*EMB, up=2*EMB ([res1|norm_w]) — the
+                    # up slot is dropped under _xreuse (C3.1, resident reuse).
                     # Odd channel 5 -> BD ids in the 24-47 pool (clear of the
                     # even W/y chains' low ids); pin them to avoid collisions.
-                    _xlens = [EMB_DIM, 2 * EMB_DIM, 2 * EMB_DIM]
+                    _xlens = ([EMB_DIM, 2 * EMB_DIM] if _xreuse
+                              else [EMB_DIM, 2 * EMB_DIM, 2 * EMB_DIM])
+                    _nx = len(_xlens)
+                    _mm_blk = 10 + _nx
                     with block[9]:
                         dma_start(DMAChannelDir.S2MM, 5, dest=block[10],
-                                  chain=block[13])
+                                  chain=block[_mm_blk])
                     for _i, _ln in enumerate(_xlens):
                         with block[10 + _i]:
                             use_lock(_ml["x_empty"], LockAction.AcquireGreaterEqual, value=1)
                             dma_bd(_mxb, offset=0, len=_ln, bd_id=24 + _i)
                             use_lock(_ml["x_full"], LockAction.Release, value=1)
-                            next_bd(block[10 + ((_i + 1) % 3)])
-                    with block[13]:
-                        dma_start(DMAChannelDir.MM2S, 5, dest=block[14],
+                            next_bd(block[10 + ((_i + 1) % _nx)])
+                    with block[_mm_blk]:
+                        dma_start(DMAChannelDir.MM2S, 5, dest=block[_mm_blk + 1],
                                   chain=block[2])
                     for _i, _ln in enumerate(_xlens):
-                        with block[14 + _i]:
+                        with block[_mm_blk + 1 + _i]:
                             use_lock(_ml["x_full"], LockAction.AcquireGreaterEqual, value=1)
-                            dma_bd(_mxb, offset=0, len=_ln, bd_id=27 + _i)
+                            dma_bd(_mxb, offset=0, len=_ln, bd_id=24 + _nx + _i)
                             use_lock(_ml["x_empty"], LockAction.Release, value=1)
-                            next_bd(block[14 + ((_i + 1) % 3)])
+                            next_bd(block[_mm_blk + 1 + ((_i + 1) % _nx)])
                 if _dw is not None:
                     with block[9]:
                         dma_start(DMAChannelDir.MM2S, 2, dest=block[10], chain=block[11])
@@ -4514,7 +4536,10 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
             def _mat_wave(arg_w, arg_y, out_rows, x_emit):
                 # X feed: per-column shim[c]->mem[c] (pkt 16) when _memx (the
                 # fan-free fix); else the single-source shim broadcast (pkt 1).
-                if _memx:
+                # x_emit=None (C3.1 up wave): no delivery, core reuses xp.
+                if x_emit is None:
+                    x_tasks = []
+                elif _memx:
                     x_tasks = [_x_once(f"air_channel_{X_CH}_{c}", x_emit, 16)
                                for c in range(N_COLS)]
                 else:
@@ -4633,7 +4658,8 @@ def _emit_call2_c2(sym: str, with_down: bool) -> None:
             _mat_wave(args[7], args[8], HIDDEN_DIM, _packed_x)
             if _n_stages < 4:
                 return
-            _mat_wave(args[9], args[10], HIDDEN_DIM, _packed_x)
+            _mat_wave(args[9], args[10], HIDDEN_DIM,
+                      None if _xreuse else _packed_x)
             if _n_stages < 5:
                 return
             # 5: swiglu  SiLU(gate) * up -> swiglu
