@@ -487,7 +487,7 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
     wt_globals["TOK_ADDR"] = TOK_ADDR
     wt_globals["DMA_MM2S_1_START_QUEUE"] = DMA_MM2S_1_START_QUEUE
     karm = PythocKernel(chain_wt_arm, [], extra_globals=wt_globals, helpers=[])
-    kwait = PythocKernel(chain_wt_wait, [], extra_globals=wt_globals, helpers=[])
+    kwait = PythocKernel(chain_wt_wait, [np.int32], extra_globals=wt_globals, helpers=[])
 
     workers, col_in, col_out, wbufs = [], [], [], []
 
@@ -498,6 +498,7 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
         arm()
         arm()
         arm()
+        nslot = 0
         for it in range_(iters):
             for (real, grow, gcol) in coords:
                 ein = a.acquire(1)
@@ -505,7 +506,8 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
                 mb = 0
                 while mb < N_BLK:
                     if compute:
-                        wait()
+                        nslot = nslot + 1
+                        wait(nslot)
                         arm()
                         if real and compute == 1:
                             c1(ein, wbuf, scratch, mb, 0, IC)
@@ -515,7 +517,8 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
                 ob = 0
                 while ob < N_BLK:
                     if compute:
-                        wait()
+                        nslot = nslot + 1
+                        wait(nslot)
                         arm()
                         if real and compute == 1:
                             c2r(scratch, wbuf, eout, ein, ob, 0, IC, grow, gcol, GBOUND)
@@ -671,7 +674,11 @@ def _patch_wt_replay(module, cols, nwork, tpr, n_iters, mem_stream, wbuf_addr,
                         for si in range(N_SLOT_P):
                             with block[1 + si]:
                                 use_lock(lk_cr, LockAction.AcquireGreaterEqual, value=1)
-                                dma_bd(msrc, offset=si * slot_n, len=slot_n)
+                                # explicit 44-47: the BD assigner counts per
+                                # memtile_dma op, so the second op's odd pool
+                                # restarts at 24 and clobbers iron's BDs
+                                dma_bd(msrc, offset=si * slot_n, len=slot_n,
+                                       bd_id=44 + si)
                                 use_lock(echo_locks[c], LockAction.Release, value=1)
                                 next_bd(block[1 + (si + 1) % N_SLOT_P])
                         with block[N_SLOT_P + 1]:
@@ -682,14 +689,14 @@ def _patch_wt_replay(module, cols, nwork, tpr, n_iters, mem_stream, wbuf_addr,
                 dma_start(DMAChannelDir.S2MM, 5, dest=block[1], chain=block[2])
                 with block[1]:
                     use_lock(lk_e, LockAction.AcquireGreaterEqual, value=tpr)
-                    dma_bd(msrc, offset=0, len=mem_n)
+                    dma_bd(msrc, offset=0, len=mem_n, bd_id=42)
                     use_lock(lk_f, LockAction.Release, value=tpr)
                     next_bd(block[1])
                 with block[2]:
                     dma_start(DMAChannelDir.MM2S, 5, dest=block[3], chain=block[4])
                 with block[3]:
                     use_lock(lk_f, LockAction.AcquireGreaterEqual, value=1)
-                    dma_bd(msrc, offset=0, len=mem_n)
+                    dma_bd(msrc, offset=0, len=mem_n, bd_id=43)
                     use_lock(lk_e, LockAction.Release, value=1)
                     next_bd(block[3])
                 with block[4]:
