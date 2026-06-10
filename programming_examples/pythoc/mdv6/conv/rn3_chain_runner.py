@@ -103,3 +103,62 @@ def run_re6_rn3_chain(inp_hwc: torch.Tensor, weight_pairs, *, bo_key: str | None
 def last_stats(n_iters: int):
     r = _RUNNERS.get(n_iters)
     return None if r is None else r.last_stats
+
+
+# ── geometry-generic (re4 80x80x32, re8 20x20x64) ────────────────────────
+
+
+def _get_geo_runner(geo: str, n_iters: int) -> ResidentXCLBinRunner:
+    key = (geo, n_iters)
+    r = _RUNNERS.get(key)
+    if r is None:
+        bd = Path(__file__).parent / f"build_rn3_chain_{geo}_i{n_iters}"
+        xclbin, insts = bd / "final.xclbin", bd / "insts.bin"
+        if not (xclbin.exists() and insts.exists()):
+            from aie.utils.compile import compile_mlir_module
+            from conv.aie2_rn3_chain_geo import rn3_chain_geo
+            (bd / "work").mkdir(parents=True, exist_ok=True)
+            compile_mlir_module(mlir_module=rn3_chain_geo(geo, n_iters=n_iters),
+                                insts_path=str(insts), xclbin_path=str(xclbin),
+                                work_dir=str(bd / "work"), verbose=False)
+        r = ResidentXCLBinRunner(xclbin, insts)
+        _RUNNERS[key] = r
+    return r
+
+
+def _pack_geo_iter(w1_u16, w2_u16, ic, wslot, n_blk):
+    w1, b1w, b1b = fused_weight_u16_to_parts(w1_u16, ic, ic)
+    w2, b2w, b2b = fused_weight_u16_to_parts(w2_u16, ic, ic)
+    slots = np.zeros((2 * n_blk, wslot), np.uint16)
+    for b in range(n_blk):
+        s = pack_3x3_weights_u16(w1[b*16:(b+1)*16], b1w[b*16:(b+1)*16], b1b[b*16:(b+1)*16])
+        slots[b, :s.size] = s
+    for b in range(n_blk):
+        s = pack_3x3_weights_u16(w2[b*16:(b+1)*16], b2w[b*16:(b+1)*16], b2b[b*16:(b+1)*16])
+        slots[n_blk + b, :s.size] = s
+    return slots.reshape(-1)
+
+
+def run_rn3_chain_geo(geo: str, inp_hwc: torch.Tensor, weight_pairs) -> torch.Tensor:
+    from conv.aie2_rn3_chain_geo import geo_params
+    p = geo_params(geo)
+    ic, G = p["IC"], p["GBOUND"]
+    nt = p["WORKER_TILES"][0]
+    n_iters = len(weight_pairs)
+    key = (geo,) + tuple(id(a) for pr in weight_pairs for a in pr)
+    cached = _WEIGHT_CACHE.get(key)
+    if cached is None:
+        blocks = [np.tile(_pack_geo_iter(w1, w2, ic, p["WSLOT"], p["N_BLK"]), nt)
+                  for w1, w2 in weight_pairs]
+        cached = (np.concatenate(blocks), list(weight_pairs))
+        _WEIGHT_CACHE[key] = cached
+    weights = cached[0]
+    img = np.zeros((p["IMG_H"], p["IMG"], ic), np.float32)
+    img[PAD:PAD+G, PAD:PAD+G, :] = inp_hwc.float().numpy()
+    r = _get_geo_runner(geo, n_iters)
+    res = r.run(f32_to_bf16_u16(img.reshape(-1)), weights, np.zeros(p["IMG_ELEMS"], np.uint16),
+                bo_key=f"rn3geo_{geo}_{id(weights)}", output_indices={0, 2},
+                inout_indices={0, 2}, static_indices={1})
+    final = res[0] if n_iters % 2 == 0 else res[2]
+    out = bf16_u16_to_f32(final).reshape(p["IMG_H"], p["IMG"], ic)[PAD:PAD+G, PAD:PAD+G, :]
+    return torch.from_numpy(out).to(torch.bfloat16)
