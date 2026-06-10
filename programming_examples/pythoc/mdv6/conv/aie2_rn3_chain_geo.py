@@ -36,6 +36,7 @@ from kernels.rep_elan_bf16_pythoc import KERNEL_EXTRA_GLOBALS, _MMUL_HELPERS
 from kernels.rn3_chain_pythoc import (
     chain_wt_arm,
     chain_wt_arm_nq,
+    chain_wt_arm_tok,
     chain_wt_wait,
     chain_conv1_bf16,
     chain_mask_bf16,
@@ -482,26 +483,24 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
                       WT_SLOT_I32=SLOT_I32,
                       DMA_BD_BASE=DMA_BD_BASE,
                       DMA_S2MM_1_START_QUEUE=DMA_S2MM_1_START_QUEUE)
-    karm = (PythocKernel(chain_wt_arm_nq, [np.int32], extra_globals=wt_globals, helpers=[])
-            if compute == 5 else
-            PythocKernel(chain_wt_arm, [], extra_globals=wt_globals, helpers=[]))
+    from kernels.rn3_chain_pythoc import TOK_ADDR, DMA_MM2S_1_START_QUEUE
+    wt_globals["TOK_ADDR"] = TOK_ADDR
+    wt_globals["DMA_MM2S_1_START_QUEUE"] = DMA_MM2S_1_START_QUEUE
+    karm = PythocKernel(chain_wt_arm_tok, [np.int32], extra_globals=wt_globals, helpers=[])
     kwait = PythocKernel(chain_wt_wait, [], extra_globals=wt_globals, helpers=[])
 
     workers, col_in, col_out, wbufs = [], [], [], []
 
-    def core_fn(a, o, wbuf, scratch, c1, m, c2r, arm, wait, iters, coords):
-        if compute >= 4:
-            arm(0) if compute == 5 else arm()  # at boot, before any FIFO acquire
+    def core_fn(a, o, wbuf, scratch, c1, m, c2r, arm, wait, pkt_id, iters, coords):
         for it in range_(iters):
             for (real, grow, gcol) in coords:
                 ein = a.acquire(1)
                 eout = o.acquire(1)
                 mb = 0
                 while mb < N_BLK:
-                    if compute and compute < 4:
-                        arm()
-                        if compute < 3:
-                            wait()
+                    if compute:
+                        arm(pkt_id)
+                        wait()
                         if real and compute == 1:
                             c1(ein, wbuf, scratch, mb, 0, IC)
                     mb = mb + 1
@@ -509,10 +508,9 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
                     m(scratch, grow, gcol, GBOUND, N_BLK)
                 ob = 0
                 while ob < N_BLK:
-                    if compute and compute < 4:
-                        arm()
-                        if compute < 3:
-                            wait()
+                    if compute:
+                        arm(pkt_id)
+                        wait()
                         if real and compute == 1:
                             c2r(scratch, wbuf, eout, ein, ob, 0, IC, grow, gcol, GBOUND)
                     ob = ob + 1
@@ -529,6 +527,7 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
                                  obj_types=[final_ty] * NWORK, depths=[1] * NWORK,
                                  names=[f"cw_out_{c}_{i}" for i in range(NWORK)])
         col_in.append(fin); col_out.append(fout)
+        PKT_IDS = (1, 8, 12, 13)
         for i in range(NWORK):
             coords = tuple(tile_of(c, i, r) for r in range(TPR))
             scratch = Buffer(scratch_ty, name=f"cw_scr_{c}_{i}")
@@ -536,7 +535,7 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
             wbufs.append((c, i, f"cw_wt_{c}_{i}"))
             workers.append(Worker(core_fn,
                 [in_sp[i].cons(), out_j[i].prod(), wbuf,
-                 scratch, kc1, km, kc2r, karm, kwait, n_iters, coords],
+                 scratch, kc1, km, kc2r, karm, kwait, PKT_IDS[i], n_iters, coords],
                 tile=Tile(c, 2 + i), stack_size=stack_size))
 
     rt = Runtime()
@@ -564,19 +563,20 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
 
     module = Program(dev, rt).resolve_program()
     _patch_wt_replay(module, COLS, NWORK, TPR, n_iters, MEM_STREAM, WT_BUF_ADDR,
-                     static_wt=static_wt)
+                     static_wt=static_wt, n_slot=SLOTS_PER_PAIR)
     return module
 
 
 def _patch_wt_replay(module, cols, nwork, tpr, n_iters, mem_stream, wbuf_addr,
-                     static_wt=0):
+                     static_wt=0, n_slot=4):
+    N_SLOT_P = n_slot
     """Post-resolve patch: fixed wbuf addresses; per col memtile slot buffer +
     locks + S2MM1 fill / MM2S1 replay DMA + flows + shim alloc + per-iter
     runtime fills of WT (sequence arg 1)."""
     from aie.dialects.aie import (
         DMAChannelDir, EndOp, LockAction, WireBundle, buffer, dma_bd,
-        dma_start, flow, lock, memtile_dma, next_bd, shim_dma_allocation,
-        use_lock,
+        dma_start, flow, lock, memtile_dma, next_bd, packetflow,
+        shim_dma_allocation, use_lock,
     )
     from aie.dialects.aiex import (
         shim_dma_single_bd_task, dma_start_task,
@@ -632,19 +632,40 @@ def _patch_wt_replay(module, cols, nwork, tpr, n_iters, mem_stream, wbuf_addr,
             flow(shim_t, WireBundle.DMA, 1, mem_t, WireBundle.DMA, 5)
             for w in range(nwork):
                 flow(mem_t, WireBundle.DMA, 5, tiles[(c, 2 + w)], WireBundle.DMA, 1)
+            # credit packets: core MM2S1 -> mem S2MM4 (fan-in, never id 0)
+            PKT_IDS = (1, 8, 12, 13)
+            tok_ty = np.ndarray[(4,), np.dtype[np.int32]]
+            tok = buffer(mem_t, datatype=tok_ty, name=f"wt_tok_{c}", address=0x7F000)
+            lk_cr = lock(mem_t, lock_id=28, init=0, sym_name=f"wt_cr_{c}")
+            for w in range(nwork):
+                packetflow(PKT_IDS[w], tiles[(c, 2 + w)], WireBundle.DMA, 1,
+                           {"dest": mem_t, "port": WireBundle.DMA, "channel": 5})
             shim_dma_allocation(f"wt_in_{c}", shim_t, DMAChannelDir.MM2S, 1)
 
             def _mk(msrc, lk_e, lk_f):
                 @memtile_dma(mem_t)
                 def mt(block):
                     if static_wt:
-                        # ungated replay of the CDO-initialized buffer
-                        dma_start(DMAChannelDir.MM2S, 5, dest=block[1], chain=block[2],
+                        # per-slot credit-paced replay: emit one slot only when
+                        # all NWORK cores have armed (credits via token packets)
+                        slot_n = mem_n // N_SLOT_P
+                        dma_start(DMAChannelDir.MM2S, 5, dest=block[1],
+                                  chain=block[N_SLOT_P + 2],
                                   repeat_count=n_iters * tpr - 1)
-                        with block[1]:
-                            dma_bd(msrc, offset=0, len=mem_n)
-                            next_bd(block[2])
-                        with block[2]:
+                        for si in range(N_SLOT_P):
+                            with block[1 + si]:
+                                use_lock(lk_cr, LockAction.AcquireGreaterEqual, value=nwork)
+                                dma_bd(msrc, offset=si * slot_n, len=slot_n)
+                                next_bd(block[2 + si] if si < N_SLOT_P - 1 else block[N_SLOT_P + 1])
+                        with block[N_SLOT_P + 1]:
+                            EndOp()
+                        with block[N_SLOT_P + 2]:
+                            dma_start(DMAChannelDir.S2MM, 5, dest=block[N_SLOT_P + 3], chain=block[N_SLOT_P + 4])
+                        with block[N_SLOT_P + 3]:
+                            dma_bd(tok, offset=0, len=1)
+                            use_lock(lk_cr, LockAction.Release, value=1)
+                            next_bd(block[N_SLOT_P + 3])
+                        with block[N_SLOT_P + 4]:
                             EndOp()
                     else:
                         _mt_body(block, msrc, lk_e, lk_f)
