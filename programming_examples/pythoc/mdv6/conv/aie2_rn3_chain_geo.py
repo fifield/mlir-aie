@@ -35,6 +35,7 @@ from aie.helpers.taplib import TensorAccessPattern
 from kernels.rep_elan_bf16_pythoc import KERNEL_EXTRA_GLOBALS, _MMUL_HELPERS
 from kernels.rn3_chain_pythoc import (
     chain_wt_arm,
+    chain_wt_arm_nq,
     chain_wt_wait,
     chain_conv1_bf16,
     chain_mask_bf16,
@@ -481,19 +482,23 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
                       WT_SLOT_I32=SLOT_I32,
                       DMA_BD_BASE=DMA_BD_BASE,
                       DMA_S2MM_1_START_QUEUE=DMA_S2MM_1_START_QUEUE)
-    karm = PythocKernel(chain_wt_arm, [], extra_globals=wt_globals, helpers=[])
+    karm = (PythocKernel(chain_wt_arm_nq, [np.int32], extra_globals=wt_globals, helpers=[])
+            if compute == 5 else
+            PythocKernel(chain_wt_arm, [], extra_globals=wt_globals, helpers=[]))
     kwait = PythocKernel(chain_wt_wait, [], extra_globals=wt_globals, helpers=[])
 
     workers, col_in, col_out, wbufs = [], [], [], []
 
     def core_fn(a, o, wbuf, scratch, c1, m, c2r, arm, wait, iters, coords):
+        if compute >= 4:
+            arm(0) if compute == 5 else arm()  # at boot, before any FIFO acquire
         for it in range_(iters):
             for (real, grow, gcol) in coords:
                 ein = a.acquire(1)
                 eout = o.acquire(1)
                 mb = 0
                 while mb < N_BLK:
-                    if compute:
+                    if compute and compute < 4:
                         arm()
                         if compute < 3:
                             wait()
@@ -504,7 +509,7 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
                     m(scratch, grow, gcol, GBOUND, N_BLK)
                 ob = 0
                 while ob < N_BLK:
-                    if compute:
+                    if compute and compute < 4:
                         arm()
                         if compute < 3:
                             wait()
