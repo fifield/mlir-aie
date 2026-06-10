@@ -555,16 +555,16 @@ IR-clean (c2_merged = 1 LoadPDI). Two findings:
    `aie_ir_gen.py` (`_O_GEMV_FFN_PACK_DEFAULT = "c2_merged"`); step back with
    `PYTHOC_LLAMA_O_GEMV_FFN_PACK_MODE=d1d3d4_rms|d1d3d4|none`.
 
-   **AWQ is NOT yet collapsed.** `builders/o_gemv_ffn_awq.py` tops out at
-   `d1d3d4_rms` (3 devices, the Path A floor) — it has no c1/c2. Porting the
-   collapse is separate work: the AWQ matvec dequants uint4 weights with
-   per-group scales/zeros, so its per-matvec input streams, L1 buffers and
-   mem-tile staging differ from the BF16 matvec. The C2 *concepts* carry over
-   directly — reuse one matvec core across O/gate/up waves, fold RMS into
-   gate/up, distinct shim-S2MM0 output packet ids (the bug that blocked BF16
-   C2 will bite AWQ identically), per-column mem-tile activation — but the
-   row-map and wave bodies must be rebuilt against the AWQ kernels. AWQ
-   default stays `d1d3d4_rms` until then.
+   **AWQ collapsed too (2026-06-10).** `builders/o_gemv_ffn_awq.py` now has
+   `_emit_awq_call2_c2` (`c2_rms`/`c2_merged`), ported from the BF16 C2 by
+   substituting the uint4-dequant matvec kernels (`awq_matvec_vectorized_u4_bf16`
+   / `dg_…`, ui8 weights with `row_bytes` strides) — everything else (RMS fold,
+   per-column mem-tile activation, distinct shim-S2MM0 output ids
+   matvec-y=1/add=5/swiglu=6/down=7, the add/swiglu cores) is identical because
+   the AWQ matvec call shape matches the BF16 one. `c2_merged` is the AWQ
+   default: decode call 2 = ONE device / ONE configure / **1 LoadPDI** (was 3),
+   bit-exact (`make hf-gate QUANT=awq` 2/2), **~14.5 tok/s** (AWQ stays faster
+   than BF16). The distinct-output-id fix was needed identically, as predicted.
 
 ### Retraction (2026-06-10): minimal stale-master reproducers were invalid
 
