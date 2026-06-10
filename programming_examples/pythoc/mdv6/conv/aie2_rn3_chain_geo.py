@@ -664,15 +664,16 @@ def _patch_wt_replay(module, cols, nwork, tpr, n_iters, mem_stream, wbuf_addr,
                         # per-slot credit-paced replay: emit one slot only when
                         # all NWORK cores have armed (credits via token packets)
                         slot_n = mem_n // N_SLOT_P
+                        # infinite ring: queue repeat doesn't re-run a chain
+                        # that terminates in EndOp; credits pace every slot
                         dma_start(DMAChannelDir.MM2S, 5, dest=block[1],
-                                  chain=block[N_SLOT_P + 1],
-                                  repeat_count=n_iters * tpr - 1)
+                                  chain=block[N_SLOT_P + 1])
                         for si in range(N_SLOT_P):
                             with block[1 + si]:
                                 use_lock(lk_cr, LockAction.AcquireGreaterEqual, value=1)
                                 dma_bd(msrc, offset=si * slot_n, len=slot_n)
                                 use_lock(echo_locks[c], LockAction.Release, value=1)
-                                next_bd(block[2 + si] if si < N_SLOT_P - 1 else block[N_SLOT_P + 1])
+                                next_bd(block[1 + (si + 1) % N_SLOT_P])
                         with block[N_SLOT_P + 1]:
                             EndOp()
                     else:
