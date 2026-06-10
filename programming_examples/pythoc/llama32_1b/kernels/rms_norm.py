@@ -82,3 +82,44 @@ def rms_norm_2048_bf16(
         p_w = p_w + 16
         p_y = p_y + 16
         k = k + 16
+
+
+@aie_kernel
+def rms_norm_1024_bf16(
+    x: ptr[bf16, True],       # input vector, 1024 bf16
+    w: ptr[bf16, True],       # weight vector, 1024 bf16
+    y: ptr[bf16, True],       # output vector, 1024 bf16
+    scratch: ptr[bf16, True], # 16 bf16 scratch (ABI stability; unused)
+) -> void:
+    # emb=1024 variant (Qwen3-0.6B etc.); identical math to rms_norm_2048_bf16
+    # with N=1024. 1024 % 64 == 0 and 1024 % 16 == 0 so both vector loops divide.
+    acc: aie_vector[f32, 64] = zeros(f32, 64)
+    conf: i32 = i32(60)
+    p_x: ptr[bf16] = x
+    i: i32 = 0
+    while i < 1024:
+        xv: aie_vector[bf16, 64] = load_v(p_x, 64)
+        acc = I1024_I1024_ACC2048_bf_mac_conf(xv, xv, acc, conf)
+        p_x = p_x + 64
+        i = i + 64
+
+    total: f32 = reduce_add_reassoc(acc)
+    mean: f32 = total / f32(1024.0)
+    mean_eps: f32 = mean + f32(1.0e-5)
+    inv_rms: bf16 = bf16(f32(1.0) / f32(sqrtf(mean_eps)))
+    scale: aie_vector[bf16, 16] = broadcast(bf16, 16, inv_rms)
+
+    p_x2: ptr[bf16] = x
+    p_w: ptr[bf16] = w
+    p_y: ptr[bf16] = y
+    k: i32 = 0
+    while k < 1024:
+        xv2: aie_vector[bf16, 16] = load_v(p_x2, 16)
+        wv: aie_vector[bf16, 16] = load_v(p_w, 16)
+        tmp: aie_vector[bf16, 16] = vector_mul(xv2, scale)
+        out: aie_vector[bf16, 16] = vector_mul(tmp, wv)
+        store_v(p_y, out)
+        p_x2 = p_x2 + 16
+        p_w = p_w + 16
+        p_y = p_y + 16
+        k = k + 16

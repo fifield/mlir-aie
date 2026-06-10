@@ -159,7 +159,7 @@ KERNEL_SOURCE = (
     / "programming_examples"
     / "flash_attention"
     / "kernel_fusion_based"
-    / "attn.cc"
+    / "attn_npu2.cc"
 )
 REFERENCE_KERNEL_OBJECT = (
     WORKSPACE_ROOT
@@ -168,9 +168,9 @@ REFERENCE_KERNEL_OBJECT = (
     / "flash_attention"
     / "kernel_fusion_based"
     / "build_peano"
-    / "attn.o"
+    / "attn_npu2.o"
 )
-KERNEL_OBJECT = "attn.o"
+KERNEL_OBJECT = "attn_npu2.o"
 
 
 # ---------------------------------------------------------------------------

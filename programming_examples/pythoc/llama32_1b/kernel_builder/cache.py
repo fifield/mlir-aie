@@ -40,6 +40,7 @@ _LINK_OBJS = [
     # now live in attn_pythoc.o, so attn.o / attn_npu2.o / attn_decode_npu2.o
     # are no longer staged or linked).
     "rms_norm_2048_bf16.o",
+    "rms_norm_1024_bf16.o",
     "silu_and_mul_bf16.o",
     "rope_pythoc.o",
     "mv_pythoc.o",
