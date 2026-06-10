@@ -37,6 +37,7 @@ from kernels.rn3_chain_pythoc import (
     chain_wt_arm,
     chain_wt_arm_nq,
     chain_wt_arm_tok,
+    chain_wt_stamp,
     chain_wt_wait,
     chain_conv1_bf16,
     chain_mask_bf16,
@@ -166,6 +167,7 @@ def rn3_chain_geo(geo: str, n_iters: int = 2, stack_size: int = 4096, compute: i
                         w.release(1)
                         ob = ob + 1
                     t = t + 1
+                stamp(eout, 0, nslot)
                 a.release(1)
                 o.release(1)
                 ps = ps + 1
@@ -488,10 +490,12 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
     wt_globals["DMA_MM2S_1_START_QUEUE"] = DMA_MM2S_1_START_QUEUE
     karm = PythocKernel(chain_wt_arm, [], extra_globals=wt_globals, helpers=[])
     kwait = PythocKernel(chain_wt_wait, [np.int32], extra_globals=wt_globals, helpers=[])
+    kstamp = PythocKernel(chain_wt_stamp, [final_ty, np.int32, np.int32],
+                          extra_globals=wt_globals, helpers=[])
 
     workers, col_in, col_out, wbufs = [], [], [], []
 
-    def core_fn(a, o, wbuf, scratch, c1, m, c2r, arm, wait, pkt_id, iters, coords):
+    def core_fn(a, o, wbuf, scratch, c1, m, c2r, arm, wait, stamp, pkt_id, iters, coords):
         # queue a full round of receives before any data flows: the stream
         # must never park (parked beats head-of-line block chain fills)
         arm()
@@ -544,7 +548,7 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
             wbufs.append((c, i, f"cw_wt_{c}_{i}"))
             workers.append(Worker(core_fn,
                 [in_sp[i].cons(), out_j[i].prod(), wbuf,
-                 scratch, kc1, km, kc2r, karm, kwait, PKT_IDS[i], n_iters, coords],
+                 scratch, kc1, km, kc2r, karm, kwait, kstamp, PKT_IDS[i], n_iters, coords],
                 tile=Tile(c, 2 + i), stack_size=stack_size))
 
     rt = Runtime()
@@ -579,13 +583,15 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
         "aie.device(aie-place-tiles,aie-assign-lock-ids,aie-register-objectFifos,"
         "aie-objectFifo-stateful-transform{dynamic-objFifos=true}))",
         module.context).run(module.operation)
+    import os as _os
+    _spl = _os.environ.get("WR_SPLICE", "1") == "1"
     _patch_wt_replay(module, COLS, NWORK, TPR, n_iters, MEM_STREAM, WT_BUF_ADDR,
-                     static_wt=static_wt, n_slot=SLOTS_PER_PAIR)
+                     static_wt=static_wt, n_slot=SLOTS_PER_PAIR, splice=_spl)
     return module
 
 
 def _patch_wt_replay(module, cols, nwork, tpr, n_iters, mem_stream, wbuf_addr,
-                     static_wt=0, n_slot=4):
+                     static_wt=0, n_slot=4, splice=1):
     N_SLOT_P = n_slot
     """Post-resolve patch: fixed wbuf addresses; per col memtile slot buffer +
     locks + S2MM1 fill / MM2S1 replay DMA + flows + shim alloc + per-iter
@@ -707,6 +713,10 @@ def _patch_wt_replay(module, cols, nwork, tpr, n_iters, mem_stream, wbuf_addr,
     # zero-length credit BD after each join BD: join -> credit(+1) -> orig
     from aie.ir import Block
     targets = []  # (block, bd_op, next_bd_op, col)
+    if not splice:
+        cols_iter = []
+    else:
+        cols_iter = None
     for op in body.operations:
         if op.operation.name != "aie.memtile_dma":
             continue
@@ -725,7 +735,7 @@ def _patch_wt_replay(module, cols, nwork, tpr, n_iters, mem_stream, wbuf_addr,
                 col = int(txt.split("cw_out_")[1].split("_")[0])
                 nxt = next(o2 for o2 in ops[i:] if o2.operation.name == "aie.next_bd")
                 targets.append((blk, o, nxt, col))
-    for blk, bd_op, nxt, col in targets:
+    for blk, bd_op, nxt, col in (targets if splice else []):
         orig_target = nxt.successors[0]
         nb = Block.create_after(blk)
         buf_val = bd_op.operands[0]
