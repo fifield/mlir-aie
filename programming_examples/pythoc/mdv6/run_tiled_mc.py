@@ -84,6 +84,7 @@ _MC_INPUT_DEPTH = {}
 # expected_len in the key and verify on hit (mlir-aie-woi guard) so a recycled
 # id cannot silently return blocks for a different layer's weights.
 _WTBLOCK_CACHE_3x3 = {}   # (id(wts_u16), ocb, oc_block, out_ch, C, ks, expected_len) -> np.ndarray
+_WCHUNK_CACHE = {}        # (id(wts_u16), chunk, n_chunks, out_ch, C, ks) -> sliced wts u16
 _GEMM_OCB_CACHE = {}      # (id(wts_u16), ic, oc, oc_block, expected_len) -> list[np.ndarray]
 _GEMM_KB_CACHE = {}       # (id(wts_u16), ic, oc, k_block, expected_len) -> np.ndarray
 
@@ -491,7 +492,9 @@ def _run_tiled_fused_conv_mc_impl(mc_name, sc_name, input_hwc, weights_uint16,
     # values. effective_ppc from the registry overrides regime_ppc inside the
     # OCB dispatch (the ELF was built with effective_ppc baked in).
     if actual_name in _MERGED_LAYERS_OCB:
-        elf_name, n_ocb, effective_ppc, ocb_oc_block = _MERGED_LAYERS_OCB[actual_name]
+        entry = _MERGED_LAYERS_OCB[actual_name]
+        elf_name, n_ocb, effective_ppc, ocb_oc_block = entry[:4]
+        n_chunks = entry[4] if len(entry) > 4 else 1
         merged = _get_merged_kernel(elf_name)
         if merged is not None:
             regime = _regime_conv_artifact(mc_name, actual_name, ppc)
@@ -505,12 +508,46 @@ def _run_tiled_fused_conv_mc_impl(mc_name, sc_name, input_hwc, weights_uint16,
                 ocb_stride, ocb_padding = stride, padding
             # oc_block comes from the registry (must match the ELF's built
             # oc_block, NOT necessarily regime active_oc — see re4_rn3).
-            return _run_tiled_mc_inner_ocb_merged(
-                merged, elf_name, n_ocb, effective_ppc,
-                input_hwc, weights_uint16,
-                out_h, out_w, out_ch, ocb_tile_h, ocb_tile_w, ocb_oc_block,
-                ocb_stride, kernel_size, ocb_padding,
-            )
+            if n_chunks == 1:
+                return _run_tiled_mc_inner_ocb_merged(
+                    merged, elf_name, n_ocb, effective_ppc,
+                    input_hwc, weights_uint16,
+                    out_h, out_w, out_ch, ocb_tile_h, ocb_tile_w, ocb_oc_block,
+                    ocb_stride, kernel_size, ocb_padding,
+                )
+            # Chunked OCB dispatch: the ELF covers chunk_oc = n_ocb*oc_block
+            # output channels; call it n_chunks times with sliced weights
+            # (conv + bn_w + bn_b are sliced along OC) and concat outputs.
+            chunk_oc = n_ocb * ocb_oc_block
+            if chunk_oc * n_chunks != out_ch:
+                raise RuntimeError(
+                    f"OCB-chunk {elf_name}: n_chunks={n_chunks} × chunk_oc="
+                    f"{chunk_oc} != out_ch={out_ch}")
+            C = input_hwc.shape[2]
+            cw_per_oc = C * kernel_size * kernel_size
+            total_conv = out_ch * cw_per_oc
+            outs = []
+            for ci in range(n_chunks):
+                key = (id(weights_uint16), ci, n_chunks, out_ch, C, kernel_size)
+                w_chunk = _WCHUNK_CACHE.get(key)
+                if w_chunk is None:
+                    oc_s = ci * chunk_oc
+                    oc_e = oc_s + chunk_oc
+                    w_chunk = np.concatenate([
+                        weights_uint16[oc_s * cw_per_oc:oc_e * cw_per_oc],
+                        weights_uint16[total_conv + oc_s:total_conv + oc_e],
+                        weights_uint16[total_conv + out_ch + oc_s:
+                                       total_conv + out_ch + oc_e],
+                    ])
+                    _WCHUNK_CACHE[key] = w_chunk
+                    _gemm_cache_evict_dead_ids(_WCHUNK_CACHE)
+                outs.append(_run_tiled_mc_inner_ocb_merged(
+                    merged, elf_name, n_ocb, effective_ppc,
+                    input_hwc, w_chunk,
+                    out_h, out_w, chunk_oc, ocb_tile_h, ocb_tile_w,
+                    ocb_oc_block, ocb_stride, kernel_size, ocb_padding,
+                ))
+            return torch.cat(outs, dim=2)
 
     # Single-clone (or batch-fanout) merged-ELF path. One xrt.run dispatches
     # n_batches sub-runs internally; the host still loops over OCBs.
@@ -740,6 +777,10 @@ _MERGED_LAYERS_OCB_ALL = {
     # one xrt.run. aconv7/aconv19 use single-sub merged today (x1).
     # aconv5 skipped — too many OCB iterations to fit in unroll budget.
     "mc_aconv3":       ("ocb_aconv3_x1",      8, 4,  16),
+    # aconv5: full-layer OCB infeasible (12 OCB × ppc4 = 48 iter > limit).
+    # Half-layer ELF (n_ocb=6 covers 96 ch), 5th field n_chunks=2 dispatches
+    # it twice with OC-sliced weights → 24 launches collapse to 2.
+    "mc_aconv5_p4":    ("ocb_aconv5h_x1",     6, 4,  16, 2),
     "mc_aconv7":       ("ocb_aconv7_x1",      16, 1, 16),
     "mc_aconv16":      ("ocb_aconv16_x1",     6, 4,  16),
     "mc_aconv19":      ("ocb_aconv19_x1",     16, 1, 8),
