@@ -294,7 +294,10 @@ def rn3_chain_geo(geo: str, n_iters: int = 2, stack_size: int = 4096, compute: i
 
 RASTER_GEOS = {
     # raster: TPR tiles per core, tile idx = (col*NWORK+w)*TPR + r over GRID^2.
-    "re6w": dict(IC=48, GBOUND=40, COLS=7, NWORK=4, TPR=1),
+    "re6w": dict(IC=48, GBOUND=40, COLS=7, NWORK=4, TPR=1),  # DEPTH2 doesn't fit L1 at IC48
+    # DEPTH=2 measured wall-flat (8.20 vs 8.00 ms): per-round drain waits set
+    # the pace, and removing them wedges (BD reuse before drains complete).
+    # Chain pace is wt slot DMA (~83 KB/col/round vs 14 KB patches).
     "re4w": dict(IC=32, GBOUND=80, COLS=7, NWORK=4, TPR=4),
 }
 
@@ -321,6 +324,7 @@ def rn3_chain_raster(geo: str, n_iters: int = 2, stack_size: int = 4096, compute
     GRID, IMG, IMG_ELEMS = p["GRID"], p["IMG"], p["IMG_ELEMS"]
     FINAL, SCRATCH, N_BLK, WSLOT = p["FINAL"], p["SCRATCH"], p["N_BLK"], p["WSLOT"]
     GBOUND = p["GBOUND"]
+    DEPTH = p.get("DEPTH", 1)
     CHUNK = 12 * 12 * IC
     SLOTS_PER_PAIR = 2 * N_BLK
     JUNK_ROW = GRID * TILE + 2 * PAD
@@ -377,14 +381,14 @@ def rn3_chain_raster(geo: str, n_iters: int = 2, stack_size: int = 4096, compute
                 o.release(1)
 
     for c in range(COLS):
-        fin = ObjectFifo(col_in_ty, depth=1, name=f"cr_in_{c}")
-        fout = ObjectFifo(col_out_ty, depth=1, name=f"cr_out_{c}")
-        fwt = ObjectFifo(wslot_ty, depth=1, name=f"cr_wt_{c}")
+        fin = ObjectFifo(col_in_ty, depth=DEPTH, name=f"cr_in_{c}")
+        fout = ObjectFifo(col_out_ty, depth=DEPTH, name=f"cr_out_{c}")
+        fwt = ObjectFifo(wslot_ty, depth=DEPTH, name=f"cr_wt_{c}")
         in_sp = fin.cons().split(offsets=[w * CHUNK for w in range(NWORK)],
-                                 obj_types=[patch_ty] * NWORK, depths=[1] * NWORK,
+                                 obj_types=[patch_ty] * NWORK, depths=[DEPTH] * NWORK,
                                  names=[f"cr_in_{c}_{i}" for i in range(NWORK)])
         out_j = fout.prod().join(offsets=[w * FINAL for w in range(NWORK)],
-                                 obj_types=[final_ty] * NWORK, depths=[1] * NWORK,
+                                 obj_types=[final_ty] * NWORK, depths=[DEPTH] * NWORK,
                                  names=[f"cr_out_{c}_{i}" for i in range(NWORK)])
         col_in.append(fin); col_out.append(fout); col_wt.append(fwt)
         for i in range(NWORK):
