@@ -540,6 +540,11 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
                     ob = ob + 1
                 a.release(1)
                 o.release(1)
+        # absorb tail credits: joins over-credit by N_SLOT in the last round
+        arm(WT_BD, WT_Q, WT_BUF_ADDR // 4, SLOT_I32, WT_LOCK)
+        arm(WT_BD, WT_Q, WT_BUF_ADDR // 4, SLOT_I32, WT_LOCK)
+        arm(WT_BD, WT_Q, WT_BUF_ADDR // 4, SLOT_I32, WT_LOCK)
+        arm(WT_BD, WT_Q, WT_BUF_ADDR // 4, SLOT_I32, WT_LOCK)
 
     for c in range(COLS):
         fin = ObjectFifo(col_in_ty, depth=1, name=f"cw_in_{c}")
