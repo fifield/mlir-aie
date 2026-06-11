@@ -776,10 +776,19 @@ def _patch_wt_replay(module, cols, nwork, tpr, n_iters, mem_stream, wbuf_addr,
     with InsertionPoint.at_block_begin(seq_block), Location.unknown(module.context):
         # iron never enables Core_Processor_Bus — cores' MMIO arming wedges
         # the AXI without it (root cause of every replay hang)
-        from aie.dialects.aiex import npu_maskwrite32
+        from aie.dialects.aiex import npu_maskwrite32, npu_write32
         for c in range(cols):
             for w in range(nwork):
                 npu_maskwrite32(address=0x32038, value=1, mask=1, column=c, row=2 + w)
+        # re-init replay pacing locks each launch — leftover state from the
+        # previous launch otherwise stalls fill #1 (lk_e drained, ring offset)
+        for c in range(cols):
+            npu_write32(address=0xC0000 + 27 * 16, value=0, column=c, row=1)
+            npu_write32(address=0xC0000 + 28 * 16, value=0, column=c, row=1)
+            npu_write32(address=0xC0000 + 30 * 16, value=tpr * n_slot, column=c, row=1)
+        for c in range(cols):
+            for w in range(nwork):
+                npu_write32(address=0x0001F000 + 12 * 16, value=0, column=c, row=2 + w)
         # iter 0 fill at boot; later fills are paced in time by the
         # per-round drain waits already in the sequence (fill #it issues
         # in the patch group of iter it round 0; for now boot-issue 1)
