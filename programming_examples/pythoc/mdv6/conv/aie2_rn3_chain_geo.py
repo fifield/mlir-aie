@@ -769,6 +769,12 @@ def _patch_wt_replay(module, cols, nwork, tpr, n_iters, mem_stream, wbuf_addr,
     seq_block = seq_op.regions[0].blocks[0]
     wt_arg = seq_block.arguments[1]
     with InsertionPoint.at_block_begin(seq_block), Location.unknown(module.context):
+        # iron never enables Core_Processor_Bus — cores' MMIO arming wedges
+        # the AXI without it (root cause of every replay hang)
+        from aie.dialects.aiex import npu_maskwrite32
+        for c in range(cols):
+            for w in range(nwork):
+                npu_maskwrite32(address=0x32038, value=1, mask=1, column=c, row=2 + w)
         for c in range(0 if static_wt else cols):
             for it in range(n_iters):
                 t = shim_dma_single_bd_task(
