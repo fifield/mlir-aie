@@ -669,7 +669,7 @@ def _patch_wt_replay(module, cols, nwork, tpr, n_iters, mem_stream, wbuf_addr,
             init = np.arange(100, 100 + mem_n, dtype=np.int32) if static_wt else None
             msrc = buffer(mem_t, datatype=src_ty, name=f"wt_src_{c}", address=0x70000,
                           initial_value=init)
-            lk_e = lock(mem_t, lock_id=30, init=n_iters, sym_name=f"wt_e_{c}")
+            lk_e = lock(mem_t, lock_id=30, init=tpr * n_slot, sym_name=f"wt_e_{c}")
             lk_f = lock(mem_t, lock_id=31, init=0, sym_name=f"wt_f_{c}")
             flow(shim_t, WireBundle.DMA, 1, mem_t, WireBundle.DMA, 5)
             for w in range(nwork):
@@ -710,7 +710,8 @@ def _patch_wt_replay(module, cols, nwork, tpr, n_iters, mem_stream, wbuf_addr,
                 # join BDs convert echo -> credits for later rounds
                 dma_start(DMAChannelDir.S2MM, 5, dest=block[1], chain=block[2])
                 with block[1]:
-                    use_lock(lk_e, LockAction.AcquireGreaterEqual, value=1)
+                    # acquire one iter's worth of slot completions before refill
+                    use_lock(lk_e, LockAction.AcquireGreaterEqual, value=tpr * N_SLOT_P)
                     dma_bd(msrc, offset=0, len=mem_n, bd_id=42)
                     use_lock(lk_cr, LockAction.Release, value=N_SLOT_P)
                     next_bd(block[1])
@@ -775,12 +776,13 @@ def _patch_wt_replay(module, cols, nwork, tpr, n_iters, mem_stream, wbuf_addr,
         for c in range(cols):
             for w in range(nwork):
                 npu_maskwrite32(address=0x32038, value=1, mask=1, column=c, row=2 + w)
+        # iter 0 fill at boot; later fills are paced in time by the
+        # per-round drain waits already in the sequence (fill #it issues
+        # in the patch group of iter it round 0; for now boot-issue 1)
         for c in range(0 if static_wt else cols):
-            for it in range(n_iters):
-                t = shim_dma_single_bd_task(
-                    f"wt_in_{c}", wt_arg, offset=it * mem_stream,
-                    sizes=[1, 1, 1, mem_stream])
-                dma_start_task(t)
+            t = shim_dma_single_bd_task(
+                f"wt_in_{c}", wt_arg, offset=0, sizes=[1, 1, 1, mem_stream])
+            dma_start_task(t)
 
 
 if __name__ == "__main__":
