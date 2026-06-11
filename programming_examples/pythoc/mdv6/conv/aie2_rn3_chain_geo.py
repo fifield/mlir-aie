@@ -167,7 +167,6 @@ def rn3_chain_geo(geo: str, n_iters: int = 2, stack_size: int = 4096, compute: i
                         w.release(1)
                         ob = ob + 1
                     t = t + 1
-                stamp(eout, 0, nslot)
                 a.release(1)
                 o.release(1)
                 ps = ps + 1
