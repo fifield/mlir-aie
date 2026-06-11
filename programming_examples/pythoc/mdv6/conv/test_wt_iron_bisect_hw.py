@@ -44,6 +44,17 @@ PATCH_W = 1152          # 12*12*32 patch in i32
 TELEM_N = 8
 WT_BUF = 0xC800
 PATCH_BUF = 0x2000
+FIN_BUF = 0x4000
+FIN_W = 512
+
+
+@aie_kernel
+def wt_consumer(wt: ptr[i32, True], wt_words: i32) -> void:
+    n: i32 = 0
+    while n < ROUNDS * N_SLOT:
+        n = n + 1
+        program_dma_and_start(15, DMA_S2MM_1_START_QUEUE, wt_words, SLOT_W, 0)
+        spin_lock_ge(LOCK0_VALUE, n)
 
 
 @aie_kernel
@@ -57,6 +68,9 @@ def bench(patch: ptr[i32, True], wt: ptr[i32, True], telem: ptr[i32, True],
         # patch arrives via CDO-paced S2MM0 ring (cons lock 2 += 1)
         spin_lock_ge(LOCK2_VALUE, r + 1)
         chk = chk + patch[r % 64]
+        # finals join: push a tile to memtile each round (chain core MM2S0)
+        program_dma_and_start(2, DMA_MM2S_0_START_QUEUE, FIN_BUF // 4, FIN_W, 1)
+        spin_lock_ge(LOCK1_VALUE, r + 1)
         s: i32 = 0
         while s < N_SLOT:
             nslot = nslot + 1
@@ -68,8 +82,8 @@ def bench(patch: ptr[i32, True], wt: ptr[i32, True], telem: ptr[i32, True],
     t1: i32 = read_tm(TIMER_LOW)
     telem[0] = t1 - t0
     telem[1] = chk
-    program_dma_and_start(2, DMA_MM2S_1_START_QUEUE, TELEM_ADDR_WORDS, 8, 1)
-    spin_lock_ge(LOCK1_VALUE, 1)
+    program_dma_and_start(3, DMA_MM2S_1_START_QUEUE, TELEM_ADDR_WORDS, 8, 3)
+    spin_lock_ge(LOCK3_VALUE, 1)
 
 
 def main():
@@ -80,8 +94,12 @@ def main():
     patch_ty = np.ndarray[(PATCH_W,), np.dtype[np.int32]]
     g = mpc._globals(MEM_N)
     g.update(ROUNDS=ROUNDS, N_SLOT=N_SLOT, SLOT_W=SLOT_W,
-             LOCK2_VALUE=0x0001F000 + 2 * 16)
+             LOCK2_VALUE=0x0001F000 + 2 * 16, LOCK3_VALUE=0x0001F000 + 3 * 16,
+             FIN_BUF=FIN_BUF, FIN_W=FIN_W)
     kernel = PythocKernel(bench, [patch_ty, wt_ty, telem_ty, np.int32],
+                          target_arch="aie2p", extra_globals=g,
+                          helpers=[mpc.program_dma_and_start, mpc.spin_lock_ge])
+    wtonly = PythocKernel(wt_consumer, [wt_ty, np.int32],
                           target_arch="aie2p", extra_globals=g,
                           helpers=[mpc.program_dma_and_start, mpc.spin_lock_ge])
 
@@ -89,7 +107,9 @@ def main():
         @device(AIEDevice.npu2)
         def dev():
             kernel.resolve()
+            wtonly.resolve()
             t00, t01, t02 = tile(0, 0), tile(0, 1), tile(0, 2)
+            others = [tile(0, 3), tile(0, 4), tile(0, 5)]
             wsrc = buffer(t01, datatype=src_ty, name="wsrc", address=0x70000,
                           initial_value=np.tile(np.arange(1, SLOT_W + 1, dtype=np.int32), N_SLOT))
             psrc = buffer(t01, datatype=psrc_ty, name="psrc", address=0x60000,
@@ -100,11 +120,19 @@ def main():
             lock(t02, lock_id=0, init=0, sym_name="wt_done")
             lock(t02, lock_id=1, init=0, sym_name="telem_done")
             lk_pc = lock(t02, lock_id=2, init=0, sym_name="patch_cons")
-            lk_pp = lock(t02, lock_id=3, init=ROUNDS, sym_name="patch_prod")
+            lk_pp = lock(t02, lock_id=4, init=ROUNDS, sym_name="patch_prod")
+            lock(t02, lock_id=3, init=0, sym_name="telem3_done")
+            buffer(t02, datatype=np.ndarray[(FIN_W,), np.dtype[np.int32]], name="fin", address=FIN_BUF)
+            jdst = buffer(t01, datatype=np.ndarray[(FIN_W,), np.dtype[np.int32]], name="jdst", address=0x50000)
+            lk_jp = lock(t01, lock_id=2, init=ROUNDS, sym_name="join_p")
+            lk_jc = lock(t01, lock_id=3, init=0, sym_name="join_c")
+            flow(t02, WireBundle.DMA, 0, t01, WireBundle.DMA, 1)  # finals join
             lk_msrc = lock(t01, lock_id=0, init=ROUNDS, sym_name="mem_p")
             lk_dummy = lock(t01, lock_id=1, init=0, sym_name="mem_dummy")
             flow(t01, WireBundle.DMA, 0, t02, WireBundle.DMA, 0)  # patches
             flow(t01, WireBundle.DMA, 5, t02, WireBundle.DMA, 1)  # wt
+            for ot in others:
+                flow(t01, WireBundle.DMA, 5, ot, WireBundle.DMA, 1)
             flow(t02, WireBundle.DMA, 1, t00, WireBundle.DMA, 0)  # telem
             shim_dma_allocation("telem_alloc", t00, DMAChannelDir.S2MM, 0)
 
@@ -119,12 +147,21 @@ def main():
                 with block[2]:
                     EndOp()
                 with block[3]:
-                    dma_start(DMAChannelDir.MM2S, 5, dest=block[4], chain=block[5],
+                    dma_start(DMAChannelDir.MM2S, 5, dest=block[4], chain=block[6],
                               repeat_count=ROUNDS - 1)
                 with block[4]:
                     dma_bd(wsrc, offset=0, len=MEM_N, bd_id=44)
                     next_bd(block[5])
                 with block[5]:
+                    EndOp()
+                with block[6]:
+                    dma_start(DMAChannelDir.S2MM, 1, dest=block[7], chain=block[8])
+                with block[7]:
+                    use_lock(lk_jp, LockAction.AcquireGreaterEqual, value=1)
+                    dma_bd(jdst, offset=0, len=FIN_W, bd_id=26)
+                    use_lock(lk_jc, LockAction.Release, value=1)
+                    next_bd(block[7])
+                with block[8]:
                     EndOp()
 
             # core S2MM0: 4 patch BDs lock-paced ring
@@ -143,9 +180,23 @@ def main():
             def cb():
                 kernel(pbuf, wbuf, telem, WT_BUF // 4)
 
+            # other cores: wt-only consumers (arm + spin per slot)
+            obufs = []
+            for i, ot in enumerate(others):
+                obufs.append(buffer(ot, datatype=wt_ty, name=f"owb{i}", address=WT_BUF))
+                buffer(ot, datatype=telem_ty, name=f"otl{i}", address=mpc.CORE_TELEM_ADDR)
+                lock(ot, lock_id=0, init=0, sym_name=f"owt_done{i}")
+            def mko(ot, ob):
+                @core(ot)
+                def ocb():
+                    wtonly(ob, WT_BUF // 4)
+            for ot, ob in zip(others, obufs):
+                mko(ot, ob)
+
             @runtime_sequence(telem_ty)
             def seq(C):
-                npu_maskwrite32(address=mpc.CORE_PROCESSOR_BUS, value=1, mask=1, column=0, row=2)
+                for _r in range(2, 6):
+                    npu_maskwrite32(address=mpc.CORE_PROCESSOR_BUS, value=1, mask=1, column=0, row=_r)
                 t = shim_dma_single_bd_task("telem_alloc", C, sizes=[1, 1, 1, TELEM_N], issue_token=True)
                 dma_start_task(t)
                 dma_await_task(t)
