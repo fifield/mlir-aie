@@ -479,29 +479,40 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
                       extra_globals=KERNEL_EXTRA_GLOBALS, helpers=[])
     kc2r = PythocKernel(chain_conv2res_bf16, [scratch_ty, wslot_ty, final_ty, patch_ty, np.int32, np.int32, np.int32, np.int32, np.int32, np.int32],
                         extra_globals=KERNEL_EXTRA_GLOBALS, helpers=[_store_bn_silu_res_4x8_rows])
-    from kernels.rn3_chain_pythoc import WT_BD, WT_LOCK, DMA_BD_BASE, DMA_S2MM_1_START_QUEUE
+    from kernels.rn3_chain_pythoc import WT_BD, WT_LOCK, WT_BDBASE, WT_S2MM1Q
     wt_globals = dict(KERNEL_EXTRA_GLOBALS,
                       WT_BD=WT_BD, WT_LOCK=WT_LOCK, WT_BUF_ADDR=WT_BUF_ADDR,
                       WT_SLOT_I32=SLOT_I32,
-                      DMA_BD_BASE=DMA_BD_BASE,
-                      DMA_S2MM_1_START_QUEUE=DMA_S2MM_1_START_QUEUE)
+                      WT_BDBASE=WT_BDBASE,
+                      WT_S2MM1Q=WT_S2MM1Q)
     from kernels.rn3_chain_pythoc import TOK_ADDR, DMA_MM2S_1_START_QUEUE
     wt_globals["TOK_ADDR"] = TOK_ADDR
     wt_globals["DMA_MM2S_1_START_QUEUE"] = DMA_MM2S_1_START_QUEUE
-    karm = PythocKernel(chain_wt_arm, [], extra_globals=wt_globals, helpers=[])
-    kwait = PythocKernel(chain_wt_wait, [np.int32], extra_globals=wt_globals, helpers=[])
+    # proven mpc helpers — the bespoke chain_wt_arm OBJECT is toxic when
+    # linked into the worker program (wedges all delivery even if unused)
+    import sys as _sys
+    from pathlib import Path as _P
+    _sys.path.insert(0, str(_P(__file__).resolve().parents[2] / "microbench" / "memtile_program_cost"))
+    import memtile_program_cost as _mpc
+    wt_globals = _mpc._globals(SLOT_I32)
+    karm = PythocKernel(_mpc.program_dma_and_start, [np.int32] * 5,
+                        extra_globals=wt_globals, helpers=[])
+    kwait = PythocKernel(_mpc.spin_lock_ge, [np.int32, np.int32],
+                         extra_globals=wt_globals, helpers=[])
+    WT_Q = 0x0001DE0C
+    LOCK12_VALUE = 0x0001F000 + WT_LOCK * 16
     kstamp = PythocKernel(chain_wt_stamp, [final_ty, np.int32, np.int32],
-                          extra_globals=wt_globals, helpers=[])
+                          extra_globals=dict(wt_globals, WT_LOCK=WT_LOCK), helpers=[])
 
     workers, col_in, col_out, wbufs = [], [], [], []
 
     def core_fn(a, o, wbuf, scratch, c1, m, c2r, arm, wait, stamp, pkt_id, iters, coords):
         # queue a full round of receives before any data flows: the stream
         # must never park (parked beats head-of-line block chain fills)
-        arm()
-        arm()
-        arm()
-        arm()
+        arm(WT_BD, WT_Q, WT_BUF_ADDR // 4, SLOT_I32, WT_LOCK)
+        arm(WT_BD, WT_Q, WT_BUF_ADDR // 4, SLOT_I32, WT_LOCK)
+        arm(WT_BD, WT_Q, WT_BUF_ADDR // 4, SLOT_I32, WT_LOCK)
+        arm(WT_BD, WT_Q, WT_BUF_ADDR // 4, SLOT_I32, WT_LOCK)
         nslot = 0
         for it in range_(iters):
             for (real, grow, gcol) in coords:
@@ -511,8 +522,8 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
                 while mb < N_BLK:
                     if compute:
                         nslot = nslot + 1
-                        wait(nslot)
-                        arm()
+                        wait(LOCK12_VALUE, nslot)
+                        arm(WT_BD, WT_Q, WT_BUF_ADDR // 4, SLOT_I32, WT_LOCK)
                         if real and compute == 1:
                             c1(ein, wbuf, scratch, mb, 0, IC)
                     mb = mb + 1
@@ -522,8 +533,8 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
                 while ob < N_BLK:
                     if compute:
                         nslot = nslot + 1
-                        wait(nslot)
-                        arm()
+                        wait(LOCK12_VALUE, nslot)
+                        arm(WT_BD, WT_Q, WT_BUF_ADDR // 4, SLOT_I32, WT_LOCK)
                         if real and compute == 1:
                             c2r(scratch, wbuf, eout, ein, ob, 0, IC, grow, gcol, GBOUND)
                     ob = ob + 1
