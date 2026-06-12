@@ -79,6 +79,8 @@ jobs:
           mkdir build
           pushd build
 
+          export pybind11_DIR=`python -m pybind11 --cmakedir`
+
           cmake .. -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DPython3_EXECUTABLE=$(which python) \
