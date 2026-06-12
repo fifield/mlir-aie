@@ -110,7 +110,7 @@ def run_rn_mc(repncsp, inp, H, W, ic, oc,
     current = x1
     _chain_geo = {('mc_re6_rn3', 40, 48): 're6', ('mc_re4_rn3', 80, 32): 're4',
                   ('mc_re8_rn3', 20, 64): 're8'}.get((mc_rn3, H, neck))
-    use_rn3chain = (os.environ.get('MDV6_USE_RN3CHAIN', '0') not in ('', '0', 'false', 'False')
+    use_rn3chain = (os.environ.get('MDV6_USE_RN3CHAIN', '1') not in ('', '0', 'false', 'False')
             and _chain_geo is not None and H == W
             and all(b.residual for b in repncsp.bottleneck))
     if use_rn3chain:
@@ -124,7 +124,7 @@ def run_rn_mc(repncsp, inp, H, W, ic, oc,
             return run_rn3_chain_geo(_chain_geo, current, pairs,
                                      x2_hwc=x2, rnm_w_u16=fuse_bn(repncsp.conv3))
         if (_chain_geo in ('re6', 're4')
-                and os.environ.get('MDV6_RN3RASTER', '0') not in ('', '0', 'false', 'False')):
+                and os.environ.get('MDV6_RN3RASTER', '1') not in ('', '0', 'false', 'False')):
             from conv.rn3_chain_runner import run_rn3_chain_raster
             current = run_rn3_chain_raster(_chain_geo + 'w', current, pairs)
         elif _chain_geo == 're6':
