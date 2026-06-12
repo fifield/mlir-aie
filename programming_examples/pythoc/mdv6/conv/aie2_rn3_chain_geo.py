@@ -32,7 +32,24 @@ from aie.iron.device import NPU2, Tile
 from aie.iron.pythoc import PythocKernel
 from aie.helpers.taplib import TensorAccessPattern
 
+import os as _os
 from kernels.rep_elan_bf16_pythoc import KERNEL_EXTRA_GLOBALS, _MMUL_HELPERS
+from kernels.chain_conv1_bfp import (
+    chain_conv1_bfp as _chain_conv1_bfp,
+    KERNEL_EXTRA_GLOBALS as _BFP_C1_GLOBALS,
+    CONV1_BFP_HELPERS as _BFP_C1_HELPERS,
+)
+from kernels.chain_conv2res_bfp import (
+    chain_conv2res_bfp as _chain_conv2res_bfp,
+    KERNEL_EXTRA_GLOBALS as _BFP_C2_GLOBALS,
+    CONV2RES_BFP_HELPERS as _BFP_C2_HELPERS,
+)
+# BFP576 block-float convs: ON by default. ~3x on the rn3 chain COMPUTE and slightly
+# more accurate; e2e is flat (the model is dispatch-bound) but correct + stable. Rare
+# intermittent resident-runner timeout (~NPU/XRT flake, not a BFP bug). Disable with
+# MDV6_CONV1_BFP=0 / MDV6_CONV2_BFP=0 to fall back to the emulated mmul.
+_CONV1_BFP = _os.environ.get("MDV6_CONV1_BFP", "1") not in ("", "0", "false", "False")
+_CONV2_BFP = _os.environ.get("MDV6_CONV2_BFP", "1") not in ("", "0", "false", "False")
 from kernels.rn3_chain_pythoc import (
     chain_wt_arm,
     chain_wt_arm_nq,
@@ -124,12 +141,21 @@ def rn3_chain_geo(geo: str, n_iters: int = 2, stack_size: int = 4096, compute: i
     img_ty = np.ndarray[(img_elems,), np.dtype[np.uint16]]
     wt_host_ty = np.ndarray[(wt_elems,), np.dtype[np.uint16]]
 
-    kc1 = PythocKernel(chain_conv1_bf16, [patch_ty, wslot_ty, scratch_ty, np.int32, np.int32, np.int32],
-                       extra_globals=KERNEL_EXTRA_GLOBALS, helpers=_MMUL_HELPERS)
+    if _CONV1_BFP:
+        kc1 = PythocKernel(_chain_conv1_bfp, [patch_ty, wslot_ty, scratch_ty, np.int32, np.int32, np.int32],
+                           extra_globals={**KERNEL_EXTRA_GLOBALS, **_BFP_C1_GLOBALS},
+                           helpers=list(_MMUL_HELPERS) + list(_BFP_C1_HELPERS))
+    else:
+        kc1 = PythocKernel(chain_conv1_bf16, [patch_ty, wslot_ty, scratch_ty, np.int32, np.int32, np.int32],
+                           extra_globals=KERNEL_EXTRA_GLOBALS, helpers=_MMUL_HELPERS)
     km = PythocKernel(chain_mask_bf16, [scratch_ty, np.int32, np.int32, np.int32, np.int32],
                       extra_globals=KERNEL_EXTRA_GLOBALS, helpers=[])
-    kc2r = PythocKernel(chain_conv2res_bf16, [scratch_ty, wslot_ty, final_ty, patch_ty, np.int32, np.int32, np.int32, np.int32, np.int32, np.int32],
-                        extra_globals=KERNEL_EXTRA_GLOBALS, helpers=[_store_bn_silu_res_4x8_rows])
+    if _CONV2_BFP:
+        kc2r = PythocKernel(_chain_conv2res_bfp, [scratch_ty, wslot_ty, final_ty, patch_ty, np.int32, np.int32, np.int32, np.int32, np.int32, np.int32],
+                            extra_globals=dict(_BFP_C2_GLOBALS), helpers=list(_BFP_C2_HELPERS))
+    else:
+        kc2r = PythocKernel(chain_conv2res_bf16, [scratch_ty, wslot_ty, final_ty, patch_ty, np.int32, np.int32, np.int32, np.int32, np.int32, np.int32],
+                            extra_globals=KERNEL_EXTRA_GLOBALS, helpers=[_store_bn_silu_res_4x8_rows])
     # helpers come from kc1's _MMUL_HELPERS (same core program) — listing
     # _store_bn_silu_4x8_rows again would redefine the symbol
     kgm = PythocKernel(chain_gemm_bf16, [patch_ty, scratch_ty, wslot_ty, final_ty, np.int32, np.int32, np.int32],
@@ -322,7 +348,8 @@ def raster_params(geo: str):
                 FINAL=TILE * TILE * ic, SCRATCH=(ic // 16) * 1600)
 
 
-def rn3_chain_raster(geo: str, n_iters: int = 2, stack_size: int = 4096, compute: int = 1):
+def rn3_chain_raster(geo: str, n_iters: int = 2, stack_size: int = 4096, compute: int = 1,
+                     wr2: int = 0):
     """TPR tiles per core: tile idx = (col*NWORK + w)*TPR + r rastered over the
     GRIDxGRID image. vs column-major chain: per-core load drops to TPR tiles
     (re6w 1 vs 2, re4w 4 vs 6) and 25-28 cores run instead of 15-20."""
@@ -352,14 +379,27 @@ def rn3_chain_raster(geo: str, n_iters: int = 2, stack_size: int = 4096, compute
     wslot_ty = np.ndarray[(WSLOT,), np.dtype[np.uint16]]
     scratch_ty = np.ndarray[(SCRATCH,), np.dtype[np.uint16]]
     img_ty = np.ndarray[(IMG_ELEMS,), np.dtype[np.uint16]]
-    wt_host_ty = np.ndarray[(n_iters * TPR * SLOTS_PER_PAIR * WSLOT,), np.dtype[np.uint16]]
+    # wr2: weights NOT host-duplicated per round (memtile ring replays TPR);
+    # one group per iter in the WT BO. non-wr2: TPR-duplicated as before.
+    WT_GROUP = SLOTS_PER_PAIR * WSLOT
+    wt_host_ty = np.ndarray[((n_iters * WT_GROUP) if wr2 else (n_iters * TPR * WT_GROUP),),
+                            np.dtype[np.uint16]]
 
-    kc1 = PythocKernel(chain_conv1_bf16, [patch_ty, wslot_ty, scratch_ty, np.int32, np.int32, np.int32],
-                       extra_globals=KERNEL_EXTRA_GLOBALS, helpers=_MMUL_HELPERS)
+    if _CONV1_BFP:
+        kc1 = PythocKernel(_chain_conv1_bfp, [patch_ty, wslot_ty, scratch_ty, np.int32, np.int32, np.int32],
+                           extra_globals={**KERNEL_EXTRA_GLOBALS, **_BFP_C1_GLOBALS},
+                           helpers=list(_MMUL_HELPERS) + list(_BFP_C1_HELPERS))
+    else:
+        kc1 = PythocKernel(chain_conv1_bf16, [patch_ty, wslot_ty, scratch_ty, np.int32, np.int32, np.int32],
+                           extra_globals=KERNEL_EXTRA_GLOBALS, helpers=_MMUL_HELPERS)
     km = PythocKernel(chain_mask_bf16, [scratch_ty, np.int32, np.int32, np.int32, np.int32],
                       extra_globals=KERNEL_EXTRA_GLOBALS, helpers=[])
-    kc2r = PythocKernel(chain_conv2res_bf16, [scratch_ty, wslot_ty, final_ty, patch_ty, np.int32, np.int32, np.int32, np.int32, np.int32, np.int32],
-                        extra_globals=KERNEL_EXTRA_GLOBALS, helpers=[_store_bn_silu_res_4x8_rows])
+    if _CONV2_BFP:
+        kc2r = PythocKernel(_chain_conv2res_bfp, [scratch_ty, wslot_ty, final_ty, patch_ty, np.int32, np.int32, np.int32, np.int32, np.int32, np.int32],
+                            extra_globals=dict(_BFP_C2_GLOBALS), helpers=list(_BFP_C2_HELPERS))
+    else:
+        kc2r = PythocKernel(chain_conv2res_bf16, [scratch_ty, wslot_ty, final_ty, patch_ty, np.int32, np.int32, np.int32, np.int32, np.int32, np.int32],
+                            extra_globals=KERNEL_EXTRA_GLOBALS, helpers=[_store_bn_silu_res_4x8_rows])
 
     workers, col_in, col_out, col_wt = [], [], [], []
 
@@ -420,10 +460,12 @@ def rn3_chain_raster(geo: str, n_iters: int = 2, stack_size: int = 4096, compute
                             (IMG_ELEMS,), offset=(gr * IMG + gc) * IC,
                             sizes=[1, 12, 12 * IC],
                             strides=[0, IMG * IC, 1]), task_group=tg)
-                    rt.fill(col_wt[c].prod(), WT, TensorAccessPattern(
-                        (n_iters * TPR * SLOTS_PER_PAIR * WSLOT,),
-                        offset=(it * TPR + r) * SLOTS_PER_PAIR * WSLOT,
-                        sizes=[1, SLOTS_PER_PAIR * WSLOT], strides=[0, 1]), task_group=tg)
+                    if (not wr2) or r == 0:
+                        _tot = (n_iters * WT_GROUP) if wr2 else (n_iters * TPR * WT_GROUP)
+                        _off = (it * WT_GROUP) if wr2 else (it * TPR + r) * WT_GROUP
+                        rt.fill(col_wt[c].prod(), WT, TensorAccessPattern(
+                            (_tot,), offset=_off,
+                            sizes=[1, WT_GROUP], strides=[0, 1]), task_group=tg)
                     for w in range(NWORK):
                         _, gr, gc = tile_of(c, w, r)
                         rt.drain(col_out[c].cons(), dst, TensorAccessPattern(
@@ -433,7 +475,22 @@ def rn3_chain_raster(geo: str, n_iters: int = 2, stack_size: int = 4096, compute
                             wait=(c == COLS - 1 and w == NWORK - 1))
                 rt.finish_task_group(tg)
 
-    return Program(dev, rt).resolve_program()
+    module = Program(dev, rt).resolve_program()
+    # wr2 only does something where TPR>1 (re4w): the memtile ring replays the
+    # group TPR times. At TPR=1 (re6w/re8w) there is NOTHING to replay -- weights
+    # are already 1 group/iter (host fill is identical to non-wr2), so skip the
+    # replay patch entirely. Applying it there built a no-op memtile ring whose
+    # hardcoded BD ids overflow the 47-BD ceiling at IC48.
+    if wr2 and TPR > 1:
+        from aie.passmanager import PassManager
+        PassManager.parse(
+            "builtin.module(canonicalize,aie-canonicalize-device,"
+            "aie.device(aie-place-tiles,aie-assign-lock-ids,"
+            "aie-register-objectFifos,"
+            "aie-objectFifo-stateful-transform{dynamic-objFifos=true}))",
+            module.context).run(module.operation)
+        _patch_wt_replay2(module, COLS, NWORK, TPR, n_iters, SLOTS_PER_PAIR, WSLOT)
+    return module
 
 
 def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, compute: int = 1,
@@ -472,12 +529,21 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
     img_ty = np.ndarray[(IMG_ELEMS,), np.dtype[np.uint16]]
     wt_host_ty = np.ndarray[(n_iters * MEM_STREAM,), np.dtype[np.uint16]]
 
-    kc1 = PythocKernel(chain_conv1_bf16, [patch_ty, wslot_ty, scratch_ty, np.int32, np.int32, np.int32],
-                       extra_globals=KERNEL_EXTRA_GLOBALS, helpers=_MMUL_HELPERS)
+    if _CONV1_BFP:
+        kc1 = PythocKernel(_chain_conv1_bfp, [patch_ty, wslot_ty, scratch_ty, np.int32, np.int32, np.int32],
+                           extra_globals={**KERNEL_EXTRA_GLOBALS, **_BFP_C1_GLOBALS},
+                           helpers=list(_MMUL_HELPERS) + list(_BFP_C1_HELPERS))
+    else:
+        kc1 = PythocKernel(chain_conv1_bf16, [patch_ty, wslot_ty, scratch_ty, np.int32, np.int32, np.int32],
+                           extra_globals=KERNEL_EXTRA_GLOBALS, helpers=_MMUL_HELPERS)
     km = PythocKernel(chain_mask_bf16, [scratch_ty, np.int32, np.int32, np.int32, np.int32],
                       extra_globals=KERNEL_EXTRA_GLOBALS, helpers=[])
-    kc2r = PythocKernel(chain_conv2res_bf16, [scratch_ty, wslot_ty, final_ty, patch_ty, np.int32, np.int32, np.int32, np.int32, np.int32, np.int32],
-                        extra_globals=KERNEL_EXTRA_GLOBALS, helpers=[_store_bn_silu_res_4x8_rows])
+    if _CONV2_BFP:
+        kc2r = PythocKernel(_chain_conv2res_bfp, [scratch_ty, wslot_ty, final_ty, patch_ty, np.int32, np.int32, np.int32, np.int32, np.int32, np.int32],
+                            extra_globals=dict(_BFP_C2_GLOBALS), helpers=list(_BFP_C2_HELPERS))
+    else:
+        kc2r = PythocKernel(chain_conv2res_bf16, [scratch_ty, wslot_ty, final_ty, patch_ty, np.int32, np.int32, np.int32, np.int32, np.int32, np.int32],
+                            extra_globals=KERNEL_EXTRA_GLOBALS, helpers=[_store_bn_silu_res_4x8_rows])
     from kernels.rn3_chain_pythoc import WT_BD, WT_LOCK, WT_BDBASE, WT_S2MM1Q
     wt_globals = dict(KERNEL_EXTRA_GLOBALS,
                       WT_BD=WT_BD, WT_LOCK=WT_LOCK, WT_BUF_ADDR=WT_BUF_ADDR,
@@ -809,6 +875,117 @@ def _patch_wt_replay(module, cols, nwork, tpr, n_iters, mem_stream, wbuf_addr,
         nxt = ops[ops.index(anchor) + 1]
         with InsertionPoint(nxt), Location.unknown(module.context):
             reset_and_fill(it)
+
+
+def _patch_wt_replay2(module, cols, nwork, tpr, n_iters, n_slot, wslot):
+    """Clean weight-replay (NO credits/self-arm/write_tm). Reroutes the iron
+    cr_wt path shim->cores (switch-routed) to shim->memtile staging + a go-gated
+    group-cycled ring (memtile MM2S5) broadcasting to the cores' unchanged iron
+    cr_wt cons (S2MM ch1). The shim cr_wt fill (1 group/iter) lands in the memtile
+    staging (S2MM5, self-replenish); the ring replays it TPR x group-cycled. A
+    host npu_write32 releases `go` by TPR after each iteration's fill. Proven by
+    test_wt_replay_cores_micro_hw."""
+    from aie.dialects.aie import (
+        DMAChannelDir, EndOp, LockAction, WireBundle, buffer, dma_bd, dma_start,
+        flow, lock, memtile_dma, next_bd, use_lock,
+    )
+    from aie.dialects.aiex import npu_write32
+    from aie.ir import InsertionPoint, Location
+    import re as _re
+
+    GROUP = n_slot * wslot
+    S2_ID, GO_ID, MM_ID = 27, 28, 29
+    GO_REG = 0xC0000 + GO_ID * 16
+    grp_ty = np.ndarray[(GROUP,), np.dtype[np.uint16]]
+
+    dev_op = next(o for o in module.body.operations
+                  if o.operation.name == "aie.device")
+    body = dev_op.regions[0].blocks[0]
+    tiles, seq_op = {}, None
+    for op in body.operations:
+        nm = op.operation.name
+        if nm == "aie.tile":
+            mt = _re.search(r"col\s*=\s*(\d+),\s*row\s*=\s*(\d+)", str(op))
+            tiles[(int(mt.group(1)), int(mt.group(2)))] = op
+        if "runtime_sequence" in nm:
+            seq_op = op
+
+    # erase the shim->core cr_wt flows (src = shim row0, dst = core row>=2).
+    # flow refs tiles by SSA name (...tile_C_R); first match = src, second = dst.
+    # only cr_wt is shim->core (cr_in is shim->mem, cr_out is core/mem->shim).
+    for op in list(body.operations):
+        if op.operation.name != "aie.flow":
+            continue
+        m = _re.findall(r"tile_(\d+)_(\d+)", str(op))
+        if len(m) >= 2 and m[0][1] == "0" and int(m[1][1]) >= 2:
+            op.operation.erase()
+
+    last = list(body.operations)[-1]
+    with InsertionPoint(last), Location.unknown(module.context):
+        for c in range(cols):
+            mem_t, shim_t = tiles[(c, 1)], tiles[(c, 0)]
+            cores = [tiles[(c, 2 + w)] for w in range(nwork)]
+            grp = buffer(mem_t, datatype=grp_ty, name=f"wt_grp_{c}", address=0x70000)
+            s2d = lock(mem_t, lock_id=S2_ID, init=1, sym_name=f"wt_s2d_{c}")
+            go = lock(mem_t, lock_id=GO_ID, init=0, sym_name=f"wt_go_{c}")
+            m2d = lock(mem_t, lock_id=MM_ID, init=1, sym_name=f"wt_m2d_{c}")
+            flow(shim_t, WireBundle.DMA, 1, mem_t, WireBundle.DMA, 5)   # shim->mem fill
+            for w in range(nwork):
+                flow(mem_t, WireBundle.DMA, 5, cores[w], WireBundle.DMA, 1)  # ring bcast
+
+            def _mk(grp, s2d, go, m2d):
+                @memtile_dma(mem_t)
+                def mt(block):
+                    dma_start(DMAChannelDir.S2MM, 5, dest=block[1], chain=block[2])
+                    with block[1]:
+                        use_lock(s2d, LockAction.AcquireGreaterEqual, value=1)
+                        dma_bd(grp, offset=0, len=GROUP, bd_id=42)
+                        use_lock(s2d, LockAction.Release, value=1)
+                        next_bd(block[1])
+                    with block[2]:
+                        dma_start(DMAChannelDir.MM2S, 5, dest=block[3],
+                                  chain=block[3 + n_slot])
+                    for s in range(n_slot):
+                        with block[3 + s]:
+                            gate = go if s == 0 else m2d
+                            use_lock(gate, LockAction.AcquireGreaterEqual, value=1)
+                            dma_bd(grp, offset=s * wslot, len=wslot, bd_id=43 + s)
+                            use_lock(m2d, LockAction.Release, value=1)
+                            nxt = block[3 + s + 1] if s < n_slot - 1 else block[3]
+                            next_bd(nxt)
+                    with block[3 + n_slot]:
+                        EndOp()
+            _mk(grp, s2d, go, m2d)
+
+    # runtime: release `go` by TPR right after each per-iteration cr_wt fill.
+    # cr_wt fill = dma_configure_task_for @cr_wt_C then dma_start_task; insert the
+    # go release after that start_task. Collect first, then mutate.
+    seq_block = seq_op.regions[0].blocks[0]
+    ops = list(seq_block.operations)
+    inserts = []
+    for i, op in enumerate(ops):
+        if op.operation.name != "aiex.dma_configure_task_for":
+            continue
+        mt = _re.search(r"@cr_wt_(\d+)_shim_alloc", str(op))
+        if not mt:
+            continue
+        j = i + 1
+        while j < len(ops) and ops[j].operation.name != "aiex.dma_start_task":
+            j += 1
+        succ = ops[j + 1] if j + 1 < len(ops) else None
+        inserts.append((succ, int(mt.group(1))))
+    for succ, col in inserts:
+        ip = InsertionPoint(succ) if succ is not None else InsertionPoint(seq_block)
+        with ip, Location.unknown(module.context):
+            npu_write32(address=GO_REG, value=tpr, column=col, row=1)
+
+    # per-launch lock re-init: the memtile locks persist across resident-runner
+    # launches (CDO inits once at PDI load); reset go=0, dummies=1 each launch.
+    with InsertionPoint.at_block_begin(seq_block), Location.unknown(module.context):
+        for c in range(cols):
+            npu_write32(address=0xC0000 + S2_ID * 16, value=1, column=c, row=1)
+            npu_write32(address=GO_REG, value=0, column=c, row=1)
+            npu_write32(address=0xC0000 + MM_ID * 16, value=1, column=c, row=1)
 
 
 if __name__ == "__main__":
