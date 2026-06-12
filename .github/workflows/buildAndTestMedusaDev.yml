@@ -28,7 +28,7 @@ jobs:
     name: XRT NPU3 Tests
     runs-on: ryzen-ai-npu3
     env:
-      VITIS: /home/labuser/vitis-HEAD/Vitis
+      VITIS: /proj/primebuilds/9999.0_PRIME_0819_1/installs/lin64/HEAD/Vitis
       LM_LICENSE_FILE: 1757@172.19.220.188:2100@172.19.6.231
 
     steps:
@@ -54,7 +54,7 @@ jobs:
           pip install -r python/requirements_notebook.txt
 
           # Install peano
-          pip install /home/github/llvm_aie-1.8.0.dev20260415152325+g5b858460-py3-none-manylinux_2_34_x86_64.whl
+          pip install /scratch/github/llvm_aie-1.9.0.dev20260611145819+g33c9a5c2-py3-none-manylinux_2_38_x86_64.whl
           export PEANO_INSTALL_DIR="$(pip show llvm-aie | grep ^Location: | awk '{print $2}')/lnx64.o/tools/peano/"
 
           VERSION=$(utils/clone-llvm.sh --get-wheel-version)
