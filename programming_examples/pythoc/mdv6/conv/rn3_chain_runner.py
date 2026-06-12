@@ -181,26 +181,33 @@ def run_rn3_chain_raster(geo: str, inp_hwc: torch.Tensor, weight_pairs) -> torch
     n_iters = len(weight_pairs)
     import os as _os
     wr = _os.environ.get("MDV6_WTREPLAY", "0") not in ("", "0", "false", "False")
-    key = (geo, "raster", wr) + tuple(id(a) for pr in weight_pairs for a in pr)
+    wr2 = _os.environ.get("MDV6_WTREPLAY2", "1") not in ("", "0", "false", "False")
+    key = (geo, "raster", wr, wr2) + tuple(id(a) for pr in weight_pairs for a in pr)
     cached = _WEIGHT_CACHE.get(key)
     if cached is None:
         # wt replay: memtile re-emits per round — no host TPR duplication
-        rep = 1 if wr else p["TPR"]
+        rep = 1 if (wr or wr2) else p["TPR"]
         blocks = [np.tile(_pack_geo_iter(w1, w2, ic, p["WSLOT"], p["N_BLK"]), rep)
                   for w1, w2 in weight_pairs]
         cached = (np.concatenate(blocks), list(weight_pairs))
         _WEIGHT_CACHE[key] = cached
     weights = cached[0]
-    rkey = (geo, n_iters, "raster", wr)
+    c1b = _os.environ.get("MDV6_CONV1_BFP", "1") not in ("", "0", "false", "False")
+    c2b = _os.environ.get("MDV6_CONV2_BFP", "1") not in ("", "0", "false", "False")
+    btag = ("_c1b" if c1b else "") + ("_c2b" if c2b else "")
+    rkey = (geo, n_iters, "raster", wr, wr2, c1b, c2b)
     r = _RUNNERS.get(rkey)
     if r is None:
-        tag = "_wr" if wr else ""
+        tag = ("_wr2" if wr2 else ("_wr" if wr else "")) + btag
         bd = Path(__file__).parent / f"build_rn3_raster_{geo}_i{n_iters}{tag}"
         xclbin, insts = bd / "final.xclbin", bd / "insts.bin"
         if not (xclbin.exists() and insts.exists()):
             from aie.utils.compile import compile_mlir_module
             from conv.aie2_rn3_chain_geo import rn3_chain_raster, rn3_chain_raster_wr
-            gen = rn3_chain_raster_wr if wr else rn3_chain_raster
+            if wr2:
+                def gen(geo, n_iters): return rn3_chain_raster(geo, n_iters=n_iters, wr2=1)
+            else:
+                gen = rn3_chain_raster_wr if wr else rn3_chain_raster
             (bd / "work").mkdir(parents=True, exist_ok=True)
             compile_mlir_module(mlir_module=gen(geo, n_iters=n_iters),
                                 insts_path=str(insts), xclbin_path=str(xclbin),
