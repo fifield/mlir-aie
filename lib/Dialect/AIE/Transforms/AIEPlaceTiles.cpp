@@ -14,6 +14,7 @@
 #include "mlir/Transforms/DialectConversion.h"
 
 #include <cmath>
+#include <map>
 
 namespace xilinx::AIE {
 #define GEN_PASS_DEF_AIEPLACETILES
@@ -59,6 +60,84 @@ private:
   DeviceOp device;
   Placer &placer;
 };
+
+// Emit the AIE4 control wiring: every shim tile used by the design must carry a
+// controller_id PacketInfoAttr and participate in a Control32 -> Controller32
+// packet flow back to the first shim's Controller32 channel 0. Without this the
+// AIE4 runtime sequence has no control path back to the host and
+// pyxrt.run.wait() never returns. AIE2 / AIE2P targets do not need it.
+//
+// This runs after tile placement so that logical tiles have been resolved to
+// real, column-assigned (and merged) aie.tile ops. Doing the wiring earlier
+// (e.g. in the IRON Python front-end on aie.logical_tile ops) does not work:
+// unplaced logical tiles have no column to deduplicate on, and any attribute
+// set on a logical tile is dropped when it is rewritten into a real tile.
+//
+// The emitted pattern:
+//   shim.attributes["controller_id"] = #aie.packet_info<pkt_type=0, pkt_id=i>
+//   aie.packet_flow(i) {
+//     aie.packet_source<%shim, Control32 : ch>     // ch in {0, 1}
+//     aie.packet_dest<%first_shim, Controller32 : 0>
+//   }
+//
+// AIE4 shims have two BD pools (lower: BDs 0..15 on channels 0/1; upper: BDs
+// 16..31). The lower pool returns DMA tokens via Control32:0 and the upper pool
+// via Control32:1; both flows from a given shim share that shim's controller_id
+// pkt_id, since the destination matches against the packet_id carried by the
+// source tile, not by the source channel.
+static void emitAIE4ControlWiring(DeviceOp device) {
+  const AIETargetModel &targetModel = device.getTargetModel();
+  if (!isa<AIE4TargetModel>(targetModel))
+    return;
+
+  // Collect the unique shim NOC/PL tiles used by the design, one per column and
+  // in deterministic column order. If any tile already carries a controller_id
+  // the design was wired manually (e.g. the *_placed.py examples); leave it be.
+  std::map<int, TileOp> shimByCol;
+  for (auto tile : device.getOps<TileOp>()) {
+    if (tile->hasAttr("controller_id"))
+      return;
+    if (!tile.isShimNOCorPLTile())
+      continue;
+    int col = tile.colIndex();
+    if (!shimByCol.count(col))
+      shimByCol[col] = tile;
+  }
+  if (shimByCol.empty())
+    return;
+
+  MLIRContext *ctx = device.getContext();
+
+  // Assign controller_id [pkt_type=0, pkt_id=idx] per shim column.
+  SmallVector<TileOp> shims;
+  int idx = 0;
+  for (auto &[col, tile] : shimByCol) {
+    tile->setAttr("controller_id",
+                  PacketInfoAttr::get(ctx, /*pkt_type=*/0, /*pkt_id=*/idx));
+    shims.push_back(tile);
+    ++idx;
+  }
+
+  TileOp controller = shims.front();
+  OpBuilder builder(ctx);
+  for (int i = 0, e = shims.size(); i < e; ++i) {
+    TileOp shim = shims[i];
+    for (int ctrlCh : {0, 1}) {
+      builder.setInsertionPoint(device.getBody()->getTerminator());
+      auto pktFlow =
+          PacketFlowOp::create(builder, shim.getLoc(), /*ID=*/i,
+                               /*keep_pkt_header=*/nullptr,
+                               /*ctrl_pkt_flow=*/nullptr);
+      Block *body = builder.createBlock(&pktFlow.getPorts());
+      builder.setInsertionPointToStart(body);
+      PacketSourceOp::create(builder, shim.getLoc(), shim,
+                             WireBundle::Control32, ctrlCh);
+      PacketDestOp::create(builder, shim.getLoc(), controller,
+                           WireBundle::Controller32, /*channel=*/0);
+      EndOp::create(builder, shim.getLoc());
+    }
+  }
+}
 
 struct AIEPlaceTilesPass
     : xilinx::AIE::impl::AIEPlaceTilesBase<AIEPlaceTilesPass> {
@@ -142,6 +221,10 @@ struct AIEPlaceTilesPass
             delegateTile.getResult());
       }
     }
+
+    // Tiles are now placed (and merged); emit AIE4 control wiring on the real
+    // aie.tile ops. No-op for non-AIE4 targets.
+    emitAIE4ControlWiring(device);
   }
 };
 
