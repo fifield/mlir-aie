@@ -109,6 +109,39 @@ def o_gemv_ffn_host_arg_types(emb_dim: int = 2048, hidden_dim: int = 8192,
     ]
 
 
+def c2_attn_host_arg_types(emb_dim: int = 2048, hidden_dim: int = 8192,
+                           n_groups: int = 8, n_chunks: int = 1,
+                           resident: bool = False):
+    """Host arg type specs for the ``c2_attn`` collapsed device (STEP B).
+
+    Extends the 15-arg o_gemv_ffn layout: the c2 args 0..14 are unchanged, but
+    arg1 (``attn_out``) becomes an on-NPU-written DDR scratch (the attention
+    wave-0 output, flat head-major (emb_dim,)) rather than a host input. Three
+    new attention inputs are appended:
+
+        arg15 : memref<n_groups*4096 x bf16>          q_all (tiled per group)
+        arg16 : memref<n_groups*n_chunks*4096 x bf16> k_all (tiled per chunk)
+        arg17 : memref<n_groups*n_chunks*4096 x bf16> v_all
+
+    The attention output is scattered into arg1 head-major so the O wave reads
+    it exactly as it reads ``attn_out`` in plain c2_merged.
+    """
+    tile_size = 64 * 64  # TILE_ROWS * HEAD_DIM
+    kv_size = n_chunks * tile_size
+    base = o_gemv_ffn_host_arg_types(emb_dim, hidden_dim)
+    # arg1 (attn_out) is widened: the attention wave writes each group's full
+    # 64x64 untiled context tile (n_groups*4096), and the O wave gathers rows
+    # 0..3 of each group head-major from it.
+    base[1] = bf16_np(n_groups * tile_size)
+    # Resident folds the runtime valid length L into q's padding (no extra
+    # arg); the ABI is the same 18-arg layout in both modes.
+    return base + [
+        bf16_np(n_groups * tile_size),   # arg15 q_all
+        bf16_np(n_groups * kv_size),     # arg16 k_all
+        bf16_np(n_groups * kv_size),     # arg17 v_all
+    ]
+
+
 def rms_gemv_rope_awq_host_arg_types(emb_dim: int = 2048, kv_dim: int = 512,
                                      group_size: int = 128):
     """Return the 13 host arg type specs for ``rms_gemv_rope_awq``.
