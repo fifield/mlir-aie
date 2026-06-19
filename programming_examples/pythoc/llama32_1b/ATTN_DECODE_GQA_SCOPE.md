@@ -928,3 +928,82 @@ overrides the credit (default 1); `PYTHOC_C2_WRELAY2_DN` gates the down relay.
 - builders/o_gemv_ffn.py: `_emit_call2_c2` -- 2-slot L2 W-relay + down-W-relay
   ping-pong gated by `_wrelay2`/`_wrelay2_dn` (auto-on for resident); credit knob
   `PYTHOC_C2_WRELAY2_CR` (default 1). WQUIESCE comment corrected (superseded).
+
+---
+
+## Part 2 — c2_attn host-overhead close (incremental KV tiling + resident KV BO)
+
+GOAL: take c2_attn decode from ~7.5 tok/s (133 ms/tok) toward the c2_merged
+baseline (11.9 tok/s, 84 ms/tok) by eliminating the O(seq) per-token KV
+re-pack + re-upload. Only the NEW token's K/V row should be tiled/transferred
+each step. All work gated under the c2_attn pack mode; default c2_merged
+stays byte-identical.
+
+### Part 2a — INCREMENTAL host tiling (LANDED, default-on)
+Before: `_run_c2_attn` zeroed + copied the FULL 256-padded k_pad/v_pad for all
+8 groups and re-tiled all 4 chunks (8*4*4096 elts each) EVERY layer EVERY
+token (O(seq) host work).
+After: a PERSISTENT per-layer tiled buffer (`_C2_ATTN_KV_STATE[layer_idx]`)
+is kept across tokens. On first sight of a layer it is SEEDED once by tiling
+the rows already in the cache (the prefill KV, 0..current_pos). Thereafter
+each token writes ONLY the new row(s) into it: position s lives in chunk
+c=s//64, tile-row r=s%64; per group g, the flat offsets are
+`g*kv_size + c*tile_size + ((col//8)*512 + r*8 + (col%8))` for col 0..63.
+`c2_attn_reset_kv_state()` clears the buffers at the start of each sequence
+(called in `generate()` right before the decode loop).
+
+Verified byte-identical to the old full re-tile across all chunk boundaries
+(seq 38/39/64/65/66/131/201) via a standalone numpy check.
+
+Result: steady-state per-token dropped from ~133 ms to ~81 ms/tok
+(measured tokens 2..N consistently 80-88 ms). On a full 20-token decode the
+token-1 one-time overhead (~480 ms; first-dispatch BO alloc) amortizes out.
+Gold "The capital of France is Paris." decodes correctly. This single change
+closes essentially the whole host-side gap to c2_merged.
+
+### Part 2b — RESIDENT KV BO, incremental device push (LANDED behind flag, OFF by default)
+Mechanism: declare args 16/17 (k_all/v_all) STATIC so the generic
+write/sync path skips them after the first (seeding) dispatch; on each
+subsequent token push ONLY the touched chunk's bytes into the resident
+per-layer BO via a new cache helper `KernelCache.update_static_bo(bo_key,
+arg_index, host_array, ranges)` (copies the touched element ranges into the
+mapped BO and issues one contiguous ranged `BO_TO_DEVICE` sync) BEFORE the
+dispatch. Gated by `PYTHOC_C2_ATTN_RESIDENT_KV` (default "0").
+
+Result: net SLIGHT REGRESSION (~84-88 ms/tok vs 2a's ~81). After 2a removed
+the O(seq) host re-tile, the per-token K/V upload is small next to the ~80 ms
+NPU compute, so the extra ranged-sync round-trip does not pay for itself
+(per-group syncs were worse, ~88 ms; collapsing to one ranged sync per arg got
+it to ~84, still above 2a). Left in behind the env flag for future use (e.g.
+if NPU compute drops and the upload re-dominates). Correctness preserved
+("Paris.").
+
+### Final numbers (Strix Halo aie2p, instruct bf16, gold prompt)
+- c2_attn BEFORE (committed e7c1341bf): ~133 ms/tok steady-state, ~7.5 tok/s.
+- c2_attn AFTER (2a default): ~81 ms/tok steady-state; ~12.3 tok/s steady,
+  effectively matching c2_merged. (20-token wall avg ~9.5 tok/s; gold prompt
+  hits EOS at token 9 so its wall avg is dragged by the amortized token-1
+  overhead -- judge on steady-state.)
+- c2_merged baseline (control, same session): ~85 ms/tok, ~11.5-12.0 tok/s.
+  c2_attn steady-state now PARITY with c2_merged. Residual gap is the ~480 ms
+  one-time first-token overhead (BO allocation), not per-token host work.
+
+### Regression
+- tests/test_c2_attn_ir.py: 6/6 PASS (default c2_merged byte-identical, 15-arg,
+  leak-free; resident c2_attn ONE configure/run).
+- c2_merged gold gate (`make profile`, no env var): "The capital of France is
+  Paris.", ~11.5 tok/s -- unchanged.
+- c2_attn gold gate (`PYTHOC_LLAMA_O_GEMV_FFN_PACK_MODE=c2_attn make profile`):
+  "The capital of France is Paris." (clean runs; ~1/3 of runs still hit the
+  separate process-teardown quiescence garbage "!!!!", out of scope).
+
+### Files changed (all c2_attn-gated; default c2_merged + AWQ untouched)
+- llama32_1b_decode.py: persistent `_C2_ATTN_KV_STATE` + `c2_attn_reset_kv_state`
+  + `_c2_attn_tile_row_offsets`/`_C2_ATTN_ROW_OFF` + `_c2_attn_chunk_ranges`;
+  `_run_c2_attn` rewritten to seed-once + incremental-row tiling (2a) and
+  optional resident-KV incremental BO push (2b, flag-gated).
+- kernel_builder/cache.py: new `KernelCache.update_static_bo()` partial in-place
+  resident-BO update helper (ranged BO_TO_DEVICE sync). Generic load_and_run
+  path unchanged.
+- llama32_1b_inference.py: import + call `c2_attn_reset_kv_state()` at the top
+  of the decode phase in `generate()` (no-op for c2_merged/AWQ).

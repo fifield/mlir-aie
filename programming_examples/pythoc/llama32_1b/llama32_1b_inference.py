@@ -64,6 +64,7 @@ from llama32_1b_prefill import (
 from llama32_1b_decode import (
     compile_decode_kernels,
     run_decode_block,
+    c2_attn_reset_kv_state,
 )
 
 # ---------------------------------------------------------------------------
@@ -750,6 +751,9 @@ def generate(
     )
 
     # --- Phase 2: NPU Decode ---
+    # Fresh sequence: clear the c2_attn incremental tiled-KV buffers so a new
+    # prompt re-seeds from this run's prefill cache (no stale tiles).
+    c2_attn_reset_kv_state()
     generated_tokens = [prefill_token]  # Token 0 = from prefill
     current_pos = prompt_len
     x_decode = weights.embed_table[prefill_token].astype(bfloat16)
