@@ -761,6 +761,11 @@ def generate(
 
     if not streaming:
         print(f"\nDecoding {n_tokens} tokens (token 1 to {n_tokens})...")
+    # Enable per-kernel breakdown capture when a profile dump is requested.
+    if profile:
+        import os as _pos0
+        if _pos0.environ.get("PYTHOC_PROFILE_DUMP"):
+            decode_cache.profiler.enabled = True
     t_decode_start = time.time()
 
     for token_idx in range(n_tokens):
@@ -841,6 +846,29 @@ def generate(
 
     t_decode = time.time() - t_decode_start
     n_generated = len(generated_tokens) - 1  # exclude prefill token
+
+    # Dump per-kernel decode profile to a file (survives any teardown crash).
+    if profile:
+        import os as _pos
+        dump = _pos.environ.get("PYTHOC_PROFILE_DUMP")
+        if dump:
+            try:
+                prof = decode_cache.profiler
+                lines = []
+                for name in sorted(prof.kernel_breakdowns.keys()):
+                    ents = prof.kernel_breakdowns[name]
+                    nn = len(ents)
+                    aw = sum(e["write_ms"] for e in ents) / nn
+                    ak = sum(e["kernel_ms"] for e in ents) / nn
+                    ar = sum(e["read_ms"] for e in ents) / nn
+                    lines.append(
+                        f"{name:24s} write={aw:7.2f}ms run={ak:7.2f}ms "
+                        f"read={ar:7.2f}ms total={aw+ak+ar:7.2f}ms (x{nn})")
+                with open(dump, "w") as _f:
+                    _f.write("\n".join(lines) + "\n")
+            except Exception as _e:  # pragma: no cover - diagnostic only
+                with open(dump, "w") as _f:
+                    _f.write(f"profile dump failed: {_e}\n")
 
     if not streaming:
         print(f"\nGenerated {n_generated} tokens in {t_decode:.2f}s")
