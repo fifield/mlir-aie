@@ -363,6 +363,47 @@ _RES_MAX_CHUNKS = 4
 _RES_TILE_ROWS = 64
 _RES_PADDED = _RES_MAX_CHUNKS * _RES_TILE_ROWS  # 256
 
+# --- c2_attn incremental KV tiling (Part 2a) ---------------------------------
+# Persistent per-layer tiled K/V buffers (k_all/v_all, 8*4*4096 bf16 each).  The
+# KV cache grows by exactly ONE row per decode token; rather than zero+copy+
+# re-tile the full 256-pad every layer/token (O(seq) host work, ~16 ms/tok), we
+# keep these buffers resident across tokens and write ONLY the new row's tile.
+# Seeded lazily per layer from whatever rows the cache already holds (the prefill
+# KV), then updated one row at a time.  Reset at the start of each sequence.
+_C2_ATTN_KV_STATE = {}  # layer_idx -> {"k_all", "v_all", "seeded_pos"}
+
+
+def c2_attn_reset_kv_state():
+    """Clear the persistent incremental tiled K/V buffers.  Call at the start of
+    each new prompt/sequence so a fresh decode does not reuse stale tiles."""
+    _C2_ATTN_KV_STATE.clear()
+
+
+def _c2_attn_tile_row_offsets():
+    """Per-column flat offsets within a single tile (chunk) for ONE row r=0.
+    Element (r,col) -> (col//8)*512 + r*8 + (col%8).  Returns a (64,) int array
+    of the r=0 offsets; add r*8 for row r.  Cached (pure function of head_dim)."""
+    cols = np.arange(_RES_TILE_ROWS)  # head_dim == TILE_ROWS == 64
+    return (cols // 8) * 512 + (cols % 8)
+
+
+_C2_ATTN_ROW_OFF = _c2_attn_tile_row_offsets()  # (64,) precomputed
+
+
+def _c2_attn_chunk_ranges(c, n_groups=8):
+    """Element [start, stop) ranges in the flat k_all/v_all buffer for chunk c
+    across all n_groups groups.  Each group's chunk-c tile is the contiguous
+    block [g*kv_size + c*tile_size, +tile_size).  Returns a list of (start,stop)
+    element pairs (one per group) so only the touched tiles are re-synced (8 KB
+    x 8 groups = 64 KB vs the full 256 KB)."""
+    kv_size = _RES_MAX_CHUNKS * _RES_TILE_ROWS * _RES_TILE_ROWS  # 4*4096
+    tile_size = _RES_TILE_ROWS * _RES_TILE_ROWS  # 4096
+    out = []
+    for g in range(n_groups):
+        s = g * kv_size + c * tile_size
+        out.append((s, s + tile_size))
+    return out
+
 
 def _c2_attn_tile_8x8(mat):
     """Tile a (64,64) matrix into 8x8 column-block-major flat layout:
@@ -419,23 +460,56 @@ def _run_c2_attn(cache, layer_weights, x_bf16, q_roped, k_cache_layer,
 
     qh = np.asarray(q_roped, dtype=bfloat16).reshape(n_heads, head_dim)
     q_all = np.zeros(n_kv_heads * tile_size, dtype=bfloat16)
-    k_all = np.zeros(n_kv_heads * kv_size, dtype=bfloat16)
-    v_all = np.zeros(n_kv_heads * kv_size, dtype=bfloat16)
+
+    # --- Part 2a: INCREMENTAL tiled K/V.  Maintain a persistent per-layer
+    # k_all/v_all and tile ONLY the new row(s) into it each token, instead of
+    # zero+copy+re-tile of the full 256-pad for all 8 groups every layer/token.
+    layer_idx = getattr(layer_weights, "_layer_idx", None)
+    state_key = layer_idx if layer_idx is not None else id(k_cache_layer)
+    st = _C2_ATTN_KV_STATE.get(state_key)
+    if st is None:
+        # First time this layer is seen this sequence: allocate the persistent
+        # buffers and SEED them by tiling every row currently in the cache (the
+        # prefill KV: positions 0..seed_pos-1).  This one-time per-layer seed is
+        # the only full tiling; thereafter we touch one row per token.
+        k_all = np.zeros(n_kv_heads * kv_size, dtype=bfloat16)
+        v_all = np.zeros(n_kv_heads * kv_size, dtype=bfloat16)
+        seed_pos = current_pos  # rows [0, current_pos) are already populated
+        for g in range(n_kv_heads):
+            for c in range(_RES_MAX_CHUNKS):
+                lo = c * TILE_ROWS
+                hi = min(lo + TILE_ROWS, seed_pos)
+                if hi <= lo:
+                    break
+                k_pad = np.zeros((TILE_ROWS, head_dim), dtype=bfloat16)
+                v_pad = np.zeros((TILE_ROWS, head_dim), dtype=bfloat16)
+                k_pad[:hi - lo] = k_cache_layer[g, lo:hi, :].astype(bfloat16)
+                v_pad[:hi - lo] = v_cache_layer[g, lo:hi, :].astype(bfloat16)
+                base = g * kv_size + c * tile_size
+                k_all[base:base + tile_size] = _c2_attn_tile_8x8(k_pad)
+                v_all[base:base + tile_size] = _c2_attn_tile_8x8(v_pad)
+        st = {"k_all": k_all, "v_all": v_all, "seeded_pos": seed_pos}
+        _C2_ATTN_KV_STATE[state_key] = st
+    k_all = st["k_all"]
+    v_all = st["v_all"]
+
+    # Write the new row(s) [seeded_pos .. current_pos] into the persistent tiles.
+    # Normally exactly one new row (current_pos); the range guard covers any skip.
+    for s in range(st["seeded_pos"], current_pos + 1):
+        c = s // TILE_ROWS
+        r = s % TILE_ROWS
+        # offsets within chunk c's tile for this row: row_off + r*8 (per col)
+        off = _C2_ATTN_ROW_OFF + r * 8
+        for g in range(n_kv_heads):
+            base = g * kv_size + c * tile_size
+            k_all[base + off] = k_cache_layer[g, s, :].astype(bfloat16)
+            v_all[base + off] = v_cache_layer[g, s, :].astype(bfloat16)
+    st["seeded_pos"] = current_pos + 1
+
     for g in range(n_kv_heads):
         q_pad = np.zeros((TILE_ROWS, head_dim), dtype=bfloat16)
         q_pad[:group_size] = qh[g * group_size:(g + 1) * group_size]
         q_all[g * tile_size:(g + 1) * tile_size] = q_pad.reshape(-1)
-        # KV zero-padded to 256 (fixed 4 chunks), PRE-TILED per 64-row chunk.
-        k_pad = np.zeros((_RES_PADDED, head_dim), dtype=bfloat16)
-        v_pad = np.zeros((_RES_PADDED, head_dim), dtype=bfloat16)
-        k_pad[:seq_len] = k_cache_layer[g, :seq_len, :].astype(bfloat16)
-        v_pad[:seq_len] = v_cache_layer[g, :seq_len, :].astype(bfloat16)
-        for c in range(_RES_MAX_CHUNKS):
-            kt = _c2_attn_tile_8x8(k_pad[c * TILE_ROWS:(c + 1) * TILE_ROWS])
-            vt = _c2_attn_tile_8x8(v_pad[c * TILE_ROWS:(c + 1) * TILE_ROWS])
-            base = g * kv_size + c * tile_size
-            k_all[base:base + tile_size] = kt
-            v_all[base:base + tile_size] = vt
         # Fold runtime valid length L = seq_len into q's free padding.  q_all is
         # UNTILED (the device DMA tiles it 8x8); the core reads tiled offset 32 =
         # (row4,col0), whose UNTILED position is row4*64+col0 = 256.  Rows 0..3
@@ -458,18 +532,46 @@ def _run_c2_attn(cache, layer_weights, x_bf16, q_roped, k_cache_layer,
     down_buf = np.zeros(emb_dim, dtype=bfloat16)
     output_buf = np.zeros(emb_dim, dtype=bfloat16)
 
-    layer_idx = getattr(layer_weights, "_layer_idx", None)
     bo_key = f"c2attn_{kname}_L{layer_idx}" if layer_idx is not None else None
+    # Part 2b: keep the per-layer K/V BOs RESIDENT across tokens and push only
+    # the new row's bytes each step instead of re-uploading the full ~256 KB
+    # k_all/v_all every dispatch.  args 16/17 are declared static (the generic
+    # write/sync path skips them after the first call); the incremental tile
+    # rows we just wrote into the host k_all/v_all are pushed into the resident
+    # device BO via cache.update_static_bo (a ranged BO_TO_DEVICE sync covering
+    # only the touched chunk).  On the seeding call (first time a layer is seen)
+    # the full buffer is uploaded once.
+    # Part 2b (resident KV, incremental BO push) is OFF by default: after 2a
+    # removed the O(seq) host re-tile, the per-token K/V upload is small next to
+    # the ~80 ms NPU compute, and the extra ranged-sync round-trip is a slight
+    # net regression (~84 vs ~81 ms/tok measured).  Kept behind the env flag for
+    # future investigation (e.g. if NPU compute drops and upload re-dominates).
+    import os as _os
+    _resident_kv = _os.environ.get("PYTHOC_C2_ATTN_RESIDENT_KV", "0") != "0"
+    _resident_kv = _resident_kv and bo_key is not None
+    static_in = {0, 7, 9, 12}
+    if _resident_kv:
+        static_in = static_in | {16, 17}
+        # On every call AFTER the first (which uploads the full buffer via the
+        # generic static-first-call write), push ONLY the chunk touched by the
+        # new token's row into the resident arg16/arg17 BOs -- BEFORE dispatch.
+        if st.get("_first_kv_done"):
+            c_touched = current_pos // _RES_TILE_ROWS
+            ranges = _c2_attn_chunk_ranges(c_touched)
+            cache.update_static_bo(bo_key, 16, k_all, ranges)
+            cache.update_static_bo(bo_key, 17, v_all, ranges)
     results = cache.load_and_run(
         kname, OGF_BACKEND,
         wo, attn_scratch, proj_buf, x_residual, res1_buf, w_norm2, normed2_buf,
         w_gate, gate_buf, w_up, up_buf, swiglu_buf, w_down, down_buf, output_buf,
         q_all, k_all, v_all,
         output_indices=[14],
-        static_input_indices={0, 7, 9, 12},
+        static_input_indices=static_in,
         intermediate_indices={1, 2, 4, 6, 8, 10, 11, 13, 14},
         bo_key=bo_key,
     )
+    if _resident_kv:
+        st["_first_kv_done"] = True
     return results[14].astype(bfloat16)
 
 

@@ -568,6 +568,51 @@ class KernelCache:
         )
         return results
 
+    def update_static_bo(self, bo_key, arg_index, host_array, ranges):
+        """Partial, in-place update of a RESIDENT input BO.
+
+        Copies only the element ``ranges`` (list of (start, stop) in element
+        units) of ``host_array`` into the already-allocated BO ``bo_key``/
+        ``arg_index`` and issues a ranged BO_TO_DEVICE sync per range, instead
+        of re-writing/uploading the whole buffer.  Used by the c2_attn
+        incremental KV path: the BO is declared static (generic write skipped)
+        and only the new token's tile rows are pushed each step.
+
+        No-op if the BO set was never allocated (first call hasn't run yet).
+        """
+        import filelock
+        import pyxrt as xrt
+
+        bos = self._cached_bos.get(bo_key)
+        if bos is None:
+            return
+        bo = bos[arg_index]
+        a = host_array
+        if a.dtype == bfloat16:
+            a = a.view(np.int16)
+        itemsize = a.itemsize
+        with filelock.FileLock("/tmp/npu.lock"):
+            mv = bo.map()
+            dst = np.frombuffer(mv, dtype=np.uint8)
+            src = np.frombuffer(a, dtype=np.uint8)
+            # Copy only the touched element ranges (cheap host memcpy), then
+            # issue ONE contiguous ranged DMA spanning [min..max] of the touched
+            # bytes.  A single sync call beats N per-range syncs (the XRT
+            # per-call overhead dominates the DMA of a few KB).
+            blo_min = None
+            bhi_max = None
+            for (lo, hi) in ranges:
+                blo = lo * itemsize
+                bhi = hi * itemsize
+                np.copyto(dst[blo:bhi], src[blo:bhi], casting="no")
+                blo_min = blo if blo_min is None else min(blo_min, blo)
+                bhi_max = bhi if bhi_max is None else max(bhi_max, bhi)
+            if blo_min is not None:
+                bo.sync(
+                    xrt.xclBOSyncDirection.XCL_BO_SYNC_BO_TO_DEVICE,
+                    bhi_max - blo_min, blo_min,
+                )
+
 
 # ---------------------------------------------------------------------------
 # Compatibility helper: callers in this project pass `prepare_air_project()`
