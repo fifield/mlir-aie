@@ -387,6 +387,33 @@ def test_hf_answer_gate_o_gemv_ffn_c2_merged():
         "real weights."
     ).format(model=HF_MODEL),
 )
+def test_hf_answer_gate_o_gemv_ffn_c2_attn():
+    """Gate for c2_attn (`o_gemv_ffn=c2_attn`): the full call-2 collapse PLUS
+    GQA decode attention folded in as WAVE 0 on the row-3 (add) herd -- O,
+    add1, gate, up, swiglu, down, add2 AND attention all in ONE device / ONE
+    aiex.configure / 1 LoadPDI. The ABI drops the CPU-attention attn_out input
+    (arg1 becomes an on-NPU-written DDR scratch) and appends q/k/v
+    (args 15/16/17); a distinct per-position ELF is built so the trailing-chunk
+    softmax mask (last_valid == current_pos+1) stays exact. Tokens must still
+    contain "Paris".
+
+    Skipped under AWQ: device packing + on-NPU attention are BF16-only.
+    """
+    if HF_GATE_QUANT == "awq":
+        pytest.skip("device packing is BF16-only; no AWQ c2_attn variant")
+    head, text = _run_gate_and_detokenize(extra_env={
+        "PYTHOC_LLAMA_O_GEMV_FFN_PACK_MODE": "c2_attn",
+    })
+    _assert_paris(head, text, "c2_attn")
+
+
+@pytest.mark.skipif(
+    not _has_tokenizer(),
+    reason=(
+        "HuggingFace cache does not contain {model}; this gate requires "
+        "real weights."
+    ).format(model=HF_MODEL),
+)
 def test_hf_answer_gate_rms_gemv_rope_fold():
     """Gate for the RMS fold into the Q/K/V+RoPE pack (`rms_gemv_rope=rgr1_ddr`).
 
