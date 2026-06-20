@@ -45,19 +45,25 @@ def build_c2_attn_module(seq_len: int = 64, n_groups: int = 8, *,
 
 def build_c2_attn_resident_module(n_groups: int = 8, *,
                                   verbose: bool = False) -> str:
-    """Build the RESIDENT c2_attn module: ONE fixed-structure PDI (MAX_CHUNKS=4,
-    seq_len<=256) reused for every decode position.  The trailing-chunk mask is
-    a RUNTIME value (valid length L, DMA'd from the host per token) derived
-    on-device, so a single ELF/PDI serves all positions -> sidesteps the
-    two-full-fabric-PDI wedge that blocked the prior per-position c2_attn.
+    """Build the RESIDENT c2_attn module: ONE fixed-structure PDI reused for
+    every decode position.  The trailing-chunk mask is a RUNTIME value (valid
+    length L, DMA'd from the host per token) derived on-device, so a single
+    ELF/PDI serves all positions -> sidesteps the two-full-fabric-PDI wedge that
+    blocked the prior per-position c2_attn.
+
+    The KV chunk ceiling is 4 (seq<=256) by default.  Setting
+    ``PYTHOC_C2_ATTN_MEMKV=1`` lifts it to ``PYTHOC_C2_ATTN_MAX_CHUNKS`` (e.g.
+    8 -> seq<=512) by feeding the full per-group KV in ONE shim BD/group and
+    letting the add-tile fill ring backpressure it (constant shim BD usage, so
+    context length no longer hits the ~16-BD shim cap).
 
     Behind the same ``attn_wave0`` flag (default c2_merged untouched).  Enabled
-    via ``PYTHOC_C2_ATTN_RESIDENT=1``; seq_len is fixed at 256 (4 chunks).
+    via ``PYTHOC_C2_ATTN_RESIDENT=1``.
     """
     if n_groups != 8:
         raise NotImplementedError(f"c2_attn fixed to 8 GQA groups; got {n_groups}")
     if verbose:
-        print("  [c2_attn] building RESIDENT device (MAX_CHUNKS=4, runtime L)")
+        print("  [c2_attn] building RESIDENT device (runtime L)")
     os.environ["PYTHOC_C2_ATTN_SEQ_LEN"] = "256"
     os.environ["PYTHOC_C2_ATTN_RESIDENT"] = "1"
     try:
