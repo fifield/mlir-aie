@@ -282,8 +282,12 @@ def c2_attn_npu(cache, q, k_cache, v_cache, current_pos, lw, *,
 # RESIDENT (stepR): ONE fixed-structure PDI (MAX_CHUNKS=4) reused for every
 # position; the trailing-chunk mask is a runtime value L = current_pos+1.
 # ---------------------------------------------------------------------------
-RES_MAX_CHUNKS = 4
-RES_PADDED = RES_MAX_CHUNKS * TILE_ROWS  # 256
+import os as _os_r
+# MEMKV (PYTHOC_C2_ATTN_MEMKV=1) lifts the 4-chunk shim-direct cap; the host
+# pads to PYTHOC_C2_ATTN_MAX_CHUNKS*64.  Must mirror builders/o_gemv_ffn.py.
+RES_MAX_CHUNKS = (int(_os_r.environ.get("PYTHOC_C2_ATTN_MAX_CHUNKS", "8"))
+                  if _os_r.environ.get("PYTHOC_C2_ATTN_MEMKV", "0") == "1" else 4)
+RES_PADDED = RES_MAX_CHUNKS * TILE_ROWS  # 256 (or MAX_CHUNKS*64 under MEMKV)
 
 
 def _tile_8x8(mat):

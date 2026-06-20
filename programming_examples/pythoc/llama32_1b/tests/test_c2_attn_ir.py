@@ -100,5 +100,41 @@ def test_c2_merged_unchanged_under_resident_flag():
     assert "a_q_" not in ir and "fused_softmax" not in ir
 
 
+def test_c2_attn_memkv_lifts_cap_one_configure():
+    """MEMKV lifts the 256-token cap host-side: the resident device builds with
+    A_N_CHUNKS=PYTHOC_C2_ATTN_MAX_CHUNKS, the arg16/17 (k_all/v_all) sizes scale
+    with MAX_CHUNKS, and it stays ONE configure/run (1 LoadPDI).  The KV is fed
+    by ONE big shim BD per group (host-side), so the on-fabric routing is the
+    proven shim->add path -- NO extra packet ids, NO memtile staging buffers
+    (those wedged on HW)."""
+    from builders.c2_attn import build_c2_attn_resident_module
+    os.environ["PYTHOC_C2_ATTN_MEMKV"] = "1"
+    os.environ["PYTHOC_C2_ATTN_MAX_CHUNKS"] = "8"
+    try:
+        ir = build_c2_attn_resident_module(8)
+    finally:
+        os.environ.pop("PYTHOC_C2_ATTN_MEMKV", None)
+        os.environ.pop("PYTHOC_C2_ATTN_MAX_CHUNKS", None)
+    assert ir.count("aiex.configure") == 1
+    assert ir.count("aiex.run") == 1
+    # arg16 (k_all) sized n_groups*MAX_CHUNKS*4096 = 8*8*4096 = 262144.
+    assert "262144xbf16" in ir, "k_all/v_all not sized for 8 chunks"
+    # No retired memtile-staging artifacts leak into the shipped path.
+    assert '"mem_kvk' not in ir and '"mem_kvv' not in ir
+    # Routing unchanged: no pkt 17/18 (the retired memtile-leg ids).
+    assert "ID = 17" not in ir and "ID = 18" not in ir
+
+
+def test_c2_attn_default_resident_cap_4():
+    """The default resident path (MEMKV off) stays the validated 4-chunk feed:
+    arg16/17 sized for 4 chunks (131072), one configure."""
+    from builders.c2_attn import build_c2_attn_resident_module
+    os.environ.pop("PYTHOC_C2_ATTN_MEMKV", None)
+    ir = build_c2_attn_resident_module(8)
+    assert "131072xbf16" in ir, "default resident must size k_all/v_all for 4 chunks"
+    assert '"mem_kvk' not in ir
+    assert ir.count("aiex.configure") == 1
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
