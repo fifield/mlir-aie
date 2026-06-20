@@ -21,8 +21,17 @@ ett = importlib.util.module_from_spec(spec1); spec1.loader.exec_module(ett)
 extract_patch = ett.extract_patch
 bf16_to_uint16 = ett.bf16_to_uint16
 uint16_to_bf16 = ett.uint16_to_bf16
+extract_all_patches_u16 = ett.extract_all_patches_u16
+pack_input_batch_u16 = ett.pack_input_batch_u16
+reassemble_output_hwc = ett.reassemble_output_hwc
+pack_gemm_input_batch_u16 = ett.pack_gemm_input_batch_u16
+reassemble_gemm_output = ett.reassemble_gemm_output
 
 N_CORES = 32
+
+# Vectorized (numpy) host packing/unpacking. Default ON. Set MDV6_VEC_PACK=0
+# to fall back to the legacy per-tile torch/python loops (kept for safety).
+_VEC_PACK = os.environ.get("MDV6_VEC_PACK", "1").strip() not in ("0", "off", "false")
 # MDV6_BUILD_DIR (set by lit) routes merged ELFs out of the source tree
 # so test runs never see "already built, skipping" from stale artifacts.
 _MDV6_BUILD_ROOT = os.environ.get("MDV6_BUILD_DIR")
@@ -210,8 +219,34 @@ else:
 _MERGED_KERNELS = OrderedDict()  # elf_name -> (device, elf, hw_context, kernel) or None
 _MERGED_BO_POOL = {}             # (elf_name, role, size) -> xrt.ext.bo
 _USE_PACKED_GEMM = os.environ.get("MDV6_USE_PACKED_GEMM", "0") not in ("", "0", "false", "False")
-_DEFAULT_MAX_LIVE_CONTEXTS = "30" if _USE_PACKED_GEMM else "1000000"
-_MERGED_MAX_LIVE_CONTEXTS = int(os.environ.get("MDV6_MAX_LIVE_MERGED_CONTEXTS", _DEFAULT_MAX_LIVE_CONTEXTS))
+# This NPU/firmware allows ~29 simultaneous xrt.elf hw_contexts; the full
+# non-packed mdv6 frame already loads exactly that many merged ELFs. Trimming
+# below the frame's working set causes per-frame CREATE_HWCTX reload thrash
+# (measured ~5x slower), so we keep the cache effectively unbounded and instead
+# keep the packed working set inside the budget via _PACKED_SKIP_SHAPES below.
+_MERGED_MAX_LIVE_CONTEXTS = int(os.environ.get("MDV6_MAX_LIVE_MERGED_CONTEXTS", "1000000"))
+
+# Packed-GEMM context budget. Each packed multi-batch shape that has a
+# *dedicated* non-packed _x1 ELF is context-neutral: enabling it stops loading
+# the per-batch ELF and loads the packed one instead. But a packed shape whose
+# non-packed _x1 ELF is still needed by another (n_batches==1) layer is purely
+# additive — it pushes the frame's hw_context count past the hardware ceiling
+# and wedges with DRM_IOCTL_AMDXDNA_CREATE_HWCTX (err=-2). t188_ic64_oc64_p2 is
+# such a shape: elan_c1 (n_batches=3) would pack it, but re15_rnm (n_batches=1)
+# still dispatches the same non-packed _x1 ELF. Skip it so the env-gated packed
+# path stays within budget. Override with MDV6_PACKED_SKIP_SHAPES="" to pack all
+# (only safe if the non-packed working set has headroom).
+_PACKED_SKIP_SHAPES = set(
+    s for s in os.environ.get(
+        "MDV6_PACKED_SKIP_SHAPES",
+        "merged_gemm_t188_ic64_oc64_p2_x3_packed",
+    ).split(",") if s
+)
+
+
+def _packed_shape_allowed(packed_elf_name):
+    """True if this packed shape fits the hw_context budget (see above)."""
+    return packed_elf_name not in _PACKED_SKIP_SHAPES
 
 
 def _drop_merged_kernel(elf_name):
@@ -311,6 +346,11 @@ def _sync_prof_report():
     print("  --- top layer/bucket ---")
     for (layer, b), (t, n) in top:
         print(f"  {layer:18s} {b:10s} {t*1e3:7.1f} ms {n:4d}x")
+
+
+if _SYNC_PROF:
+    import atexit as _atexit
+    _atexit.register(_sync_prof_report)
 
 
 def _xrt_run_kernel(kernel, args):
@@ -694,41 +734,48 @@ def _run_tiled_mc_inner_merged(merged_entry, elf_name, n_batches, ppc,
     expected_wts_len = total_conv_wts + 2 * out_ch
 
     # Patch extraction (same as standalone path) — done once, reused across OCBs.
-    all_patches = []
-    all_coords = []
-    for tr in range(tiles_h):
-        for tc in range(tiles_w):
-            patch = extract_patch(input_hwc, tr, tc, tile_h, tile_w,
-                                   stride, kernel_size, padding)
-            patch_u16 = bf16_to_uint16(patch.flatten())
-            if len(patch_u16) < patch_size:
-                patch_u16 = np.pad(patch_u16, (0, patch_size - len(patch_u16)))
-            all_patches.append(patch_u16)
-            all_coords.append((tr, tc))
-
+    n_tiles = tiles_h * tiles_w
     patches_per_call = N_CORES * ppc
-    expected_batches = (len(all_patches) + patches_per_call - 1) // patches_per_call
+    expected_batches = (n_tiles + patches_per_call - 1) // patches_per_call
     if expected_batches != n_batches:
         raise RuntimeError(
             f"merged dispatch for {elf_name}: expected {n_batches} batches, "
-            f"computed {expected_batches} from {len(all_patches)} patches"
+            f"computed {expected_batches} from {n_tiles} patches"
         )
 
-    # Pack input: group patches by core × ppc slot, padding incomplete trailing
-    # calls with slot-0 data (same convention as _run_tiled_mc_inner).
-    inputs_per_batch = []
-    for batch_idx in range(n_batches):
-        batch_start = batch_idx * patches_per_call
-        batch_end = min(batch_start + patches_per_call, len(all_patches))
-        batch_patches = list(all_patches[batch_start:batch_end])
-        while len(batch_patches) < patches_per_call:
-            batch_patches.append(batch_patches[0])
-        per_core_batches = []
-        for core in range(N_CORES):
-            core_start = core * ppc
-            core_end = core_start + ppc
-            per_core_batches.append(np.concatenate(batch_patches[core_start:core_end]))
-        inputs_per_batch.append(np.concatenate(per_core_batches))
+    if _VEC_PACK:
+        all_patches_2d = extract_all_patches_u16(
+            input_hwc, tiles_h, tiles_w, tile_h, tile_w,
+            stride, kernel_size, padding)
+        inputs_per_batch = [
+            pack_input_batch_u16(all_patches_2d, b * patches_per_call,
+                                 patches_per_call)
+            for b in range(n_batches)
+        ]
+    else:
+        all_patches = []
+        for tr in range(tiles_h):
+            for tc in range(tiles_w):
+                patch = extract_patch(input_hwc, tr, tc, tile_h, tile_w,
+                                       stride, kernel_size, padding)
+                patch_u16 = bf16_to_uint16(patch.flatten())
+                if len(patch_u16) < patch_size:
+                    patch_u16 = np.pad(patch_u16, (0, patch_size - len(patch_u16)))
+                all_patches.append(patch_u16)
+        inputs_per_batch = []
+        for batch_idx in range(n_batches):
+            batch_start = batch_idx * patches_per_call
+            batch_end = min(batch_start + patches_per_call, len(all_patches))
+            batch_patches = list(all_patches[batch_start:batch_end])
+            while len(batch_patches) < patches_per_call:
+                batch_patches.append(batch_patches[0])
+            per_core_batches = []
+            for core in range(N_CORES):
+                core_start = core * ppc
+                core_end = core_start + ppc
+                per_core_batches.append(np.concatenate(batch_patches[core_start:core_end]))
+            inputs_per_batch.append(np.concatenate(per_core_batches))
+    all_coords = [(tr, tc) for tr in range(tiles_h) for tc in range(tiles_w)]
 
     output_per_batch = N_CORES * ppc * output_tile_size
 
@@ -745,6 +792,16 @@ def _run_tiled_mc_inner_merged(merged_entry, elf_name, n_batches, ppc,
     # Inputs are the same across every OCB; fill them once.
     for i in range(n_batches):
         _xrt_fill_bo(in_bos[i], inputs_per_batch[i])
+
+    # Real tiles per batch (last batch may be partial); used to build the
+    # contiguous per-OCB buffer for vectorized reassembly.
+    batch_real = [
+        min((b + 1) * patches_per_call, n_tiles) - b * patches_per_call
+        for b in range(n_batches)
+    ]
+    if _VEC_PACK:
+        big_out_vec = np.empty(
+            (n_oc_blocks, n_tiles * output_tile_size), dtype=np.uint16)
 
     for ocb in range(n_oc_blocks):
         oc_start = ocb * oc_block
@@ -779,25 +836,41 @@ def _run_tiled_mc_inner_merged(merged_entry, elf_name, n_batches, ppc,
             args.append(out_bos[i])
         _xrt_run_kernel(kernel, args)
 
-        for batch_idx in range(n_batches):
-            out_data = _xrt_read_bo(out_bos[batch_idx], output_per_batch)
-            # one bf16 conversion per batch instead of one per tile
-            out_f = uint16_to_bf16(out_data)
-            batch_start = batch_idx * patches_per_call
-            batch_end = min(batch_start + patches_per_call, len(all_patches))
-            for j in range(batch_end - batch_start):
-                tr, tc = all_coords[batch_start + j]
-                oh_s = tr * tile_h; ow_s = tc * tile_w
-                oh_e = min(oh_s + tile_h, out_h)
-                ow_e = min(ow_s + tile_w, out_w)
-                core = j // ppc
-                slot = j % ppc
-                start = (core * ppc + slot) * output_tile_size
-                tile_out = out_f[start:start + output_tile_size]
-                tile_out = tile_out.reshape(tile_h, tile_w, oc_block)
-                output[oh_s:oh_e, ow_s:ow_e, oc_start:oc_end] = \
-                    tile_out[:oh_e - oh_s, :ow_e - ow_s, :actual_oc]
+        if _VEC_PACK:
+            ofs = 0
+            for batch_idx in range(n_batches):
+                out_data = _xrt_read_bo(out_bos[batch_idx], output_per_batch)
+                real = batch_real[batch_idx]
+                n_real = real * output_tile_size
+                # core*ppc+slot == j, so the first n_real elems are tiles in
+                # j-order (no per-tile reordering needed).
+                big_out_vec[ocb, ofs:ofs + n_real] = out_data[:n_real]
+                ofs += n_real
+        else:
+            for batch_idx in range(n_batches):
+                out_data = _xrt_read_bo(out_bos[batch_idx], output_per_batch)
+                # one bf16 conversion per batch instead of one per tile
+                out_f = uint16_to_bf16(out_data)
+                batch_start = batch_idx * patches_per_call
+                batch_end = min(batch_start + patches_per_call, n_tiles)
+                for j in range(batch_end - batch_start):
+                    tr, tc = all_coords[batch_start + j]
+                    oh_s = tr * tile_h; ow_s = tc * tile_w
+                    oh_e = min(oh_s + tile_h, out_h)
+                    ow_e = min(ow_s + tile_w, out_w)
+                    core = j // ppc
+                    slot = j % ppc
+                    start = (core * ppc + slot) * output_tile_size
+                    tile_out = out_f[start:start + output_tile_size]
+                    tile_out = tile_out.reshape(tile_h, tile_w, oc_block)
+                    output[oh_s:oh_e, ow_s:ow_e, oc_start:oc_end] = \
+                        tile_out[:oh_e - oh_s, :ow_e - ow_s, :actual_oc]
 
+    if _VEC_PACK:
+        return reassemble_output_hwc(
+            big_out_vec.reshape(-1), n_oc_blocks, tiles_h, tiles_w, tile_h,
+            tile_w, oc_block, ppc, out_h, out_w, out_ch, output_tile_size,
+            n_tiles * output_tile_size)
     return output
 
 
@@ -900,35 +973,39 @@ def _run_tiled_mc_inner_ocb_merged(merged_entry, elf_name, n_ocb, ppc,
     expected_wts_len = total_conv_wts + 2 * out_ch
 
     # Patch extraction — single spatial batch per OCB.
-    all_patches = []
-    all_coords = []
-    for tr in range(tiles_h):
-        for tc in range(tiles_w):
-            patch = extract_patch(input_hwc, tr, tc, tile_h, tile_w,
-                                   stride, kernel_size, padding)
-            patch_u16 = bf16_to_uint16(patch.flatten())
-            if len(patch_u16) < patch_size:
-                patch_u16 = np.pad(patch_u16, (0, patch_size - len(patch_u16)))
-            all_patches.append(patch_u16)
-            all_coords.append((tr, tc))
-
+    n_tiles = tiles_h * tiles_w
     patches_per_call = N_CORES * ppc
-    if len(all_patches) > patches_per_call:
+    if n_tiles > patches_per_call:
         raise RuntimeError(
-            f"OCB-unroll {elf_name}: layer needs {len(all_patches)} patches > "
+            f"OCB-unroll {elf_name}: layer needs {n_tiles} patches > "
             f"{patches_per_call} (cores*effective_ppc={ppc}); ELF built with "
             f"insufficient effective_ppc to absorb all spatial batches")
 
-    # Pack single input batch, padding incomplete trailing slots with slot-0.
-    batch_patches = list(all_patches)
-    while len(batch_patches) < patches_per_call:
-        batch_patches.append(batch_patches[0])
-    per_core_batches = []
-    for core in range(N_CORES):
-        core_start = core * ppc
-        core_end = core_start + ppc
-        per_core_batches.append(np.concatenate(batch_patches[core_start:core_end]))
-    input_concat = np.concatenate(per_core_batches)
+    if _VEC_PACK:
+        all_patches = extract_all_patches_u16(
+            input_hwc, tiles_h, tiles_w, tile_h, tile_w,
+            stride, kernel_size, padding)
+        input_concat = pack_input_batch_u16(all_patches, 0, patches_per_call)
+    else:
+        all_patches = []
+        for tr in range(tiles_h):
+            for tc in range(tiles_w):
+                patch = extract_patch(input_hwc, tr, tc, tile_h, tile_w,
+                                       stride, kernel_size, padding)
+                patch_u16 = bf16_to_uint16(patch.flatten())
+                if len(patch_u16) < patch_size:
+                    patch_u16 = np.pad(patch_u16, (0, patch_size - len(patch_u16)))
+                all_patches.append(patch_u16)
+        batch_patches = list(all_patches)
+        while len(batch_patches) < patches_per_call:
+            batch_patches.append(batch_patches[0])
+        per_core_batches = []
+        for core in range(N_CORES):
+            core_start = core * ppc
+            core_end = core_start + ppc
+            per_core_batches.append(np.concatenate(batch_patches[core_start:core_end]))
+        input_concat = np.concatenate(per_core_batches)
+    all_coords = [(tr, tc) for tr in range(tiles_h) for tc in range(tiles_w)]
 
     output_per_batch = N_CORES * ppc * output_tile_size
 
@@ -974,6 +1051,11 @@ def _run_tiled_mc_inner_ocb_merged(merged_entry, elf_name, n_ocb, ppc,
     _xrt_run_kernel(kernel, [big_wt_bo, in_bo, big_out_bo])
 
     big_out_data = _xrt_read_bo(big_out_bo, big_out_nelem)
+
+    if _VEC_PACK:
+        return reassemble_output_hwc(
+            big_out_data, n_ocb, tiles_h, tiles_w, tile_h, tile_w, oc_block,
+            ppc, out_h, out_w, out_ch, output_tile_size, output_per_batch)
 
     # Unpack tile-by-tile per OCB.
     for ocb in range(n_ocb):
@@ -1346,7 +1428,8 @@ def _run_gemm_conv1x1_mc_impl(gemm_name, sc_name, input_hwc, weights_uint16,
         n_batches = int(math.ceil(M / (N_CORES * tile_m_kb * ppc)))
         if n_batches > 1:
             packed_elf_name = _merged_gemm_packed_elf_name(tile_m_kb, IC, out_ch, k_block, ppc, n_batches)
-            packed_merged = _get_merged_kernel(packed_elf_name)
+            packed_merged = (_get_merged_kernel(packed_elf_name)
+                             if _packed_shape_allowed(packed_elf_name) else None)
             if packed_merged is not None:
                 return _run_gemm_kblocked_packed_merged(
                     packed_merged, packed_elf_name, input_hwc, weights_uint16,
@@ -1385,7 +1468,8 @@ def _run_gemm_conv1x1_mc_impl(gemm_name, sc_name, input_hwc, weights_uint16,
         n_batches = int(math.ceil(M / (N_CORES * tile_m * ppc)))
         if n_batches > 1:
             packed_elf_name = _merged_gemm_packed_elf_name(tile_m, IC, out_ch, 0, ppc, n_batches)
-            packed_merged = _get_merged_kernel(packed_elf_name)
+            packed_merged = (_get_merged_kernel(packed_elf_name)
+                             if _packed_shape_allowed(packed_elf_name) else None)
             if packed_merged is not None:
                 return _run_gemm_oc_blocked_packed_merged(
                     packed_merged, packed_elf_name, input_hwc, weights_uint16,
@@ -1509,38 +1593,51 @@ def _run_gemm_kblocked_merged(merged_entry, elf_name, input_hwc, weights_uint16,
     input_flat = input_hwc.reshape(M, IC)
     output = torch.zeros(out_h, out_w, out_ch, dtype=torch.bfloat16)
     output_flat = output.reshape(M, out_ch)
+    if _VEC_PACK:
+        input_flat_u16 = bf16_to_uint16(input_flat.contiguous())
 
     for batch_start in range(0, M, pixels_per_call):
         batch_end = min(batch_start + pixels_per_call, M)
         batch_pixels = batch_end - batch_start
 
-        host_in = np.zeros(total_slots * input_size, dtype=np.uint16)
-        n_active_slots = (batch_pixels + tile_m - 1) // tile_m
-        for s in range(n_active_slots):
-            pix_start = batch_start + s * tile_m
-            pix_end = min(pix_start + tile_m, batch_end)
-            active_u16 = bf16_to_uint16(input_flat[pix_start:pix_end].flatten())
-            dst = s * input_size
-            host_in[dst:dst + len(active_u16)] = active_u16
-        # Pad trailing slots with slot 0 (multicore_padding feedback).
-        slot0 = host_in[:input_size]
-        for s in range(n_active_slots, total_slots):
-            host_in[s * input_size:(s + 1) * input_size] = slot0
+        if _VEC_PACK:
+            host_in = pack_gemm_input_batch_u16(
+                input_flat_u16, batch_start, batch_pixels,
+                total_slots, tile_m, input_size)
+        else:
+            host_in = np.zeros(total_slots * input_size, dtype=np.uint16)
+            n_active_slots = (batch_pixels + tile_m - 1) // tile_m
+            for s in range(n_active_slots):
+                pix_start = batch_start + s * tile_m
+                pix_end = min(pix_start + tile_m, batch_end)
+                active_u16 = bf16_to_uint16(input_flat[pix_start:pix_end].flatten())
+                dst = s * input_size
+                host_in[dst:dst + len(active_u16)] = active_u16
+            # Pad trailing slots with slot 0 (multicore_padding feedback).
+            slot0 = host_in[:input_size]
+            for s in range(n_active_slots, total_slots):
+                host_in[s * input_size:(s + 1) * input_size] = slot0
 
         _xrt_fill_bo(in_bo, host_in)
         _xrt_run_kernel(kernel, [wt_bo, in_bo, out_bo])
         out_data = _xrt_read_bo(out_bo, total_slots * output_size)
 
-        for s in range(min(n_active_slots, total_slots)):
-            pix_start = batch_start + s * tile_m
-            pix_end = min(pix_start + tile_m, batch_end)
-            if pix_start >= batch_end:
-                break
-            n_pix = pix_end - pix_start
-            start = s * output_size
-            tile_out = uint16_to_bf16(out_data[start:start + n_pix * out_ch])
-            tile_out = tile_out.reshape(n_pix, out_ch)
-            output_flat[pix_start:pix_end, :] = tile_out.to(torch.bfloat16)
+        if _VEC_PACK:
+            reassemble_gemm_output(
+                out_data, batch_start, batch_pixels, total_slots, tile_m,
+                out_ch, output_size, output_flat)
+        else:
+            n_active_slots = (batch_pixels + tile_m - 1) // tile_m
+            for s in range(min(n_active_slots, total_slots)):
+                pix_start = batch_start + s * tile_m
+                pix_end = min(pix_start + tile_m, batch_end)
+                if pix_start >= batch_end:
+                    break
+                n_pix = pix_end - pix_start
+                start = s * output_size
+                tile_out = uint16_to_bf16(out_data[start:start + n_pix * out_ch])
+                tile_out = tile_out.reshape(n_pix, out_ch)
+                output_flat[pix_start:pix_end, :] = tile_out.to(torch.bfloat16)
 
     return output
 
@@ -1575,37 +1672,50 @@ def _run_gemm_oc_blocked_merged(merged_entry, elf_name, input_hwc, weights_uint1
     input_flat = input_hwc.reshape(M, IC)
     output = torch.zeros(out_h, out_w, out_ch, dtype=torch.bfloat16)
     output_flat = output.reshape(M, out_ch)
+    if _VEC_PACK:
+        input_flat_u16 = bf16_to_uint16(input_flat.contiguous())
 
     for batch_start in range(0, M, pixels_per_call):
         batch_end = min(batch_start + pixels_per_call, M)
         batch_pixels = batch_end - batch_start
 
-        host_in = np.zeros(total_slots * input_size, dtype=np.uint16)
-        n_active_slots = (batch_pixels + tile_m - 1) // tile_m
-        for s in range(n_active_slots):
-            pix_start = batch_start + s * tile_m
-            pix_end = min(pix_start + tile_m, batch_end)
-            active_u16 = bf16_to_uint16(input_flat[pix_start:pix_end].flatten())
-            dst = s * input_size
-            host_in[dst:dst + len(active_u16)] = active_u16
-        slot0 = host_in[:input_size]
-        for s in range(n_active_slots, total_slots):
-            host_in[s * input_size:(s + 1) * input_size] = slot0
+        if _VEC_PACK:
+            host_in = pack_gemm_input_batch_u16(
+                input_flat_u16, batch_start, batch_pixels,
+                total_slots, tile_m, input_size)
+        else:
+            host_in = np.zeros(total_slots * input_size, dtype=np.uint16)
+            n_active_slots = (batch_pixels + tile_m - 1) // tile_m
+            for s in range(n_active_slots):
+                pix_start = batch_start + s * tile_m
+                pix_end = min(pix_start + tile_m, batch_end)
+                active_u16 = bf16_to_uint16(input_flat[pix_start:pix_end].flatten())
+                dst = s * input_size
+                host_in[dst:dst + len(active_u16)] = active_u16
+            slot0 = host_in[:input_size]
+            for s in range(n_active_slots, total_slots):
+                host_in[s * input_size:(s + 1) * input_size] = slot0
 
         _xrt_fill_bo(in_bo, host_in)
         _xrt_run_kernel(kernel, [wt_bo, in_bo, out_bo])
         out_data = _xrt_read_bo(out_bo, total_slots * output_size)
 
-        for s in range(min(n_active_slots, total_slots)):
-            pix_start = batch_start + s * tile_m
-            pix_end = min(pix_start + tile_m, batch_end)
-            if pix_start >= batch_end:
-                break
-            n_pix = pix_end - pix_start
-            start = s * output_size
-            tile_out = uint16_to_bf16(out_data[start:start + n_pix * out_ch])
-            tile_out = tile_out.reshape(n_pix, out_ch)
-            output_flat[pix_start:pix_end, :] = tile_out.to(torch.bfloat16)
+        if _VEC_PACK:
+            reassemble_gemm_output(
+                out_data, batch_start, batch_pixels, total_slots, tile_m,
+                out_ch, output_size, output_flat)
+        else:
+            n_active_slots = (batch_pixels + tile_m - 1) // tile_m
+            for s in range(min(n_active_slots, total_slots)):
+                pix_start = batch_start + s * tile_m
+                pix_end = min(pix_start + tile_m, batch_end)
+                if pix_start >= batch_end:
+                    break
+                n_pix = pix_end - pix_start
+                start = s * output_size
+                tile_out = uint16_to_bf16(out_data[start:start + n_pix * out_ch])
+                tile_out = tile_out.reshape(n_pix, out_ch)
+                output_flat[pix_start:pix_end, :] = tile_out.to(torch.bfloat16)
 
     return output
 
@@ -1651,39 +1761,55 @@ def _run_gemm_oc_blocked_pair_merged(merged_entry, elf_name, input_hwc,
     out_b = torch.zeros(out_h, out_w, out_ch, dtype=torch.bfloat16)
     out_a_flat = out_a.reshape(M, out_ch)
     out_b_flat = out_b.reshape(M, out_ch)
+    if _VEC_PACK:
+        input_flat_u16 = bf16_to_uint16(input_flat.contiguous())
 
     for batch_start in range(0, M, pixels_per_call):
         batch_end = min(batch_start + pixels_per_call, M)
         batch_pixels = batch_end - batch_start
 
-        host_in = np.zeros(total_slots * input_size, dtype=np.uint16)
-        n_active_slots = (batch_pixels + tile_m - 1) // tile_m
-        for s in range(n_active_slots):
-            pix_start = batch_start + s * tile_m
-            pix_end = min(pix_start + tile_m, batch_end)
-            active_u16 = bf16_to_uint16(input_flat[pix_start:pix_end].flatten())
-            dst = s * input_size
-            host_in[dst:dst + len(active_u16)] = active_u16
-        slot0 = host_in[:input_size]
-        for s in range(n_active_slots, total_slots):
-            host_in[s * input_size:(s + 1) * input_size] = slot0
+        if _VEC_PACK:
+            host_in = pack_gemm_input_batch_u16(
+                input_flat_u16, batch_start, batch_pixels,
+                total_slots, tile_m, input_size)
+        else:
+            host_in = np.zeros(total_slots * input_size, dtype=np.uint16)
+            n_active_slots = (batch_pixels + tile_m - 1) // tile_m
+            for s in range(n_active_slots):
+                pix_start = batch_start + s * tile_m
+                pix_end = min(pix_start + tile_m, batch_end)
+                active_u16 = bf16_to_uint16(input_flat[pix_start:pix_end].flatten())
+                dst = s * input_size
+                host_in[dst:dst + len(active_u16)] = active_u16
+            slot0 = host_in[:input_size]
+            for s in range(n_active_slots, total_slots):
+                host_in[s * input_size:(s + 1) * input_size] = slot0
 
         _xrt_fill_bo(in_bo, host_in)
         _xrt_run_kernel(kernel, [in_bo, wt_a_bo, out_a_bo, wt_b_bo, out_b_bo])
         out_a_data = _xrt_read_bo(out_a_bo, total_slots * output_size)
         out_b_data = _xrt_read_bo(out_b_bo, total_slots * output_size)
 
-        for s in range(min(n_active_slots, total_slots)):
-            pix_start = batch_start + s * tile_m
-            pix_end = min(pix_start + tile_m, batch_end)
-            if pix_start >= batch_end:
-                break
-            n_pix = pix_end - pix_start
-            start = s * output_size
-            ta = uint16_to_bf16(out_a_data[start:start + n_pix * out_ch])
-            tb = uint16_to_bf16(out_b_data[start:start + n_pix * out_ch])
-            out_a_flat[pix_start:pix_end, :] = ta.reshape(n_pix, out_ch).to(torch.bfloat16)
-            out_b_flat[pix_start:pix_end, :] = tb.reshape(n_pix, out_ch).to(torch.bfloat16)
+        if _VEC_PACK:
+            reassemble_gemm_output(
+                out_a_data, batch_start, batch_pixels, total_slots, tile_m,
+                out_ch, output_size, out_a_flat)
+            reassemble_gemm_output(
+                out_b_data, batch_start, batch_pixels, total_slots, tile_m,
+                out_ch, output_size, out_b_flat)
+        else:
+            n_active_slots = (batch_pixels + tile_m - 1) // tile_m
+            for s in range(min(n_active_slots, total_slots)):
+                pix_start = batch_start + s * tile_m
+                pix_end = min(pix_start + tile_m, batch_end)
+                if pix_start >= batch_end:
+                    break
+                n_pix = pix_end - pix_start
+                start = s * output_size
+                ta = uint16_to_bf16(out_a_data[start:start + n_pix * out_ch])
+                tb = uint16_to_bf16(out_b_data[start:start + n_pix * out_ch])
+                out_a_flat[pix_start:pix_end, :] = ta.reshape(n_pix, out_ch).to(torch.bfloat16)
+                out_b_flat[pix_start:pix_end, :] = tb.reshape(n_pix, out_ch).to(torch.bfloat16)
 
     return out_a, out_b
 
