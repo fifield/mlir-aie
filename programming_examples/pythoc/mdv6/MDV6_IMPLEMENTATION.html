@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MDV6 on NPU2 — implementation deep-dive</title>
+<style>
+  :root {
+    --bg: #11151c; --panel: #181e28; --panel2: #1e2633;
+    --ink: #d8dee9; --dim: #7b8597; --line: #2c3645;
+    --acc: #4fc3f7; --green: #66d18c; --amber: #ffc24d; --red: #ef7070;
+    --violet: #b08ef9; --pink: #f08fb8;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--ink); font: 15px/1.6 -apple-system, "Segoe UI", Roboto, sans-serif;
+         margin: 0; padding: 32px 5vw 90px; max-width: 1400px; margin: 0 auto; }
+  h1 { font-size: 28px; margin: 0 0 6px; }
+  h2 { font-size: 20px; margin: 52px 0 10px; color: var(--acc); border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+  h3 { font-size: 15.5px; margin: 26px 0 8px; color: var(--amber); }
+  h4 { font-size: 14px; margin: 18px 0 4px; color: var(--green); }
+  .sub { color: var(--dim); margin-bottom: 8px; }
+  .lead { color: var(--ink); margin: 14px 0; max-width: 90ch; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 22px; margin: 14px 0; }
+  .panel.tight { padding: 10px 14px; }
+  .cols { display: flex; gap: 18px; flex-wrap: wrap; }
+  .cols > div { flex: 1 1 340px; }
+  svg { display:block; max-width: 100%; height: auto; margin: 4px 0; }
+  text { font-family: "SF Mono", Consolas, monospace; fill: var(--ink); }
+  .t9 { font-size: 9px; } .t10 { font-size: 10px; } .t11 { font-size: 11px; } .t12 { font-size: 12px; }
+  .t13 { font-size: 13px; font-weight: 600; } .t15 { font-size: 15px; font-weight: 600; }
+  .dim { fill: var(--dim); } .accT { fill: var(--acc); } .grnT { fill: var(--green); }
+  .ambT { fill: var(--amber); } .vioT { fill: var(--violet); } .redT { fill: var(--red); } .pnkT { fill: var(--pink); }
+  .box { fill: var(--panel2); stroke: var(--line); stroke-width:1; rx: 6; }
+  .boxA { fill: #15303f; stroke: var(--acc); rx: 6; }
+  .boxG { fill: #15331f; stroke: var(--green); rx: 6; }
+  .boxV { fill: #261b40; stroke: var(--violet); rx: 6; }
+  .boxAm { fill: #3a2d10; stroke: var(--amber); rx: 6; }
+  .boxR { fill: #3a1818; stroke: var(--red); rx: 6; }
+  .boxP { fill: #381d2c; stroke: var(--pink); rx: 6; }
+  .wire { stroke: var(--dim); stroke-width: 1.2; fill: none; marker-end: url(#arr); }
+  .wireA { stroke: var(--acc); stroke-width: 1.6; fill: none; marker-end: url(#arrA); }
+  .wireG { stroke: var(--green); stroke-width: 1.6; fill: none; marker-end: url(#arrG); }
+  .wireAm { stroke: var(--amber); stroke-width: 1.6; fill: none; marker-end: url(#arrAm); }
+  .dash { stroke-dasharray: 4 3; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 6px 0; }
+  th, td { text-align: left; padding: 6px 12px 6px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--dim); font-weight: 600; }
+  td.num, th.num { font-family: "SF Mono", Consolas, monospace; text-align: right; }
+  .green { color: var(--green); } .amber { color: var(--amber); } .red { color: var(--red); }
+  .violet { color: var(--violet); } .accc { color: var(--acc); } .pink { color: var(--pink); } .dimc { color: var(--dim); }
+  code { background: var(--panel2); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; font-size: 12.5px; }
+  pre { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; overflow-x: auto;
+        font-size: 12px; line-height: 1.5; color: var(--ink); }
+  ul, ol { margin: 6px 0; padding-left: 22px; } li { margin: 4px 0; }
+  .legend span { display: inline-block; margin-right: 18px; font-size: 12.5px; }
+  .chip { display:inline-block; width: 11px; height: 11px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  .kpi { display:flex; gap:14px; flex-wrap:wrap; margin: 14px 0; }
+  .kpi > div { background: var(--panel2); border:1px solid var(--line); border-radius:8px; padding:10px 16px; flex:1 1 150px; }
+  .kpi .v { font-size:23px; font-weight:700; font-family:"SF Mono",Consolas,monospace; }
+  .kpi .l { font-size:11.5px; color:var(--dim); }
+  .note { border-left: 3px solid var(--amber); padding: 6px 14px; margin: 12px 0; background:#1d1c12; color:#e8dcb8; font-size:13.5px; border-radius: 0 6px 6px 0; }
+  .toc { columns: 2; font-size: 13.5px; }
+  .toc a { color: var(--acc); text-decoration: none; } .toc a:hover { text-decoration: underline; }
+  a { color: var(--acc); }
+  .cap { font-size: 12px; color: var(--dim); margin: 2px 0 10px; }
+</style>
+</head>
+<body>
+
+<h1>MDV6 on the AMD NPU2 — implementation deep-dive</h1>
+<div class="sub">MegaDetector&nbsp;v6 · MIT-YOLOv9-c detector · 640×640 bf16 · ~9.8&nbsp;GMAC/frame ·
+32 AIE2P cores · mlir-aie / IRON + PythoC kernels</div>
+<div class="sub">Default <code>make profile</code> config (rn3-chain + raster + weight-replay + BFP576 all default-on) —
+generated 2026-06-20</div>
+
+<div class="kpi">
+  <div><div class="v green">2.09 fps</div><div class="l">warm throughput (455–533 ms range)</div></div>
+  <div><div class="v">479 ms</div><div class="l">warm latency / frame</div></div>
+  <div><div class="v">84</div><div class="l">NPU launches / frame</div></div>
+  <div><div class="v amber">33%</div><div class="l">frame spent NPU-active (158 ms)</div></div>
+  <div><div class="v red">63%</div><div class="l">frame spent in dispatch/host overhead</div></div>
+  <div><div class="v">~1200×</div><div class="l">wall ÷ bf16 compute roofline</div></div>
+</div>
+
+<p class="lead">This document describes how a YOLOv9-c–class object detector is compiled and executed on the
+AMD&nbsp;XDNA2 (NPU2 / AIE2P) spatial array. It covers the network topology, the hardware substrate, how
+each layer is decomposed into NPU dispatches, how Conv+BN+SiLU is fused into single on-core kernels, how the
+32 cores are laid out spatially and scheduled in time, how data and weights move between DDR / memtile&nbsp;L2 /
+core&nbsp;L1, and where the frame time actually goes. The recurring theme: <b>this model is
+dispatch/host-bound, not compute-bound</b> — the arithmetic is &lt;0.1% of peak, and almost every
+optimization in the codebase is about <i>collapsing launches</i>, not making math faster.</p>
+
+<div class="panel tight"><div class="toc">
+<a href="#net">1 · The network — YOLOv9-c / GELAN</a><br>
+<a href="#hw">2 · The hardware — NPU2 / AIE2P array</a><br>
+<a href="#map">3 · Mapping the network onto the array</a><br>
+<a href="#fuse">4 · Kernel fusion — Conv+BN+SiLU in one call</a><br>
+<a href="#spatial">5 · Spatial layout — 32 cores, split/join/broadcast</a><br>
+<a href="#dispatch">6 · Dispatch mechanisms — collapsing launches</a><br>
+<a href="#chain">7 · The rn3 halo chain — N bottlenecks, one launch</a><br>
+<a href="#bfp">8 · BFP576 compute + weight replay</a><br>
+<a href="#temporal">9 · Temporal schedule — the frame timeline</a><br>
+<a href="#feeds">10 · Communication, speeds &amp; feeds</a><br>
+<a href="#roofline">11 · Where the time goes — roofline &amp; levers</a><br>
+</div></div>
+
+
+<!-- ============================================================ -->
+<h2 id="net">1 · The network — YOLOv9-c / GELAN</h2>
+
+<p class="lead">MDV6 is Microsoft CameraTraps' <b>MegaDetector v6</b>, an MIT-licensed YOLOv9-c wildlife detector with
+3 classes (animal / person / vehicle). The architecture is GELAN: a backbone of <code>ELAN</code> and
+<code>RepNCSPELAN</code> blocks, an <code>SPPELAN</code> + FPN/PAN neck, and a 3-scale detection head
+(P3 80×80, P4 40×40, P5 20×20). Channel progression is 32→64→128→192→256.</p>
+
+<div class="panel">
+<svg viewBox="0 0 1340 470">
+<defs>
+<marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#7b8597"/></marker>
+<marker id="arrA" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#4fc3f7"/></marker>
+<marker id="arrG" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#66d18c"/></marker>
+<marker id="arrAm" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#ffc24d"/></marker>
+</defs>
+
+<!-- backbone column -->
+<text class="t13 accT" x="20" y="20">BACKBONE (stride-down)</text>
+<rect class="box" x="20" y="34" width="150" height="26"/><text class="t11" x="28" y="51">conv0  3→32  /2  320²</text>
+<rect class="box" x="20" y="66" width="150" height="26"/><text class="t11" x="28" y="83">conv1  32→64  /4  160²</text>
+<rect class="boxA" x="20" y="98" width="150" height="26"/><text class="t11 accT" x="28" y="115">elan2  64→64   160²</text>
+<rect class="box" x="20" y="138" width="150" height="26"/><text class="t11" x="28" y="155">aconv3  64→128 /8 80²</text>
+<rect class="boxA" x="20" y="170" width="150" height="26"/><text class="t11 accT" x="28" y="187">rep_elan4  →128  80² (B3)</text>
+<rect class="box" x="20" y="210" width="150" height="26"/><text class="t11" x="28" y="227">aconv5 128→192 /16 40²</text>
+<rect class="boxA" x="20" y="242" width="150" height="26"/><text class="t11 accT" x="28" y="259">rep_elan6  →192  40² (B4)</text>
+<rect class="box" x="20" y="282" width="150" height="26"/><text class="t11" x="28" y="299">aconv7 192→256 /32 20²</text>
+<rect class="boxA" x="20" y="314" width="150" height="26"/><text class="t11 accT" x="28" y="331">rep_elan8  →256  20² (B5)</text>
+<path class="wire" d="M95 60 V 66"/><path class="wire" d="M95 92 V 98"/><path class="wire" d="M95 124 V 138"/>
+<path class="wire" d="M95 164 V 170"/><path class="wire" d="M95 196 V 210"/><path class="wire" d="M95 236 V 242"/>
+<path class="wire" d="M95 268 V 282"/><path class="wire" d="M95 308 V 314"/>
+
+<!-- neck column -->
+<text class="t13 ambT" x="320" y="20">NECK (SPPELAN + top-down FPN)</text>
+<rect class="boxAm" x="320" y="314" width="150" height="26"/><text class="t11 ambT" x="328" y="331">spp9  256→256 20² (N3)</text>
+<rect class="box" x="320" y="262" width="150" height="26"/><text class="t11" x="328" y="279">↑2 + cat B4 → 448  40²</text>
+<rect class="boxAm" x="320" y="230" width="150" height="26"/><text class="t11 ambT" x="328" y="247">rep_elan12 →192 40² (N4)</text>
+<path class="wireAm" d="M170 327 H 320"/>
+<path class="wireAm" d="M395 314 V 288"/>
+<path class="wireAm" d="M170 255 C 250 255, 250 275, 320 275"/>
+<text class="t9 dim" x="178" y="250">B4</text>
+<path class="wireAm" d="M395 262 V 256"/>
+
+<!-- head column -->
+<text class="t13 vioT" x="620" y="20">HEAD (PAN bottom-up) → P3/P4/P5</text>
+<rect class="box" x="620" y="180" width="160" height="26"/><text class="t11" x="628" y="197">↑2 + cat B3 → 320 80²</text>
+<rect class="boxV" x="620" y="148" width="160" height="26"/><text class="t11 vioT" x="628" y="165">rep_elan15 →128 80² (P3)</text>
+<rect class="box" x="620" y="234" width="160" height="26"/><text class="t11" x="628" y="251">aconv16 128→96 + cat N4 → 288</text>
+<rect class="boxV" x="620" y="266" width="160" height="26"/><text class="t11 vioT" x="628" y="283">rep_elan18 →192 40² (P4)</text>
+<rect class="box" x="620" y="320" width="160" height="26"/><text class="t11" x="628" y="337">aconv19 192→128 + cat N3 → 384</text>
+<rect class="boxV" x="620" y="352" width="160" height="26"/><text class="t11 vioT" x="628" y="369">rep_elan21 →256 20² (P5)</text>
+<path class="wireAm" d="M470 243 C 545 243, 545 193, 620 193"/>
+<path class="wire" d="M700 174 V 180"/>
+<path class="wire" d="M700 206 C 590 206, 590 247, 620 247"/>
+<path class="wire" d="M700 260 V 266"/>
+<path class="wire" d="M700 292 C 590 292, 590 333, 620 333"/>
+<path class="wire" d="M700 346 V 352"/>
+<text class="t9 dim" x="500" y="200">N4↑</text>
+
+<!-- detection -->
+<rect class="boxP" x="900" y="148" width="150" height="26"/><text class="t11 pnkT" x="908" y="165">Detection P3 (CPU)</text>
+<rect class="boxP" x="900" y="266" width="150" height="26"/><text class="t11 pnkT" x="908" y="283">Detection P4 (CPU)</text>
+<rect class="boxP" x="900" y="352" width="150" height="26"/><text class="t11 pnkT" x="908" y="369">Detection P5 (CPU)</text>
+<path class="wire" d="M780 161 H 900"/><path class="wire" d="M780 279 H 900"/><path class="wire" d="M780 365 H 900"/>
+<text class="t11 pnkT" x="1080" y="266">→ (class, anchor, vector)</text>
+<text class="t11 pnkT" x="1080" y="284">× 3 scales · anc2vec / DFL</text>
+
+<text class="t10 dim" x="900" y="40">B3/B4/N3/N4 are reused as</text>
+<text class="t10 dim" x="900" y="56">skip/concat sources by the</text>
+<text class="t10 dim" x="900" y="72">neck &amp; head (GELAN routing).</text>
+</svg>
+<div class="cap">Fig 1. Full MDV6 dataflow. Blue = ELAN/RepNCSPELAN blocks (the bulk of compute), amber = neck, violet = head.
+Skip connections B3/B4/N3/N4 are concatenated downstream (FPN top-down then PAN bottom-up).</div>
+</div>
+
+<h3>1.1 · The building blocks</h3>
+<div class="cols">
+<div class="panel">
+<h4>Conv (the atom)</h4>
+<code>SiLU(BN(Conv2d(x)))</code> — every convolution in the model. Bias-free conv, BatchNorm
+(eps 1e-3), SiLU activation. At inference BN folds into the conv weights, so the NPU kernel
+sees a single packed weight blob and applies BN as a per-output-channel scale+bias before SiLU.
+</div>
+<div class="panel">
+<h4>AConv (downsample)</h4>
+<code>Conv3×3,s2( AvgPool2×2,s1(x) )</code>. The 2×2 average-pool runs on the
+<span class="pink">CPU</span>; the strided 3×3 conv runs on the NPU. Used at every resolution drop
+(aconv3/5/7/16/19).
+</div>
+<div class="panel">
+<h4>RepConv (reparameterized)</h4>
+At train time <code>SiLU(BN(3×3) + BN(1×1))</code>; at inference the 1×1 branch folds into the
+center tap of the 3×3 kernel and both BNs collapse into one. <code>fuse_repconv()</code> does this
+on the host so a single packed 3×3 conv kernel runs it — no separate 1×1 dispatch.
+</div>
+</div>
+<div class="cols">
+<div class="panel">
+<h4>ELAN / RepNCSPELAN</h4>
+<code>conv1</code> (1×1) splits channels into x1/x2; two processing branches
+(<code>conv2</code>,<code>conv3</code> — each a RepNCSP + 3×3 in the Rep variant); then
+<code>conv4</code> (1×1) fuses <code>cat[x1,x2,x3,x4]</code>. This 4-way concat is the GELAN
+"aggregation". <b>9 RepNCSPELAN blocks dominate the model.</b>
+</div>
+<div class="panel">
+<h4>RepNCSP / Bottleneck</h4>
+<code>conv1</code>,<code>conv2</code> (1×1) on the same input; a stack of
+<code>repeat_num=3</code> <b>Bottlenecks</b> (each = RepConv 3×3 → Conv 3×3 → <b>+residual</b>);
+then <code>conv3</code> (1×1) over <code>cat</code>. The bottleneck stack is exactly what the
+<a href="#chain">rn3 halo chain</a> fuses into one launch.
+</div>
+<div class="panel">
+<h4>SPPELAN</h4>
+<code>conv1</code> (1×1) then three cascaded <code>MaxPool 5×5,s1</code> (run on
+<span class="pink">CPU</span>); concat all four, then <code>conv5</code> (1×1). Spatial-pyramid pooling
+at the deepest scale (20×20).
+</div>
+</div>
+
+
+<!-- ============================================================ -->
+<h2 id="hw">2 · The hardware — NPU2 / AIE2P array</h2>
+
+<p class="lead">The target is the AMD XDNA2 NPU (<code>aie.device(npu2)</code>, AIE2P generation). The compute fabric
+is an 8-column × 4-row grid of <b>32 VLIW AI-Engine cores</b>, fronted by a row of <b>memtiles</b> (L2 scratch)
+and a row of <b>shim tiles</b> (the DDR/NoC boundary). Data flows vertically: DDR → shim → memtile L2 → core L1,
+compute, then back down.</p>
+
+<div class="panel">
+<svg viewBox="0 0 1240 360">
+<text class="t13 accT" x="20" y="18">NPU2 array — 8 columns × (4 cores + 1 memtile + 1 shim)</text>
+<!-- columns -->
+<g>
+<!-- draw 8 columns -->
+<!-- macro via explicit since SVG has no loops -->
+<!-- column template: x = 30 + col*150 -->
+<!-- col0 -->
+<g>
+ <rect class="boxG" x="30" y="40" width="120" height="26"/><text class="t10 grnT" x="60" y="57">core (L1 64KB)</text>
+ <rect class="boxG" x="30" y="70" width="120" height="26"/><text class="t10 grnT" x="78" y="87">core</text>
+ <rect class="boxG" x="30" y="100" width="120" height="26"/><text class="t10 grnT" x="78" y="117">core</text>
+ <rect class="boxG" x="30" y="130" width="120" height="26"/><text class="t10 grnT" x="78" y="147">core</text>
+ <rect class="boxA" x="30" y="166" width="120" height="30"/><text class="t10 accT" x="55" y="185">memtile L2 512KB</text>
+ <rect class="boxV" x="30" y="200" width="120" height="26"/><text class="t10 vioT" x="68" y="217">shim DMA</text>
+</g>
+</g>
+<!-- replicate columns 1..7 as compact stacks -->
+<g font-family="monospace">
+<!-- helper: each subsequent col compressed -->
+</g>
+<!-- columns 1-7 -->
+<g>
+<!-- col1 --><rect class="boxG" x="180" y="40" width="120" height="116" rx="6"/><text class="t10 grnT" x="218" y="103">4 cores</text>
+<rect class="boxA" x="180" y="166" width="120" height="30"/><text class="t10 accT" x="205" y="185">memtile L2</text>
+<rect class="boxV" x="180" y="200" width="120" height="26"/><text class="t10 vioT" x="218" y="217">shim</text>
+</g>
+<g>
+<rect class="boxG" x="330" y="40" width="120" height="116" rx="6"/><text class="t10 grnT" x="368" y="103">4 cores</text>
+<rect class="boxA" x="330" y="166" width="120" height="30"/><text class="t10 accT" x="355" y="185">memtile L2</text>
+<rect class="boxV" x="330" y="200" width="120" height="26"/><text class="t10 vioT" x="368" y="217">shim</text>
+</g>
+<g>
+<rect class="boxG" x="480" y="40" width="120" height="116" rx="6"/><text class="t10 grnT" x="518" y="103">4 cores</text>
+<rect class="boxA" x="480" y="166" width="120" height="30"/><text class="t10 accT" x="505" y="185">memtile L2</text>
+<rect class="boxV" x="480" y="200" width="120" height="26"/><text class="t10 vioT" x="518" y="217">shim</text>
+</g>
+<g>
+<rect class="boxG" x="630" y="40" width="120" height="116" rx="6"/><text class="t10 grnT" x="668" y="103">4 cores</text>
+<rect class="boxA" x="630" y="166" width="120" height="30"/><text class="t10 accT" x="655" y="185">memtile L2</text>
+<rect class="boxV" x="630" y="200" width="120" height="26"/><text class="t10 vioT" x="668" y="217">shim</text>
+</g>
+<g>
+<rect class="boxG" x="780" y="40" width="120" height="116" rx="6"/><text class="t10 grnT" x="818" y="103">4 cores</text>
+<rect class="boxA" x="780" y="166" width="120" height="30"/><text class="t10 accT" x="805" y="185">memtile L2</text>
+<rect class="boxV" x="780" y="200" width="120" height="26"/><text class="t10 vioT" x="818" y="217">shim</text>
+</g>
+<g>
+<rect class="boxG" x="930" y="40" width="120" height="116" rx="6"/><text class="t10 grnT" x="968" y="103">4 cores</text>
+<rect class="boxA" x="930" y="166" width="120" height="30"/><text class="t10 accT" x="955" y="185">memtile L2</text>
+<rect class="boxV" x="930" y="200" width="120" height="26"/><text class="t10 vioT" x="968" y="217">shim</text>
+</g>
+<g>
+<rect class="boxG" x="1080" y="40" width="120" height="116" rx="6"/><text class="t10 grnT" x="1118" y="103">4 cores</text>
+<rect class="boxA" x="1080" y="166" width="120" height="30"/><text class="t10 accT" x="1105" y="185">memtile L2</text>
+<rect class="boxV" x="1080" y="200" width="120" height="26"/><text class="t10 vioT" x="1118" y="217">shim</text>
+</g>
+
+<!-- DDR -->
+<rect class="boxR" x="30" y="250" width="1170" height="30"/><text class="t12 redT" x="560" y="270">DDR (host BOs · weights · activations) — shim NoC boundary ≈ 1.7 GB/s/shim measured</text>
+<path class="wireA" d="M90 250 V 230"/><path class="wireA" d="M90 166 V 158"/>
+<path class="wireG" d="M120 158 V 166"/><path class="wireG" d="M120 230 V 250"/>
+<text class="t10 accT" x="160" y="245">↑ patches+weights   ↓ output tiles</text>
+
+<text class="t11 dim" x="30" y="312">col 0</text><text class="t11 dim" x="1140" y="312">col 7</text>
+<text class="t12 grnT" x="30" y="335">32 compute cores</text>
+<text class="t12 accT" x="220" y="335">8 memtiles (L2)</text>
+<text class="t12 vioT" x="420" y="335">8 shim DMAs</text>
+<text class="t12 dim" x="600" y="335">vertical DMA: DDR↔shim↔memtile↔core, no inter-column compute traffic in the conv designs</text>
+</svg>
+<div class="cap">Fig 2. NPU2 substrate. The conv/GEMM designs treat each column independently: a column's shim pulls that
+column's slice of the input from DDR, the memtile splits it to 4 cores, cores compute, the memtile joins
+4 outputs and the shim writes them back.</div>
+</div>
+
+<h3>2.1 · Resource budgets that bound the design</h3>
+<table>
+<tr><th>Resource</th><th class="num">Limit</th><th>Where it bites</th></tr>
+<tr><td>L1 per core</td><td class="num">64 KB</td><td>Caps tile size, patches-per-core, oc_block. GEMM budget = 64KB − 8KB stack − 32B RTP = <b>57,344 B</b>.</td></tr>
+<tr><td>L2 per memtile</td><td class="num">512 KB</td><td>Holds the column's patch fan-out + weight broadcast + output join. Dispatch budget capped at ~400 KB.</td></tr>
+<tr><td>Program memory / core</td><td class="num">~16 KB</td><td>Caps total compile-time-unrolled kernel iterations at ~40 (stride-2) / ~50 (stride-1).</td></tr>
+<tr><td>Memtile BD count</td><td class="num">48 / 12 ch</td><td>Buffer-descriptor pool; managed with 4D-strided BDs (one BD describes n_ocb iterations).</td></tr>
+<tr><td>Shim BD count</td><td class="num">16 / ch</td><td>Same fix; caps how many epilogue drains a chain can emit.</td></tr>
+<tr><td>XRT context slots</td><td class="num">32</td><td>Each standalone xclbin burned one — the reason everything moved to single-ELF dispatch.</td></tr>
+<tr><td>bf16 MAC peak</td><td class="num">5.12 TFLOP/s</td><td>The emulated <code>mmul&lt;4,8,8&gt;</code> path. Hardware <b>BFP576</b> (8×8×8) reaches ~41 TOPS.</td></tr>
+</table>
+
+
+<!-- ============================================================ -->
+<h2 id="map">3 · Mapping the network onto the array</h2>
+
+<p class="lead">The host (<code>test_full_model_mc.py</code>) runs the PyTorch module graph but replaces every Conv+BN+SiLU
+with a call into the NPU dispatch engine (<code>run_tiled_mc.py</code>). The model is executed
+<b>layer-by-layer, sequentially</b> — there is no cross-layer pipelining on the array. Each NPU layer is one or
+a few <code>xrt.run</code> launches; the glue (pooling, upsample, concat, residual add, detection) stays on
+the CPU. Activations round-trip through DDR between layers.</p>
+
+<h3>3.1 · What runs where</h3>
+<div class="cols">
+<div class="panel">
+<h4 class="grnT">On the NPU (32 cores)</h4>
+<ul>
+<li>All <b>3×3 convs</b> → <code>conv3x3_fused_packed_bf16</code></li>
+<li>All <b>1×1 convs</b> → GEMM path (<code>gemm_conv1x1_*</code>)</li>
+<li><b>RepConv</b> bottleneck convs (folded to 3×3)</li>
+<li>The <b>rn3 bottleneck stacks</b> (chain, incl. residual+SiLU)</li>
+</ul>
+</div>
+<div class="panel">
+<h4 class="pnkT">On the CPU (host)</h4>
+<ul>
+<li><b>AvgPool</b> (AConv), <b>MaxPool</b> (SPPELAN), <b>Upsample</b></li>
+<li>All <b>concat / split / chunk</b> (channel slicing, <code>np.concatenate</code>)</li>
+<li>Per-iteration <b>residual add</b> when not using the chain</li>
+<li>The <b>Detection head</b>: anchor/class convs, softmax, anc2vec/DFL</li>
+</ul>
+</div>
+</div>
+<div class="note">np.concatenate alone fires ~1300 times/frame (≈9 ms). It is cheap per-call but a symptom: the HWC
+channel layout means every GELAN aggregation and skip-connection is a host-side memory shuffle between NPU launches.</div>
+
+<h3>3.2 · Per-layer NPU cost (warm-frame, the 158 ms NPU-active budget)</h3>
+<p class="cap">From <code>launch_inventory.md</code> (profile 6, warm average). "calls" = xrt.run launches that layer
+fires per frame; the 1×1 GEMM layers and the heavy 3×3 c3 convs dominate.</p>
+<table>
+<tr><th>layer</th><th class="num">ms</th><th class="num">calls</th><th class="num">µs/call</th><th>what</th></tr>
+<tr><td>mc_re4_c3</td><td class="num">18.21</td><td class="num">4</td><td class="num">4551</td><td>3×3 64→64 @80² — heaviest single conv</td></tr>
+<tr><td>mc_ftconv1</td><td class="num">17.69</td><td class="num">4</td><td class="num">4423</td><td>stem 3×3 s2 32→64 @160²</td></tr>
+<tr><td>mc_re6_c3</td><td class="num">17.44</td><td class="num">6</td><td class="num">2907</td><td>3×3 96→96 @40²</td></tr>
+<tr><td>mc_elan_c3</td><td class="num">12.10</td><td class="num">2</td><td class="num">6049</td><td>3×3 @160² (largest spatial)</td></tr>
+<tr><td>gemm_re6_rn1</td><td class="num">7.81</td><td class="num">6</td><td class="num">1302</td><td>1×1 pair (rn1)</td></tr>
+<tr><td>mc_ftconv0</td><td class="num">7.80</td><td class="num">1</td><td class="num">7799</td><td>stem 3×3 s2 3→32 @320²</td></tr>
+<tr><td>mc_re8_c3</td><td class="num">6.86</td><td class="num">4</td><td class="num">1716</td><td>3×3 128→128 @20²</td></tr>
+<tr><td colspan="5" class="dimc">… + ~18 GEMM 1×1 layers (gemm_re4_c4, gemm_elan_c4, gemm_re*_rn1/rnm/c1) at 0.8–1.4 µs/call,
++ aconv3/5/7/16/19 3×3-stride2, + the rn3 chains folded into ~1 launch each.</td></tr>
+</table>
+
+
+<!-- ============================================================ -->
+<h2 id="fuse">4 · Kernel fusion — Conv+BN+SiLU in one call</h2>
+
+<p class="lead">There are exactly <b>four</b> PythoC-compiled compute kernels (one <code>.o</code> set in
+<code>kernels/build/</code>), plus the BFP576 chain kernels. Fusion happens at two levels: <b>op-fusion</b>
+(BN and SiLU are computed inside the conv kernel, no host round-trip), and <b>weight-fusion</b> (RepConv's two
+branches and BatchNorm collapse into the conv weights on the host).</p>
+
+<table>
+<tr><th>kernel (extern "C")</th><th>fuses</th><th>compute engine</th><th>used by</th></tr>
+<tr><td class="green">conv3x3_fused_packed_bf16</td><td>Conv3×3 + BN + SiLU</td><td><code>mmul&lt;4,8,8&gt;</code></td><td>every 3×3 layer</td></tr>
+<tr><td class="violet">gemm_conv1x1_fused_packed_bf16</td><td>1×1 GEMM + BN + SiLU</td><td><code>mmul&lt;4,8,8&gt;</code></td><td>1×1 convs (IC fits L1)</td></tr>
+<tr><td class="violet">gemm_conv1x1_kblocked_bf16</td><td>1×1 GEMM, K-split + BN + SiLU on last block</td><td><code>mmul&lt;4,8,8&gt;</code></td><td>wide 1×1 (IC too big for L1)</td></tr>
+<tr><td class="amber">residual_add_silu_bf16</td><td>residual add + SiLU (scalar)</td><td>scalar VLIW</td><td>chain epilogue / bottleneck</td></tr>
+<tr><td class="accc">chain_conv1_bfp / chain_conv2res_bfp</td><td>3×3 + BN + SiLU (+residual)</td><td><b>BFP576 8×8×8 HW</b></td><td>rn3 chain (default-on)</td></tr>
+</table>
+
+<h3>4.1 · The 3×3 conv inner loop</h3>
+<p>The kernel walks output channel-blocks of 8, computes 4 output pixels at a time via a
+<code>mmul&lt;4,8,8&gt;</code> (4 pixels × 8 IC × 8 OC), reducing over IC-blocks × 9 kernel taps, then applies
+BN (per-OC scale+bias) and a polynomial SiLU before storing. Crucially, the weights arrive
+<b>pre-packed</b> so the inner loop is a contiguous <code>load_v&lt;64&gt;</code> per tap.</p>
+
+<div class="cols">
+<div class="panel">
+<svg viewBox="0 0 560 250">
+<text class="t12 grnT" x="10" y="16">conv3x3_fused_packed_bf16 — per 8-pixel × 8-OC block</text>
+<rect class="box" x="10" y="30" width="160" height="40"/><text class="t10" x="20" y="48">acc = 0  (mmul C)</text><text class="t9 dim" x="20" y="62">aie::mmul&lt;4,8,8&gt;</text>
+<rect class="boxA" x="200" y="30" width="160" height="40"/><text class="t10 accT" x="210" y="48">for ic_blk, kh, kw:</text><text class="t9 dim" x="210" y="62">A=4px·8ic  B=load_v&lt;64&gt;</text>
+<rect class="box" x="390" y="30" width="160" height="40"/><text class="t10" x="400" y="48">acc.mac(A,B)</text><text class="t9 dim" x="400" y="62">9·(ic/8) MACs</text>
+<path class="wireA" d="M170 50 H 200"/><path class="wireA" d="M360 50 H 390"/>
+<rect class="boxAm" x="200" y="100" width="160" height="40"/><text class="t10 ambT" x="210" y="118">BN: row·bn_w + bn_b</text><text class="t9 dim" x="210" y="132">accfloat mul + add</text>
+<rect class="boxAm" x="390" y="100" width="160" height="40"/><text class="t10 ambT" x="400" y="118">SiLU: x·σ(x)</text><text class="t9 dim" x="400" y="132">x·(0.5 + x/(2+2|x|))</text>
+<path class="wire" d="M280 70 V 100"/><path class="wireAm" d="M360 120 H 390"/>
+<rect class="boxG" x="390" y="170" width="160" height="34"/><text class="t10 grnT" x="400" y="191">store bf16 → output</text>
+<path class="wire" d="M470 140 V 170"/>
+<text class="t9 dim" x="10" y="190">No intermediate leaves L1:</text>
+<text class="t9 dim" x="10" y="204">conv→BN→SiLU is one fused pass</text>
+<text class="t9 dim" x="10" y="218">per output block, in registers.</text>
+</svg>
+</div>
+<div class="panel">
+<h4>Weight packing for <code>mmul&lt;4,8,8&gt;</code></h4>
+<p>PyTorch OIHW weights <code>[OC,IC,3,3]</code> are repacked on the host (cached by weight id) into
+<code>[OC/8, IC/8, 9, 8ic, 8oc]</code> — the exact order the inner loop streams. BN scale/bias are
+appended as <code>2·OC</code> bf16 values. So one weight BO = packed conv + BN, and the kernel reads it
+linearly.</p>
+<pre>conv block  [OC, IC, 9]
+  → [OC/8, 8, IC/8, 8, 9]
+  → permute (OC/8, IC/8, 9, 8ic, 8oc)
+  → flatten  ++ bn_w[OC] ++ bn_b[OC]</pre>
+<p class="cap">1×1 GEMM uses <code>[IC/8, OC/8, 8ic, 8oc]</code>; K-blocked appends BN to each K-chunk but only
+applies it on the final chunk. Channels are always padded to multiples of 8 (and IC=3 stem padded to 8).</p>
+</div>
+</div>
+
+<h3>4.2 · Weight-level fusion — RepConv &amp; BatchNorm</h3>
+<p><code>fuse_bn()</code> folds BatchNorm into conv weights at model load (prewarmed once, id-keyed cache).
+<code>fuse_repconv()</code> goes further: it collapses RepConv's parallel <code>BN(3×3) + BN(1×1)</code> into a
+single 3×3 kernel by adding the 1×1 weights into the center tap and merging both BN affines, setting
+<code>bn_w=1</code> so the standard 3×3 kernel runs it verbatim. This moved RepConv off the CPU and removed a
+whole class of host work and an extra dispatch per bottleneck.</p>
+<div class="panel" style="text-align:center">
+<svg viewBox="0 0 900 90">
+<rect class="box" x="10" y="25" width="220" height="40"/><text class="t11" x="22" y="42">SiLU( BN(Conv3×3(x))</text><text class="t11" x="22" y="58" xml:space="preserve">    + BN(Conv1×1(x)) )</text>
+<text class="t15 grnT" x="270" y="52">⟶</text>
+<rect class="boxG" x="320" y="25" width="240" height="40"/><text class="t11 grnT" x="332" y="48">SiLU( Conv3×3_fused(x) )</text>
+<text class="t11 dim" x="600" y="40">1×1 → center tap of 3×3;</text>
+<text class="t11 dim" x="600" y="58">both BN affines merged; bn_w=1.</text>
+</svg>
+</div>
+
+
+<!-- ============================================================ -->
+<h2 id="spatial">5 · Spatial layout — 32 cores, split / join / broadcast</h2>
+
+<p class="lead">A conv layer's output is tiled into fixed <code>tile_h × tile_w</code> output tiles. Each tile (plus its
+halo) is a "patch". The 32 cores each process <code>patches_per_core</code> patches per invocation. The IRON
+generator (<code>aie2_multicore.py</code>) builds a per-column dataflow: a bulk input ObjectFifo is
+<b>split</b> at the memtile into 4 per-core patch FIFOs, the weight blob is <b>broadcast</b> to all 4 cores,
+and 4 per-core outputs are <b>joined</b> back at the memtile for the shim to drain.</p>
+
+<div class="panel">
+<svg viewBox="0 0 1180 330">
+<text class="t13 accT" x="20" y="16">One column (×8) — ObjectFifo topology generated by aie2_multicore.py</text>
+<!-- DDR -->
+<rect class="boxR" x="40" y="40" width="150" height="50"/><text class="t11 redT" x="55" y="62">DDR host BO</text><text class="t9 dim" x="55" y="78">input / weights / out</text>
+<!-- shim -->
+<rect class="boxV" x="40" y="130" width="150" height="40"/><text class="t11 vioT" x="70" y="155">shim DMA</text>
+<path class="wireA" d="M115 90 V 130"/>
+<!-- memtile -->
+<rect class="boxA" x="40" y="210" width="150" height="70"/><text class="t11 accT" x="55" y="234">memtile L2</text>
+<text class="t9 dim" x="55" y="250">col_in.split()</text><text class="t9 dim" x="55" y="263">col_out.join()</text><text class="t9 dim" x="55" y="276">wt broadcast</text>
+<path class="wireA" d="M115 170 V 210"/>
+
+<!-- split arrows to 4 cores -->
+<rect class="boxG" x="320" y="40" width="160" height="44"/><text class="t10 grnT" x="332" y="58">core 0 · patch FIFO</text><text class="t9 dim" x="332" y="74">conv3x3 kernel(.o)</text>
+<rect class="boxG" x="320" y="100" width="160" height="44"/><text class="t10 grnT" x="332" y="118">core 1</text>
+<rect class="boxG" x="320" y="160" width="160" height="44"/><text class="t10 grnT" x="332" y="178">core 2</text>
+<rect class="boxG" x="320" y="220" width="160" height="44"/><text class="t10 grnT" x="332" y="238">core 3</text>
+<path class="wireA" d="M190 235 C 250 235, 250 62, 320 62"/>
+<path class="wireA" d="M190 240 C 255 240, 255 122, 320 122"/>
+<path class="wireA" d="M190 245 C 260 245, 260 182, 320 182"/>
+<path class="wireA" d="M190 250 C 265 250, 265 242, 320 242"/>
+<text class="t9 accT" x="200" y="200">split (offsets per core)</text>
+
+<!-- weight broadcast -->
+<path class="wireAm dash" d="M190 220 C 250 150, 280 80, 320 50"/>
+<text class="t9 ambT" x="210" y="120">wt broadcast (depth=1, all 4 cores)</text>
+
+<!-- join back -->
+<rect class="boxA" x="600" y="120" width="150" height="70"/><text class="t11 accT" x="615" y="148">memtile join</text><text class="t9 dim" x="615" y="164">4 out tiles →</text><text class="t9 dim" x="615" y="177">1 col_out BO</text>
+<path class="wireG" d="M480 62 C 545 62, 545 140, 600 140"/>
+<path class="wireG" d="M480 122 C 550 122, 550 150, 600 150"/>
+<path class="wireG" d="M480 182 C 555 182, 555 160, 600 160"/>
+<path class="wireG" d="M480 242 C 560 242, 560 170, 600 170"/>
+<rect class="boxV" x="820" y="120" width="150" height="40"/><text class="t11 vioT" x="850" y="145">shim drain</text>
+<path class="wireG" d="M750 150 H 820"/>
+<rect class="boxR" x="820" y="200" width="150" height="40"/><text class="t11 redT" x="845" y="225">DDR out BO</text>
+<path class="wireG" d="M895 160 V 200"/>
+
+<text class="t10 dim" x="1000" y="60">RTPs: 6×int32 per core</text>
+<text class="t10 dim" x="1000" y="76">(tile_h, tile_w, ic, oc,</text>
+<text class="t10 dim" x="1000" y="92">stride, padding) — one ELF</text>
+<text class="t10 dim" x="1000" y="108">covers many layer shapes.</text>
+<text class="t10 dim" x="1000" y="134">WorkerRuntimeBarrier</text>
+<text class="t10 dim" x="1000" y="150">gates each core start.</text>
+</svg>
+<div class="cap">Fig 3. Per-column dataflow. <span class="accc">Blue</span> = input fan-out (split), <span class="amber">amber</span> =
+weight broadcast, <span class="green">green</span> = output fan-in (join). All eight columns run this identically and
+independently; the host fills/drains each column with a strided TensorAccessPattern.</div>
+</div>
+
+<h3>5.1 · How patches are distributed</h3>
+<p>The host slices the output grid into <code>tiles_h × tiles_w</code> tiles, builds a patch (tile + halo) per
+tile, and packs them as <code>core 0: patches[0..ppc-1], core 1: patches[ppc..2·ppc-1], …</code> across 32
+cores. If a layer has more tiles than <code>32 × ppc</code>, the host loops in <b>spatial batches</b> (each a
+separate sub-run); short batches are padded by repeating patch 0. After the run, output tiles are reassembled
+to the spatial grid via the inverse index <code>(core·ppc + slot)</code>.</p>
+
+<h3>5.2 · RTPs — one ELF, many shapes</h3>
+<p>Six per-core <code>int32</code> runtime parameters (tile_h, tile_w, ic, oc, stride, padding) are written by
+the host each dispatch. This lets a single compiled ELF/ObjectFifo envelope serve a whole family of layer
+shapes without recompiling — essential because there are dozens of distinct conv shapes but only a handful of
+ELFs.</p>
+
+
+<!-- ============================================================ -->
+<h2 id="dispatch">6 · Dispatch mechanisms — collapsing launches</h2>
+
+<p class="lead">Because the frame is dispatch-bound (~2.3 ms of host plumbing <i>per launch</i>), the central optimization
+is to <b>do more work per <code>xrt.run</code></b>. The codebase evolved a ladder of ELF formats, each one
+folding more host-level loops into a single NPU launch. The compiler emits <b>one binary containing N device
+blocks plus a dispatcher device</b>; the dispatcher's <code>@main</code> issues
+<code>aiex.configure { aiex.run … }</code> per sub-device, sequentially.</p>
+
+<table>
+<tr><th>format</th><th>mechanism</th><th>launches</th><th>applies to</th></tr>
+<tr><td class="dimc">① standalone xclbin</td><td>one layer per xclbin; burns an XRT context slot</td><td class="num">many</td><td>retired</td></tr>
+<tr><td class="accc">② merged-x1 ELF</td><td>wrap one device in a dispatcher; <code>xrt.elf</code> + <code>xrt.ext.kernel</code>, no context burn</td><td class="num">n_ocb/layer</td><td>baseline 3×3</td></tr>
+<tr><td class="accc">③ multi-clone fanout</td><td>N identical sub-devices in <code>@main</code>; saves N−1 launch gaps</td><td class="num">1/layer</td><td>ftconv0(×8), elan_c3(×4)…</td></tr>
+<tr><td class="green">④ OCB-unroll</td><td>OC-block loop unrolled <b>inside</b> the runtime sequence; one 4D-strided memtile TAP iterates n_ocb times; one run = n_ocb × n_spatial_batches dispatches</td><td class="num"><b>1</b>/layer</td><td>rn3·c3·aconv3/7/16/19</td></tr>
+<tr><td class="green">④′ OCB-chunked</td><td>half-layer ELF ×2 with OC-sliced weights (when full unroll exceeds program memory)</td><td class="num"><b>2</b></td><td>aconv5</td></tr>
+<tr><td class="violet">⑤ GEMM packed</td><td>all pixels of a 1×1 in one run (OC-blocked or K-blocked)</td><td class="num"><b>1</b>/layer</td><td>all 1×1 (c1/c4/rn1/rnm)</td></tr>
+<tr><td class="violet">⑤′ GEMM pair</td><td>two 1×1 sharing one input BO via <code>chain_links</code> → one run, two wt/out BOs</td><td class="num"><b>1</b>/pair</td><td>rn1 conv1+conv2</td></tr>
+<tr><td class="amber">⑥ rn3 halo chain</td><td>N residual bottlenecks on-device, DDR-bounced (§7)</td><td class="num"><b>1</b>/stack</td><td>re4/re6/re8 stacks</td></tr>
+</table>
+
+<div class="note">Net effect across all phases: <b>453 → 84 launches/frame</b>. Sub-runs within one
+<code>xrt.run</code> are sequential on the array (they take turns, not parallel), but they amortize the
+per-launch host gap — which is the dominant cost.</div>
+
+<h3>6.1 · The dispatcher stitching (MLIR shape)</h3>
+<pre>module {
+  aie.device(npu2) @sub0_mc_re6_c3 { /* cores, memtiles, ObjectFifos, runtime_sequence */ }
+  aie.device(npu2) @sub1_...       { ... }
+  aie.device(npu2) @main_dispatcher {
+    aie.runtime_sequence @main(%w, %in, %out, ...) {
+      aiex.configure @sub0_mc_re6_c3 { aiex.run @sub0_..._seq(%in, %w, %out) }
+      // more configure/run pairs for clones / pairs / OCB iterations
+    }
+  }
+}</pre>
+<p class="cap"><code>share_arg_idxs={1}</code> promotes each sub's weight arg to a shared dispatcher arg;
+<code>chain_links=[(src_sub,src_arg,dst_sub,dst_arg)]</code> aliases one sub's input to another's (the GEMM-pair
+trick). BD slots reset between sub-devices.</p>
+
+<h3>6.2 · Host-side dispatch decision tree</h3>
+<pre>run_tiled_fused_conv_mc(name, …)            # sets _CURRENT_LAYER for profiling
+ └ _get_mc_variant(name)                    # resolve _p2/_p4 ppc + _d2 input-depth suffix
+   1. name in _MERGED_LAYERS_OCB  → _run_tiled_mc_inner_ocb_merged   (1 run, big wt/out BO)
+   2. name in _MERGED_LAYERS      → _run_tiled_mc_inner_merged       (n_batches clones / run)
+   3. else                        → RuntimeError (no xclbin fallback)
+
+run_gemm_conv1x1_mc → _run_gemm_oc_blocked_merged | _run_gemm_kblocked_merged
+run_gemm_pair_mc    → _run_gemm_oc_blocked_pair_merged   (chain_links)</pre>
+<p>BOs are pooled per <code>(elf, role, size)</code> and reused; prepared <code>xrt.run</code> objects are cached
+by <code>(kernel-id, arg-ids)</code> so steady-state launches skip set-up. Only the consumed byte range is
+synced to/from device each call.</p>
+
+
+<!-- ============================================================ -->
+<h2 id="chain">7 · The rn3 halo chain — N bottlenecks, one launch</h2>
+
+<p class="lead">The RepNCSP bottleneck stack is <code>repeat_num=3</code> iterations of
+<code>x ← x + Conv3×3( RepConv3×3(x) )</code> — six 3×3 convs plus residual adds, in strict sequence. Naively
+that is 6+ launches and 3 host residual adds per stack, repeated at <b>re4 (80²), re6 (40²), re8 (20²)</b> and
+again in the neck/head. The <b>halo chain</b> fuses an entire stack into <b>one launch</b>, keeping activations
+resident on-chip and applying the residual+SiLU inside the kernel.</p>
+
+<div class="panel">
+<svg viewBox="0 0 1180 300">
+<text class="t13 ambT" x="20" y="16">rn3 chain — ping-pong DDR-bounce across bottleneck iterations (re6: 40×40×48)</text>
+
+<!-- iteration blocks -->
+<rect class="boxAm" x="40" y="60" width="150" height="120"/>
+<text class="t11 ambT" x="55" y="80">iter 0</text>
+<rect class="boxG" x="55" y="92" width="120" height="26"/><text class="t9 grnT" x="65" y="109">conv1 3×3 (RepConv)</text>
+<rect class="box" x="55" y="120" width="120" height="20"/><text class="t9 dim" x="65" y="134">mask halo</text>
+<rect class="boxG" x="55" y="142" width="120" height="30"/><text class="t9 grnT" x="65" y="155">conv2res 3×3</text><text class="t9 dim" x="65" y="167">+resid +SiLU</text>
+
+<rect class="boxAm" x="230" y="60" width="150" height="120"/>
+<text class="t11 ambT" x="245" y="80">iter 1</text>
+<rect class="boxG" x="245" y="92" width="120" height="26"/><text class="t9 grnT" x="255" y="109">conv1 3×3</text>
+<rect class="box" x="245" y="120" width="120" height="20"/><text class="t9 dim" x="255" y="134">mask</text>
+<rect class="boxG" x="245" y="142" width="120" height="30"/><text class="t9 grnT" x="255" y="155">conv2res 3×3</text>
+
+<rect class="boxAm" x="420" y="60" width="150" height="120"/>
+<text class="t11 ambT" x="435" y="80">iter 2</text>
+<rect class="boxG" x="435" y="92" width="120" height="26"/><text class="t9 grnT" x="445" y="109">conv1 3×3</text>
+<rect class="box" x="435" y="120" width="120" height="20"/><text class="t9 dim" x="445" y="134">mask</text>
+<rect class="boxG" x="435" y="142" width="120" height="30"/><text class="t9 grnT" x="445" y="155">conv2res 3×3</text>
+
+<!-- ping pong BOs -->
+<rect class="boxR" x="40" y="220" width="240" height="30"/><text class="t10 redT" x="110" y="240">image BO A</text>
+<rect class="boxR" x="320" y="220" width="240" height="30"/><text class="t10 redT" x="400" y="240">image BO B</text>
+<path class="wireAm" d="M115 180 V 220"/><text class="t9 dim" x="120" y="200">read A</text>
+<path class="wireAm" d="M305 220 C 280 205, 300 190, 305 180"/><text class="t9 dim" x="300" y="205">write B</text>
+<path class="wireAm" d="M380 220 V 180"/><text class="t9 dim" x="385" y="200">read B</text>
+<path class="wireAm" d="M495 180 C 500 205, 300 215, 280 232"/><text class="t9 dim" x="470" y="205">write A</text>
+
+<!-- weights -->
+<rect class="boxV" x="640" y="60" width="170" height="40"/><text class="t10 vioT" x="652" y="80">weight slots / iter</text><text class="t9 dim" x="652" y="95">16·ic·9+32 per block</text>
+<path class="wireAm dash" d="M640 80 C 590 80, 580 100, 560 105"/>
+<text class="t10 dim" x="640" y="130">memtile splits the 12×12 padded image into</text>
+<text class="t10 dim" x="640" y="146">per-core tiles (1 tile/core, rastered over the grid).</text>
+<text class="t10 dim" x="640" y="162">conv1 writes a scratch buffer; conv2res reads</text>
+<text class="t10 dim" x="640" y="178">scratch + the iteration's input for the residual.</text>
+<text class="t10 ambT" x="640" y="206">Whole stack = ONE xrt.run; the runtime_sequence</text>
+<text class="t10 ambT" x="640" y="222">drives the per-iteration fill/drain with wait barriers.</text>
+</svg>
+<div class="cap">Fig 4. The chain alternates two DDR image BOs per iteration ("halo-bounce"). conv1 → mask → conv2res(+residual+SiLU)
+run back-to-back on each core; the host re-streams weights and re-triggers fill/drain per iteration but never
+unpacks/repacks activations between iterations.</div>
+</div>
+
+<h3>7.1 · Geometries &amp; placement</h3>
+<table>
+<tr><th>geo</th><th>resolution</th><th class="num">IC</th><th>layout</th><th>cores</th><th>path</th></tr>
+<tr><td>re4 / re4w</td><td>80×80×32</td><td class="num">32</td><td>raster, 7 cols × 4 workers, TPR=4 (4 rounds cover 80²)</td><td class="num">28</td><td>raster (default)</td></tr>
+<tr><td>re6 / re6w</td><td>40×40×48</td><td class="num">48</td><td>raster, 7 cols × 4 workers, TPR=1</td><td class="num">28</td><td>raster (default)</td></tr>
+<tr><td>re8</td><td>20×20×64</td><td class="num">64</td><td>geo, 3 cols × 1 worker, pinned tiles</td><td class="num">3</td><td>geo</td></tr>
+</table>
+<p class="cap">The <b>raster</b> path pins 1 tile/core and rasters the output grid across rounds; the <b>geo</b> path
+column-pins multiple tiles per column. re4/re6 use raster by default (<code>MDV6_RN3RASTER=1</code>); re8 uses geo.
+A "mask" kernel zeros the halo region outside the valid image before the residual add.</p>
+
+<h3>7.2 · Temporal schedule inside the chain</h3>
+<p>Per iteration, per pass, per tile: acquire input tile from the FIFO; loop weight-blocks doing
+<code>conv1</code> into a scratch buffer; <code>mask</code> the scratch; loop output-blocks doing
+<code>conv2res</code> (3×3 over scratch, + residual from the iteration's input, + SiLU) into the output tile;
+release. Weights for each iteration are streamed from DDR (or replayed from L2 — §8). The residual is read
+from the <i>same iteration's input buffer</i>, so the chain must keep <code>x_i</code> intact while writing
+<code>x_{i+1}</code> — the reason for the two ping-pong BOs.</p>
+
+
+<!-- ============================================================ -->
+<h2 id="bfp">8 · BFP576 compute + weight replay</h2>
+
+<div class="cols">
+<div class="panel">
+<h4 class="accc">BFP576 hardware MAC</h4>
+<p>The default <code>mmul&lt;4,8,8&gt;</code> path is an <i>emulated</i> bf16 matmul (shuffle-bound, ~5.12 TFLOP/s
+peak). The AIE2P core also has a native <b>BFP576</b> (block-floating-point, 8×8×8) MAC — 576 multipliers,
+shared exponent per 8-element block — that is ~5.6× denser and reaches tens of TOPS.</p>
+<p>The chain's <code>chain_conv1_bfp</code> / <code>chain_conv2res_bfp</code> are drop-in BFP576 versions of the
+chain convs: they build the activation operand via on-the-fly im2col, vshuffle the pre-packed weights into BFP
+layout, and accumulate in a 2048-wide BFP accumulator before BN+SiLU. They are <b>default-on</b>
+(<code>MDV6_CONV1_BFP=1</code>, <code>MDV6_CONV2_BFP=1</code>).</p>
+</div>
+<div class="panel">
+<h4 class="amber">Weight replay (wr2)</h4>
+<p>In the raster chain with TPR&gt;1 (re4w), the same weight slots are needed every round. <b>Replay</b> fills
+the weights into the memtile <b>once per iteration</b> and re-emits them from L2 (~14 GB/s measured, ~8× shim
+BW) instead of re-reading DDR each round. Host upload drops from <code>TPR× </code> to <code>1×</code> the
+weight bytes.</p>
+<p>It is wired as <code>MDV6_WTREPLAY2=1</code> (default-on, ring-buffer post-resolve patch). For re6w (TPR=1)
+it is a no-op; re8 geo doesn't use it.</p>
+</div>
+</div>
+
+<div class="note"><b>Why these don't move the wall.</b> Both BFP576 and weight-replay attack <i>NPU compute and
+weight-DMA</i> — but those live inside the 158 ms <code>npu_run</code> bucket, which is only 33% of the frame,
+and the chain convs are a slice of that. Measured: <code>npu_run</code> is 158 ms with them on, 159 ms with them
+off. They are kept default-on because they are correct, slightly more accurate, and harmless — not because they
+change throughput. The wall is set by launch count, not arithmetic.</div>
+
+
+<!-- ============================================================ -->
+<h2 id="temporal">9 · Temporal schedule — the frame timeline</h2>
+
+<p class="lead">A frame is a strictly sequential walk of the layer graph. There is no overlap between NPU compute
+and host glue, and no cross-layer pipelining: layer L's output must come back to DDR, be concat/pooled/upsampled
+on the CPU, and be re-uploaded before layer L+1 launches. The "frame" below is one
+<code>_forward_one_frame()</code> call.</p>
+
+<div class="panel">
+<svg viewBox="0 0 1180 220">
+<text class="t12 dim" x="20" y="16">one warm frame ≈ 479 ms — repeated host→NPU→host per layer (not to scale; interleaved across ~84 launches)</text>
+<!-- swimlanes -->
+<text class="t11 pnkT" x="20" y="52">CPU</text>
+<text class="t11 vioT" x="20" y="92">host↔dev</text>
+<text class="t11 grnT" x="20" y="132">NPU</text>
+
+<!-- repeating pattern -->
+<g>
+<rect class="boxP" x="90" y="38" width="60" height="22"/><text class="t9 pnkT" x="98" y="53">concat</text>
+<rect class="boxV" x="155" y="78" width="90" height="22"/><text class="t9 vioT" x="160" y="93">launch_gap</text>
+<rect class="boxG" x="250" y="118" width="70" height="22"/><text class="t9 grnT" x="258" y="133">conv run</text>
+<rect class="boxV" x="325" y="78" width="50" height="22"/><text class="t9 vioT" x="330" y="93">sync</text>
+<rect class="boxP" x="380" y="38" width="60" height="22"/><text class="t9 pnkT" x="388" y="53">pool/up</text>
+<rect class="boxV" x="445" y="78" width="90" height="22"/><text class="t9 vioT" x="450" y="93">launch_gap</text>
+<rect class="boxG" x="540" y="118" width="70" height="22"/><text class="t9 grnT" x="548" y="133">conv run</text>
+<rect class="boxV" x="615" y="78" width="50" height="22"/><text class="t9 vioT" x="620" y="93">sync</text>
+<rect class="boxP" x="670" y="38" width="60" height="22"/><text class="t9 pnkT" x="678" y="53">concat</text>
+<rect class="boxV" x="735" y="78" width="90" height="22"/><text class="t9 vioT" x="740" y="93">launch_gap</text>
+<rect class="boxG" x="830" y="118" width="70" height="22"/><text class="t9 grnT" x="838" y="133">conv run</text>
+<text class="t11 dim" x="920" y="98">… × 84 launches …</text>
+<rect class="boxP" x="1010" y="38" width="120" height="22"/><text class="t9 pnkT" x="1018" y="53">Detection (CPU)</text>
+</g>
+<line x1="20" y1="160" x2="1160" y2="160" stroke="#2c3645"/>
+<text class="t11 dim" x="20" y="182">Critical path is serial: each conv waits on the previous layer's host post-processing; the array is idle</text>
+<text class="t11 dim" x="20" y="198">during launch_gap + CPU glue (≈63% of the frame). NPU is busy only in the green slices (≈33%).</text>
+</svg>
+<div class="cap">Fig 5. Frame timeline. The pattern <i>CPU glue → launch_gap → NPU run → sync</i> repeats per layer. The array
+sits idle through the violet (launch plumbing) and pink (CPU) segments.</div>
+</div>
+
+<h3>9.1 · Frame time budget</h3>
+<table>
+<tr><th>bucket</th><th class="num">ms</th><th class="num">%</th><th>what</th></tr>
+<tr><td class="violet">launch_gap</td><td class="num">192.5</td><td class="num">40.2</td><td>per-launch Python/pyxrt plumbing — 2291 µs/call × 84</td></tr>
+<tr><td class="dimc">pre_post</td><td class="num">109.3</td><td class="num">22.8</td><td>setup before first launch + last-layer drain</td></tr>
+<tr><td class="green">npu_run</td><td class="num">158.3</td><td class="num">33.1</td><td>NPU active (DefaultNPURuntime.run + merged-ELF xrt.run)</td></tr>
+<tr><td class="pink">cpu_layers</td><td class="num">9.4</td><td class="num">2.0</td><td>AvgPool / MaxPool / Upsample / Detection</td></tr>
+<tr><td class="dimc">numpy</td><td class="num">9.1</td><td class="num">1.9</td><td>np.concatenate (host weight/activation assembly)</td></tr>
+<tr><td><b>total</b></td><td class="num"><b>479.1</b></td><td class="num"><b>100</b></td><td></td></tr>
+</table>
+
+
+<!-- ============================================================ -->
+<h2 id="feeds">10 · Communication, speeds &amp; feeds</h2>
+
+<div class="cols">
+<div class="panel">
+<h4>Data movement per launch</h4>
+<ul>
+<li>Host packs patches → fills input BO → <code>sync_to_device</code> (only bytes written).</li>
+<li>shim → memtile (one DMA per column), memtile <b>split</b> → 4 core L1 patch FIFOs.</li>
+<li>weight BO broadcast to all 4 cores in a column (depth-1 FIFO).</li>
+<li>cores compute, memtile <b>joins</b> 4 outputs, shim → DDR out BO.</li>
+<li>host <code>sync_from_device</code> (only consumed bytes) → reassemble grid.</li>
+</ul>
+</div>
+<div class="panel">
+<h4>Measured bandwidths</h4>
+<table>
+<tr><td>shim DDR↔chip</td><td class="num">~1.7 GB/s / shim</td></tr>
+<tr><td>memtile L2 replay</td><td class="num">~14 GB/s</td></tr>
+<tr><td>per-core S2MM (replay col)</td><td class="num">~10.5 GB/s</td></tr>
+<tr><td>launch plumbing</td><td class="num">~2.3 ms / launch</td></tr>
+</table>
+<p class="cap">Weight DMA is the chain's pace-setter (~83 KB/col/round at shim BW), which is what replay targets.</p>
+</div>
+</div>
+
+<h3>10.1 · Buffer sizing constants</h3>
+<table>
+<tr><th>constant</th><th class="num">value</th><th>meaning</th></tr>
+<tr><td>N_CORES</td><td class="num">32</td><td>8 cols × 4 rows</td></tr>
+<tr><td>_GEMM_L1</td><td class="num">57,344 B</td><td>L1 budget = 64KB − 8KB stack − 32B RTP</td></tr>
+<tr><td>_L2_BUDGET</td><td class="num">400 KB</td><td>per-dispatch memtile budget (of 512 KB)</td></tr>
+<tr><td>_XRT_BUF_MAX</td><td class="num">16 MB</td><td>max bytes per BO role</td></tr>
+<tr><td>_MAX_K_BLOCKS</td><td class="num">16</td><td>max IC subdivisions for K-blocked GEMM</td></tr>
+<tr><td>tile_m / ppc caps</td><td class="num">256 / 32</td><td>GEMM pixel-tile and patches-per-core ceilings</td></tr>
+<tr><td>patch alignment</td><td class="num">even</td><td>patch_size rounded up to a multiple of 2 (DMA)</td></tr>
+</table>
+<p>BOs are pooled by <code>(elf, role, size)</code> and reused frame-to-frame; <code>xrt.run</code> objects are
+cached by arg identity so warm launches skip argument set-up. Weight repacks are id-keyed caches
+(3×3, GEMM-OCB, GEMM-KB, weight-chunk) sized to ~1024 entries (≈300 unique weight tensors in MDV6).</p>
+
+
+<!-- ============================================================ -->
+<h2 id="roofline">11 · Where the time goes — roofline &amp; levers</h2>
+
+<p class="lead">The logical work is <b>9.8 GMAC / 19.6 GFLOP per frame</b>. At the bf16 emulated peak (5.12 TFLOP/s)
+that is a <b>3.83 ms</b> compute floor (≈261 fps); the optimistic DDR floor (~50 GB/s, 156 MB) is <b>3.12 ms</b>.
+The measured warm wall is ~479 ms — roughly <b>1200× the compute floor</b>, and even the NPU-active 158 ms is
+~40× over it. The model is decisively <b>orchestration/dispatch/data-movement bound</b>.</p>
+
+<div class="panel">
+<svg viewBox="0 0 1180 150">
+<text class="t12 dim" x="20" y="18">log-scale gap: where 479 ms sits vs the rooflines</text>
+<line x1="60" y1="80" x2="1140" y2="80" stroke="#2c3645"/>
+<!-- markers -->
+<circle cx="120" cy="80" r="6" fill="#66d18c"/><text class="t10 grnT" x="95" y="62">3.8 ms</text><text class="t9 dim" x="90" y="104">compute floor</text>
+<circle cx="115" cy="80" r="6" fill="#4fc3f7"/><text class="t10 accT" x="95" y="120">3.1 ms DDR floor</text>
+<circle cx="640" cy="80" r="7" fill="#ffc24d"/><text class="t10 ambT" x="600" y="62">158 ms</text><text class="t9 dim" x="585" y="104">NPU-active</text>
+<circle cx="900" cy="80" r="9" fill="#ef7070"/><text class="t11 redT" x="865" y="58">479 ms</text><text class="t9 dim" x="855" y="104">measured wall (2.09 fps)</text>
+<text class="t10 dim" x="980" y="84">← ~1200× →</text>
+</svg>
+</div>
+
+<h3>11.1 · The dispatch-collapse model</h3>
+<p>If the non-launch floor were ~30 ms and per-launch overhead could be driven down, throughput scales with
+launch count:</p>
+<table>
+<tr><th class="num">launches</th><th class="num">@2.3 ms/launch (today)</th><th class="num">@1.34 ms/launch</th><th class="num">@0.6 ms/launch</th></tr>
+<tr><td class="num">84 (today)</td><td class="num red">~479 ms / 2.1 fps</td><td class="num">~143 ms / 7 fps</td><td class="num">~80 ms / 12 fps</td></tr>
+<tr><td class="num">50</td><td class="num">~145 ms</td><td class="num">~97 ms / 10 fps</td><td class="num">~60 ms / 17 fps</td></tr>
+<tr><td class="num">25</td><td class="num">~88 ms</td><td class="num">~64 ms / 16 fps</td><td class="num">~45 ms / 22 fps</td></tr>
+</table>
+<p class="cap">Numbers illustrative (from the roofline note, re-based on the current 84/479 operating point). The two
+independent levers are <b>fewer launches</b> and <b>cheaper launches</b>.</p>
+
+<h3>11.2 · Remaining levers (in priority order)</h3>
+<ol>
+<li><b>Cut per-launch overhead.</b> 2.3 ms/launch is the single biggest term (40% of frame). Anything that
+reduces the Python/pyxrt cost per <code>xrt.run</code> multiplies across all 84 launches.</li>
+<li><b>Fuse more launches.</b> The heavy <code>mc_*_c3</code> 3×3 convs run multiple times/frame; block-level
+fusion (a whole RepNCSPELAN stage resident) would remove host round-trips between its sub-convs.</li>
+<li><b>Reduce host glue.</b> ~1300 <code>np.concatenate</code>/frame + CPU pool/upsample/detect; moving GELAN
+aggregation on-chip would cut both the numpy and the surrounding launch gaps.</li>
+<li><b>Weight-replay i3–i12</b> (producer-leg redesign) for the deep chains — bandwidth, only matters once
+dispatch is addressed.</li>
+</ol>
+
+<div class="note">Bottom line: every compute-side optimization in this codebase (BFP576, weight replay, mmul packing,
+RepConv fusion) is correct and shipped, but the frame is gated by <b>how many times the host hands work to the
+NPU and waits</b>. The path to 10×+ is launch-count collapse and host-glue elimination, not faster math.</div>
+
+<p class="sub" style="margin-top:40px">Sources: <code>test_full_model_mc.py</code>, <code>run_tiled_mc.py</code>,
+<code>conv/aie2_multicore.py</code>, <code>conv/aie2_rn3_chain_geo.py</code>, <code>conv/rn3_chain_runner.py</code>,
+<code>kernels/rep_elan_bf16.cc</code>, <code>kernels/chain_conv{1,2res}_bfp.py</code>,
+<code>mdv6/model.py</code> + <code>layers.py</code>, <code>launch_inventory.md</code>,
+<code>docs/model_roofline_latest.md</code>, <code>IMPL_ARCH_STATUS.md</code>.</p>
+
+</body>
+</html>

@@ -56,6 +56,10 @@ class FrameStats:
     n_launches: int = 0
     npu_ms: float = 0.0
     inter_launch_gaps_ms: float = 0.0
+    _first_launch_start: float | None = None
+    _last_launch_end_ts: float | None = None
+    pre_ms: float = 0.0
+    post_ms: float = 0.0
 
 
 class Profiler:
@@ -129,6 +133,9 @@ class Profiler:
         # The "tracked" buckets all happen during gaps; we compute pre_post as
         # the residual after subtracting npu + inter-launch-gaps.
         self._cur.npu_ms = self._cur.bucket_ms.get("npu_run", 0.0)
+        if self._cur._first_launch_start is not None:
+            self._cur.pre_ms = (self._cur._first_launch_start - self._frame_start) * 1000
+            self._cur.post_ms = (time.perf_counter() - self._cur._last_launch_end_ts) * 1000
         self.frames.append(self._cur)
 
     # ---- hooks ----
@@ -155,6 +162,9 @@ class Profiler:
             t1 = time.perf_counter()
             prof._bump("npu_run", t1 - t0)
             prof._cur.n_launches += 1
+            if prof._cur._first_launch_start is None:
+                prof._cur._first_launch_start = t0
+            prof._cur._last_launch_end_ts = t1
             prof._last_launch_end = t1
             return r
 
@@ -224,6 +234,9 @@ class Profiler:
                 prof._bump("npu_run", t1 - t0)
                 prof._cur.n_launches += 1
                 prof._last_launch_end = t1
+                if prof._cur._first_launch_start is None:
+                    prof._cur._first_launch_start = t0
+                prof._cur._last_launch_end_ts = t1
                 # Per-layer attribution: bucket the NPU time by the layer name
                 # set in mcr._CURRENT_LAYER by run_tiled_fused_conv_mc /
                 # run_gemm_conv1x1_mc.
@@ -234,6 +247,40 @@ class Profiler:
                 return r
 
             self._patch(mcr, "_xrt_run_kernel", _wrap_xrt)
+
+        # rn3 chain dispatch (ResidentXCLBinRunner.run) — profiler-blind
+        # otherwise; its wall lands in inter_launch_gaps→launch_gap. Hook it as
+        # its own 'chain' bucket and use last_stats to split kernel vs host.
+        try:
+            from conv.resident_xclbin_runner import ResidentXCLBinRunner as _RXR
+            _orig_chain = _RXR.run
+
+            def _wrap_chain(self_, *a, **kw):
+                now = time.perf_counter()
+                if prof._last_launch_end is not None:
+                    prof._cur.inter_launch_gaps_ms += (now - prof._last_launch_end) * 1000
+                t0 = time.perf_counter()
+                r = _orig_chain(self_, *a, **kw)
+                t1 = time.perf_counter()
+                prof._bump("npu_run", t1 - t0, sub="chain.total")
+                st = getattr(self_, "last_stats", None)
+                if st is not None:
+                    prof._cur.sub_bucket_ms["chain.kernel"] += st.kernel_ms
+                    prof._cur.sub_bucket_ms["chain.host_write"] += st.write_ms
+                    prof._cur.sub_bucket_ms["chain.host_read"] += st.read_ms
+                    prof._cur.sub_bucket_n["chain.kernel"] += 1
+                    prof._cur.sub_bucket_n["chain.host_write"] += 1
+                    prof._cur.sub_bucket_n["chain.host_read"] += 1
+                prof._cur.n_launches += 1
+                if prof._cur._first_launch_start is None:
+                    prof._cur._first_launch_start = t0
+                prof._cur._last_launch_end_ts = t1
+                prof._last_launch_end = t1
+                return r
+
+            self._patch(_RXR, "run", _wrap_chain)
+        except Exception:
+            pass
 
         # fuse_bn variants in elan/test_tiled.py.
         ett_spec = importlib.util.spec_from_file_location(
@@ -338,7 +385,9 @@ class Profiler:
         n = len(warm)
         out = {"wall_ms": sum(f.wall_ms for f in warm) / n,
                "n_launches": sum(f.n_launches for f in warm) / n,
-               "inter_launch_gaps_ms": sum(f.inter_launch_gaps_ms for f in warm) / n}
+               "inter_launch_gaps_ms": sum(f.inter_launch_gaps_ms for f in warm) / n,
+               "pre_ms": sum(f.pre_ms for f in warm) / n,
+               "post_ms": sum(f.post_ms for f in warm) / n}
         cats: dict[str, float] = defaultdict(float)
         for f in warm:
             for k, v in f.bucket_ms.items():
@@ -406,7 +455,8 @@ class Profiler:
              f"Per-launch Python/pyxrt plumbing ({launch_gap*1000/n_launches:.0f} µs/call)"
              if n_launches else "Per-launch plumbing"),
             ("pre_post", pre_post,
-             "Pre-first-launch + post-last-launch (model setup, last layer)"),
+             f"Pre-first-launch + post-last-launch "
+             f"(pre={warm.get('pre_ms',0):.0f} ms, post={warm.get('post_ms',0):.0f} ms)"),
         ]
         for cat, ms, desc in rows:
             pct = 100 * ms / wall if wall else 0
