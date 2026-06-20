@@ -357,11 +357,19 @@ def run_decode_block(
 
 _C2_ATTN_BUILT = set()
 
-# Resident c2_attn: ONE fixed-structure PDI (MAX_CHUNKS=4, seq_len<=256) reused
-# for every decode position; trailing-chunk mask is a runtime value L.
-_RES_MAX_CHUNKS = 4
+# Resident c2_attn: ONE fixed-structure PDI reused for every decode position;
+# trailing-chunk mask is a runtime value L.  The chunk ceiling is 4 (seq<=256)
+# on the shim-direct KV feed, but lifts to PYTHOC_C2_ATTN_MAX_CHUNKS when the
+# memtile-staged KV feed (PYTHOC_C2_ATTN_MEMKV=1) is on -- the KV is staged into
+# L2 in ONE shim BD/group and drip-fed to the add tile, so chunk count no longer
+# consumes shim BD IDs.  The host MUST match the builder's chunk count exactly
+# (same env vars) or the resident BO sizes / runtime-L fold drift.
+import os as _os_c2
+_C2_ATTN_MEMKV = _os_c2.environ.get("PYTHOC_C2_ATTN_MEMKV", "0") == "1"
+_RES_MAX_CHUNKS = (int(_os_c2.environ.get("PYTHOC_C2_ATTN_MAX_CHUNKS", "8"))
+                   if _C2_ATTN_MEMKV else 4)
 _RES_TILE_ROWS = 64
-_RES_PADDED = _RES_MAX_CHUNKS * _RES_TILE_ROWS  # 256
+_RES_PADDED = _RES_MAX_CHUNKS * _RES_TILE_ROWS  # 256 (or MAX_CHUNKS*64 w/ MEMKV)
 
 # --- c2_attn incremental KV tiling (Part 2a) ---------------------------------
 # Persistent per-layer tiled K/V buffers (k_all/v_all, 8*4*4096 bf16 each).  The
@@ -442,8 +450,9 @@ def _run_c2_attn(cache, layer_weights, x_bf16, q_roped, k_cache_layer,
     group_size = n_heads // n_kv_heads
     seq_len = current_pos + 1
     assert seq_len <= _RES_PADDED, (
-        f"c2_attn resident supports seq_len<=256; got {seq_len} "
-        f"(current_pos={current_pos})")
+        f"c2_attn resident supports seq_len<={_RES_PADDED} "
+        f"(MAX_CHUNKS={_RES_MAX_CHUNKS}, MEMKV={_C2_ATTN_MEMKV}); got "
+        f"{seq_len} (current_pos={current_pos})")
     TILE_ROWS = _RES_TILE_ROWS
     tile_size = TILE_ROWS * head_dim
     kv_size = _RES_MAX_CHUNKS * tile_size
