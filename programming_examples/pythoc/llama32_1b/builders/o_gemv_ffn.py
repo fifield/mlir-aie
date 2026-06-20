@@ -3968,16 +3968,33 @@ def _emit_call2_c2(sym: str, with_down: bool, *, attn_wave0: bool = False,
     A_TILE_ROWS = 64
     A_KVP = 64
     A_TILE_SIZE = A_TILE_ROWS * A_HEAD_DIM            # 4096
+    import os as _os_geo
+    # MEMKV: lifts the 256-token cap.  The 256 cap = MAX_CHUNKS(4) x KVP(64),
+    # set by the shim BD-*task* budget: the resident path fed K/V over the shim
+    # in 2 + 2*A_N_BUF_FILLS tasks/group/token, which exhausts the ~16 shim BD
+    # IDs at n_chunks>=8.  MEMKV feeds the FULL per-group K (and V) in ONE shim
+    # BD each (the add-tile fill ring backpressures the single stream into the L1
+    # double-buffer), so shim BD-task usage is CONSTANT (q+k+v+out = 4/group) and
+    # context length decouples from the shim BD budget.  Routing is UNCHANGED
+    # (the proven shim->add path) -- an earlier memtile-staging design wedged on
+    # HW (see ATTN_DECODE_GQA_SCOPE.md).  Default OFF (4-chunk path byte-id).
+    _A_MEMKV = (attn_resident
+                and _os_geo.environ.get("PYTHOC_C2_ATTN_MEMKV", "0") == "1")
+    # New context ceiling (chunks).  MEMKV raises it; the default resident path
+    # stays at 4.  Bounded only by host BO sizing + add-L1 fill backpressure
+    # (KV never lands in L2, so no memtile budget concern).
     A_MAX_CHUNKS = 4                                  # seq_len <= 256
+    if _A_MEMKV:
+        A_MAX_CHUNKS = int(_os_geo.environ.get("PYTHOC_C2_ATTN_MAX_CHUNKS", "8"))
     if attn_resident:
-        # Resident c2_attn: FIXED structure (always 4 KV chunks); only the L
-        # RTP varies per token -> ONE PDI for every decode position.  The host
-        # zero-pads K/V to 256 and writes the valid length L; the mask kernel
-        # derives each chunk's boundary on-device from L.
+        # Resident c2_attn: FIXED structure (always A_MAX_CHUNKS KV chunks);
+        # only the L RTP varies per token -> ONE PDI for every decode position.
+        # The host zero-pads K/V to A_MAX_CHUNKS*64 and writes the valid length
+        # L; the mask kernel derives each chunk's boundary on-device from L.
         A_N_CHUNKS = A_MAX_CHUNKS
         A_LAST_VALID = A_KVP                            # unused (runtime mask)
         A_CHUNKS_PER_BUF = 2                            # double-buffer 2 chunks
-        A_N_BUF_FILLS = A_N_CHUNKS // A_CHUNKS_PER_BUF  # 2 refills/token
+        A_N_BUF_FILLS = A_N_CHUNKS // A_CHUNKS_PER_BUF  # refills/token
     else:
         A_N_CHUNKS = (seq_len + A_KVP - 1) // A_KVP
         A_LAST_VALID = seq_len - (A_N_CHUNKS - 1) * A_KVP
@@ -4191,6 +4208,13 @@ def _emit_call2_c2(sym: str, with_down: bool, *, attn_wave0: bool = False,
                     mem_buf_dw1[col] = buffer(mem_tiles[col], datatype=_DW_L2_TY)
             for col in reversed(range(N_COLS)):
                 mem_buf_dy[col] = buffer(mem_tiles[col], datatype=_DY_L2_TY)
+
+        # NOTE: MEMKV (the >256 cap lift) does NOT stage KV in L2 -- an earlier
+        # memtile-staging design wedged on HW (ERT_CMD_STATE_TIMEOUT, see
+        # ATTN_DECODE_GQA_SCOPE.md "MEMKV").  The shipped MEMKV lifts the cap
+        # purely host-side: ONE big shim BD per group feeds the full per-group KV
+        # over the proven shim->add routing and the add-tile fill ring
+        # backpressures it.  So no extra memtile KV buffers/locks/channels here.
 
         mat_buf_y = {}
         mat_buf_w = {}
@@ -4827,6 +4851,12 @@ def _emit_call2_c2(sym: str, with_down: bool, *, attn_wave0: bool = False,
             # S2MM0; v: shim MM2S1 -> add S2MM1; gp out: add MM2S0 -> shim
             # S2MM0. Time-disjoint with the add/swiglu/matvec waves.
             for col in range(n_groups):
+                # q+k: shim MM2S0 -> add S2MM0; v: shim MM2S1 -> add S2MM1
+                # (pkt 16).  MEMKV lifts the cap by changing only the HOST DMA
+                # (ONE big shim BD streams the full per-group KV; the add-mem
+                # 4-fill ring backpressures it via k_avail/v_avail) -- the on-
+                # fabric routing is IDENTICAL to the proven 4-chunk path, so no
+                # new memtile leg / packet ids (memtile staging wedged on HW).
                 packetflow(
                     pkt_id=16,
                     source=shim_tiles[col], source_port=WireBundle.DMA,
@@ -5134,7 +5164,8 @@ def _emit_call2_c2(sym: str, with_down: bool, *, attn_wave0: bool = False,
                             use_lock(_ml["dw_ready"], LockAction.Release, value=1)
                             next_bd(block[14])
                     with block[15]:
-                        dma_start(DMAChannelDir.S2MM, 3, dest=block[16], chain=block[2])
+                        dma_start(DMAChannelDir.S2MM, 3, dest=block[16],
+                                  chain=block[2])
                     with block[16]:
                         use_lock(_ml["dy_done"], LockAction.AcquireGreaterEqual, value=1)
                         dma_bd(_dy, offset=0, len=M_TILE_K8192)
@@ -5176,7 +5207,34 @@ def _emit_call2_c2(sym: str, with_down: bool, *, attn_wave0: bool = False,
                             EndOp()
                     dma_start_task(qt)
                     in_tasks.append(qt)
-                    if attn_resident:
+                    if _A_MEMKV:
+                        # MEMKV: the FULL per-group K/V cache streams in ONE shim
+                        # BD each (pkt 16 -> add S2MM0/S2MM1, the proven routing).
+                        # The add-mem ring's A_N_BUF_FILLS fill-BDs each pull one
+                        # A_CHUNKS_PER_BUF-tile slice off the stream, gated by the
+                        # add k_avail/v_avail locks -> stream backpressure drips
+                        # the 64 KB into the 16 KB L1 double-buffer.  ONE shim BD
+                        # regardless of A_N_CHUNKS -> shim BD usage is CONSTANT,
+                        # so context length no longer hits the ~16-BD cap.  Host
+                        # pre-tiles each chunk 8x8 col-block-major (FLAT copy).
+                        kt = dma_configure_task_for(f"air_channel_{AK_CH}_{g}")
+                        with bds(kt) as bd:
+                            with bd[0]:
+                                dma_bd(arg_k, offset=kv_base, len=A_KV_SIZE,
+                                       packet=(0, 16))
+                                EndOp()
+                        dma_start_task(kt)
+                        in_tasks.append(kt)
+                        vt = dma_configure_task_for(f"air_channel_{AV_CH}_{g}")
+                        with bds(vt) as bd:
+                            with bd[0]:
+                                dma_bd(arg_v, offset=kv_base, len=A_KV_SIZE,
+                                       packet=(0, 16))
+                                EndOp()
+                        dma_start_task(vt)
+                        in_tasks.append(vt)
+                        continue_chunks = False
+                    elif attn_resident:
                         # Resident: K/V fed as A_N_BUF_FILLS DMAs of
                         # A_CHUNKS_PER_BUF chunks each (matching the (128,64)
                         # double-buffer refill ring).  Host pre-tiles each chunk
@@ -5673,9 +5731,18 @@ def build_o_gemv_ffn_module(
                 dispatch_sequence = DEFAULT_DISPATCH_SEQUENCE
         if _c2_attn:
             from ._emit import c2_attn_host_arg_types
+            import os as _os_disp
+            # Resident chunk count: MEMKV (memtile-staged KV) lifts the 4-chunk
+            # shim-direct cap to PYTHOC_C2_ATTN_MAX_CHUNKS.  Must match the inner
+            # _emit_call2_c2 A_MAX_CHUNKS (same env) or the run sig mismatches.
+            _disp_memkv = (_c2_attn_resident
+                           and _os_disp.environ.get("PYTHOC_C2_ATTN_MEMKV", "0") == "1")
+            _disp_res_chunks = (
+                int(_os_disp.environ.get("PYTHOC_C2_ATTN_MAX_CHUNKS", "8"))
+                if _disp_memkv else 4)
             _disp_host_tys = c2_attn_host_arg_types(
                 EMB_DIM, HIDDEN_DIM, n_groups=8,
-                n_chunks=(4 if _c2_attn_resident
+                n_chunks=(_disp_res_chunks if _c2_attn_resident
                           else (_c2_attn_seq_len + 63) // 64),
                 resident=_c2_attn_resident)
         else:

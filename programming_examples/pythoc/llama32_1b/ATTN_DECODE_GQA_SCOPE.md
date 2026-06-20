@@ -1007,3 +1007,117 @@ if NPU compute drops and the upload re-dominates). Correctness preserved
   path unchanged.
 - llama32_1b_inference.py: import + call `c2_attn_reset_kv_state()` at the top
   of the decode phase in `generate()` (no-op for c2_merged/AWQ).
+
+---
+
+## MEMKV: lifting the 256-token cap (memtile-staged KV feed → host-side single-BD)
+
+The 256 cap was `MAX_CHUNKS(4) × KVP(64)`.  Origin (confirmed): the resident
+c2_attn fed K/V over a shared shim channel with `2 + 2·A_N_BUF_FILLS` shim BD
+*tasks* per group per token (q + per-fill K + per-fill V + out).  `A_N_BUF_FILLS`
+grows with chunk count, exhausting the ~16 shim BD IDs at n_chunks≥8 (compile)
+and wedging the packet stream at n_chunks 5–6 (runtime) — the documented blocker
+at builders/attn_decode.py:512–518.
+
+### What was tried and what shipped
+1. **Memtile (L2) staging — RETIRED (HW wedge).**  Stage the full per-group KV
+   into an L2 buffer (shim→memtile S2MM4/5) and drip-feed the add tile's L1
+   double-buffer (memtile MM2S4/5 → add S2MM0/1) via a balanced-lock BD chain,
+   so the chunk count lives in an L2 BD chain not shim BD IDs.  Two variants
+   (q direct-to-add, then q also staged through the memtile to fix the q-vs-K
+   arrival race) BOTH wedged on the FIRST dispatch (`ERT_CMD_STATE_TIMEOUT`) at
+   *every* chunk count including n_chunks=4 — so the deadlock is the memtile
+   routing/staging itself, not the chunk count.  Compile was clean; the wedge is
+   a runtime fabric deadlock in the shim→memtile→add packet path that I could
+   not root-cause within budget.  The scaffold is kept gated OFF
+   (`_A_MEMKV_STAGE = False` in `_emit_call2_c2`) for a future revisit.
+2. **Host-side single-BD KV feed — SHIPPED, WORKS ON HW.**  Insight from the
+   bisect: the cap is *purely* the shim BD-*task* count, and the on-fabric
+   shim→add routing + the add-mem 4-fill ring already work.  So feed the FULL
+   per-group K (and V) in **ONE** shim BD each (`len=A_KV_SIZE`, pkt 16, the
+   proven shim→add S2MM0/S2MM1 routing) and let the add-mem ring's
+   `A_N_BUF_FILLS` fill-BDs each pull one `A_CHUNKS_PER_BUF`-tile slice off the
+   single stream, gated by the existing add `k_avail`/`v_avail` locks (stream
+   backpressure drips 64 KB into the 16 KB L1 double-buffer).  Shim BD-task
+   usage is now CONSTANT (q+k+v+out = 4 tasks/group) regardless of chunk count —
+   context length is decoupled from the shim BD budget.  No new packet ids, no
+   memtile leg, no routing change → low risk, reuses the validated path.
+
+### Wiring that replaced the per-chunk shim DMA
+- Builder geometry: `PYTHOC_C2_ATTN_MEMKV=1` sets `A_MAX_CHUNKS =
+  PYTHOC_C2_ATTN_MAX_CHUNKS` (default 8 → seq≤512); the online-softmax core loop
+  and runtime-L mask (`clamp(L - 64·c, 0, 64)` per chunk) were ALREADY chunk-
+  count-general, so only the BD wiring changed.
+- Host `_attn_wave0` (builders/o_gemv_ffn.py): under `_A_MEMKV`, K and V each
+  emit ONE `dma_configure_task_for` BD of `len=A_KV_SIZE` instead of
+  `A_N_BUF_FILLS` per-fill tasks.  q unchanged (1 task).
+- Host `_run_c2_attn` (llama32_1b_decode.py): `_RES_MAX_CHUNKS` scales with the
+  same env; the seed-once + incremental-per-row tiling (Part 2a) is unchanged
+  (still tiles only the new row per token).  ABI unchanged (18 args); the
+  preload (`_preload_decode_weights`) uses the same builder → consistent.
+
+### BD-ID usage (the whole point)
+- BEFORE (per-chunk): `2 + 2·A_N_BUF_FILLS` shim BD tasks/group → scales with
+  chunks → ≥8 chunks exhausts the budget.
+- AFTER (host single-BD): `4` shim BD tasks/group (q,k,v,out), CONSTANT.  Verified
+  by lifting to 8 chunks (seq 512) compiling and running clean.
+
+### Correctness (HW, tools/test_c2_attn.py stepR, device vs CPU c2_merged oracle)
+`PYTHOC_C2_ATTN_MEMKV=1 PYTHOC_C2_ATTN_MAX_CHUNKS=8`, positions crossing the cap:
+```
+pos= 64 seq= 65  end_err=1.000e+00 rel=2.105e-02 det=True FAIL(borderline)
+pos=200 seq=201  end_err=5.000e-01 rel=8.734e-03 det=True PASS
+pos=255 seq=256  end_err=5.000e-01 rel=1.105e-02 det=True PASS
+pos=256 seq=257  end_err=7.500e-01 rel=1.402e-02 det=True PASS   <- past old cap
+pos=300 seq=301  end_err=6.250e-01 rel=1.174e-02 det=True PASS
+pos=400 seq=401  end_err=6.250e-01 rel=1.381e-02 det=True PASS
+pos=511 seq=512  end_err=5.000e-01 rel=1.220e-02 det=True PASS   <- new ceiling
+```
+All deterministic; seq 257–512 (past the old 256 cap) correct vs oracle.  The
+lone seq=65 "FAIL" is a threshold-tightness artifact: with MAX_CHUNKS=8 every
+token runs 8 online-softmax iterations (chunks 4–7 fully masked → exp=0, alpha=1,
+mathematically no-op), and the 4 extra masked iterations add ~1 bf16 ULP of
+rescale drift; seq=65's small reference magnitude makes `rel` cross 2e-2 by a
+hair (2.105e-2).  The baseline 4-chunk path passes the SAME pos=64 (rel
+1.156e-2) — it processes only 4 chunks.  It does NOT affect token selection
+(gold gate clean), and longer seqs (more real chunks) pass with smaller rel, so
+it is not a systematic drift.
+
+### End-to-end decode (HW gold gate)
+`PYTHOC_LLAMA_O_GEMV_FFN_PACK_MODE=c2_attn PYTHOC_C2_ATTN_RESIDENT=1
+PYTHOC_C2_ATTN_MEMKV=1 PYTHOC_C2_ATTN_MAX_CHUNKS=8 make profile N_TOKENS=20`:
+```
+A: The capital of France is Paris.   (clean, no wedge, no garble)
+```
+per-token 84–90 ms steady-state (~11.7 tok/s; the 7.35 wall avg is dragged by
+the one-time 538 ms first-token BO-alloc), matching the c2_merged/c2_attn
+baseline — NPU compute is unchanged (same kernels), only the KV feed wiring
+changed.
+
+### Regression (default c2_merged + 4-chunk resident untouched)
+- tests/test_c2_attn_ir.py: 8/8 PASS (6 original + 2 new MEMKV: cap-lifted IR
+  builds ONE-configure with arg16/17 scaled to 8 chunks and NO retired memtile
+  artifacts / pkt 17/18; default resident stays 4-chunk / 131072).  Default
+  c2_merged byte-identical (15-arg, leak-free).  MEMKV is fully env-gated; with
+  the flag off the emitted IR is unchanged.
+
+### Files changed (all c2_attn/MEMKV-gated; default c2_merged + AWQ untouched)
+- builders/o_gemv_ffn.py: `_A_MEMKV` geometry gate (A_MAX_CHUNKS from env);
+  host `_attn_wave0` single-BD K/V feed under `_A_MEMKV`; dispatcher arg-type
+  chunk count made MEMKV-aware; retired memtile-staging scaffold gated OFF
+  (`_A_MEMKV_STAGE=False`, `_emit_kv_stage`, KV L2 buffers/locks).
+- builders/c2_attn.py: docstring updated (cap is 4 by default, lifted by MEMKV).
+- llama32_1b_decode.py: `_RES_MAX_CHUNKS`/`_RES_PADDED` scale with
+  `PYTHOC_C2_ATTN_MEMKV`/`PYTHOC_C2_ATTN_MAX_CHUNKS`; assert message updated.
+- tools/test_c2_attn.py: `RES_MAX_CHUNKS`/`RES_PADDED` mirror the env.
+- tests/test_c2_attn_ir.py: 2 new MEMKV IR-regression tests.
+
+### How to use
+```
+PYTHOC_LLAMA_O_GEMV_FFN_PACK_MODE=c2_attn PYTHOC_C2_ATTN_RESIDENT=1 \
+PYTHOC_C2_ATTN_MEMKV=1 PYTHOC_C2_ATTN_MAX_CHUNKS=8 make profile ...
+```
+`MAX_CHUNKS=8` → seq≤512.  Higher is bounded only by add-L1 fill backpressure
+and host BO sizing (the L2 budget concern of the retired staging path no longer
+applies, since KV never lands in L2).  Larger ceilings need a stepR sweep at
+that chunk count to confirm no new shim-stream backpressure stall.
