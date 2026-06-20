@@ -293,6 +293,21 @@ def _preload_decode_weights(decode_cache, weights, config, *, awq_lm_head=False)
 
     print("  Pre-loading decode weights into per-layer BOs...")
 
+    # When o_gemv_ffn runs the RESIDENT c2_attn collapsed device, its cache slot
+    # holds an 18-arg device (extended q/k/v ABI, wide arg1 scratch, resident
+    # attention herd).  The generic 15-arg c2_merged preload below would (a)
+    # dispatch the resident device with a MISMATCHED ABI -- leaving the
+    # forever-loop attention herd contending the NPU partition against the
+    # subsequent prefill (intermittent NaN/garble in the prefill first token),
+    # and (b) be wasted anyway: _run_c2_attn re-uploads every weight under its
+    # own per-layer bo_key (c2attn_o_gemv_ffn_L*), never reusing these BOs.  So
+    # skip the o_gemv_ffn weight preload in c2_attn mode; the resident device is
+    # loaded/dispatched correctly (18-arg) on the first decode token instead.
+    from llama32_1b_decode import decode_cache_signatures as _decode_sigs
+    _skip_ogf_preload = (
+        _decode_sigs().get("o_gemv_ffn", {}).get("pack_mode") == "c2_attn"
+    )
+
     rope_lut_q_dummy = np.zeros(n_heads * head_dim, dtype=bfloat16)
     rope_lut_k_dummy = np.zeros(n_kv_heads * head_dim, dtype=bfloat16)
 
@@ -322,30 +337,32 @@ def _preload_decode_weights(decode_cache, weights, config, *, awq_lm_head=False)
             bo_key=f"rms_gemv_rope_L{layer_idx}",
         )
 
-        # o_gemv_ffn: allocate + write weights
-        decode_cache.load_and_run(
-            "o_gemv_ffn",
-            OGF_BACKEND,
-            lw._wo_t,  # wo
-            np.zeros(emb_dim, dtype=bfloat16),  # attn_out
-            np.zeros(emb_dim, dtype=bfloat16),  # proj
-            np.zeros(emb_dim, dtype=bfloat16),  # x_residual
-            np.zeros(emb_dim, dtype=bfloat16),  # res1
-            lw.ffn_norm.reshape(emb_dim).astype(bfloat16),  # ffn_norm_w
-            np.zeros(emb_dim, dtype=bfloat16),  # normed2
-            lw._wgate_t,  # wgate
-            np.zeros(hidden_dim, dtype=bfloat16),  # gate
-            lw._wup_t,  # wup
-            np.zeros(hidden_dim, dtype=bfloat16),  # up
-            np.zeros(hidden_dim, dtype=bfloat16),  # swiglu
-            lw._wdown_t,  # wdown
-            np.zeros(emb_dim, dtype=bfloat16),  # down
-            np.zeros(emb_dim, dtype=bfloat16),  # output
-            output_indices=[14],
-            static_input_indices={0, 5, 7, 9, 12},
-            intermediate_indices={2, 4, 6, 8, 10, 11, 13, 14},
-            bo_key=f"o_gemv_ffn_L{layer_idx}",
-        )
+        # o_gemv_ffn: allocate + write weights (c2_merged 15-arg device only).
+        # Skipped under c2_attn -- see _skip_ogf_preload note above.
+        if not _skip_ogf_preload:
+            decode_cache.load_and_run(
+                "o_gemv_ffn",
+                OGF_BACKEND,
+                lw._wo_t,  # wo
+                np.zeros(emb_dim, dtype=bfloat16),  # attn_out
+                np.zeros(emb_dim, dtype=bfloat16),  # proj
+                np.zeros(emb_dim, dtype=bfloat16),  # x_residual
+                np.zeros(emb_dim, dtype=bfloat16),  # res1
+                lw.ffn_norm.reshape(emb_dim).astype(bfloat16),  # ffn_norm_w
+                np.zeros(emb_dim, dtype=bfloat16),  # normed2
+                lw._wgate_t,  # wgate
+                np.zeros(hidden_dim, dtype=bfloat16),  # gate
+                lw._wup_t,  # wup
+                np.zeros(hidden_dim, dtype=bfloat16),  # up
+                np.zeros(hidden_dim, dtype=bfloat16),  # swiglu
+                lw._wdown_t,  # wdown
+                np.zeros(emb_dim, dtype=bfloat16),  # down
+                np.zeros(emb_dim, dtype=bfloat16),  # output
+                output_indices=[14],
+                static_input_indices={0, 5, 7, 9, 12},
+                intermediate_indices={2, 4, 6, 8, 10, 11, 13, 14},
+                bo_key=f"o_gemv_ffn_L{layer_idx}",
+            )
 
     # LM Head GEMV weights (8 partitions).  Route to packed-AWQ when
     # `awq_lm_head=True` and weights.awq_lm_head is populated.
