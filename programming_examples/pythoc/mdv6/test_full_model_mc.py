@@ -94,7 +94,11 @@ def run_elan_mc(model_elan, input_hwc, H, W, ic, oc,
 
 def run_rn_mc(repncsp, inp, H, W, ic, oc,
               mc_rn1, sc_rn1, mc_rn3, sc_rn3, mc_rnm, sc_rnm,
-              trn1, orn1, trn3, orn3, trnm, ornm):
+              trn1, orn1, trn3, orn3, trnm, ornm,
+              return_concat=False):
+    """If return_concat=True, return (concat, repncsp.conv3) just BEFORE the rnm
+    GEMM instead of running it — lets run_re_mc fuse rnm+c3 into one ELF
+    (run_rnm_c3) behind MDV6_FUSE_RE8. Only used for the re8 20x20x128 shape."""
     """RepNCSP with multicore conv sub-layers + host CPU RepConv.
 
     Phase C step A: x1 and x2 are both 1x1 convs on the same `inp` input
@@ -132,6 +136,8 @@ def run_rn_mc(repncsp, inp, H, W, ic, oc,
         else:
             current = run_rn3_chain_geo(_chain_geo, current, pairs)
         concat = torch.cat([current, x2], dim=2)
+        if return_concat:
+            return concat, repncsp.conv3
         return rt(mc_rnm, sc_rnm, concat, fuse_bn(repncsp.conv3), H, W, oc, trnm, trnm, ornm, 1, 1, 0)
     for bn_block in repncsp.bottleneck:
         residual = current.clone()
@@ -188,6 +194,8 @@ def run_rn_mc(repncsp, inp, H, W, ic, oc,
                            H, W, neck, trn3, trn3, orn3, 1, 3, 1)
         current = (residual + conv2_out) if bn_block.residual else conv2_out
     concat = torch.cat([current, x2], dim=2)
+    if return_concat:
+        return concat, repncsp.conv3
     return rt(mc_rnm, sc_rnm, concat, fuse_bn(repncsp.conv3), H, W, oc, trnm, trnm, ornm, 1, 1, 0)
 
 
@@ -198,14 +206,34 @@ def run_re_mc(layer, inp, H, W, ic, oc, part, proc,
     half = part // 2
     c1 = rt(mc_c1, sc_c1, inp, fuse_bn(layer.conv1), H, W, part, tc1, tc1, oc1, 1, 1, 0)
     x1 = c1[:,:,:half]; x2 = c1[:,:,half:]
-    x3rn = run_rn_mc(layer.conv2[0], x2, H, W, half, proc,
-                      mc_rn1, sc_rn1, mc_rn3, sc_rn3, mc_rnm, sc_rnm,
-                      trn1, orn1, trn3, orn3, trnm, ornm)
-    x3 = rt(mc_c3, sc_c3, x3rn, fuse_bn(layer.conv2[1]), H, W, proc, tc3, tc3, oc3, 1, 3, 1)
-    x4rn = run_rn_mc(layer.conv3[0], x3, H, W, proc, proc,
-                      mc_rn1, sc_rn1, mc_rn3, sc_rn3, mc_rnm, sc_rnm,
-                      trn1, orn1, trn3, orn3, trnm, ornm)
-    x4 = rt(mc_c3, sc_c3, x4rn, fuse_bn(layer.conv3[1]), H, W, proc, tc3, tc3, oc3, 1, 3, 1)
+    # A1/A2: fuse the RepNCSP rnm GEMM + the following c3 3x3 into ONE merged ELF
+    # (run_rnm_c3, device-resident PAD(2) seam) per hop, replacing 2 launches with
+    # 1. Gated to the re8/re21 20x20x128 shape (the proven rnm_halo seam). The rnm
+    # input concat(chain_out, x2) is host-repacked to per-core rows; the c3 BN-scale
+    # is folded into the halo conv weights and BN-bias+SiLU applied host-side.
+    _fuse_rnm_c3 = (os.environ.get("MDV6_FUSE_RE8", "0") not in ('', '0', 'false', 'False')
+                    and H == 20 and W == 20 and proc == 128)
+    if _fuse_rnm_c3:
+        from conv.rnm_halo_runner import run_rnm_c3
+        cat3, conv3_mod3 = run_rn_mc(layer.conv2[0], x2, H, W, half, proc,
+                          mc_rn1, sc_rn1, mc_rn3, sc_rn3, mc_rnm, sc_rnm,
+                          trn1, orn1, trn3, orn3, trnm, ornm, return_concat=True)
+        x3 = run_rnm_c3(cat3, fuse_bn(conv3_mod3), fuse_bn(layer.conv2[1]),
+                        H, W, proc, mcr_mod=mcr)
+        cat4, conv3_mod4 = run_rn_mc(layer.conv3[0], x3, H, W, proc, proc,
+                          mc_rn1, sc_rn1, mc_rn3, sc_rn3, mc_rnm, sc_rnm,
+                          trn1, orn1, trn3, orn3, trnm, ornm, return_concat=True)
+        x4 = run_rnm_c3(cat4, fuse_bn(conv3_mod4), fuse_bn(layer.conv3[1]),
+                        H, W, proc, mcr_mod=mcr)
+    else:
+        x3rn = run_rn_mc(layer.conv2[0], x2, H, W, half, proc,
+                          mc_rn1, sc_rn1, mc_rn3, sc_rn3, mc_rnm, sc_rnm,
+                          trn1, orn1, trn3, orn3, trnm, ornm)
+        x3 = rt(mc_c3, sc_c3, x3rn, fuse_bn(layer.conv2[1]), H, W, proc, tc3, tc3, oc3, 1, 3, 1)
+        x4rn = run_rn_mc(layer.conv3[0], x3, H, W, proc, proc,
+                          mc_rn1, sc_rn1, mc_rn3, sc_rn3, mc_rnm, sc_rnm,
+                          trn1, orn1, trn3, orn3, trnm, ornm)
+        x4 = rt(mc_c3, sc_c3, x4rn, fuse_bn(layer.conv3[1]), H, W, proc, tc3, tc3, oc3, 1, 3, 1)
     # B1: on-device concat[x1,x2,x3,x4] -> c4. Gated to the re8/re21 shape
     # (20x20, 4x128 -> 256) the M0 proof targets bit-exactly. Replaces the host
     # torch.cat + a separate c4 GEMM launch (2 DDR round-trips of the fused
