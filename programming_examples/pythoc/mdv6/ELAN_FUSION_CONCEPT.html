@@ -47,6 +47,8 @@ concat on-chip · collapse ~9 launches → 1–2</div>
 (0/32768, max_diff 0.0); concat→conv4 is byte-identical to the host path. Binding constraint = ~29 hw-context ceiling + re4 shim-BDs, NOT L2 capacity.</div>
 <div class="sub" style="color:#4fc3f7">Reframe (from the PDI-merge study): the concat's real value is as a <b>stitching enabler</b> — removing the host concat/split lets a whole
 RepNCSPELAN block become one no-host-touch segment, stitchable into one ELF where host dispatches (~505 µs) become on-device PDI swaps (~40 µs). The win is dispatch consolidation, not the bounce.</div>
+<div class="sub" style="color:#ffc24d">STATUS (2026-06-21): all primitives proven on HW; rnm→c3 fusion integrated in-model (98→94 launches, 29→28 ctx, 0.1420 PASS) but <b>wall NEUTRAL</b>.
+Full single-ELF block blocked on a chain→rnm tiles→rows reformat. Dispatch reduction confirmed wall-flat at this scope — see §5.</div>
 
 <svg width="0" height="0"><defs>
 <marker id="a" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#7b8597"/></marker>
@@ -216,7 +218,7 @@ TPC=12 already overflows it (the same 24&gt;16 wall that disables re4's rnm-fold
 harder; re4 likely needs BD relief first.</div>
 </div>
 
-<h2>5 · Payoff &amp; milestone ladder (design target)</h2>
+<h2>5 · Milestone ladder &amp; measured outcome</h2>
 <div class="panel">
 <ul>
 <li><b>Milestone 0 — standalone concat proof: <span class="green">DONE ✓ (2026-06-21)</span></b> on-device strided
@@ -226,20 +228,28 @@ strided gather <code>rt.fill</code> (§2). Files: <code>conv/aie2_concat_proof.p
 Limits found: <code>fill</code> dest is linear (interleave goes in source strides); DMA BD inner-dim ≤1023;
 split/join+passthrough-copy deadlocks (use split/join+GEMM); <code>iron.tensor(u16)</code> silently promotes to
 u32 — pin <code>dtype=np.uint16</code>.</li>
-<li><b>Milestone 1 — fuse conv4's concat:</b> remove the host concat + one launch for every re8 block
-(2 blocks/frame). <span class="dim">small, low risk once M0 lands.</span></li>
-<li><b>Milestone 2 — chain→c3→concat resident:</b> keep the branch outputs in L2 across the chain and c3
-without DDR bounce. This is where the re-tile bridge (§3) is the risk. <span class="dim">multi-day, real BD/layout work.</span></li>
-<li><b>Milestone 3 — whole block = 1–2 launches:</b> conv1→split→branches→concat→conv4 on one device.</li>
+<li><b>Producer→consumer stitch <span class="green">DONE ✓</span></b> — <code>build_merged chain_links=[(prod_out,cons_in)]</code>:
+device-resident intermediate, 1 ELF / 1 hw_context, bit-exact. Measured PDI-swap floor <b>~39 µs vs ~505 µs host dispatch</b>.
+A merged ELF = 1 context regardless of sub-device count (B2a: 2 GEMMs → ctx 2→1).</li>
+<li><b>chain as 1-context xrt.elf <span class="green">DONE ✓</span></b> — the rn3 chain migrated off ResidentXCLBinRunner into a merged ELF, bit-exact.</li>
+<li><b>KEYSTONE — halo-gather 3×3 from padded-HWC <span class="green">DONE ✓</span></b> — a 3×3 conv reads halo'd windows
+directly from a padded image via an overlapping-window <code>rt.fill</code> TAP (overlap is only forbidden for <code>split</code>).
+Eliminates the 4.08× im2col blowup that blocked conv0→conv1, chain→c3 and full-block fusion. OC=128 fits L1 via per-oc-block C-drain.</li>
+<li><b>rnm→c3 device-resident seam <span class="green">DONE ✓</span></b> — the real 128→128 model seam (rnm 1×1 drains
+PAD-padded HWC → halo_c3 reads it), 1 ELF / 1 ctx, bit-exact 0.037.</li>
+<li><b>In-model integration <span class="green">DONE ✓</span></b> — rnm→c3 fused across all 4 re8 hops behind
+<code>MDV6_FUSE_RE8</code>: launches <b>98→94</b>, hw_context <b>29→28</b>, accuracy 0.1420 PASS, <b class="amber">wall neutral</b>.</li>
+<li><b>Full single-ELF block <span class="red">BLOCKED</span></b> — gated on a <code>chain→rnm</code> tiles→rows reformat
+(chain drains 8×8 tiles; rnm wants per-core rows + x2-interleave — no single TAP bridges them) and the chain's separate runtime context.</li>
 </ul>
-<p class="lead"><b>Payoff (scoped):</b> a re8 block collapses ~5–7 sub-launches → 1–2. But the scope is blunt about the
-ceiling: dispatch-count reduction is <b>wall-flat</b> (launch_gap is already at its floor), so the win comes only
-from removing the <b>chain→host→3×3 DDR bounces</b>, not launches — <span class="amber">~2–5 ms for re8 alone</span>
-(re8 is the smallest geometry, fired once/frame). The lever only gets big if extended to re6/re4, whose c3 convs
-dominate npu_run (mc_re4_c3 18 ms, mc_re6_c3 17 ms, mc_elan_c3 12 ms) → potentially 15–40 ms — but those hit the
-shim-BD ceiling (re4) and multi-memtile span (re6). <span class="red">Hard bound:</span> the concat removes plumbing,
-<i>not compute</i>, so it can't beat the c3 kernel-compute floor — making the convs themselves faster (BFP576/wider
-matmul) is the complementary, larger lever.</p>
+<p class="lead"><b>Measured outcome (2026-06-21):</b> every primitive is HW-proven and the rnm→c3 fusion is integrated in the
+live model bit-exact — but at re8 scale the <b>wall is neutral</b> (−4 launches is below noise; launch_gap is already at its
+floor, and the concat/stitch remove <i>plumbing, not compute</i>). This re-confirms the session's recurring finding:
+dispatch/context reduction does not move this wall at achievable scope (packed-GEMM −9 = flat; rnm-fold regressed; re8 fusion −4 = flat).
+The model-wide ~40 ms target would need re6/re4 fusion + the chain→rnm reformat + BN/SiLU-in-kernel + displacing tail ELFs — a
+multi-week rollout whose payoff is still bounded by dispatch-floor economics. <span class="red">Hard bound:</span> the heavy c3
+kernel compute stays; making the convs themselves faster (BFP576/wider matmul) is the complementary, larger lever. The fusion work
+is banked as a <b>de-risked, gated primitive library</b> (all seams proven), ready for that rollout if/when funded.</p>
 </div>
 
 <p class="sub" style="margin-top:36px">Concept sketch for discussion — pairs with the agent's feasibility scope (L2 budget, BD/TAP layout,
