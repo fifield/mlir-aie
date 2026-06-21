@@ -301,3 +301,11 @@ B1 concat→c4 ✓ · KEYSTONE halo-gather 3×3 from padded-HWC ✓. → full re
 - Model seam = rnm(1×1 over concat(bottleneck64, x2)) → c3(3×3, 128→128). Chain emits 64ch (bottleneck), NOT c3's 128ch input.
 - Need: concat (M0✓) → rnm 1×1 GEMM (✓) → emit PAD-padded HWC output → halo_c3 OC=128 (✓ now) reads it device-resident.
 - Composes proven pieces + M0-style padded-output placement (place 20×20×128 into 24×24×128 padded buffer).
+
+### rnm→c3 SEAM DONE ✓ (verified) — both re8 blockers now CLEARED
+- S1: rnm 1×1 GEMM (128→128) drains PAD(2)-padded HWC (24/28-img), de-pad bit-exact 0.023, border all-zero,
+  seam→halo_c3 standalone 0.019. Drain TAP offset=((PAD+r0)*IMG+PAD)*oc, out_d0≤1023 factored. Files: conv/aie2_gemm_pad_out.py, test_gemm_pad_out_hw.py.
+- S2: rnm→halo_c3 in ONE merged ELF, chain_links=[(0,2,1,0)] (memref<100352> device-resident), OC=128 stream_oc=block,
+  shift=PAD-1 baked. **hw_context 2→1**, bit-exact 0.037 at the REAL 128→128 model seam. Files: conv/build_rnm_halo_merged.py, test_rnm_halo_merged_hw.py.
+- S3 assess: full block GO, no blocker. 3 seams proven (chain→rnm=B2a, rnm→halo_c3=this, concat→c4=M0/B1).
+  Remaining = layout-bridging between hops (tile↔row↔padded), ~3 milestones, NOT topology/L1/deadlock.
