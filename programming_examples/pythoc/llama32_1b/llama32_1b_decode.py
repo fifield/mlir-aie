@@ -275,11 +275,14 @@ def run_decode_block(
     k_cache_layer[:, current_pos, :] = k_roped
     v_cache_layer[:, current_pos, :] = v.reshape(n_kv_heads, head_dim)
 
-    # --- Attention: CPU by default; on-NPU wave 0 under o_gemv_ffn=c2_attn ---
+    # --- Attention: CPU by default; on-NPU wave 0 under o_gemv_ffn=c2_attn
+    #     (BF16) or o_gemv_ffn_awq=c2_attn (AWQ uint4 path). ---
     from kernel_builder import aie_ir_gen as _air
     _ogf_mode = _air.decode_pack_modes().get("o_gemv_ffn")
     _c2_attn = (_ogf_mode == "c2_attn") and awq_layer_weights is None
-    if _c2_attn:
+    _awq_c2_attn = (awq_layer_weights is not None
+                    and _air.o_gemv_ffn_awq_pack_mode() == "c2_attn")
+    if _c2_attn or _awq_c2_attn:
         # c2_attn folds attention into call 2 as wave 0; no CPU attention.
         attn_out = None
     else:
@@ -296,6 +299,24 @@ def run_decode_block(
     # --- Call 2: o_gemv_ffn (8 launches, 15 args) ---
     # O GEMV + Add + RMSNorm + Gate/Up GEMV + SiLU*mul + Down GEMV + Add
     if awq_layer_weights is not None:
+        if _awq_c2_attn:
+            from llama32_1b_awq_runtime import o_gemv_ffn_awq_c2_attn_npu
+            return o_gemv_ffn_awq_c2_attn_npu(
+                cache,
+                layer_weights,
+                awq_layer_weights,
+                x_bf16,
+                q_roped,
+                k_cache_layer,
+                v_cache_layer,
+                current_pos,
+                emb_dim=emb_dim,
+                hidden_dim=hidden_dim,
+                n_heads=n_heads,
+                n_kv_heads=n_kv_heads,
+                head_dim=head_dim,
+                layer_idx=layer_idx,
+            )
         from llama32_1b_awq_runtime import o_gemv_ffn_awq_npu
         return o_gemv_ffn_awq_npu(
             cache,
