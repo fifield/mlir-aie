@@ -193,18 +193,24 @@ def halo_conv3x3_bfp_ocb(in_win: ptr[bf16, True], weight: ptr[bf16, True],
     This keeps the L1 weight buffer at one PAIR (IC=128: 36KB) so full OC=128
     (which would need a 288KB single slot) fits.
 
-    `oc` is unused for indexing (kept for signature parity); `ocp` selects the
-    pair only for the host-side weight/output offset bookkeeping, which is done
-    on the host -- the kernel always works on the slot it is handed."""
+    c_buf is the per-PAIR L1 buffer [2, M_BLOCKS=8, 8, 8] f32 = PAIR_C (4KB).
+    The kernel always writes its pair at cbase=0 (the pair's own buffer, which
+    the host then drains through the output FIFO into the right OUT offset).
+    This is the OC=128 C-drain: only ONE pair's C (4KB) is ever resident, vs
+    the full-OC C (OC=128: 32KB) that overflowed L1.
+
+    `oc`/`ocp` are unused for indexing (kept for signature parity); the kernel
+    always works on the per-pair slot it is handed — all pair offsetting (both
+    weights and the drained C) is done on the host."""
     set_ctrl_reg(9, 1)
     set_ctrl_reg(1, 12)
     PATCH_W: i32 = 10
     M_BLOCKS: i32 = 8
     KKMAX: i32 = (ic // 8) * 9
     woff_b: i32 = KKMAX * 64
-    # this pair writes blocks 2*ocp, 2*ocp+1 of the full [N_BLK_OC,8,8,8] C
-    # buffer the host holds in L1; cbase = 2*ocp * M_BLOCKS * 64 (contiguous).
-    cbase: i32 = ocp * (2 * M_BLOCKS * 64)
+    # per-pair C-drain: c_buf is the pair's OWN [2, M_BLOCKS, 8, 8] buffer; write
+    # at cbase=0. Only ONE pair's C is resident in L1 (PAIR_C = 4KB) at a time.
+    cbase: i32 = 0
 
     # zero this pair's C accumulator: 2 oc-blocks * 8 M_BLOCKS * 64
     z: aie_vector[f32, 64] = zeros(f32, 64)
@@ -294,6 +300,94 @@ def halo_conv3x3_bfp_ocb(in_win: ptr[bf16, True], weight: ptr[bf16, True],
         store_v(c_buf + c01_off, acc01)
         store_v(c_buf + c10_off, acc10)
         store_v(c_buf + c11_off, acc11)
+        m = m + 2
+
+
+@aie_kernel
+def halo_conv3x3_bfp_ocb1(in_win: ptr[bf16, True], weight: ptr[bf16, True],
+                          c_buf: ptr[f32, True], ic: i32, oc: i32,
+                          ocp: i32) -> void:
+    """Per-SINGLE-oc-block streaming variant (OC=128 C-drain, tightest L1).
+
+    Same BFP576 math as halo_conv3x3_bfp_ocb but computes ONE oc-block (8 output
+    channels) per call. 2x1 register blocking: two m-rows (sp0, sp1) x one
+    oc-block n. The weight pointer points at THIS block's single-oc-block slot
+    (KKMAX*64 bf16 = 18KB for IC=128), and c_buf is this block's tiled
+    accumulator [M_BLOCKS=8, 8, 8] f32 = 2KB (cbase=0).
+
+    L1 budget IC=128: stack 4KB + wt 18KB + win 25KB + C 2KB = ~50KB < 64KB.
+    The per-PAIR variant (ocb) needs 36KB weights -> 70KB total, overflows; this
+    single-block variant is what makes OC=128 fit. N_BLK weight slots are
+    streamed (one per oc-block) and N_BLK C buffers are drained.
+
+    `oc`/`ocp` unused for indexing (host does all offsetting)."""
+    set_ctrl_reg(9, 1)
+    set_ctrl_reg(1, 12)
+    PATCH_W: i32 = 10
+    M_BLOCKS: i32 = 8
+    KKMAX: i32 = (ic // 8) * 9
+    cbase: i32 = 0
+
+    # zero this block's C: M_BLOCKS * 64
+    z: aie_vector[f32, 64] = zeros(f32, 64)
+    nz: i32 = 0
+    while nz < M_BLOCKS:
+        store_v(c_buf + cbase + nz * 64, z)
+        nz = nz + 1
+
+    m: i32 = 0
+    while m < M_BLOCKS:
+        c00_off: i32 = cbase + m * 64               # row m
+        c10_off: i32 = cbase + (m + 1) * 64         # row m+1
+        acc00: aie_vector[f32, 64] = load_v(c_buf + c00_off, 64)
+        acc10: aie_vector[f32, 64] = load_v(c_buf + c10_off, 64)
+        sp0: i32 = m * 8
+        sp1: i32 = sp0 + 8
+        b0_off: i32 = 0
+        k: i32 = 0
+        while k < KKMAX:
+            icb: i32 = k // 9
+            tp: i32 = k - icb * 9
+            kh: i32 = tp // 3
+            kw: i32 = tp - kh * 3
+            va0: aie_vector[bf16, 64] = _build_a64_halo(in_win, sp0, 8, 1, PATCH_W, ic, icb, kh, kw)
+            a0l: aie_vector[bf16, 32] = vector_extract(va0, 0, 32)
+            a0h: aie_vector[bf16, 32] = vector_extract(va0, 32, 32)
+            a0al: aie_vector[f32, 32] = v32bf16_to_v32accfloat(a0l)
+            a0ah: aie_vector[f32, 32] = v32bf16_to_v32accfloat(a0h)
+            a0ac: aie_vector[f32, 64] = concat(a0al, a0ah)
+            a0m, a0e = v64accfloat_to_v64bfp16ebs8(a0ac)
+            vb0: aie_vector[bf16, 64] = load_v(weight + b0_off, 64)
+            b0_off = b0_off + 64
+            b0i: aie_vector[i32, 32] = vector_cast(vb0, i32, 32)
+            b0lo: aie_vector[i32, 16] = vector_extract(b0i, 0, 16)
+            b0hi: aie_vector[i32, 16] = vector_extract(b0i, 16, 16)
+            b0ev: aie_vector[i32, 16] = vshuffle(b0lo, b0hi, 52)
+            b0od: aie_vector[i32, 16] = vshuffle(b0lo, b0hi, 53)
+            b0cat: aie_vector[i32, 32] = concat(b0ev, b0od)
+            vb0s: aie_vector[bf16, 64] = vector_cast(b0cat, bf16, 64)
+            b0sl: aie_vector[bf16, 32] = vector_extract(vb0s, 0, 32)
+            b0sh: aie_vector[bf16, 32] = vector_extract(vb0s, 32, 32)
+            b0al: aie_vector[f32, 32] = v32bf16_to_v32accfloat(b0sl)
+            b0ah: aie_vector[f32, 32] = v32bf16_to_v32accfloat(b0sh)
+            b0ac: aie_vector[f32, 64] = concat(b0al, b0ah)
+            b0m, b0e = v64accfloat_to_v64bfp16ebs8(b0ac)
+            i00: aie_vector[i32, 64] = vector_cast(acc00, i32, 64)
+            r00: aie_vector[i32, 64] = BFP576_BFP576_ACC2048_mac_conf(a0m, a0e, b0m, b0e, i00, MAC_CONF)
+            acc00 = vector_cast(r00, f32, 64)
+            va1: aie_vector[bf16, 64] = _build_a64_halo(in_win, sp1, 8, 1, PATCH_W, ic, icb, kh, kw)
+            a1l: aie_vector[bf16, 32] = vector_extract(va1, 0, 32)
+            a1h: aie_vector[bf16, 32] = vector_extract(va1, 32, 32)
+            a1al: aie_vector[f32, 32] = v32bf16_to_v32accfloat(a1l)
+            a1ah: aie_vector[f32, 32] = v32bf16_to_v32accfloat(a1h)
+            a1ac: aie_vector[f32, 64] = concat(a1al, a1ah)
+            a1m, a1e = v64accfloat_to_v64bfp16ebs8(a1ac)
+            i10: aie_vector[i32, 64] = vector_cast(acc10, i32, 64)
+            r10: aie_vector[i32, 64] = BFP576_BFP576_ACC2048_mac_conf(a1m, a1e, b0m, b0e, i10, MAC_CONF)
+            acc10 = vector_cast(r10, f32, 64)
+            k = k + 1
+        store_v(c_buf + c00_off, acc00)
+        store_v(c_buf + c10_off, acc10)
         m = m + 2
 
 
