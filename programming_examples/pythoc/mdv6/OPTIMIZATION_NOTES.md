@@ -328,3 +328,13 @@ B1 concat→c4 ✓ · KEYSTONE halo-gather 3×3 from padded-HWC ✓. → full re
 - BUT wall is NEUTRAL at re8 scale (-4 launches below noise) — re-confirms dispatch/context reduction doesn't move the wall here.
 - Model-wide ~40ms would need: re6/re4 fusion + a chain→rnm tiles→rows reformat + BN/SiLU-in-kernel + displacing tail ELFs.
   Multi-week; payoff still bounded by dispatch-floor economics (heavy compute stays; launch_gap already at floor).
+
+### chain→rnm→c3 FULL HOP in ONE ELF ✓ (verified, agent-committed C1/C2/C3)
+- The LAST seam (chain→rnm) solved: x2 host-padded to the SAME 28×28 PAD(2) layout as the chain, stacked into a
+  widened chain A/B BO (stack_x2_ch=HALF_ELEMS=50176 → [chain64 | x2_64]); ONE gather TAP does de-pad+concat
+  (sizes=[cc,20,2,64], strides=[IMG*ic2, ic2, HALF_ELEMS, 1]) → rnm GEMM. chain drains a CONTIGUOUS padded image (verified).
+- C1 depad+concat→rnm 0.0195 / C2 chain→rnm 2→1 / C3 chain→rnm→halo_c3 FULL HOP **3→1 ctx**, 0.045. All HW PASS.
+- Files: conv/aie2_depad_concat_gemm.py, conv/build_chain_rnm_merged.py, conv/build_chain_rnm_halo_merged.py + tests;
+  conv/aie2_rn3_chain_geo.py (gated stack_x2_ch, default 0 = unchanged). Commits 828ee2498/6278ef0db/64d27e573.
+- A3 (full single-ELF re8 hop) ACHIEVED. Remaining: wire run_chain_rnm_c3 into run_re_mc (replace run_rnm_c3 for re8)
+  → folds the chain's separate ResidentXCLBin dispatch into the merged ELF; measure frame launch/ctx delta.
