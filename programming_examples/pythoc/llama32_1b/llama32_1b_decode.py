@@ -52,6 +52,26 @@ def decode_cache_signatures():
     }
 
 
+def awq_decode_cache_signatures():
+    """Per-kernel build signatures for the lazily-compiled AWQ decode kernels.
+
+    Mirror of `decode_cache_signatures` for the `*_awq` kernels. Unlike the
+    BF16 kernels (compiled eagerly by `compile_decode_kernels`), the AWQ
+    kernels are compiled lazily during preload / first decode token, so they
+    need the SAME pack-mode signature in the manifest to (a) persist the ELF
+    across processes and (b) auto-rebuild when a `PYTHOC_LLAMA_*_AWQ_PACK_MODE`
+    env toggle changes the emitted IR (e.g. c2_merged <-> c2_attn share the
+    `o_gemv_ffn_awq` cache slot).
+    """
+    from kernel_builder import aie_ir_gen
+
+    return {
+        "o_gemv_ffn_awq": {"pack_mode": aie_ir_gen.o_gemv_ffn_awq_pack_mode()},
+        "rms_gemv_rope_awq": {
+            "pack_mode": aie_ir_gen.rms_gemv_rope_awq_pack_mode()},
+    }
+
+
 def compile_decode_kernels(cache, config):
     """Compile the 3 merged decode kernels (mlir-aie -> aiecc -> ELF)."""
     from kernel_builder.external_kernels import compile_all_external_kernels

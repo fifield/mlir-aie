@@ -156,6 +156,17 @@ def o_gemv_ffn_awq_pack_mode() -> str:
         _O_GEMV_FFN_AWQ_PACK_ENV, _O_GEMV_FFN_AWQ_PACK_DEFAULT)
 
 
+def rms_gemv_rope_awq_pack_mode() -> str:
+    """Resolve the AWQ ``rms_gemv_rope_awq`` device-packing mode from the env.
+
+    Mirror of ``o_gemv_ffn_awq_pack_mode`` -- exposes the resolution so the AWQ
+    manifest signature can auto-distinguish ELFs built under different pack
+    modes (a pack-mode toggle invalidates the cached binary across processes).
+    """
+    return _resolve_pack_mode(
+        _RMS_GEMV_ROPE_AWQ_PACK_ENV, _RMS_GEMV_ROPE_AWQ_PACK_DEFAULT)
+
+
 def _ensure_builders_on_path() -> None:
     project_root = _REFERENCE_DIR.parent
     p = str(project_root)

@@ -485,7 +485,11 @@ def _preload_decode_weights_awq(decode_cache, weights, config):
                 verbose=getattr(decode_cache, "verbose", False),
             ),
             instance_name="rms_gemv_rope_awq",
+            config={"pack_mode": _aig.rms_gemv_rope_awq_pack_mode()},
         )
+        # Persist the lazily-compiled ELF so the next process reuses it (the
+        # merge in _save_manifest keeps the o_gemv_ffn_awq / BF16 entries).
+        decode_cache._save_manifest()
 
     rope_lut_q_dummy = np.zeros(n_heads * head_dim, dtype=bfloat16)
     rope_lut_k_dummy = np.zeros(n_kv_heads * head_dim, dtype=bfloat16)
@@ -969,7 +973,27 @@ def build_session(args) -> Session:
         # mid-AWQ-run is both wasteful and interferes with the subsequent
         # AWQ-kernel compile.
         if args.quant == "awq":
-            decode_ok = decode_cache.load_manifest()
+            # AWQ kernels (o_gemv_ffn_awq, rms_gemv_rope_awq) compile lazily
+            # during preload / first decode token; the manifest lets a warm
+            # process reuse the ELF and skip the ~7s recompile. Load WITHOUT
+            # expected_configs so all present entries (incl. the BF16 kernels the
+            # unconditional _preload_decode_weights needs) populate artifacts --
+            # the atomic expected_configs path would drop everything on a single
+            # AWQ-config mismatch. Then SURGICALLY evict only the AWQ kernels
+            # whose cached pack mode != the current env, so a c2_merged<->c2_attn
+            # toggle (shared o_gemv_ffn_awq slot) rebuilds that ELF instead of
+            # running a stale one, while leaving the rest loaded. A stale/missing
+            # load is non-fatal -- the lazy compile path fills any gap.
+            from llama32_1b_decode import awq_decode_cache_signatures
+            decode_cache.load_manifest()
+            for _kn, _sig in awq_decode_cache_signatures().items():
+                if (_kn in decode_cache.artifacts
+                        and decode_cache.configs.get(_kn) != _sig):
+                    print(f"  AWQ cache for '{_kn}' is stale "
+                          f"({decode_cache.configs.get(_kn)} != {_sig}); "
+                          f"will rebuild.")
+                    del decode_cache.artifacts[_kn]
+            decode_ok = True
         else:
             from llama32_1b_decode import decode_cache_signatures
             decode_sigs = decode_cache_signatures()
