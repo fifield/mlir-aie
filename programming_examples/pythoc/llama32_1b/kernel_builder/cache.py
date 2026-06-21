@@ -360,7 +360,21 @@ class KernelCache:
     # ----- Manifest persistence --------------------------------------------
 
     def _save_manifest(self):
+        # Merge with the existing on-disk manifest rather than overwriting it.
+        # The decode cache is shared across kernel families that populate
+        # `self.artifacts` at different times -- the BF16 kernels are written
+        # eagerly by compile_decode_kernels, while the lazily-compiled *_awq
+        # kernels are added during preload/decode. A plain overwrite from
+        # either path would drop the other family's entries (e.g. an AWQ run
+        # wiping the BF16 o_gemv_ffn entry), forcing a needless recompile on the
+        # next process. Same-name entries are updated; absent ones are kept.
+        path = self.cache_dir / self.MANIFEST_FILE
         manifest = {}
+        if path.exists():
+            try:
+                manifest = json.loads(path.read_text())
+            except (ValueError, OSError):
+                manifest = {}
         for name, art in self.artifacts.items():
             manifest[name] = {
                 "output_binary": str(art.output_binary),
@@ -368,9 +382,7 @@ class KernelCache:
                 "insts": None,
                 "config": self.configs.get(name),
             }
-        (self.cache_dir / self.MANIFEST_FILE).write_text(
-            json.dumps(manifest, indent=2)
-        )
+        path.write_text(json.dumps(manifest, indent=2))
         self._log(f"Saved manifest with {len(manifest)} entries")
 
     def manifest_exists(self):
