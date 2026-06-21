@@ -102,7 +102,14 @@ def geo_params(geo: str):
 
 
 def rn3_chain_geo(geo: str, n_iters: int = 2, stack_size: int = 4096, compute: int = 1,
-                  rnm: int = 0):
+                  rnm: int = 0, stack_x2_ch: int = 0):
+    """stack_x2_ch>0 (rnm=0 only): widen the A/B image BO by stack_x2_ch elems so
+    the chain output BO has room for an x2 concat half stacked above the chain's
+    50176-elem padded image. The chain writes only [0:IMG_ELEMS] (drain offsets
+    unchanged); the host pre-loads x2 into [IMG_ELEMS:IMG_ELEMS+stack_x2_ch] of
+    the final output BO. This makes the chain output == the C1 depad_concat_gemm
+    stacked input [chain_padded | x2_padded], enabling the chain->rnm device-
+    resident seam via a single chain_link (whole-arg alias)."""
     p = geo_params(geo)
     IC, COLS, PASSES = p["IC"], p["COLS"], p["PASSES"]
     WORKER_TILES, N_BLK, WSLOT = p["WORKER_TILES"], p["N_BLK"], p["WSLOT"]
@@ -126,6 +133,10 @@ def rn3_chain_geo(geo: str, n_iters: int = 2, stack_size: int = 4096, compute: i
     wt_elems = EPI_W0 + (EPI_WT if rnm else 0)
     X2_ROW0 = p["X2_ROW0"]
     img_elems = p["IMG_ELEMS_RNM"] if rnm else IMG_ELEMS
+    if stack_x2_ch and not rnm:
+        # widen A/B image BO for the stacked x2 concat half (chain writes only
+        # [0:IMG_ELEMS]; host loads x2 into the [IMG_ELEMS:] tail of the output)
+        img_elems = IMG_ELEMS + stack_x2_ch
     if rnm:
         # one x2 tile parked in scratch during the epilogue (8 rows x 12 x IC);
         # chain conv planes are dead by then, so no L1 growth
