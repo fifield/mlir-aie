@@ -83,6 +83,15 @@ TILE_SIZE = TILE_ROWS * HEAD_DIM     # 4096
 
 KERNEL_OBJECT = "attn_pythoc.o"
 
+
+def _attn_hp_sym(base: str) -> str:
+    """PYTHOC_ATTN_HP=1 -> bf16-MAC (no bfp16-ebs8) attention matmul variant.
+    Flag OFF -> BFP576 symbol UNCHANGED (byte-identical default)."""
+    import os
+    if os.environ.get("PYTHOC_ATTN_HP", "") == "1":
+        return base + "_hp"
+    return base
+
 # Tiling DMA dims.  In mlir-aie the ``dimensions`` on a shim ``dma_bd``
 # describe the access pattern into the HOST buffer; the L1 side (aie.mem
 # dma_bd) is linear.  So:
@@ -237,8 +246,8 @@ def _declare_attn_kernels():
         "zero_fill_g": _ef("zero_fill_g_bf16", [g_flat_ty]),
         "zero_fill_gp": _ef("zero_fill_gp_bf16", [gp_ty]),
         "neg_inf_fill_up": _ef("neg_inf_fill_up_bf16", [row_ty]),
-        "matmul_a_b": _ef("matmul_a_b_bf16", [qk_ty, qk_ty, g_flat_ty]),
-        "matmul_g_b": _ef("matmul_g_b_bf16", [g_flat_ty, v_ty, gp_ty]),
+        "matmul_a_b": _ef(_attn_hp_sym("matmul_a_b_bf16"), [qk_ty, qk_ty, g_flat_ty]),
+        "matmul_g_b": _ef(_attn_hp_sym("matmul_g_b_bf16"), [g_flat_ty, v_ty, gp_ty]),
         "fused_softmax": _ef("fused_softmax",
                              [g_flat_ty, row_ty, row_ty, row_ty]),
         "div_gp_sp": _ef("div_gp_sp", [row_ty, gp_ty]),
@@ -434,8 +443,8 @@ def _declare_attn_kernels_online():
         "zero_fill_gp": _ef("zero_fill_gp_bf16", [gp_ty]),
         "zero_fill_sp": _ef("zero_fill_sp_bf16", [row_ty]),
         "neg_inf_fill_up": _ef("neg_inf_fill_up_bf16", [row_ty]),
-        "matmul_a_b": _ef("matmul_a_b_bf16", [qk_ty, qk_ty, g_flat_ty]),
-        "matmul_g_b": _ef("matmul_g_b_bf16", [g_flat_ty, v_ty, gp_ty]),
+        "matmul_a_b": _ef(_attn_hp_sym("matmul_a_b_bf16"), [qk_ty, qk_ty, g_flat_ty]),
+        "matmul_g_b": _ef(_attn_hp_sym("matmul_g_b_bf16"), [g_flat_ty, v_ty, gp_ty]),
         "fused_softmax": _ef("fused_softmax",
                              [g_flat_ty, row_ty, row_ty, row_ty]),
         "mul_r_gp": _ef("mul_r_gp", [row_ty, gp_ty]),
