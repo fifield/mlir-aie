@@ -22,7 +22,7 @@ import aie.iron as iron
 from aie.utils import NPUKernel, DefaultNPURuntime
 from aie.utils.compile import compile_mlir_module
 
-from aie2_halo_conv import halo_conv, TILE, PAD
+from aie2_halo_conv import halo_conv, TILE, PAD, deinterleave_stream_out
 from test_halo_conv_hw import bf16, to_u16, numpy_conv3x3, tile_b, untile_c
 
 
@@ -60,6 +60,7 @@ def main():
     DefaultNPURuntime.run(h, [iron.tensor(img_u16, dtype=np.uint16),
                               iron.tensor(wt_u16, dtype=np.uint16), out])
     flat = np.array(out.numpy())
+    flat = deinterleave_stream_out(flat, meta)
 
     got = np.zeros((gbound, gbound, oc), np.float32)
     for t in range(N_TILES):

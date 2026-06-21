@@ -287,3 +287,17 @@ B1 concat→c4 ✓ · KEYSTONE halo-gather 3×3 from padded-HWC ✓. → full re
 - Proven library: M0 concat, PoC-1 stitch, B2a ctx-neg merge, B1 concat→c4, chain-1-ctx, KEYSTONE halo-gather, B2c3-1 seam.
 - re8 full-block wall payoff ~5ms (modest); strategic payoff = context headroom → model-wide ~40ms (multi-week, per-block-class).
 - re6/re4 fit L1 more easily (OC overflow is re8/re21-specific) — but same rnm-into-chain subtlety.
+
+### OC=128 C-drain DONE ✓ (verified) — keystone halo-conv at the real mc_re8_c3 shape
+- IC=128→OC=128 fits L1 (~49KB: stack 4 + wt-slot 18 + window 25 + C 2KB) via per-SINGLE-oc-block C-drain
+  (new kernel halo_conv3x3_bfp_ocb1, BLK_UNIT=1). Per-pair (BLK_UNIT=2) overflowed at IC=128. Bit-exact 0.052 (BFP tol).
+- Output: single buffer, collapsed weight fill + contiguous linear drain (unit-major), host deinterleave_stream_out (free perm).
+  NO split/join restructure → no deadlock. Window gather still byte-identical.
+- Regression: OC=32/64 PASS. (IC=128/OC=64 pair mode retired — use stream_oc="block" for IC=128.)
+- Files: kernels/halo_conv3x3_bfp.py (+ocb1), conv/aie2_halo_conv.py (stream_oc block/pair), conv/test_halo_conv_oc128_hw.py (new).
+- B2c3-1 at OC=128: GO ~0.5d (pass stream_oc="block" + apply deinterleave at merged runner output).
+
+### REMAINING to full re8 model block: rnm→halo_c3 seam (the real model seam)
+- Model seam = rnm(1×1 over concat(bottleneck64, x2)) → c3(3×3, 128→128). Chain emits 64ch (bottleneck), NOT c3's 128ch input.
+- Need: concat (M0✓) → rnm 1×1 GEMM (✓) → emit PAD-padded HWC output → halo_c3 OC=128 (✓ now) reads it device-resident.
+- Composes proven pieces + M0-style padded-output placement (place 20×20×128 into 24×24×128 padded buffer).
