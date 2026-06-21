@@ -230,3 +230,144 @@ def o_gemv_ffn_awq_npu(
         bo_key=bo_key,
     )
     return np.asarray(results[14], dtype=bfloat16).reshape(emb_dim)
+
+
+def o_gemv_ffn_awq_c2_attn_npu(
+    cache,
+    layer_weights,
+    awq_layer_weights,
+    x_bf16,
+    q_roped,
+    k_cache_layer,
+    v_cache_layer,
+    current_pos,
+    *,
+    emb_dim: int,
+    hidden_dim: int,
+    n_heads: int,
+    n_kv_heads: int,
+    head_dim: int,
+    layer_idx=None,
+) -> np.ndarray:
+    """AWQ counterpart of llama32_1b_decode._run_c2_attn.
+
+    Runs call 2 under the RESIDENT AWQ ``c2_attn`` collapsed device: GQA decode
+    attention as WAVE 0 on the row-3 add herd (weight-free BFP576 BF16 kernels),
+    folded into the uint4 O+add1+gate/up+swiglu+down+add2 device.  ONE resident
+    PDI for all positions/layers; the trailing-chunk softmax mask is a RUNTIME
+    valid length L = current_pos+1 folded into q's free padding (untiled offset
+    256).  q + this layer's K/V cache pack into the 18-arg extended AWQ ABI:
+    base AWQ 15 args (uint4 weights, arg1 widened to the per-group attn-out
+    scratch) + q_all/k_all/v_all.
+
+    Reuses the weight-free host KV tiling from llama32_1b_decode (incremental
+    per-token tile, no O(seq) re-pack) so the host packer is single-sourced with
+    the BF16 c2_attn path.
+    """
+    from kernel_builder.aie_ir_gen import build_o_gemv_ffn_awq_ir
+    import llama32_1b_decode as _dec
+
+    group_size = n_heads // n_kv_heads
+    seq_len = current_pos + 1
+    RES_MAX_CHUNKS = _dec._RES_MAX_CHUNKS
+    RES_PADDED = _dec._RES_PADDED
+    assert seq_len <= RES_PADDED, (
+        f"AWQ c2_attn supports seq_len<={RES_PADDED} "
+        f"(MAX_CHUNKS={RES_MAX_CHUNKS}, MEMKV={_dec._C2_ATTN_MEMKV}); got "
+        f"{seq_len} (current_pos={current_pos})")
+    TILE_ROWS = _dec._RES_TILE_ROWS
+    tile_size = TILE_ROWS * head_dim
+    kv_size = RES_MAX_CHUNKS * tile_size
+
+    # ONE resident AWQ PDI for ALL positions/layers, built into the
+    # o_gemv_ffn_awq cache slot under its instance name (the pack-mode env makes
+    # build_o_gemv_ffn_awq_ir emit the c2_attn device).
+    name = "o_gemv_ffn_awq"
+    if name not in getattr(cache, "artifacts", {}):
+        cache.compile_and_cache(
+            name,
+            build_o_gemv_ffn_awq_ir(emb_dim, hidden_dim, group_size=128),
+            OGF_AWQ_BACKEND["instance_name"],
+        )
+
+    qh = np.asarray(q_roped, dtype=bfloat16).reshape(n_heads, head_dim)
+    q_all = np.zeros(n_kv_heads * tile_size, dtype=bfloat16)
+
+    # --- INCREMENTAL tiled K/V (weight-free; shared verbatim with the BF16
+    # c2_attn host packer so the on-host KV tiling cannot drift). ---
+    state_key = layer_idx if layer_idx is not None else id(k_cache_layer)
+    st = _dec._C2_ATTN_KV_STATE.get(state_key)
+    if st is None:
+        k_all = np.zeros(n_kv_heads * kv_size, dtype=bfloat16)
+        v_all = np.zeros(n_kv_heads * kv_size, dtype=bfloat16)
+        seed_pos = current_pos
+        for g in range(n_kv_heads):
+            for c in range(RES_MAX_CHUNKS):
+                lo = c * TILE_ROWS
+                hi = min(lo + TILE_ROWS, seed_pos)
+                if hi <= lo:
+                    break
+                k_pad = np.zeros((TILE_ROWS, head_dim), dtype=bfloat16)
+                v_pad = np.zeros((TILE_ROWS, head_dim), dtype=bfloat16)
+                k_pad[:hi - lo] = k_cache_layer[g, lo:hi, :].astype(bfloat16)
+                v_pad[:hi - lo] = v_cache_layer[g, lo:hi, :].astype(bfloat16)
+                base = g * kv_size + c * tile_size
+                k_all[base:base + tile_size] = _dec._c2_attn_tile_8x8(k_pad)
+                v_all[base:base + tile_size] = _dec._c2_attn_tile_8x8(v_pad)
+        st = {"k_all": k_all, "v_all": v_all, "seeded_pos": seed_pos}
+        _dec._C2_ATTN_KV_STATE[state_key] = st
+    k_all = st["k_all"]
+    v_all = st["v_all"]
+
+    for s in range(st["seeded_pos"], current_pos + 1):
+        c = s // TILE_ROWS
+        r = s % TILE_ROWS
+        off = _dec._C2_ATTN_ROW_OFF + r * 8
+        for g in range(n_kv_heads):
+            base = g * kv_size + c * tile_size
+            k_all[base + off] = k_cache_layer[g, s, :].astype(bfloat16)
+            v_all[base + off] = v_cache_layer[g, s, :].astype(bfloat16)
+    st["seeded_pos"] = current_pos + 1
+
+    for g in range(n_kv_heads):
+        q_pad = np.zeros((TILE_ROWS, head_dim), dtype=bfloat16)
+        q_pad[:group_size] = qh[g * group_size:(g + 1) * group_size]
+        q_all[g * tile_size:(g + 1) * tile_size] = q_pad.reshape(-1)
+        # Fold runtime valid length L = seq_len into q's free padding (untiled
+        # offset 256 = tiled (row4,col0); rows 0..3 hold the real heads).
+        q_all[g * tile_size + 256] = bfloat16(float(seq_len))
+
+    wo_w = awq_combined_weight(awq_layer_weights.wo)
+    wgate_w = awq_combined_weight(awq_layer_weights.w_gate)
+    wup_w = awq_combined_weight(awq_layer_weights.w_up)
+    wdown_w = awq_combined_weight(awq_layer_weights.w_down)
+
+    attn_scratch = np.zeros(n_kv_heads * tile_size, dtype=bfloat16)  # arg1 wide
+    proj_buf = np.zeros(emb_dim, dtype=bfloat16)
+    x_residual = np.ascontiguousarray(
+        np.asarray(x_bf16, dtype=bfloat16).reshape(emb_dim))
+    res1_buf = np.zeros(emb_dim, dtype=bfloat16)
+    ffn_norm = np.ascontiguousarray(
+        layer_weights.ffn_norm.reshape(emb_dim).astype(bfloat16))
+    normed2_buf = np.zeros(emb_dim, dtype=bfloat16)
+    gate_buf = np.zeros(hidden_dim, dtype=bfloat16)
+    up_buf = np.zeros(hidden_dim, dtype=bfloat16)
+    swiglu_buf = np.zeros(hidden_dim, dtype=bfloat16)
+    down_buf = np.zeros(emb_dim, dtype=bfloat16)
+    output_buf = np.zeros(emb_dim, dtype=bfloat16)
+
+    bo_key = (f"c2attn_o_gemv_ffn_awq_L{layer_idx}"
+              if layer_idx is not None else None)
+    results = cache.load_and_run(
+        name,
+        OGF_AWQ_BACKEND,
+        wo_w, attn_scratch, proj_buf, x_residual, res1_buf, ffn_norm,
+        normed2_buf, wgate_w, gate_buf, wup_w, up_buf, swiglu_buf, wdown_w,
+        down_buf, output_buf,
+        q_all, k_all, v_all,
+        output_indices=[14],
+        static_input_indices={0, 5, 7, 9, 12},
+        intermediate_indices={1, 2, 4, 6, 8, 10, 11, 13, 14},
+        bo_key=bo_key,
+    )
+    return np.asarray(results[14], dtype=bfloat16).reshape(emb_dim)

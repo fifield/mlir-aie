@@ -452,6 +452,19 @@ def _preload_decode_weights_awq(decode_cache, weights, config):
     if getattr(weights, "_awq_decode_weights_preloaded_to_bos", False):
         return
 
+    # When o_gemv_ffn_awq runs the RESIDENT c2_attn collapsed device, its cache
+    # slot holds an 18-arg device (extended q/k/v ABI, wide arg1 scratch,
+    # resident attention herd). The generic 15-arg o_gemv_ffn_awq preload below
+    # would (a) dispatch the resident device with a MISMATCHED ABI -- leaving the
+    # forever-loop attention herd contending the NPU against the subsequent
+    # prefill (intermittent garble), and (b) be wasted (the c2_attn runtime
+    # re-uploads every weight under its own per-layer bo_key). So skip the
+    # o_gemv_ffn_awq weight preload in c2_attn mode (mirror the BF16
+    # _skip_ogf_preload). The resident device is loaded/dispatched correctly
+    # (18-arg) on the first decode token instead. (rms_gemv_rope_awq preload is
+    # unaffected -- it is the same 13-arg device in both modes.)
+    _skip_ogf_awq_preload = _aig.o_gemv_ffn_awq_pack_mode() == "c2_attn"
+
     emb_dim = config.emb_dim
     hidden_dim = config.hidden_dim
     n_heads = config.n_heads
@@ -507,17 +520,18 @@ def _preload_decode_weights_awq(decode_cache, weights, config):
             bo_key=f"rms_gemv_rope_awq_L{layer_idx}",
         )
 
-        # o_gemv_ffn_awq
-        o_gemv_ffn_awq_npu(
-            decode_cache,
-            dummy_attn,
-            dummy_x,
-            lw.ffn_norm.reshape(emb_dim).astype(bfloat16),
-            awq,
-            emb_dim=emb_dim,
-            hidden_dim=hidden_dim,
-            layer_idx=layer_idx,
-        )
+        # o_gemv_ffn_awq (skipped under c2_attn -- see _skip_ogf_awq_preload).
+        if not _skip_ogf_awq_preload:
+            o_gemv_ffn_awq_npu(
+                decode_cache,
+                dummy_attn,
+                dummy_x,
+                lw.ffn_norm.reshape(emb_dim).astype(bfloat16),
+                awq,
+                emb_dim=emb_dim,
+                hidden_dim=hidden_dim,
+                layer_idx=layer_idx,
+            )
 
     weights._awq_decode_weights_preloaded_to_bos = True
 

@@ -1121,3 +1121,26 @@ PYTHOC_C2_ATTN_MEMKV=1 PYTHOC_C2_ATTN_MAX_CHUNKS=8 make profile ...
 and host BO sizing (the L2 budget concern of the retired staging path no longer
 applies, since KV never lands in L2).  Larger ceilings need a stepR sweep at
 that chunk count to confirm no new shim-stream backpressure stall.
+
+---
+
+## c2_attn ported to the AWQ uint4 decode device (2026-06-20, HW-verified)
+
+The on-NPU GQA decode-attention wave-0 + MEMKV KV feed (this doc) now also runs
+folded into the **AWQ uint4** call-2 device, not just the BF16 one.  Selected by
+`PYTHOC_LLAMA_O_GEMV_FFN_AWQ_PACK_MODE=c2_attn`.  Because the attention is
+weight-free (BFP576 BF16 `attn_pythoc.o` kernels: Q·K, online softmax, P·V), the
+entire wave-0 block — channels 90-94, row-3 add-herd attention, MEMKV
+single-shim-BD K/V feed, runtime-L mask, the head-major `_o_x` gather — is
+**identical** to the BF16 device and was transplanted verbatim into
+`builders/o_gemv_ffn_awq.py::_emit_awq_call2_c2`.  The softmax-mask helpers and
+the host incremental-KV packer are imported (not copied) so they cannot drift.
+
+Results: gold "Paris" PASS (tokens identical to AWQ CPU-attention baseline),
+seq>256 PASS at MEMKV `MAX_CHUNKS=8` (seq≤512, N=120 crossing pos 256, coherent,
+no wedge), warm-reuse bit-identical across fresh processes, default AWQ
+c2_merged + default BF16 byte-identical.  Notable: the WRELAY2 single-buffer
+warm-reuse drift this doc describes for BF16 did **not** reproduce on the AWQ
+uint4 relay (WRELAY2=0 gave the same 120 tokens as WRELAY2=on); WRELAY2 is kept
+auto-on for the resident path as the proven, cheap defensive default.  Full
+writeup + file/line anchors in `C2_ATTN_AWQ_SCOPE.md`.

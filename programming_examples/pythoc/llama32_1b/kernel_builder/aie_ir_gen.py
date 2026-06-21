@@ -143,6 +143,19 @@ def decode_pack_modes() -> dict:
     }
 
 
+def o_gemv_ffn_awq_pack_mode() -> str:
+    """Resolve the AWQ ``o_gemv_ffn_awq`` device-packing mode from the env.
+
+    Unlike the BF16 ``decode_pack_modes`` dict (which feeds the BF16 manifest
+    signature), the AWQ pack mode is resolved at the AWQ IR-build call site.
+    This helper exposes the SAME resolution to the host so the decode loop can
+    detect ``c2_attn`` (on-NPU attention wave 0) and route to the AWQ
+    attention packer instead of CPU attention.
+    """
+    return _resolve_pack_mode(
+        _O_GEMV_FFN_AWQ_PACK_ENV, _O_GEMV_FFN_AWQ_PACK_DEFAULT)
+
+
 def _ensure_builders_on_path() -> None:
     project_root = _REFERENCE_DIR.parent
     p = str(project_root)
