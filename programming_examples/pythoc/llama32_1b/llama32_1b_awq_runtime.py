@@ -144,13 +144,13 @@ def _ensure_o_gemv_ffn_awq_compiled(cache, emb_dim: int, hidden_dim: int, group_
     if name in getattr(cache, "artifacts", {}):
         return
     from kernel_builder.aie_ir_gen import (build_o_gemv_ffn_awq_ir,
-                                           o_gemv_ffn_awq_pack_mode)
+                                           o_gemv_ffn_awq_cache_config)
 
     cache.compile_and_cache(
         name,
         build_o_gemv_ffn_awq_ir(emb_dim, hidden_dim, group_size=128),
         OGF_AWQ_BACKEND["instance_name"],
-        config={"pack_mode": o_gemv_ffn_awq_pack_mode()},
+        config=o_gemv_ffn_awq_cache_config(),
     )
     # Persist the lazily-compiled AWQ ELF so the next process reuses it instead
     # of recompiling (~7s). The pack-mode config makes a c2_merged<->c2_attn
@@ -272,7 +272,7 @@ def o_gemv_ffn_awq_c2_attn_npu(
     the BF16 c2_attn path.
     """
     from kernel_builder.aie_ir_gen import (build_o_gemv_ffn_awq_ir,
-                                           o_gemv_ffn_awq_pack_mode)
+                                           o_gemv_ffn_awq_cache_config)
     import llama32_1b_decode as _dec
 
     group_size = n_heads // n_kv_heads
@@ -296,7 +296,7 @@ def o_gemv_ffn_awq_c2_attn_npu(
             name,
             build_o_gemv_ffn_awq_ir(emb_dim, hidden_dim, group_size=128),
             OGF_AWQ_BACKEND["instance_name"],
-            config={"pack_mode": o_gemv_ffn_awq_pack_mode()},
+            config=o_gemv_ffn_awq_cache_config(),
         )
         # Persist so the next process reuses the ELF instead of recompiling the
         # resident c2_attn device (~7s) on the first decode token. The pack-mode
