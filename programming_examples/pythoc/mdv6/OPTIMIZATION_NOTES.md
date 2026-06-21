@@ -338,3 +338,18 @@ B1 concat→c4 ✓ · KEYSTONE halo-gather 3×3 from padded-HWC ✓. → full re
   conv/aie2_rn3_chain_geo.py (gated stack_x2_ch, default 0 = unchanged). Commits 828ee2498/6278ef0db/64d27e573.
 - A3 (full single-ELF re8 hop) ACHIEVED. Remaining: wire run_chain_rnm_c3 into run_re_mc (replace run_rnm_c3 for re8)
   → folds the chain's separate ResidentXCLBin dispatch into the merged ELF; measure frame launch/ctx delta.
+
+### FULL-HOP WIRED IN-MODEL — STRUCTURAL WIN, WALL REGRESSION (decisive negative result)
+- chain→rnm→c3 fused, all 4 re8 hops, behind MDV6_FUSE_RE8 + MDV6_FUSE_RE8_FULL (default ON when FUSE_RE8 set).
+- launches 98→**90** (-8), hw_context 29→**28**, BUT wall 403→**439ms (+36ms REGRESSION)**, accuracy 0.142→0.184 (PASS <5.0 but degraded).
+- WHY regression: the 3-iter chain now runs SYNCHRONOUSLY inside the merged dispatch on the critical path, LOSING the
+  tuned ResidentXCLBin weight-replay path + larger BO fills (widened 100352 stacked A/B BOs). Structural wins don't convert to wall.
+- Default OFF path bit-exact (0.1414 PASS) — UNTOUCHED, safe.
+- Files: conv/chain_rnm_c3_runner.py, test_full_model_mc.py (gated re8 full-hop path). Commit pending.
+
+### DECISIVE CONCLUSION — STOP the fusion deep push
+- rnm→c3 fusion: wall-NEUTRAL (-4 launches). full chain→rnm→c3 fusion: wall-REGRESSION (+36ms, accuracy degraded).
+- The fusion program is FULLY de-risked + proven in-model, but it does NOT help the wall and the full hop HURTS it.
+- Propagating to re6/re4 would replicate the regression. The wall is bounded by chain/conv COMPUTE + the gc artifact, not dispatch.
+- Banked value: complete gated primitive library + proven full-hop template (default OFF). The shipped win remains the
+  default-on vectorization (-26% wall, 518→383ms).
