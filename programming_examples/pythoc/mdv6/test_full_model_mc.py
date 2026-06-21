@@ -206,6 +206,20 @@ def run_re_mc(layer, inp, H, W, ic, oc, part, proc,
                       mc_rn1, sc_rn1, mc_rn3, sc_rn3, mc_rnm, sc_rnm,
                       trn1, orn1, trn3, orn3, trnm, ornm)
     x4 = rt(mc_c3, sc_c3, x4rn, fuse_bn(layer.conv3[1]), H, W, proc, tc3, tc3, oc3, 1, 3, 1)
+    # B1: on-device concat[x1,x2,x3,x4] -> c4. Gated to the re8/re21 shape
+    # (20x20, 4x128 -> 256) the M0 proof targets bit-exactly. Replaces the host
+    # torch.cat + a separate c4 GEMM launch (2 DDR round-trips of the fused
+    # 512-ch tensor) with one device dispatch; the fused buffer never touches
+    # host. Default OFF.
+    _fuse_re8 = (os.environ.get("MDV6_FUSE_RE8", "0") not in ('', '0', 'false', 'False')
+                 and H == 20 and W == 20 and oc == 256
+                 and x1.shape[2] == 128 and x2.shape[2] == 128
+                 and x3.shape[2] == 128 and x4.shape[2] == 128)
+    if _fuse_re8:
+        from conv.fuse_re8_runner import run_concat_c4
+        return run_concat_c4([x1.contiguous(), x2.contiguous(),
+                              x3.contiguous(), x4.contiguous()],
+                             fuse_bn(layer.conv4), H, W, oc, mcr_mod=mcr)
     return rt(mc_c4, sc_c4, torch.cat([x1, x2, x3, x4], dim=2),
               fuse_bn(layer.conv4), H, W, oc, tc4, tc4, oc4, 1, 1, 0)
 
@@ -357,8 +371,18 @@ def _forward_one_frame(model, x, _chk=lambda tag, t: None):
     for pool in model.spp9.pools:
         with torch.no_grad(): cur = pool(cur)
         feats.append(cur.squeeze(0).permute(1,2,0).contiguous())
-    n3 = rt('mc_re8_c4', 're8_conv4', torch.cat(feats, dim=2), fuse_bn(model.spp9.conv5),
-            20, 20, 256, 4, 4, 16, 1, 1, 0)
+    # B1: spp9 conv5 is the SAME concat[4x128]->1x1(512->256) shape as re8/re21
+    # c4. Routing it through the fused concat->c4 ELF means the GEMM-only c4 ELF
+    # (merged_gemm_t24_ic512_oc256_kb32_p1_x1) has NO remaining user, so the
+    # fused ELF can displace it one-for-one (context-neutral, no LRU thrash).
+    if (os.environ.get("MDV6_FUSE_RE8", "0") not in ('', '0', 'false', 'False')
+            and all(f.shape[2] == 128 for f in feats) and len(feats) == 4):
+        from conv.fuse_re8_runner import run_concat_c4
+        n3 = run_concat_c4([f.contiguous() for f in feats],
+                           fuse_bn(model.spp9.conv5), 20, 20, 256, mcr_mod=mcr)
+    else:
+        n3 = rt('mc_re8_c4', 're8_conv4', torch.cat(feats, dim=2), fuse_bn(model.spp9.conv5),
+                20, 20, 256, 4, 4, 16, 1, 1, 0)
     print(f"{time.time()-t:.3f}s"); _chk("spp9/n3", n3)
 
     # Neck
