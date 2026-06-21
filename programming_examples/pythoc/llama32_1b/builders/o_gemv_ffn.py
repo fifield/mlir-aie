@@ -4324,14 +4324,21 @@ def _emit_call2_c2(sym: str, with_down: bool, *, attn_wave0: bool = False,
                 fn.operation.attributes["llvm.emit_c_interface"] = UnitAttr.get()
                 return fn
 
+            # PYTHOC_ATTN_HP=1 selects the bf16-MAC (no bfp16-ebs8) attention
+            # matmul variants (recovers the ~1% BFP576 attention precision).
+            # Flag OFF -> BFP576 symbols UNCHANGED (byte-identical default).
+            import os as _os_hp
+            _attn_hp = _os_hp.environ.get("PYTHOC_ATTN_HP", "") == "1"
+            _ab_sym = "matmul_a_b_bf16_hp" if _attn_hp else "matmul_a_b_bf16"
+            _gb_sym = "matmul_g_b_bf16_hp" if _attn_hp else "matmul_g_b_bf16"
             attn_kernels = {
                 "zero_fill_g": _aef("zero_fill_g_bf16", [_A_GFLAT_TY]),
                 "zero_fill_gp": _aef("zero_fill_gp_bf16", [_A_GP_TY]),
                 "zero_fill_sp": _aef("zero_fill_sp_bf16", [_A_ROW_TY]),
                 "neg_inf_fill_up": _aef("neg_inf_fill_up_bf16", [_A_ROW_TY]),
-                "matmul_a_b": _aef("matmul_a_b_bf16",
+                "matmul_a_b": _aef(_ab_sym,
                                    [_A_QK_TY, _A_QK_TY, _A_GFLAT_TY]),
-                "matmul_g_b": _aef("matmul_g_b_bf16",
+                "matmul_g_b": _aef(_gb_sym,
                                    [_A_GFLAT_TY, _A_V_TY, _A_GP_TY]),
                 "fused_softmax": _aef("fused_softmax",
                                       [_A_GFLAT_TY, _A_ROW_TY, _A_ROW_TY,

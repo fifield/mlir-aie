@@ -167,6 +167,34 @@ def rms_gemv_rope_awq_pack_mode() -> str:
         _RMS_GEMV_ROPE_AWQ_PACK_ENV, _RMS_GEMV_ROPE_AWQ_PACK_DEFAULT)
 
 
+def attn_hp_enabled() -> bool:
+    """True when the bf16-MAC high-precision attention variant is selected
+    (PYTHOC_ATTN_HP). It changes which attention matmul symbols the c2_attn
+    device links, so it must factor into the decode cache signature -- toggling
+    it has to invalidate the cached ELF across processes (else a stale-precision
+    binary is silently reused). Only meaningful under the c2_attn pack mode."""
+    return os.environ.get("PYTHOC_ATTN_HP", "").strip() not in ("", "0")
+
+
+def o_gemv_ffn_cache_config() -> dict:
+    """Decode cache signature for the BF16 o_gemv_ffn slot (pack mode + the
+    attn-hp flag when c2_attn folds attention in)."""
+    cfg = {"pack_mode": _resolve_pack_mode(
+        _O_GEMV_FFN_PACK_ENV, _O_GEMV_FFN_PACK_DEFAULT)}
+    if cfg["pack_mode"] == "c2_attn":
+        cfg["attn_hp"] = attn_hp_enabled()
+    return cfg
+
+
+def o_gemv_ffn_awq_cache_config() -> dict:
+    """Decode cache signature for the AWQ o_gemv_ffn_awq slot (pack mode + the
+    attn-hp flag when c2_attn folds attention in)."""
+    cfg = {"pack_mode": o_gemv_ffn_awq_pack_mode()}
+    if cfg["pack_mode"] == "c2_attn":
+        cfg["attn_hp"] = attn_hp_enabled()
+    return cfg
+
+
 def _ensure_builders_on_path() -> None:
     project_root = _REFERENCE_DIR.parent
     p = str(project_root)

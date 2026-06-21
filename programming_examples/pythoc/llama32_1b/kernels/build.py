@@ -111,6 +111,7 @@ def compile_attn(output_dir: Optional[str] = None, verbose: bool = False) -> Pat
         vector_grow,
         vector_insert,
         vector_sub,
+        vextract_broadcast128_I512,
         vmax_ltbf16,
         vshuffle,
     )
@@ -139,6 +140,7 @@ def compile_attn(output_dir: Optional[str] = None, verbose: bool = False) -> Pat
         "vector_grow": vector_grow,
         "vector_insert": vector_insert,
         "vector_sub": vector_sub,
+        "vextract_broadcast128_I512": vextract_broadcast128_I512,
         "vmax_ltbf16": vmax_ltbf16,
         "vshuffle": vshuffle,
     }

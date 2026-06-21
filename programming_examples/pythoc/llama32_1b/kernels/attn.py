@@ -12,7 +12,7 @@
 from aie.iron.pythoc import aie_kernel
 
 from pythoc import ptr, i16, i32, i64, f32, bf16, void
-from pythoc.aie import ACC2048_accfloat_add_conf, BFP576_BFP576_ACC2048_mac_conf, I1024_I1024_ACC2048_bf_mul_conf, I512_I512_ACC1024_bf_mac_conf, I512_I512_ACC1024_bf_mul_conf, I512_I512_ACC1024_bf_negmul_conf, acc_extract, acc_grow, aie_vector, broadcast, concat, exp2, extract_elem, getExpBf16, insert_elem, load_v, reduce_add, set_ctrl_reg, store_v, v32accfloat_to_v32bf16, v32bf16_to_v32accfloat, v64accfloat_to_v64bfp16ebs8, vector_add, vector_blend, vector_cast, vector_extract, vector_grow, vector_insert, vector_mul, vector_sub, vmax_ltbf16, vshuffle, zeros
+from pythoc.aie import ACC2048_accfloat_add_conf, BFP576_BFP576_ACC2048_mac_conf, I1024_I1024_ACC2048_bf_mul_conf, I512_I512_ACC1024_bf_mac_conf, I512_I512_ACC1024_bf_mul_conf, I512_I512_ACC1024_bf_negmul_conf, acc_extract, acc_grow, aie_vector, broadcast, concat, exp2, extract_elem, getExpBf16, insert_elem, load_v, reduce_add, set_ctrl_reg, store_v, v32accfloat_to_v32bf16, v32bf16_to_v32accfloat, v64accfloat_to_v64bfp16ebs8, vector_add, vector_blend, vector_cast, vector_extract, vector_grow, vector_insert, vector_mul, vector_sub, vextract_broadcast128_I512, vmax_ltbf16, vshuffle, zeros
 
 
 @aie_kernel
@@ -1004,6 +1004,272 @@ def apply_causal_mask(g: ptr[bf16, True], q_block_idx: i32, kv_block_idx: i32) -
 									c2 = c2 + 1
 					col_blk = col_blk + 1
 				row = row + 1
+
+
+# ---------------------------------------------------------------------------
+# High-precision (bf16-MAC) attention matmul variants (PYTHOC_ATTN_HP=1).
+#
+# Same signatures, same cm8x8 input/output layout, and the SAME logical
+# products as matmul_a_b_bf16 (A @ B^T) and matmul_g_b_bf16 (A @ B) -- but
+# with NO bfp16-ebs8 down-convert: each 8x8x8 sub-tile product is computed
+# in full bf16 with fp32 accumulate, via the AIE-API emulated `mac_4x8_8x8`
+# recipe (T16_4x8/T16_8x4 transposes + vextract_broadcast128 + I512 32-lane
+# bf MAC, conf=60).  Recovers the ~1% BFP16-EBS8 operand-quantization error
+# down to the bf16 rounding floor (~0.2-0.4%).  Verified tile-for-tile on HW
+# (see PythoC/pythoc_kernels/bf16_mmul_tile.py + test_bf16_mmul_probe.py).
+#
+# Both use a flat (m_blk, n_blk, k_blk) loop with a single f32 8x8 accumulator
+# per output tile (k as a real while-loop body) to keep program memory small.
+# ---------------------------------------------------------------------------
+@aie_kernel
+def matmul_a_b_bf16_hp(a_in: ptr[bf16, True], b_in: ptr[bf16, True], out: ptr[bf16, True]) -> void:
+	# C = A @ B^T (cm8x8). a0 = A sub(m,k) at m*64 + k*512; b0 = B sub(n,k) at
+	# n*64 + k*512; C tile(m,n) at n*512 + m*64. Per k-block: 8x8x8 bf16 tile
+	# (a0 @ b0^T) accumulated into f32. Mirrors logical product of matmul_a_b_bf16.
+	conf: i32 = 60
+	t4x8: i32 = 29
+	t8x4: i32 = 28
+	set_ctrl_reg(9, 1)
+	set_ctrl_reg(1, 12)
+
+	m: i32 = 0
+	while m < 8:
+		n: i32 = 0
+		while n < 8:
+			# Initialize from the existing output tile (read-modify-write,
+			# matching the BFP576 kernels' load_v(p_c)+accumulate: the flash-
+			# attention pipeline pre-scales matmul_g_b's output buffer and
+			# expects C += A*op(B), not C = A*op(B)).
+			p_c0: ptr[bf16] = out + n * 512 + m * 64
+			c0lo: aie_vector[bf16, 32] = load_v(p_c0, 32)
+			c0hi: aie_vector[bf16, 32] = load_v(p_c0 + 32, 32)
+			acc_lo: aie_vector[f32, 32] = v32bf16_to_v32accfloat(c0lo)
+			acc_hi: aie_vector[f32, 32] = v32bf16_to_v32accfloat(c0hi)
+			p_a: ptr[bf16] = a_in + m * 64
+			p_b: ptr[bf16] = b_in + n * 64
+			k: i32 = 0
+			while k < 8:
+				a: aie_vector[bf16, 64] = load_v(p_a, 64)
+				b: aie_vector[bf16, 64] = load_v(p_b, 64)
+				p_a = p_a + 512
+				p_b = p_b + 512
+
+				a_lo: aie_vector[bf16, 32] = vector_extract(a, 0, 32)
+				a_hi: aie_vector[bf16, 32] = vector_extract(a, 32, 32)
+				at_lo: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(a_lo, i32, 16), vector_cast(a_lo, i32, 16), t4x8), bf16, 32)
+				at_hi: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(a_hi, i32, 16), vector_cast(a_hi, i32, 16), t4x8), bf16, 32)
+
+				# B^T (2-op 8x8 transpose: T16_8x8_lo/hi = 52/53), y_k = row k of B^T.
+				b_lo: aie_vector[bf16, 32] = vector_extract(b, 0, 32)
+				b_hi: aie_vector[bf16, 32] = vector_extract(b, 32, 32)
+				b_lo_i: aie_vector[i32, 16] = vector_cast(b_lo, i32, 16)
+				b_hi_i: aie_vector[i32, 16] = vector_cast(b_hi, i32, 16)
+				bt_lo_i: aie_vector[i32, 16] = vshuffle(b_lo_i, b_hi_i, 52)
+				bt_hi_i: aie_vector[i32, 16] = vshuffle(b_lo_i, b_hi_i, 53)
+				y0: aie_vector[bf16, 32] = vector_cast(vextract_broadcast128_I512(bt_lo_i, 0), bf16, 32)
+				y1: aie_vector[bf16, 32] = vector_cast(vextract_broadcast128_I512(bt_lo_i, 1), bf16, 32)
+				y2: aie_vector[bf16, 32] = vector_cast(vextract_broadcast128_I512(bt_lo_i, 2), bf16, 32)
+				y3: aie_vector[bf16, 32] = vector_cast(vextract_broadcast128_I512(bt_lo_i, 3), bf16, 32)
+				y4: aie_vector[bf16, 32] = vector_cast(vextract_broadcast128_I512(bt_hi_i, 0), bf16, 32)
+				y5: aie_vector[bf16, 32] = vector_cast(vextract_broadcast128_I512(bt_hi_i, 1), bf16, 32)
+				y6: aie_vector[bf16, 32] = vector_cast(vextract_broadcast128_I512(bt_hi_i, 2), bf16, 32)
+				y7: aie_vector[bf16, 32] = vector_cast(vextract_broadcast128_I512(bt_hi_i, 3), bf16, 32)
+
+				# rows 0..3: x_j = col j of at_lo replicated 8x (concatx4 + T16_8x4)
+				cl0: aie_vector[bf16, 4] = vector_extract(at_lo, 0, 4)
+				gl0: aie_vector[bf16, 8] = concat(cl0, cl0)
+				xl0: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(gl0, gl0), concat(gl0, gl0)), i32, 16), vector_cast(concat(concat(gl0, gl0), concat(gl0, gl0)), i32, 16), t8x4), bf16, 32)
+				acc_lo = I512_I512_ACC1024_bf_mac_conf(xl0, y0, acc_lo, conf)
+				cl1: aie_vector[bf16, 4] = vector_extract(at_lo, 4, 4)
+				gl1: aie_vector[bf16, 8] = concat(cl1, cl1)
+				xl1: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(gl1, gl1), concat(gl1, gl1)), i32, 16), vector_cast(concat(concat(gl1, gl1), concat(gl1, gl1)), i32, 16), t8x4), bf16, 32)
+				acc_lo = I512_I512_ACC1024_bf_mac_conf(xl1, y1, acc_lo, conf)
+				cl2: aie_vector[bf16, 4] = vector_extract(at_lo, 8, 4)
+				gl2: aie_vector[bf16, 8] = concat(cl2, cl2)
+				xl2: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(gl2, gl2), concat(gl2, gl2)), i32, 16), vector_cast(concat(concat(gl2, gl2), concat(gl2, gl2)), i32, 16), t8x4), bf16, 32)
+				acc_lo = I512_I512_ACC1024_bf_mac_conf(xl2, y2, acc_lo, conf)
+				cl3: aie_vector[bf16, 4] = vector_extract(at_lo, 12, 4)
+				gl3: aie_vector[bf16, 8] = concat(cl3, cl3)
+				xl3: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(gl3, gl3), concat(gl3, gl3)), i32, 16), vector_cast(concat(concat(gl3, gl3), concat(gl3, gl3)), i32, 16), t8x4), bf16, 32)
+				acc_lo = I512_I512_ACC1024_bf_mac_conf(xl3, y3, acc_lo, conf)
+				cl4: aie_vector[bf16, 4] = vector_extract(at_lo, 16, 4)
+				gl4: aie_vector[bf16, 8] = concat(cl4, cl4)
+				xl4: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(gl4, gl4), concat(gl4, gl4)), i32, 16), vector_cast(concat(concat(gl4, gl4), concat(gl4, gl4)), i32, 16), t8x4), bf16, 32)
+				acc_lo = I512_I512_ACC1024_bf_mac_conf(xl4, y4, acc_lo, conf)
+				cl5: aie_vector[bf16, 4] = vector_extract(at_lo, 20, 4)
+				gl5: aie_vector[bf16, 8] = concat(cl5, cl5)
+				xl5: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(gl5, gl5), concat(gl5, gl5)), i32, 16), vector_cast(concat(concat(gl5, gl5), concat(gl5, gl5)), i32, 16), t8x4), bf16, 32)
+				acc_lo = I512_I512_ACC1024_bf_mac_conf(xl5, y5, acc_lo, conf)
+				cl6: aie_vector[bf16, 4] = vector_extract(at_lo, 24, 4)
+				gl6: aie_vector[bf16, 8] = concat(cl6, cl6)
+				xl6: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(gl6, gl6), concat(gl6, gl6)), i32, 16), vector_cast(concat(concat(gl6, gl6), concat(gl6, gl6)), i32, 16), t8x4), bf16, 32)
+				acc_lo = I512_I512_ACC1024_bf_mac_conf(xl6, y6, acc_lo, conf)
+				cl7: aie_vector[bf16, 4] = vector_extract(at_lo, 28, 4)
+				gl7: aie_vector[bf16, 8] = concat(cl7, cl7)
+				xl7: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(gl7, gl7), concat(gl7, gl7)), i32, 16), vector_cast(concat(concat(gl7, gl7), concat(gl7, gl7)), i32, 16), t8x4), bf16, 32)
+				acc_lo = I512_I512_ACC1024_bf_mac_conf(xl7, y7, acc_lo, conf)
+
+				# rows 4..7
+				ch0: aie_vector[bf16, 4] = vector_extract(at_hi, 0, 4)
+				hh0: aie_vector[bf16, 8] = concat(ch0, ch0)
+				xh0: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(hh0, hh0), concat(hh0, hh0)), i32, 16), vector_cast(concat(concat(hh0, hh0), concat(hh0, hh0)), i32, 16), t8x4), bf16, 32)
+				acc_hi = I512_I512_ACC1024_bf_mac_conf(xh0, y0, acc_hi, conf)
+				ch1: aie_vector[bf16, 4] = vector_extract(at_hi, 4, 4)
+				hh1: aie_vector[bf16, 8] = concat(ch1, ch1)
+				xh1: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(hh1, hh1), concat(hh1, hh1)), i32, 16), vector_cast(concat(concat(hh1, hh1), concat(hh1, hh1)), i32, 16), t8x4), bf16, 32)
+				acc_hi = I512_I512_ACC1024_bf_mac_conf(xh1, y1, acc_hi, conf)
+				ch2: aie_vector[bf16, 4] = vector_extract(at_hi, 8, 4)
+				hh2: aie_vector[bf16, 8] = concat(ch2, ch2)
+				xh2: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(hh2, hh2), concat(hh2, hh2)), i32, 16), vector_cast(concat(concat(hh2, hh2), concat(hh2, hh2)), i32, 16), t8x4), bf16, 32)
+				acc_hi = I512_I512_ACC1024_bf_mac_conf(xh2, y2, acc_hi, conf)
+				ch3: aie_vector[bf16, 4] = vector_extract(at_hi, 12, 4)
+				hh3: aie_vector[bf16, 8] = concat(ch3, ch3)
+				xh3: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(hh3, hh3), concat(hh3, hh3)), i32, 16), vector_cast(concat(concat(hh3, hh3), concat(hh3, hh3)), i32, 16), t8x4), bf16, 32)
+				acc_hi = I512_I512_ACC1024_bf_mac_conf(xh3, y3, acc_hi, conf)
+				ch4: aie_vector[bf16, 4] = vector_extract(at_hi, 16, 4)
+				hh4: aie_vector[bf16, 8] = concat(ch4, ch4)
+				xh4: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(hh4, hh4), concat(hh4, hh4)), i32, 16), vector_cast(concat(concat(hh4, hh4), concat(hh4, hh4)), i32, 16), t8x4), bf16, 32)
+				acc_hi = I512_I512_ACC1024_bf_mac_conf(xh4, y4, acc_hi, conf)
+				ch5: aie_vector[bf16, 4] = vector_extract(at_hi, 20, 4)
+				hh5: aie_vector[bf16, 8] = concat(ch5, ch5)
+				xh5: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(hh5, hh5), concat(hh5, hh5)), i32, 16), vector_cast(concat(concat(hh5, hh5), concat(hh5, hh5)), i32, 16), t8x4), bf16, 32)
+				acc_hi = I512_I512_ACC1024_bf_mac_conf(xh5, y5, acc_hi, conf)
+				ch6: aie_vector[bf16, 4] = vector_extract(at_hi, 24, 4)
+				hh6: aie_vector[bf16, 8] = concat(ch6, ch6)
+				xh6: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(hh6, hh6), concat(hh6, hh6)), i32, 16), vector_cast(concat(concat(hh6, hh6), concat(hh6, hh6)), i32, 16), t8x4), bf16, 32)
+				acc_hi = I512_I512_ACC1024_bf_mac_conf(xh6, y6, acc_hi, conf)
+				ch7: aie_vector[bf16, 4] = vector_extract(at_hi, 28, 4)
+				hh7: aie_vector[bf16, 8] = concat(ch7, ch7)
+				xh7: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(hh7, hh7), concat(hh7, hh7)), i32, 16), vector_cast(concat(concat(hh7, hh7), concat(hh7, hh7)), i32, 16), t8x4), bf16, 32)
+				acc_hi = I512_I512_ACC1024_bf_mac_conf(xh7, y7, acc_hi, conf)
+				k = k + 1
+			store_v(out + n * 512 + m * 64, v32accfloat_to_v32bf16(acc_lo))
+			store_v(out + n * 512 + m * 64 + 32, v32accfloat_to_v32bf16(acc_hi))
+			n = n + 1
+		m = m + 1
+
+
+@aie_kernel
+def matmul_g_b_bf16_hp(g_in: ptr[bf16, True], b_in: ptr[bf16, True], out: ptr[bf16, True]) -> void:
+	# C = A @ B (cm8x8). a0 = A sub(m,k) at m*64 + k*512; b0 = B sub(k,n) at
+	# n*512 + k*64; C tile(m,n) at n*512 + m*64. Per k-block: plain bf16 A@B tile.
+	conf: i32 = 60
+	t4x8: i32 = 29
+	t8x4: i32 = 28
+	set_ctrl_reg(9, 1)
+	set_ctrl_reg(1, 12)
+
+	m: i32 = 0
+	while m < 8:
+		n: i32 = 0
+		while n < 8:
+			# Initialize from the existing output tile (read-modify-write,
+			# matching the BFP576 kernels' load_v(p_c)+accumulate: the flash-
+			# attention pipeline pre-scales matmul_g_b's output buffer and
+			# expects C += A*op(B), not C = A*op(B)).
+			p_c0: ptr[bf16] = out + n * 512 + m * 64
+			c0lo: aie_vector[bf16, 32] = load_v(p_c0, 32)
+			c0hi: aie_vector[bf16, 32] = load_v(p_c0 + 32, 32)
+			acc_lo: aie_vector[f32, 32] = v32bf16_to_v32accfloat(c0lo)
+			acc_hi: aie_vector[f32, 32] = v32bf16_to_v32accfloat(c0hi)
+			p_a: ptr[bf16] = g_in + m * 64
+			p_b: ptr[bf16] = b_in + n * 512
+			k: i32 = 0
+			while k < 8:
+				a: aie_vector[bf16, 64] = load_v(p_a, 64)
+				b: aie_vector[bf16, 64] = load_v(p_b, 64)
+				p_a = p_a + 512
+				p_b = p_b + 64
+
+				a_lo: aie_vector[bf16, 32] = vector_extract(a, 0, 32)
+				a_hi: aie_vector[bf16, 32] = vector_extract(a, 32, 32)
+				at_lo: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(a_lo, i32, 16), vector_cast(a_lo, i32, 16), t4x8), bf16, 32)
+				at_hi: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(a_hi, i32, 16), vector_cast(a_hi, i32, 16), t4x8), bf16, 32)
+
+				# y_k = row k of B broadcast across rows (NO transpose, A@B).
+				b_lo: aie_vector[bf16, 32] = vector_extract(b, 0, 32)
+				b_hi: aie_vector[bf16, 32] = vector_extract(b, 32, 32)
+				b_lo_i: aie_vector[i32, 16] = vector_cast(b_lo, i32, 16)
+				b_hi_i: aie_vector[i32, 16] = vector_cast(b_hi, i32, 16)
+				y0: aie_vector[bf16, 32] = vector_cast(vextract_broadcast128_I512(b_lo_i, 0), bf16, 32)
+				y1: aie_vector[bf16, 32] = vector_cast(vextract_broadcast128_I512(b_lo_i, 1), bf16, 32)
+				y2: aie_vector[bf16, 32] = vector_cast(vextract_broadcast128_I512(b_lo_i, 2), bf16, 32)
+				y3: aie_vector[bf16, 32] = vector_cast(vextract_broadcast128_I512(b_lo_i, 3), bf16, 32)
+				y4: aie_vector[bf16, 32] = vector_cast(vextract_broadcast128_I512(b_hi_i, 0), bf16, 32)
+				y5: aie_vector[bf16, 32] = vector_cast(vextract_broadcast128_I512(b_hi_i, 1), bf16, 32)
+				y6: aie_vector[bf16, 32] = vector_cast(vextract_broadcast128_I512(b_hi_i, 2), bf16, 32)
+				y7: aie_vector[bf16, 32] = vector_cast(vextract_broadcast128_I512(b_hi_i, 3), bf16, 32)
+
+				cl0: aie_vector[bf16, 4] = vector_extract(at_lo, 0, 4)
+				gl0: aie_vector[bf16, 8] = concat(cl0, cl0)
+				xl0: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(gl0, gl0), concat(gl0, gl0)), i32, 16), vector_cast(concat(concat(gl0, gl0), concat(gl0, gl0)), i32, 16), t8x4), bf16, 32)
+				acc_lo = I512_I512_ACC1024_bf_mac_conf(xl0, y0, acc_lo, conf)
+				cl1: aie_vector[bf16, 4] = vector_extract(at_lo, 4, 4)
+				gl1: aie_vector[bf16, 8] = concat(cl1, cl1)
+				xl1: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(gl1, gl1), concat(gl1, gl1)), i32, 16), vector_cast(concat(concat(gl1, gl1), concat(gl1, gl1)), i32, 16), t8x4), bf16, 32)
+				acc_lo = I512_I512_ACC1024_bf_mac_conf(xl1, y1, acc_lo, conf)
+				cl2: aie_vector[bf16, 4] = vector_extract(at_lo, 8, 4)
+				gl2: aie_vector[bf16, 8] = concat(cl2, cl2)
+				xl2: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(gl2, gl2), concat(gl2, gl2)), i32, 16), vector_cast(concat(concat(gl2, gl2), concat(gl2, gl2)), i32, 16), t8x4), bf16, 32)
+				acc_lo = I512_I512_ACC1024_bf_mac_conf(xl2, y2, acc_lo, conf)
+				cl3: aie_vector[bf16, 4] = vector_extract(at_lo, 12, 4)
+				gl3: aie_vector[bf16, 8] = concat(cl3, cl3)
+				xl3: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(gl3, gl3), concat(gl3, gl3)), i32, 16), vector_cast(concat(concat(gl3, gl3), concat(gl3, gl3)), i32, 16), t8x4), bf16, 32)
+				acc_lo = I512_I512_ACC1024_bf_mac_conf(xl3, y3, acc_lo, conf)
+				cl4: aie_vector[bf16, 4] = vector_extract(at_lo, 16, 4)
+				gl4: aie_vector[bf16, 8] = concat(cl4, cl4)
+				xl4: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(gl4, gl4), concat(gl4, gl4)), i32, 16), vector_cast(concat(concat(gl4, gl4), concat(gl4, gl4)), i32, 16), t8x4), bf16, 32)
+				acc_lo = I512_I512_ACC1024_bf_mac_conf(xl4, y4, acc_lo, conf)
+				cl5: aie_vector[bf16, 4] = vector_extract(at_lo, 20, 4)
+				gl5: aie_vector[bf16, 8] = concat(cl5, cl5)
+				xl5: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(gl5, gl5), concat(gl5, gl5)), i32, 16), vector_cast(concat(concat(gl5, gl5), concat(gl5, gl5)), i32, 16), t8x4), bf16, 32)
+				acc_lo = I512_I512_ACC1024_bf_mac_conf(xl5, y5, acc_lo, conf)
+				cl6: aie_vector[bf16, 4] = vector_extract(at_lo, 24, 4)
+				gl6: aie_vector[bf16, 8] = concat(cl6, cl6)
+				xl6: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(gl6, gl6), concat(gl6, gl6)), i32, 16), vector_cast(concat(concat(gl6, gl6), concat(gl6, gl6)), i32, 16), t8x4), bf16, 32)
+				acc_lo = I512_I512_ACC1024_bf_mac_conf(xl6, y6, acc_lo, conf)
+				cl7: aie_vector[bf16, 4] = vector_extract(at_lo, 28, 4)
+				gl7: aie_vector[bf16, 8] = concat(cl7, cl7)
+				xl7: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(gl7, gl7), concat(gl7, gl7)), i32, 16), vector_cast(concat(concat(gl7, gl7), concat(gl7, gl7)), i32, 16), t8x4), bf16, 32)
+				acc_lo = I512_I512_ACC1024_bf_mac_conf(xl7, y7, acc_lo, conf)
+
+				ch0: aie_vector[bf16, 4] = vector_extract(at_hi, 0, 4)
+				hh0: aie_vector[bf16, 8] = concat(ch0, ch0)
+				xh0: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(hh0, hh0), concat(hh0, hh0)), i32, 16), vector_cast(concat(concat(hh0, hh0), concat(hh0, hh0)), i32, 16), t8x4), bf16, 32)
+				acc_hi = I512_I512_ACC1024_bf_mac_conf(xh0, y0, acc_hi, conf)
+				ch1: aie_vector[bf16, 4] = vector_extract(at_hi, 4, 4)
+				hh1: aie_vector[bf16, 8] = concat(ch1, ch1)
+				xh1: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(hh1, hh1), concat(hh1, hh1)), i32, 16), vector_cast(concat(concat(hh1, hh1), concat(hh1, hh1)), i32, 16), t8x4), bf16, 32)
+				acc_hi = I512_I512_ACC1024_bf_mac_conf(xh1, y1, acc_hi, conf)
+				ch2: aie_vector[bf16, 4] = vector_extract(at_hi, 8, 4)
+				hh2: aie_vector[bf16, 8] = concat(ch2, ch2)
+				xh2: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(hh2, hh2), concat(hh2, hh2)), i32, 16), vector_cast(concat(concat(hh2, hh2), concat(hh2, hh2)), i32, 16), t8x4), bf16, 32)
+				acc_hi = I512_I512_ACC1024_bf_mac_conf(xh2, y2, acc_hi, conf)
+				ch3: aie_vector[bf16, 4] = vector_extract(at_hi, 12, 4)
+				hh3: aie_vector[bf16, 8] = concat(ch3, ch3)
+				xh3: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(hh3, hh3), concat(hh3, hh3)), i32, 16), vector_cast(concat(concat(hh3, hh3), concat(hh3, hh3)), i32, 16), t8x4), bf16, 32)
+				acc_hi = I512_I512_ACC1024_bf_mac_conf(xh3, y3, acc_hi, conf)
+				ch4: aie_vector[bf16, 4] = vector_extract(at_hi, 16, 4)
+				hh4: aie_vector[bf16, 8] = concat(ch4, ch4)
+				xh4: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(hh4, hh4), concat(hh4, hh4)), i32, 16), vector_cast(concat(concat(hh4, hh4), concat(hh4, hh4)), i32, 16), t8x4), bf16, 32)
+				acc_hi = I512_I512_ACC1024_bf_mac_conf(xh4, y4, acc_hi, conf)
+				ch5: aie_vector[bf16, 4] = vector_extract(at_hi, 20, 4)
+				hh5: aie_vector[bf16, 8] = concat(ch5, ch5)
+				xh5: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(hh5, hh5), concat(hh5, hh5)), i32, 16), vector_cast(concat(concat(hh5, hh5), concat(hh5, hh5)), i32, 16), t8x4), bf16, 32)
+				acc_hi = I512_I512_ACC1024_bf_mac_conf(xh5, y5, acc_hi, conf)
+				ch6: aie_vector[bf16, 4] = vector_extract(at_hi, 24, 4)
+				hh6: aie_vector[bf16, 8] = concat(ch6, ch6)
+				xh6: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(hh6, hh6), concat(hh6, hh6)), i32, 16), vector_cast(concat(concat(hh6, hh6), concat(hh6, hh6)), i32, 16), t8x4), bf16, 32)
+				acc_hi = I512_I512_ACC1024_bf_mac_conf(xh6, y6, acc_hi, conf)
+				ch7: aie_vector[bf16, 4] = vector_extract(at_hi, 28, 4)
+				hh7: aie_vector[bf16, 8] = concat(ch7, ch7)
+				xh7: aie_vector[bf16, 32] = vector_cast(vshuffle(vector_cast(concat(concat(hh7, hh7), concat(hh7, hh7)), i32, 16), vector_cast(concat(concat(hh7, hh7), concat(hh7, hh7)), i32, 16), t8x4), bf16, 32)
+				acc_hi = I512_I512_ACC1024_bf_mac_conf(xh7, y7, acc_hi, conf)
+				k = k + 1
+			store_v(out + n * 512 + m * 64, v32accfloat_to_v32bf16(acc_lo))
+			store_v(out + n * 512 + m * 64 + 32, v32accfloat_to_v32bf16(acc_hi))
+			n = n + 1
+		m = m + 1
 
 
 @aie_kernel

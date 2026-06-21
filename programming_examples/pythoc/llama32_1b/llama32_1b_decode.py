@@ -48,7 +48,7 @@ def decode_cache_signatures():
     modes = aie_ir_gen.decode_pack_modes()
     return {
         "rms_gemv_rope": {"pack_mode": modes["rms_gemv_rope"]},
-        "o_gemv_ffn": {"pack_mode": modes["o_gemv_ffn"]},
+        "o_gemv_ffn": aie_ir_gen.o_gemv_ffn_cache_config(),
     }
 
 
@@ -66,7 +66,7 @@ def awq_decode_cache_signatures():
     from kernel_builder import aie_ir_gen
 
     return {
-        "o_gemv_ffn_awq": {"pack_mode": aie_ir_gen.o_gemv_ffn_awq_pack_mode()},
+        "o_gemv_ffn_awq": aie_ir_gen.o_gemv_ffn_awq_cache_config(),
         "rms_gemv_rope_awq": {
             "pack_mode": aie_ir_gen.rms_gemv_rope_awq_pack_mode()},
     }
