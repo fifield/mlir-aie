@@ -413,8 +413,19 @@ class KernelCache:
         for name, info in manifest.items():
             binary = info["output_binary"]
             if not Path(binary).exists():
-                print(f"  WARNING: cached binary not found: {binary}")
-                return False
+                if name in expected_configs:
+                    # Eagerly-managed kernel (BF16 decode): a missing ELF means
+                    # rebuild the cache.
+                    print(f"  WARNING: cached binary not found: {binary}")
+                    return False
+                # Lazily-compiled kernel (e.g. *_awq, cleared to force a
+                # rebuild): skip this entry so it recompiles on demand, instead
+                # of atomically dropping the whole manifest -- which would also
+                # unload the still-valid eager BF16 entries the AWQ run's BF16
+                # preload depends on.
+                print(f"  cached binary missing for '{name}'; "
+                      f"will recompile lazily")
+                continue
             stored_config = info.get("config")
             if name in expected_configs and stored_config != expected_configs[name]:
                 print(
