@@ -172,3 +172,100 @@ TOP PICKS to discuss: #1 packed GEMM (biggest, ready), #2 rnm fold (clean, gated
 - T2: Found rn3 chain is profiler-blind, leaking into launch_gap. Queued ideas #2 (GEMM) and #3 (chain pack). Doing read-only scoping while #1 runs.
 - T3: Scoped GEMM oc_blocked path — input = input_hwc.reshape(M,IC) sliced by tile_m into total_slots; per-slot python loop + per-slot output reshape. Same vectorization pattern as 3x3. Ready for agent #2.
   Gave user status snapshot. Waiting on agent #1 completion notification (staying off NPU to not slow its profiling).
+
+## ITERATION #5 — measured the last launch_gap idea (resident weights): NOT meaningful
+SYNC_PROF on current default (4 frames): all BO host-I/O ≈ 21 ms/frame
+(copy_in 6.9 + sync_in 6.2 + copy_out 6.0 + sync_out 1.8). Weight fills are ~half
+the fills → static/resident-weight caching ceiling ≈ **6-7 ms/frame (~1.6%)**, below noise.
+`wait` (NPU on-device dispatch floor) = 1767 µs/call × 84 ≈ 148 ms — dominates, not host-side.
+
+CONCLUSION: launch_gap/dispatch reduction is EXHAUSTED at meaningful scale.
+- launch_gap host plumbing already cut 158→50 ms (vectorization, committed 663caa40d).
+- Remaining launch_gap ≈ 50 ms is ~21 ms irreducible BO I/O + ~30 ms residual python; weight-cache caps ~7 ms.
+- Dispatch COUNT reduction proven wall-flat (packed GEMM -9 = flat; each marginal small launch ~0.5 ms device).
+- Big convs + 14-launch chain are data-dependent (can't merge); chain 62 ms is on-device compute/floor.
+Real remaining wall levers are OUT OF SCOPE for "launch_gap/dispatch": (a) per-frame gc/alloc churn
+(~96 ms pre_post artifact), (b) conv/chain kernel compute (BFP576/mmul). Would need goal re-scope.
+
+## FUSION/STITCHING TRACK (2026-06-21)
+### M0 — on-device GELAN concat: PROVEN ✓ (verified by orchestrator)
+- concat_only BIT_EXACT (0/32768, max_diff 0.0); e2e concat→conv4 byte-identical to host path.
+- Construct: single strided gather rt.fill (sources stacked, interleaved via source strides). NOT 4 dest-scatter DMAs (fill dest is linear).
+- Files: conv/aie2_concat_proof.py, conv/test_concat_proof_hw.py.
+- Trap: iron.tensor(u16) silently promotes to u32 → pin dtype=np.uint16 (memory'd).
+
+### Option A — producer→consumer stitch: PROVEN GO ✓ (verified)
+- PoC-1: 1 ELF / 1 hw-context, device-resident intermediate, BIT-EXACT (0/65536) vs 2-dispatch baseline.
+- Construct: build_merged(chain_links=[(0,2,1,0)]) = alias producer OUTPUT arg → consumer INPUT arg (new; prior chain_links were shared-INPUT). Needs producer.out == consumer.in MLIR type.
+- Measured: PDI-swap floor ~39 µs/swap (slope) vs ~505 µs host dispatch → ~13x cheaper + frees 1 of 29 contexts. THE dispatch-consolidation win.
+- Files: conv/build_stitch_poc.py, conv/test_stitch_poc_hw.py.
+- PoC-2 (conv0→conv1): NO-GO short-term. Blocked by on-device OVERLAPPING-WINDOW halo gather (split/join require non-overlapping; can't share halo rows). ~3-5 days for a reformat kernel. This is THE keystone blocker for all tile-blocked-producer → 3×3-consumer stitching.
+
+### Option B — fuse re8 block: IN PROGRESS (agent a4067365089fe1599)
+- Milestones: B1 fuse concat→c4 (reformat-free, should land) → B2 chain→c3 resident seam (chain already emits PAD-padded HWC = halo'd layout, may sidestep the reformat blocker) → B3 full block ≤2 launches/1 context.
+- Gated behind MDV6_FUSE_RE8 (default OFF); default path must stay bit-exact.
+- Expected payoff: re8 ~5-7 ms wall (modest; launch_gap at floor). Strategic value: proves the fusion+stitch template; re6/re4 are the bigger but BD/memtile-limited targets.
+
+### Option B — B1 DONE (verified), B2 BLOCKED — the binding wall is the context ceiling
+- B1: on-device concat→c4 for re8/re21/spp9, gated MDV6_FUSE_RE8 (default OFF). Bit-exact (0/102400, max_class 0.1423 PASS), context-neutral 29→29, NO wedge. Wall FLAT (388→387), launches 98→98.
+  - Context-neutral trick: the (24,512,256,kb32,p1) c4 GEMM shape is shared by exactly 3 fusible sites → fused ELF DISPLACES the c4-only ELF one-for-one. Naive additive fusion wedges (DRM CREATE_HWCTX err=-2); LRU-capping → ~1.5s thrash.
+  - Files: conv/fuse_re8_runner.py, conv/build_fuse_re8_merged.py, test_full_model_mc.py (re8+spp9 fused paths, gated).
+- B2 (chain→c3 resident): NO-GO as scoped. Blocked by the SAME wall: model is at 29/29 contexts, ZERO headroom. A stitched chain→c3 ELF is additive (no clean same-shape displacement like c4 had) → wedge/thrash. Also launch-neutral unless it removes a host dispatch.
+
+### STRATEGIC WALL: 29-context ceiling, zero headroom = the binding constraint for the WHOLE fusion/stitch program
+- Dispatch-consolidation win (PoC-1 stitch, ~39µs swap vs 505µs dispatch) is proven, but requires merging ops into FEWER ELFs.
+- Additive fusion (new ELF alongside existing) WEDGES at 29/29. Only context-neutral (B1 same-shape displacement) or context-NEGATIVE (PoC-1 producer→consumer stitch merges 2 ELFs→1 AND removes a dispatch) levers work.
+- OPEN QUESTION (highest leverage): is the ~29 ceiling a HARD firmware limit or a configurable driver/firmware param? If raisable → additive fusion path opens. If fixed → only context-negative consolidation works.
+
+### B2 re-tasked as DISPATCHER MERGE — context-negative PROVEN (corrects B1's separate-ELF artifact)
+- **B2a (verified):** 2 back-to-back re8-shape GEMMs (1×1 IC128→OC128, tile_m=44) merged into ONE ELF via
+  build_merged + chain_links=[(0,2,1,0)] (producer.out→consumer.in alias). **hw_context 2→1, host dispatch 2→1,
+  BIT-EXACT (0/180224), wall -263µs.** 1 ELF = 1 context with 2 aiex.configure sub-devices. Intermediate device-resident.
+  → Confirms: merged-ELF dispatcher = 1 context/ELF regardless of sub-device count; merging REDUCES contexts.
+- **B1 re-confirmed context-NEUTRAL** (same-shape displacement, peak stays 29) — the artifact the user flagged.
+- **Caveat:** NO native re8 seam is drop-in mergeable — every GEMM↔next is GEMM↔3×3 (halo mismatch) OR split/concat-separated,
+  and the 4 re8 GEMMs have different tile_m (20/104/44/24). B2a used the real rnm shape with GEMMs co-pinned to tile_m=44
+  (numerically identical; tile_m only changes tiling) → proves the mechanism on a production shape, constructed seam.
+- **B2b (de-risked, key unknown ANSWERED YES):** the rn3 chain's IRON aie.device **compiles cleanly through the merged
+  full-elf path** (rc=0, 435KB ELF). xclbin-vs-elf is NOT a compile blocker. Chain output is PAD-padded HWC = the halo'd
+  layout c3 reads → chain→c3 chain_link is layout-compatible. Remaining = plumbing: (1) stage the BFP kernel .o's in
+  build_merged, (2) thread the multi-iter ping-pong A/B inout image so final-iter output is chain_link'd to c3,
+  (3) migrate chain dispatch ResidentXCLBinRunner → xrt.elf+_MERGED_KERNELS.
+- **B2c (full re8 block in 1 ELF/1 context): GO, ~1-2 days, de-risked.** Strategic prize is NOT the ~5ms re8 wall win —
+  it's the END-TO-END template (chain-under-dispatcher + co-pinned GEMMs + M0 on-device concat) that, applied model-wide,
+  drops contexts 29→~5-8 and collapses ~80 host dispatches → a handful with ~39µs swaps = the projected ~40ms launch_gap win.
+- Files: conv/build_re8_gemm_stitch.py, conv/test_re8_gemm_stitch_hw.py, run_tiled_mc.py (+26 gated MDV6_CTX_TRACE: live_merged_context_count()).
+
+### B2c-1 — chain-as-merged-1-context DONE; chain→c3 BLOCKED on the recurring keystone (halo gather)
+- ✅ **Chain → merged xrt.elf, 1 hw_context, bit-exact** (max_diff 0.0234 vs ResidentXCLBin, BFP tol). Migrated off
+  ResidentXCLBinRunner → now a budget-shareable merged context. Plumbing all solved: BFP .o's compile inline (non-issue),
+  ping-pong inout composes, dispatch migrated to xrt.elf/_MERGED_KERNELS. Files: conv/build_re8_chain_merged.py, conv/test_re8_chain_merged_hw.py.
+- ❌ **chain→c3 device-resident chain_link: BLOCKED.** chain out = memref<50176> (28×28×64 PAD-HWC) vs c3 in =
+  memref<204800> (im2col patch-packed, **4.08× larger** — pixels replicated across overlapping 3×3 halo windows).
+  Raw BO alias can't bridge; needs on-device im2col reformat. **This is the SAME overlapping-window halo gather that blocked
+  conv0→conv1 (PoC-2).** It is now confirmed THE single recurring keystone gap for all 3×3-consumer fusion.
+
+### THE KEYSTONE (singular, de-risked): on-device halo gather — padded-HWC → 3×3 conv input
+- Every on-device fusion across a 3×3 consumer (chain→c3, conv0→conv1, full re8 block, model-wide template) is blocked
+  by ONE missing primitive: a 3×3 conv whose input fill TAP gathers halo'd windows from a contiguous padded-HWC buffer,
+  instead of consuming host-im2col'd patches.
+- **De-risked:** the chain's own conv2res kernel ALREADY reads padded-HWC with halo gather → the read pattern is proven
+  expressible in IRON. Path (b): a 3×3 multicore-conv generator whose rt.fill gathers 10×10 halo patches from the shared
+  padded image. Build it M0-style (standalone bit-exact), then chain→c3 + full re8 block + conv0→conv1 all become mechanical.
+- Proven so far: M0 concat ✓, PoC-1 producer→consumer stitch ✓, B2a context-negative GEMM merge ✓, chain-merged-1-context ✓.
+  Remaining single blocker = the halo-gather primitive.
+
+### KEYSTONE LANDED ✓ — on-device halo-gather 3×3 conv from padded-HWC (the unblock)
+- Standalone: window gather BYTE-IDENTICAL to host im2col (all tiles); conv PASS max_diff 0.035 (BFP tol).
+- chain→c3 seam: merged chain ELF padded-HWC output fed VERBATIM → halo-conv, NO im2col bridge, PASS max_diff 0.043.
+- THE INSIGHT: overlapping windows ARE expressible as a plain rt.fill TAP
+  `sizes=[1,WIN,WIN,ic], strides=[0,IMG_W*ic,ic,1]`, tile origins 8 apart, windows 10 wide → overlapping source rows.
+  The non-overlap restriction only ever applied to `split`, NOT to fill TAPs. That's what unlocked it.
+- Files: kernels/halo_conv3x3_bfp.py, conv/aie2_halo_conv.py, conv/test_halo_conv_hw.py, conv/test_halo_conv_seam_hw.py.
+- The 4.08× im2col mismatch (50176 padded-HWC vs 204800 patch-packed) that blocked conv0→conv1, chain→c3, full re8 — GONE.
+- Remaining to assemble chain→halo_c3→…→concat→c4 in ONE ELF/context: low-med plumbing — per-oc-block wt streaming
+  (lift from chain), bake 1px origin offset into chain drain, place halo_c3 as a chain_link consumer sub-device.
+
+## FUSION PROGRAM — all primitives now PROVEN:
+M0 concat ✓ · PoC-1 producer→consumer stitch ✓ · B2a context-NEGATIVE GEMM merge ✓ · chain-as-1-context xrt.elf ✓ ·
+B1 concat→c4 ✓ · KEYSTONE halo-gather 3×3 from padded-HWC ✓. → full re8 block in 1 ELF/1 context is now mechanical.

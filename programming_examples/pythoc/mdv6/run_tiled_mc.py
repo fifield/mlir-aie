@@ -218,6 +218,24 @@ else:
     _MERGED_BD = os.path.join(_base, "conv", "build_merged")
 _MERGED_KERNELS = OrderedDict()  # elf_name -> (device, elf, hw_context, kernel) or None
 _MERGED_BO_POOL = {}             # (elf_name, role, size) -> xrt.ext.bo
+
+# MDV6_CTX_TRACE=1 instruments the merged-ELF context pool + dispatch counter so
+# the B2a dispatcher-merge can prove a context-count DROP and a launch DROP. It
+# tracks the set of distinct merged ELFs that hold a live xrt.hw_context and the
+# number of xrt.run dispatches. ResidentXCLBin contexts are reported separately
+# (see conv/resident_xclbin_runner.py instrumentation).
+_CTX_TRACE = os.environ.get("MDV6_CTX_TRACE", "0") not in ("", "0", "false", "False")
+_LAUNCH_COUNT = 0                # total xrt.run dispatches (merged-ELF path)
+_LAUNCH_BY_LAYER = {}            # _CURRENT_LAYER -> dispatch count
+
+
+def live_merged_context_count():
+    """Number of distinct merged ELFs currently holding a live xrt.hw_context."""
+    return sum(1 for e in _MERGED_KERNELS.values() if e is not None)
+
+
+def live_merged_context_names():
+    return sorted(n for n, e in _MERGED_KERNELS.items() if e is not None)
 _USE_PACKED_GEMM = os.environ.get("MDV6_USE_PACKED_GEMM", "0") not in ("", "0", "false", "False")
 # This NPU/firmware allows ~29 simultaneous xrt.elf hw_contexts; the full
 # non-packed mdv6 frame already loads exactly that many merged ELFs. Trimming
@@ -301,6 +319,9 @@ def _get_merged_kernel(elf_name):
     entry = (device, elf, hw_context, kernel)
     _MERGED_KERNELS[elf_name] = entry
     _trim_merged_kernel_cache()
+    if _CTX_TRACE:
+        print(f"  [ctx] +load {elf_name} (layer={_CURRENT_LAYER}) "
+              f"live={live_merged_context_count()}")
     return entry
 
 
@@ -380,6 +401,11 @@ def _xrt_run_kernel(kernel, args):
         _sync_acc("start", t1 - t0)
         _sync_acc("wait", t2 - t1)
         return run
+    if _CTX_TRACE:
+        global _LAUNCH_COUNT
+        _LAUNCH_COUNT += 1
+        lk = _CURRENT_LAYER or "?"
+        _LAUNCH_BY_LAYER[lk] = _LAUNCH_BY_LAYER.get(lk, 0) + 1
     run.start()
     run.wait2()
     return run
