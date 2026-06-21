@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>On-device ELAN fusion — concept</title>
+<style>
+  :root{--bg:#11151c;--panel:#181e28;--panel2:#1e2633;--ink:#d8dee9;--dim:#7b8597;--line:#2c3645;
+    --acc:#4fc3f7;--green:#66d18c;--amber:#ffc24d;--red:#ef7070;--violet:#b08ef9;--pink:#f08fb8;}
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--ink);font:15px/1.6 -apple-system,"Segoe UI",Roboto,sans-serif;
+    margin:0 auto;max-width:1300px;padding:32px 5vw 90px}
+  h1{font-size:26px;margin:0 0 6px}
+  h2{font-size:19px;margin:46px 0 10px;color:var(--acc);border-bottom:1px solid var(--line);padding-bottom:6px}
+  h3{font-size:15px;margin:22px 0 6px;color:var(--amber)}
+  .sub{color:var(--dim);margin-bottom:6px}
+  .lead{margin:14px 0;max-width:92ch}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:14px 0}
+  svg{display:block;max-width:100%;height:auto}
+  text{font-family:"SF Mono",Consolas,monospace;fill:var(--ink)}
+  .t9{font-size:9px}.t10{font-size:10px}.t11{font-size:11px}.t12{font-size:12px}.t13{font-size:13px;font-weight:600}
+  .dim{fill:var(--dim)}.accT{fill:var(--acc)}.grnT{fill:var(--green)}.ambT{fill:var(--amber)}
+  .redT{fill:var(--red)}.vioT{fill:var(--violet)}.pnkT{fill:var(--pink)}
+  .box{fill:var(--panel2);stroke:var(--line);rx:6}
+  .boxA{fill:#15303f;stroke:var(--acc);rx:6}.boxG{fill:#15331f;stroke:var(--green);rx:6}
+  .boxV{fill:#261b40;stroke:var(--violet);rx:6}.boxAm{fill:#3a2d10;stroke:var(--amber);rx:6}
+  .boxR{fill:#3a1818;stroke:var(--red);rx:6}.boxP{fill:#381d2c;stroke:var(--pink);rx:6}
+  .wire{stroke:var(--dim);stroke-width:1.3;fill:none;marker-end:url(#a)}
+  .wireA{stroke:var(--acc);stroke-width:1.6;fill:none;marker-end:url(#aA)}
+  .wireG{stroke:var(--green);stroke-width:1.6;fill:none;marker-end:url(#aG)}
+  .wireR{stroke:var(--red);stroke-width:1.6;fill:none;marker-end:url(#aR);stroke-dasharray:5 3}
+  table{border-collapse:collapse;width:100%;font-size:13px;margin:6px 0}
+  th,td{text-align:left;padding:6px 12px 6px 0;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--dim)}td.num,th.num{font-family:"SF Mono",Consolas,monospace;text-align:right}
+  code{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:12.5px}
+  .cap{font-size:12px;color:var(--dim);margin:4px 0 10px}
+  .red{color:var(--red)}.green{color:var(--green)}.amber{color:var(--amber)}.accc{color:var(--acc)}.violet{color:var(--violet)}
+  .note{border-left:3px solid var(--amber);padding:6px 14px;margin:12px 0;background:#1d1c12;color:#e8dcb8;border-radius:0 6px 6px 0;font-size:13.5px}
+  ul{margin:6px 0;padding-left:20px}li{margin:4px 0}
+</style>
+</head>
+<body>
+<h1>On-device ELAN fusion — concept sketch</h1>
+<div class="sub">RepNCSPELAN8 block @ 20×20 · keep intermediates resident in memtile L2 · do the GELAN
+concat on-chip · collapse ~9 launches → 1–2</div>
+<div class="sub" style="color:#66d18c">Scoped 2026-06-21. <b>M0 PROVEN on HW</b>: the on-device channel concat is <b>BIT_EXACT</b> vs np.concatenate
+(0/32768, max_diff 0.0); concat→conv4 is byte-identical to the host path. Binding constraint = ~29 hw-context ceiling + re4 shim-BDs, NOT L2 capacity.</div>
+<div class="sub" style="color:#4fc3f7">Reframe (from the PDI-merge study): the concat's real value is as a <b>stitching enabler</b> — removing the host concat/split lets a whole
+RepNCSPELAN block become one no-host-touch segment, stitchable into one ELF where host dispatches (~505 µs) become on-device PDI swaps (~40 µs). The win is dispatch consolidation, not the bounce.</div>
+
+<svg width="0" height="0"><defs>
+<marker id="a" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#7b8597"/></marker>
+<marker id="aA" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#4fc3f7"/></marker>
+<marker id="aG" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#66d18c"/></marker>
+<marker id="aR" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#ef7070"/></marker>
+</defs></svg>
+
+<p class="lead">The block is <code>conv1(1×1) → split(x1,x2) → [RepNCSP+3×3]→x3 → [RepNCSP+3×3]→x4 →
+concat[x1,x2,x3,x4] → conv4(1×1)</code>. Today each sub-op is a separate NPU launch whose output is
+DMA'd to DDR, re-assembled on the host (the concat / split are <code>np.concatenate</code>), and
+re-uploaded for the next launch. The fusion keeps all four branch tensors resident in L2 and performs the
+concat as a <b>strided memtile DMA</b> — the next conv reads a fused tensor directly.</p>
+
+<h2>1 · Today vs. fused — the launch &amp; DDR picture</h2>
+<div class="panel">
+<svg viewBox="0 0 1240 470">
+<!-- LEFT: today -->
+<text class="t13 redT" x="20" y="18">TODAY — ~9 launches/block, DDR round-trip + host concat between each</text>
+<!-- DDR bar -->
+<rect class="boxR" x="20" y="420" width="560" height="30"/><text class="t11 redT" x="240" y="440">DDR (host BOs) — every arrow crosses it</text>
+<!-- op boxes stacked, each bounces to DDR -->
+<g>
+<rect class="boxV" x="40" y="40" width="110" height="30"/><text class="t10 vioT" x="52" y="59">conv1 1×1</text>
+<rect class="boxP" x="40" y="92" width="110" height="22"/><text class="t9 pnkT" x="52" y="107">split (host)</text>
+<rect class="boxAm" x="40" y="140" width="110" height="30"/><text class="t10 ambT" x="52" y="159">RepNCSP→x3</text>
+<rect class="boxG" x="40" y="192" width="110" height="30"/><text class="t10 grnT" x="52" y="211">c3 3×3</text>
+<rect class="boxAm" x="40" y="244" width="110" height="30"/><text class="t10 ambT" x="52" y="263">RepNCSP→x4</text>
+<rect class="boxG" x="40" y="296" width="110" height="30"/><text class="t10 grnT" x="52" y="315">c3 3×3</text>
+<rect class="boxP" x="40" y="348" width="110" height="22"/><text class="t9 pnkT" x="52" y="363">concat (host)</text>
+<rect class="boxV" x="40" y="384" width="110" height="26"/><text class="t10 vioT" x="52" y="401">conv4 1×1</text>
+</g>
+<!-- bounce arrows down to DDR and back -->
+<path class="wireR" d="M155 55 C 300 55, 320 420, 300 420"/>
+<path class="wireR" d="M300 420 C 330 150, 200 150, 152 153"/>
+<path class="wireR" d="M155 205 C 360 205, 380 420, 360 420"/>
+<path class="wireR" d="M360 420 C 390 255, 200 255, 152 257"/>
+<path class="wireR" d="M155 309 C 420 309, 440 420, 420 420"/>
+<path class="wireR" d="M420 420 C 450 392, 200 392, 152 396"/>
+<text class="t10 redT" x="470" y="240">each op:</text>
+<text class="t9 dim" x="470" y="258">drain→DDR, host</text>
+<text class="t9 dim" x="470" y="272">reshuffle, re-upload,</text>
+<text class="t9 dim" x="470" y="286">new launch (~1.8 ms</text>
+<text class="t9 dim" x="470" y="300">device wait each)</text>
+
+<!-- RIGHT: fused -->
+<text class="t13 grnT" x="650" y="18">FUSED — 1 device, intermediates stay in memtile L2, concat = strided DMA</text>
+<rect class="boxA" x="650" y="120" width="170" height="250"/><text class="t11 accT" x="668" y="142">memtile L2 (512 KB)</text>
+<text class="t9 dim" x="668" y="158">resident branch tiles</text>
+<rect class="boxG" x="668" y="170" width="134" height="22"/><text class="t9 grnT" x="678" y="185">x1  20×20×128 (100KB)</text>
+<rect class="boxG" x="668" y="196" width="134" height="22"/><text class="t9 grnT" x="678" y="211">x2  100KB</text>
+<rect class="boxG" x="668" y="222" width="134" height="22"/><text class="t9 grnT" x="678" y="237">x3  100KB</text>
+<rect class="boxG" x="668" y="248" width="134" height="22"/><text class="t9 grnT" x="678" y="263">x4  100KB</text>
+<rect class="boxAm" x="668" y="284" width="134" height="34"/><text class="t9 ambT" x="678" y="299">concat 20×20×512</text><text class="t9 dim" x="678" y="312">400KB (channel-contig)</text>
+<text class="t9 dim" x="668" y="338">x1..x4 written to their</text>
+<text class="t9 dim" x="668" y="352">channel offset by 4 BDs</text>
+
+<!-- compute tiles feeding L2 -->
+<rect class="boxV" x="880" y="150" width="120" height="26"/><text class="t10 vioT" x="892" y="167">conv1 (cores)</text>
+<rect class="boxAm" x="880" y="200" width="120" height="26"/><text class="t10 ambT" x="892" y="217">rn3 chain (cores)</text>
+<rect class="boxG" x="880" y="250" width="120" height="26"/><text class="t10 grnT" x="892" y="267">c3 3×3 (cores)</text>
+<rect class="boxV" x="880" y="300" width="120" height="26"/><text class="t10 vioT" x="892" y="317">conv4 (cores)</text>
+<path class="wireG" d="M880 163 C 850 163, 840 180, 820 181"/>
+<path class="wireG" d="M880 213 C 850 213, 840 207, 820 207"/>
+<path class="wireG" d="M880 263 C 850 263, 845 233, 820 233"/>
+<path class="wireA" d="M820 301 C 845 301, 860 313, 880 313"/>
+<text class="t9 accT" x="828" y="300">conv4 reads</text>
+<text class="t9 accT" x="828" y="334">fused concat</text>
+<!-- single DDR touch -->
+<rect class="boxR" x="650" y="400" width="350" height="26"/><text class="t11 redT" x="700" y="417">DDR — block input in, block output out (2 touches total)</text>
+<path class="wireA" d="M735 400 C 735 385, 735 376, 735 370"/>
+<path class="wireA" d="M940 326 C 940 360, 940 380, 940 400"/>
+<text class="t10 grnT" x="650" y="448">No host concat/split; no per-op DDR bounce. Block = 1–2 launches.</text>
+</svg>
+<div class="cap">Left: today — 8–9 launches, every intermediate crosses DDR and is reshuffled on the host
+(<span class="red">red</span> = DDR round-trips). Right: fused — one device holds x1–x4 in L2; the concat is a
+channel-offset DMA; only the block's input and output touch DDR.</div>
+</div>
+
+<h2>2 · The on-chip concat — a strided DMA, not a memcpy</h2>
+<div class="panel">
+<svg viewBox="0 0 1240 300">
+<text class="t12 dim" x="20" y="18">4 branch tiles → one channel-contiguous L2 buffer via 4 BDs, each with a channel offset (HWC: channel is innermost)</text>
+<!-- four source tiles -->
+<rect class="boxG" x="40" y="60" width="150" height="40"/><text class="t11 grnT" x="55" y="78">x1 [20,20,128]</text><text class="t9 dim" x="55" y="92">chain/conv out tile</text>
+<rect class="boxG" x="40" y="115" width="150" height="40"/><text class="t11 grnT" x="55" y="133">x2 [20,20,128]</text>
+<rect class="boxG" x="40" y="170" width="150" height="40"/><text class="t11 grnT" x="55" y="188">x3 [20,20,128]</text>
+<rect class="boxG" x="40" y="225" width="150" height="40"/><text class="t11 grnT" x="55" y="243">x4 [20,20,128]</text>
+<!-- BD labels -->
+<text class="t10 ambT" x="230" y="84">BD0 dst_c=0</text>
+<text class="t10 ambT" x="230" y="139">BD1 dst_c=128</text>
+<text class="t10 ambT" x="230" y="194">BD2 dst_c=256</text>
+<text class="t10 ambT" x="230" y="249">BD3 dst_c=384</text>
+<path class="wireA" d="M190 80 C 320 80, 360 150, 430 150"/>
+<path class="wireA" d="M190 135 C 320 135, 360 158, 430 158"/>
+<path class="wireA" d="M190 190 C 320 190, 360 166, 430 166"/>
+<path class="wireA" d="M190 245 C 320 245, 360 174, 430 174"/>
+<!-- dest buffer: a row of 512 channels -->
+<rect class="boxAm" x="430" y="120" width="520" height="60"/>
+<rect class="boxG" x="432" y="122" width="128" height="56" opacity="0.5"/><text class="t10 grnT" x="470" y="155">x1</text>
+<rect class="boxG" x="562" y="122" width="128" height="56" opacity="0.5"/><text class="t10 grnT" x="600" y="155">x2</text>
+<rect class="boxG" x="692" y="122" width="128" height="56" opacity="0.5"/><text class="t10 grnT" x="730" y="155">x3</text>
+<rect class="boxG" x="822" y="122" width="126" height="56" opacity="0.5"/><text class="t10 grnT" x="858" y="155">x4</text>
+<text class="t11 ambT" x="430" y="112">L2 concat buffer — for each of 400 pixels: [x1ch0..127 | x2 | x3 | x4]  (stride = 512 ch)</text>
+<text class="t10 dim" x="430" y="205">Per BD: sizes=[H,W,128], dst stride places the 128 channels at offset dst_c within a 512-wide row.</text>
+<text class="t10 dim" x="430" y="222">conv4's GEMM then streams this buffer as a normal [M=400, IC=512] input — no host concat.</text>
+<text class="t10 dim" x="430" y="239">Cost: 4 memtile S2MM/MM2S BDs (of 48), 0 host bytes, 0 extra launches.</text>
+
+<text class="t12 vioT" x="990" y="60">why a DMA works:</text>
+<text class="t10 dim" x="990" y="82">concat in channel dim</text>
+<text class="t10 dim" x="990" y="98">= interleave writes at</text>
+<text class="t10 dim" x="990" y="114">a fixed column offset</text>
+<text class="t10 dim" x="990" y="130">in the destination row.</text>
+<text class="t10 dim" x="990" y="154">The DMA engine already</text>
+<text class="t10 dim" x="990" y="170">does strided 4D TAPs</text>
+<text class="t10 dim" x="990" y="186">(same trick the OCB</text>
+<text class="t10 dim" x="990" y="202">path uses for n_ocb).</text>
+</svg>
+<div class="cap"><b>M0 update:</b> proven on HW, but the IRON construct is a <b>single strided gather <code>rt.fill</code></b>, not 4
+offset-only DMAs — a <code>fill</code>'s dest is linear, so the interleave lives in the <i>source</i> strides
+(sources passed stacked <code>[x1|x2|x3|x4]</code>, gathered per-pixel: <code>sizes=[tile_m,4,128]</code>,
+<code>strides=[128, host_q, 1]</code>). Mathematically identical to the scatter; bit-exact. (The symmetric
+<i>drain</i> does take a dest-scatter TAP, as the rn3 chain uses.)</div>
+</div>
+
+<h2>3 · The hard part — bridging tilings between fused ops</h2>
+<div class="panel">
+<svg viewBox="0 0 1240 230">
+<rect class="boxV" x="30" y="60" width="200" height="90"/><text class="t11 vioT" x="45" y="82">conv1 / conv4 (1×1)</text>
+<text class="t9 dim" x="45" y="100">GEMM tiling:</text><text class="t9 dim" x="45" y="114">[M=H·W pixels, IC]</text><text class="t9 dim" x="45" y="128">rows of tile_m pixels</text>
+<rect class="boxG" x="330" y="60" width="200" height="90"/><text class="t11 grnT" x="345" y="82">c3 / chain (3×3)</text>
+<text class="t9 dim" x="345" y="100">spatial tiling:</text><text class="t9 dim" x="345" y="114">[tile_h,tile_w,IC]+halo</text><text class="t9 dim" x="345" y="128">OC-blocked by 8</text>
+<rect class="boxAm" x="630" y="60" width="200" height="90"/><text class="t11 ambT" x="645" y="82">concat buffer</text>
+<text class="t9 dim" x="645" y="100">channel-contiguous</text><text class="t9 dim" x="645" y="114">HWC [H,W,512]</text><text class="t9 dim" x="645" y="128">no halo, no OC-block</text>
+<path class="wireA" d="M230 105 H 330"/><path class="wireA" d="M530 105 H 630"/>
+<text class="t9 redT" x="245" y="98">re-tile</text><text class="t9 redT" x="545" y="98">re-tile</text>
+<text class="t11 ambT" x="900" y="80">The crux:</text>
+<text class="t10 dim" x="900" y="100">each fused op wants a</text>
+<text class="t10 dim" x="900" y="116">different on-chip layout.</text>
+<text class="t10 dim" x="900" y="132">A memtile DMA can re-tile</text>
+<text class="t10 dim" x="900" y="148">between them (strided BDs),</text>
+<text class="t10 dim" x="900" y="164">but each re-tile spends BDs</text>
+<text class="t10 dim" x="900" y="180">and must keep both layouts</text>
+<text class="t10 dim" x="900" y="196">live in L2 briefly.</text>
+<text class="t10 grnT" x="30" y="185">ANSWERED: the chain ALREADY drains channel-contiguous padded-HWC (the exact layout a 3×3 needs, halo included) → chain→3×3→concat needs NO re-tile. That's the clean seam.</text>
+<text class="t10 redT" x="30" y="205">The real re-tile is the 1×1/3×3 tile-blocked → HWC transpose, done on the HOST today (reassemble_output_hwc). Moving it on-device is the work; the concat itself is a trivial strided DMA.</text>
+</svg>
+</div>
+
+<h2>4 · Why re8 @ 20×20 first, and what bounds it</h2>
+<div class="panel">
+<table>
+<tr><th>quantity</th><th class="num">re8 @ 20²</th><th>limit</th><th>fits?</th></tr>
+<tr><td>each branch tile x1..x4</td><td class="num">100 KB</td><td>memtile 512 KB</td><td class="green">yes</td></tr>
+<tr><td>concat buffer [20,20,512]</td><td class="num">400 KB</td><td>memtile 512 KB</td><td class="green">yes (one tile)</td></tr>
+<tr><td>all 4 branches + concat live</td><td class="num">~800 KB</td><td>total L2 4 MB (≥2 memtiles)</td><td class="green">yes (spans tiles)</td></tr>
+<tr><td>concat DMA descriptors</td><td class="num">4 BDs</td><td>48 memtile / 16 shim</td><td class="green">yes</td></tr>
+<tr><td>per-core working tile</td><td class="num">&lt;64 KB</td><td>L1 64 KB</td><td class="green">yes</td></tr>
+<tr><td>re6 @ 40² concat</td><td class="num">1.2 MB</td><td>memtile 512 KB</td><td class="amber">spans 3 tiles — harder</td></tr>
+<tr><td>re4 @ 80² concat</td><td class="num">3.3 MB</td><td>total L2 4 MB</td><td class="red">near total L2 — likely no</td></tr>
+</table>
+<div class="note"><b>But capacity is NOT what binds.</b> The scope confirmed the working set fits at 20² (and even
+re6/re4 fit in total L2). The actual binding constraints are: <span class="red">(1) the ~29 hw-context
+ceiling</span> — the model already uses exactly 29, so a fused-block ELF must be <i>context-neutral</i> by
+evicting the chain/conv contexts it subsumes; <span class="red">(2) re4's shim-BD pool (16/ch)</span> —
+TPC=12 already overflows it (the same 24&gt;16 wall that disables re4's rnm-fold). re8 clears both; re6 is
+harder; re4 likely needs BD relief first.</div>
+</div>
+
+<h2>5 · Payoff &amp; milestone ladder (design target)</h2>
+<div class="panel">
+<ul>
+<li><b>Milestone 0 — standalone concat proof: <span class="green">DONE ✓ (2026-06-21)</span></b> on-device strided
+concat → conv4 GEMM. <b>concat_only BIT_EXACT</b> vs <code>np.concatenate</code> (0/32768, max_diff 0.0, incl.
+the quarter-boundary seam); <b>e2e concat→conv4 byte-identical</b> to the host-concat→GEMM path. Construct: a single
+strided gather <code>rt.fill</code> (§2). Files: <code>conv/aie2_concat_proof.py</code>, <code>conv/test_concat_proof_hw.py</code>.
+Limits found: <code>fill</code> dest is linear (interleave goes in source strides); DMA BD inner-dim ≤1023;
+split/join+passthrough-copy deadlocks (use split/join+GEMM); <code>iron.tensor(u16)</code> silently promotes to
+u32 — pin <code>dtype=np.uint16</code>.</li>
+<li><b>Milestone 1 — fuse conv4's concat:</b> remove the host concat + one launch for every re8 block
+(2 blocks/frame). <span class="dim">small, low risk once M0 lands.</span></li>
+<li><b>Milestone 2 — chain→c3→concat resident:</b> keep the branch outputs in L2 across the chain and c3
+without DDR bounce. This is where the re-tile bridge (§3) is the risk. <span class="dim">multi-day, real BD/layout work.</span></li>
+<li><b>Milestone 3 — whole block = 1–2 launches:</b> conv1→split→branches→concat→conv4 on one device.</li>
+</ul>
+<p class="lead"><b>Payoff (scoped):</b> a re8 block collapses ~5–7 sub-launches → 1–2. But the scope is blunt about the
+ceiling: dispatch-count reduction is <b>wall-flat</b> (launch_gap is already at its floor), so the win comes only
+from removing the <b>chain→host→3×3 DDR bounces</b>, not launches — <span class="amber">~2–5 ms for re8 alone</span>
+(re8 is the smallest geometry, fired once/frame). The lever only gets big if extended to re6/re4, whose c3 convs
+dominate npu_run (mc_re4_c3 18 ms, mc_re6_c3 17 ms, mc_elan_c3 12 ms) → potentially 15–40 ms — but those hit the
+shim-BD ceiling (re4) and multi-memtile span (re6). <span class="red">Hard bound:</span> the concat removes plumbing,
+<i>not compute</i>, so it can't beat the c3 kernel-compute floor — making the convs themselves faster (BFP576/wider
+matmul) is the complementary, larger lever.</p>
+</div>
+
+<p class="sub" style="margin-top:36px">Concept sketch for discussion — pairs with the agent's feasibility scope (L2 budget, BD/TAP layout,
+re-tile bridge, milestone effort/risk). Not yet validated on hardware.</p>
+</body>
+</html>
