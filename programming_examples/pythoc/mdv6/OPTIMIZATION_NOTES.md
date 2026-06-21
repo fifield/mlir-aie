@@ -309,3 +309,22 @@ B1 concat→c4 ✓ · KEYSTONE halo-gather 3×3 from padded-HWC ✓. → full re
   shift=PAD-1 baked. **hw_context 2→1**, bit-exact 0.037 at the REAL 128→128 model seam. Files: conv/build_rnm_halo_merged.py, test_rnm_halo_merged_hw.py.
 - S3 assess: full block GO, no blocker. 3 seams proven (chain→rnm=B2a, rnm→halo_c3=this, concat→c4=M0/B1).
   Remaining = layout-bridging between hops (tile↔row↔padded), ~3 milestones, NOT topology/L1/deadlock.
+
+### FULL BLOCK INTEGRATION (A1/A2/A4) — rnm→c3 fused IN-MODEL, all 4 re8 hops ✓ (verified)
+- FUSE ON: launches 98→94 (-4), hw_context peak 29→28 (-1), wall ~401ms (NEUTRAL), accuracy 0.1420 PASS.
+- Default OFF: bit-exact 0.1423 PASS (untouched). Standalone rnm→c3 vs model: max_diff 0.0137.
+- Construct: rnm GEMM(pad-out) + halo_c3(OC=128) in 1 ELF (chain_links (0,2,1,0), device-resident seam), ×4 hops.
+- Files: conv/rnm_halo_runner.py, conv/test_rnm_c3_model_hw.py, test_full_model_mc.py (gated re8 path).
+
+### A3 (full single-ELF block) NOT reached — chain→rnm layout-incompatible
+- chain drains 8×8 TILES into padded HWC; rnm GEMM wants per-core 20px ROWS + x2 channel-interleaved.
+  No single TAP bridges tiles→rows+x2 → chain→rnm stays a host repack (the model's existing torch.cat).
+- Context only -1 (not ~5): chain is on a SEPARATE ResidentXCLBinRunner context (not in the merged pool CTX_TRACE counts);
+  peak now bound by the model TAIL (re12/15/18 + aconv heads), not re8.
+- BN+SiLU gap: halo_conv does RAW conv; c3 BN-scale folded into weights (device), BN-bias+SiLU host-side. Tiny BFP perturbation (0.1423→0.1420), not bit-identical.
+
+### HONEST CONCLUSION of the fusion deep-push
+- Every primitive proven + the rnm→c3 seam integrated IN-MODEL bit-exact. Mechanism fully de-risked.
+- BUT wall is NEUTRAL at re8 scale (-4 launches below noise) — re-confirms dispatch/context reduction doesn't move the wall here.
+- Model-wide ~40ms would need: re6/re4 fusion + a chain→rnm tiles→rows reformat + BN/SiLU-in-kernel + displacing tail ELFs.
+  Multi-week; payoff still bounded by dispatch-floor economics (heavy compute stays; launch_gap already at floor).
