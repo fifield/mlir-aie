@@ -95,10 +95,16 @@ def run_elan_mc(model_elan, input_hwc, H, W, ic, oc,
 def run_rn_mc(repncsp, inp, H, W, ic, oc,
               mc_rn1, sc_rn1, mc_rn3, sc_rn3, mc_rnm, sc_rnm,
               trn1, orn1, trn3, orn3, trnm, ornm,
-              return_concat=False):
+              return_concat=False, return_chain_inputs=False):
     """If return_concat=True, return (concat, repncsp.conv3) just BEFORE the rnm
     GEMM instead of running it — lets run_re_mc fuse rnm+c3 into one ELF
-    (run_rnm_c3) behind MDV6_FUSE_RE8. Only used for the re8 20x20x128 shape."""
+    (run_rnm_c3) behind MDV6_FUSE_RE8. Only used for the re8 20x20x128 shape.
+
+    If return_chain_inputs=True, return (x1, x2, pairs, repncsp.conv3) BEFORE the
+    rn3 chain runs — lets run_re_mc fuse chain+rnm+c3 into ONE merged ELF
+    (run_chain_rnm_c3, the FULL re8 hop) behind MDV6_FUSE_RE8. x1 is the chain
+    input, x2 the concat's other half, pairs the bottleneck chain weight pairs.
+    Only valid for the rn3-chain re8 20x20x128 shape."""
     """RepNCSP with multicore conv sub-layers + host CPU RepConv.
 
     Phase C step A: x1 and x2 are both 1x1 convs on the same `inp` input
@@ -120,6 +126,10 @@ def run_rn_mc(repncsp, inp, H, W, ic, oc,
     if use_rn3chain:
         from conv.rn3_chain_runner import run_re6_rn3_chain, run_rn3_chain_geo
         pairs = [(fuse_repconv(b.conv1), fuse_bn(b.conv2)) for b in repncsp.bottleneck]
+        if return_chain_inputs:
+            # FULL re8 hop: hand x1 (chain in), x2 (concat half), pairs (chain wts)
+            # and repncsp.conv3 (rnm wts) to run_chain_rnm_c3 to fuse chain+rnm+c3.
+            return current, x2, pairs, repncsp.conv3
         # rnm epilogue fused into the chain launch (saves the rnm gemm launch)
         # re6 only: re4 (TPC=12) needs 24 epilogue drain BDs > shim pool;
         # re8 (20px) needs width-trimmed drains
@@ -213,7 +223,27 @@ def run_re_mc(layer, inp, H, W, ic, oc, part, proc,
     # is folded into the halo conv weights and BN-bias+SiLU applied host-side.
     _fuse_rnm_c3 = (os.environ.get("MDV6_FUSE_RE8", "0") not in ('', '0', 'false', 'False')
                     and H == 20 and W == 20 and proc == 128)
-    if _fuse_rnm_c3:
+    # MDV6_FUSE_RE8_FULL (default ON when MDV6_FUSE_RE8 is set): the FULL re8 hop —
+    # chain+rnm+c3 in ONE merged ELF (run_chain_rnm_c3), folding the chain's
+    # previously-separate ResidentXCLBin dispatch INTO the fused ELF. Setting it to
+    # 0 falls back to the rnm->c3-only fusion (run_rnm_c3) with a separate chain.
+    _fuse_full = (_fuse_rnm_c3
+                  and os.environ.get("MDV6_FUSE_RE8_FULL", "1") not in ('', '0', 'false', 'False'))
+    if _fuse_full:
+        from conv.chain_rnm_c3_runner import run_chain_rnm_c3
+        x1b3, x2b3, pairs3, conv3_mod3 = run_rn_mc(
+            layer.conv2[0], x2, H, W, half, proc,
+            mc_rn1, sc_rn1, mc_rn3, sc_rn3, mc_rnm, sc_rnm,
+            trn1, orn1, trn3, orn3, trnm, ornm, return_chain_inputs=True)
+        x3 = run_chain_rnm_c3(x1b3, x2b3, pairs3, fuse_bn(conv3_mod3),
+                              fuse_bn(layer.conv2[1]), H, W, proc, mcr_mod=mcr)
+        x1b4, x2b4, pairs4, conv3_mod4 = run_rn_mc(
+            layer.conv3[0], x3, H, W, proc, proc,
+            mc_rn1, sc_rn1, mc_rn3, sc_rn3, mc_rnm, sc_rnm,
+            trn1, orn1, trn3, orn3, trnm, ornm, return_chain_inputs=True)
+        x4 = run_chain_rnm_c3(x1b4, x2b4, pairs4, fuse_bn(conv3_mod4),
+                              fuse_bn(layer.conv3[1]), H, W, proc, mcr_mod=mcr)
+    elif _fuse_rnm_c3:
         from conv.rnm_halo_runner import run_rnm_c3
         cat3, conv3_mod3 = run_rn_mc(layer.conv2[0], x2, H, W, half, proc,
                           mc_rn1, sc_rn1, mc_rn3, sc_rn3, mc_rnm, sc_rnm,
