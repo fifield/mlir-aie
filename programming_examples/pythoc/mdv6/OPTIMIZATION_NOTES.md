@@ -269,3 +269,21 @@ Real remaining wall levers are OUT OF SCOPE for "launch_gap/dispatch": (a) per-f
 ## FUSION PROGRAM — all primitives now PROVEN:
 M0 concat ✓ · PoC-1 producer→consumer stitch ✓ · B2a context-NEGATIVE GEMM merge ✓ · chain-as-1-context xrt.elf ✓ ·
 B1 concat→c4 ✓ · KEYSTONE halo-gather 3×3 from padded-HWC ✓. → full re8 block in 1 ELF/1 context is now mechanical.
+
+### B2c3-1 — chain→halo_c3 device-resident seam in ONE ELF/ctx ✓ (verified)
+- hw_context 2→1, chain_link (0,2,1,0) aliases halo.in←chain.out (memref<50176> device-resident),
+  shift=PAD-1 baked into halo TAP (no host im2col, no host shift). Bit-exact 0.043 (BFP tol).
+- Files: conv/build_re8_chain_halo_merged.py, conv/test_re8_chain_halo_merged_hw.py, conv/test_halo_conv_stream_hw.py.
+- Per-oc-block weight streaming mechanism proven at OC≤64 (halo_conv3x3_bfp_ocb + stream_oc).
+
+### TWO remaining blockers to the FULL re8 model block (both substantial, HW-iteration risk):
+1. **OC=128 overflows L1** — the f32 C accumulator (16 ocb × 8 × 64 × 4B = 32KB) + win(25KB) + wt(36KB) > 64KB.
+   Fix = drain C per oc-block-PAIR (PAIR_C 4KB) → per-pair output-FIFO restructure (split/join topology, deadlock risk).
+   mc_re8_c3 is OC=128, so this gates the REAL seam.
+2. **Model seam is rnm(1×1,128ch)→c3, not chain(64ch)→c3** — B2c3-1's seam used the chain's raw 64ch output (constructed).
+   The real model fusion needs rnm-GEMM + concat fused INTO the chain to emit 128ch padded-HWC.
+
+### INFLECTION POINT: all feasibility answered YES; full model block = substantial remaining engineering, modest per-block payoff
+- Proven library: M0 concat, PoC-1 stitch, B2a ctx-neg merge, B1 concat→c4, chain-1-ctx, KEYSTONE halo-gather, B2c3-1 seam.
+- re8 full-block wall payoff ~5ms (modest); strategic payoff = context headroom → model-wide ~40ms (multi-week, per-block-class).
+- re6/re4 fit L1 more easily (OC overflow is re8/re21-specific) — but same rnm-into-chain subtlety.
