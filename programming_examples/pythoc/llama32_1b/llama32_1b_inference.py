@@ -807,6 +807,19 @@ def generate(
             decode_cache.profiler.enabled = True
     t_decode_start = time.time()
 
+    # Diagnostic logit-correlation hooks (env-gated, off by default).
+    #   PYTHOC_LOGIT_DUMP=<path.npz>   -- save per-token logits + true argmax.
+    #   PYTHOC_FORCE_TOKENS=<path.npz> -- teacher-force the fed token each step
+    #     from a prior run's dump so BOTH runs see IDENTICAL context (logits are
+    #     only comparable across runs when the input sequence matches; greedy
+    #     decode otherwise diverges after the first flipped token).
+    import os as _oslg
+    _logit_dump_path = _oslg.environ.get("PYTHOC_LOGIT_DUMP")
+    _logit_list = [] if _logit_dump_path else None
+    _argmax_list = []
+    _force_path = _oslg.environ.get("PYTHOC_FORCE_TOKENS")
+    _force = np.load(_force_path)["tokens"] if _force_path else None
+
     for token_idx in range(n_tokens):
         t_token_start = time.perf_counter()
 
@@ -865,14 +878,23 @@ def generate(
             )
         next_token = int(np.argmax(logits[0]))
 
+        # Record the TRUE logits/argmax, then optionally teacher-force the token
+        # actually fed forward so a paired run sees identical context.
+        if _logit_list is not None:
+            _logit_list.append(logits[0].copy())
+        _argmax_list.append(next_token)
+        fed_token = next_token
+        if _force is not None and token_idx < len(_force):
+            fed_token = int(_force[token_idx])
+
         t_token = time.perf_counter() - t_token_start
 
-        generated_tokens.append(next_token)
+        generated_tokens.append(fed_token)
         current_pos += 1
-        x_decode = weights.embed_table[next_token].astype(bfloat16)
+        x_decode = weights.embed_table[fed_token].astype(bfloat16)
 
         if streaming:
-            on_token(next_token, _delta_text(tokenizer, generated_tokens, stream_state))
+            on_token(fed_token, _delta_text(tokenizer, generated_tokens, stream_state))
 
         if profile:
             print(
@@ -880,8 +902,15 @@ def generate(
             )
 
         # Stop on EOS or EOT (instruct model emits <|eot_id|> = 128009)
-        if next_token in (tokenizer.eos_token_id, 128009):
+        if fed_token in (tokenizer.eos_token_id, 128009):
             break
+
+    if _logit_dump_path:
+        np.savez(_logit_dump_path,
+                 logits=np.asarray(_logit_list, dtype=np.float32),
+                 tokens=np.asarray(_argmax_list, dtype=np.int64))
+        print(f"  [logit-dump] wrote {len(_argmax_list)} rows -> "
+              f"{_logit_dump_path}")
 
     t_decode = time.time() - t_decode_start
     n_generated = len(generated_tokens) - 1  # exclude prefill token
