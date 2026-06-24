@@ -466,3 +466,10 @@ Inner Total-forward-pass timer (true latency, excludes gc artifact), --profile 6
   ~−102ms = gc.freeze killing the per-frame gc.collect artifact (baseline pre_post 112→ fused 9.6). The gc.freeze portion
   is the harness gc artifact — it could be applied to the baseline too (would drop baseline ~300ms). Fair fusion-only ≈ −18%.
 - Shipping RE8+RE6 today yields the full 403→246 because gc.freeze ships with it. Cumulative vs ORIGINAL 518ms: 518→246 = −52% (gated).
+
+### #1 DONE: model-wide gc.freeze (bit-exact, default-on) — default path 394→338ms
+- gc.collect()+gc.freeze() once after the warmup frame in _profile_main (all ELFs/BOs built) → per-frame gc.collect()
+  stops re-scanning the ~750k persistent objects. Opt-out MDV6_NO_GC_FREEZE=1. BIT-EXACT (0.1423 both).
+- Default path (FUSE off): wall 394→338 (-14%, 2.54→2.96 fps), pre_post 103.6→46.8. Honest: harness-gc-artifact + jitter fix,
+  NOT a steady-state latency change (inner timer unchanged). Makes the wall metric honest + cuts production jitter for ALL paths.
+- (Residual default pre=39ms is young-gen gc from per-frame numpy churn — the persistent-set scan is what freeze removed.)
