@@ -451,3 +451,18 @@ Inner Total-forward-pass timer (true latency, excludes gc artifact), --profile 6
 - OC=64/128 L1-overflow (full-OC wt slot 72KB/288KB) = the SAME issue ocb1 streaming already solves (orthogonal to tpc) — confirmed
   by the OC=64 test failing on buffer-alloc (got PAST placement). Effort to a real re4 fold ~0.5-1 day: port ocb1 into the mt
   core_fn + drain-layout match to dcg + plumb tpc. Bonus: re6/re8 get fewer workers at tpc>1.
+
+### CLEAN FINAL A/B (load ~2.0, rogue gone) — RE8+RE6 + gc.freeze
+| metric | baseline OFF | RE8+RE6+freeze |
+|--|--|--|
+| wall    | 403 ms | **246 ms (−39%)** |
+| fps     | 2.48 | **4.07** |
+| inner   | ~0.30s | ~0.245s |
+| npu_run | 221.7 | 179.6 |
+| pre_post| 111.8 (pre 85) | 9.6 (pre 4) |
+| launches| 98 | 78 |
+| acc     | 0.1423 | 0.1848 PASS |
+- HONEST DECOMPOSITION of the −157ms wall: ~−55ms = FUSION (real latency; npu_run 222→180, inner 0.30→0.245 = −18%);
+  ~−102ms = gc.freeze killing the per-frame gc.collect artifact (baseline pre_post 112→ fused 9.6). The gc.freeze portion
+  is the harness gc artifact — it could be applied to the baseline too (would drop baseline ~300ms). Fair fusion-only ≈ −18%.
+- Shipping RE8+RE6 today yields the full 403→246 because gc.freeze ships with it. Cumulative vs ORIGINAL 518ms: 518→246 = −52% (gated).
