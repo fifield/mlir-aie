@@ -46,8 +46,11 @@ from aie2_halo_conv import deinterleave_stream_out
 N_ITERS = 3
 GEO = os.environ.get("CRH_GEO", "re8")
 TILE = 8
-# per-geo (oc, gbound) registry — re8 (20x20x128) + re6 (40x40x96)
-_GEO_CFG = {"re8": dict(oc=128, gbound=20), "re6": dict(oc=96, gbound=40)}
+# per-geo (oc, gbound, tpc) registry — re8 (20x20x128) + re6 (40x40x96) one-tile
+# halo (tpc=1); re4 (80x80x64) tiles-per-core multi-tile halo (tpc=4, 28 workers).
+_GEO_CFG = {"re8": dict(oc=128, gbound=20, tpc=1),
+            "re6": dict(oc=96, gbound=40, tpc=1),
+            "re4": dict(oc=64, gbound=80, tpc=4)}
 
 
 def _make_weight_pairs(rng, n_iters, ic):
@@ -62,9 +65,11 @@ def _make_weight_pairs(rng, n_iters, ic):
 
 def main():
     cfg = _GEO_CFG[GEO]
+    tpc = cfg["tpc"]
     p0 = geo_params(GEO)
     elf_path, dmeta, hmeta = build(geo=GEO, n_iters=N_ITERS,
-                                   ic2=p0["IC"], oc=cfg["oc"], gbound=cfg["gbound"])
+                                   ic2=p0["IC"], oc=cfg["oc"], gbound=cfg["gbound"],
+                                   tpc=tpc)
     if elf_path is None:
         print("FAIL: merged chain->rnm->halo ELF build failed")
         return 1
@@ -126,7 +131,9 @@ def main():
     b_u16 = a_u16.copy(); b_u16[HALF_ELEMS:IN_ELEMS] = x2_padded.reshape(-1)
     gemm_wt_u16 = _pack_weights_blocked(rnm_conv, rnm_bnw, rnm_bnb)
     halo_wt_u16 = pack_halo_weights(W3_bf, c3_bnw_bf, c3_bnb_bf, oc, oc, stream_oc="block")
-    out_elems = N_TILES * C_ELEMS
+    # mt halo (tpc>1) drains n_slots (>= N_TILES; junk slots included) raster slots.
+    out_slots = hmeta.get("n_slots", N_TILES)
+    out_elems = out_slots * C_ELEMS
 
     device = xrt.device(0)
     elf = xrt.elf(elf_path)
@@ -164,18 +171,34 @@ def main():
     r.set_arg(6, out_bo)
     r.start(); r.wait2()
     out_bo.sync(xrt.xclBOSyncDirection.XCL_BO_SYNC_BO_FROM_DEVICE)
-    flat = deinterleave_stream_out(
-        np.frombuffer(out_bo.map(), dtype=np.float32, count=out_elems).copy(), hmeta)
+    raw_out = np.frombuffer(out_bo.map(), dtype=np.float32, count=out_elems).copy()
 
     # kernel applied BN + SiLU in-kernel: out IS the final activation.
     got = np.zeros((G, G, oc), np.float32)
-    for t in range(N_TILES):
-        tr, tc = t // GRID, t % GRID
-        tile = untile_c(flat[t * C_ELEMS:(t + 1) * C_ELEMS], oc)
-        for pl in range(64):
-            oh, ow = tr * TILE + pl // 8, tc * TILE + pl % 8
-            if oh < G and ow < G:
-                got[oh, ow, :] = tile[pl, :]
+    if tpc > 1:
+        # mt halo: raster slots (slot == raster tile idx). De-interleave the
+        # column-round-packed block-major OUT, then de-raster each real slot.
+        from aie2_halo_conv_mt import deinterleave_stream_mt, slot_to_tile
+        flat = deinterleave_stream_mt(raw_out, hmeta)
+        for slot in range(out_slots):
+            t = slot_to_tile(slot, hmeta)
+            if t is None:
+                continue
+            tr, tc = t // GRID, t % GRID
+            tile = untile_c(flat[slot * C_ELEMS:(slot + 1) * C_ELEMS], oc)
+            for pl in range(64):
+                oh, ow = tr * TILE + pl // 8, tc * TILE + pl % 8
+                if oh < G and ow < G:
+                    got[oh, ow, :] = tile[pl, :]
+    else:
+        flat = deinterleave_stream_out(raw_out, hmeta)
+        for t in range(N_TILES):
+            tr, tc = t // GRID, t % GRID
+            tile = untile_c(flat[t * C_ELEMS:(t + 1) * C_ELEMS], oc)
+            for pl in range(64):
+                oh, ow = tr * TILE + pl // 8, tc * TILE + pl % 8
+                if oh < G and ow < G:
+                    got[oh, ow, :] = tile[pl, :]
 
     d = np.abs(got - ref)
     max_diff, mean_diff = float(d.max()), float(d.mean())

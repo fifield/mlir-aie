@@ -35,8 +35,9 @@ from test_halo_conv_hw import (
 )
 
 
-def run_shape(ic, oc, gbound, tpc, wd_name, tag):
-    module, meta = halo_conv_mt(ic=ic, oc=oc, gbound=gbound, tpc=tpc)
+def run_shape(ic, oc, gbound, tpc, wd_name, tag, stream_oc=False):
+    module, meta = halo_conv_mt(ic=ic, oc=oc, gbound=gbound, tpc=tpc,
+                                stream_oc=stream_oc)
     assert module.operation.verify()
     GRID, N_TILES = meta["GRID"], meta["N_TILES"]
     IMG_W, IMG_H, IMG_ELEMS = meta["IMG_W"], meta["IMG_H"], meta["IMG_ELEMS"]
@@ -46,8 +47,12 @@ def run_shape(ic, oc, gbound, tpc, wd_name, tag):
 
     # --- L1 budget (single-tile residency: win + wt + C + stack) ---
     win_b = WIN_ELEMS * 2
-    wt_b = WSLOT * 2
-    c_b = C_ELEMS * 4
+    if meta.get("stream_oc"):
+        wt_b = meta["WSLOT_BLK"] * 2          # ONE oc-block wt slot resident
+        c_b = meta["BLK_C"] * 4               # ONE oc-block C resident
+    else:
+        wt_b = WSLOT * 2
+        c_b = C_ELEMS * 4
     # io_depth=1 (default): win + C single-buffered; wt depth-1 always
     l1_d2 = (win_b + wt_b + c_b) + 4096
     print(f"\n[{tag}] ic={ic} oc={oc} gbound={gbound} tpc={tpc} | GRID={GRID} "
@@ -82,7 +87,8 @@ def run_shape(ic, oc, gbound, tpc, wd_name, tag):
     ref = bn_silu_ref(raw, bn_w, bn_b)
 
     img_u16 = to_u16(conv_img)
-    wt_u16 = pack_halo_weights(W_bf, bn_w, bn_b, ic, oc)
+    wt_u16 = pack_halo_weights(W_bf, bn_w, bn_b, ic, oc,
+                               stream_oc="block" if meta.get("stream_oc") else False)
 
     npu = NPUKernel(str(wd / "final.xclbin"), str(wd / "insts.bin"), kernel_name="MLIR_AIE")
     h = DefaultNPURuntime.load(npu)
@@ -90,6 +96,9 @@ def run_shape(ic, oc, gbound, tpc, wd_name, tag):
     DefaultNPURuntime.run(h, [iron.tensor(img_u16, dtype=np.uint16),
                               iron.tensor(wt_u16, dtype=np.uint16), out])
     flat = np.array(out.numpy())
+    if meta.get("stream_oc"):
+        from aie2_halo_conv_mt import deinterleave_stream_mt
+        flat = deinterleave_stream_mt(flat, meta)
 
     # ---- assemble: OUT slot index == raster tile idx (slot_to_tile) ----
     got = np.zeros((gbound, gbound, oc), np.float32)
@@ -137,8 +146,11 @@ def main():
         results.append(("re4 oc32 tpc=4",
                         run_shape(64, 32, 80, 4, "build_halo_conv_mt_re4_oc32", "re4_oc32")))
     if only in ("", "re4"):
-        results.append(("re4 oc64 tpc=4",
-                        run_shape(64, 64, 80, 4, "build_halo_conv_mt_re4", "re4")))
+        # OC=64 via per-oc-block streaming (the OC=64 L1 fix): full-OC weight slot
+        # (72KB) overflows L1; stream one oc-block at a time (~27KB resident).
+        results.append(("re4 oc64 tpc=4 stream",
+                        run_shape(64, 64, 80, 4, "build_halo_conv_mt_re4", "re4",
+                                  stream_oc="block")))
     print("\n===== SUMMARY =====")
     allok = True
     for name, (ok, mx, mn, l1, nw) in results:

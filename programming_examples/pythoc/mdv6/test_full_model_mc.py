@@ -231,13 +231,20 @@ def run_re_mc(layer, inp, H, W, ic, oc, part, proc,
     # measurement must net against the dispatch-collapse saving.
     _fuse_re6_full = (os.environ.get("MDV6_FUSE_RE6", "0") not in ('', '0', 'false', 'False')
                       and H == 40 and W == 40 and proc == 96)
+    # MDV6_FUSE_RE4 (default OFF): the heaviest conv hop — rep_elan4 (B3) +
+    # rep_elan15 (P3) at 80x80, proc=64. Routes through the SAME run_chain_rnm_c3
+    # (per-geo registry adds (80,64)->re4) whose halo sub-device uses the
+    # tiles-per-core multi-tile halo (tpc=4, 28 workers) + OC-block streaming so
+    # re4's 100-tile c3 fits the 32-core placement. 2 blocks x 2 hops = 4 hops/frame.
+    _fuse_re4_full = (os.environ.get("MDV6_FUSE_RE4", "0") not in ('', '0', 'false', 'False')
+                      and H == 80 and W == 80 and proc == 64)
     # MDV6_FUSE_RE8_FULL (default ON when MDV6_FUSE_RE8 is set): the FULL re8 hop —
     # chain+rnm+c3 in ONE merged ELF (run_chain_rnm_c3), folding the chain's
     # previously-separate ResidentXCLBin dispatch INTO the fused ELF. Setting it to
     # 0 falls back to the rnm->c3-only fusion (run_rnm_c3) with a separate chain.
     _fuse_full = ((_fuse_rnm_c3
                   and os.environ.get("MDV6_FUSE_RE8_FULL", "1") not in ('', '0', 'false', 'False'))
-                  or _fuse_re6_full)
+                  or _fuse_re6_full or _fuse_re4_full)
     if _fuse_full:
         from conv.chain_rnm_c3_runner import run_chain_rnm_c3
         x1b3, x2b3, pairs3, conv3_mod3 = run_rn_mc(
