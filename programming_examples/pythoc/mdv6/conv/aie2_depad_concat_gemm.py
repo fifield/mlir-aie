@@ -62,7 +62,8 @@ PAD = 2
 KERNELS_DIR = os.path.join(MDV6, "kernels", "build")
 
 
-def depad_concat_gemm(ic2=64, oc=128, gbound=20, stack_size=8192, chain_img_h=None):
+def depad_concat_gemm(ic2=64, oc=128, gbound=20, stack_size=8192, chain_img_h=None,
+                      m_split=None):
     """1x1 GEMM (2*ic2 -> oc) over a gbound x gbound valid feature map whose input
     is assembled device-resident from a PAD(2)-padded chain image (channels
     [0:ic2]) + a PAD(2)-padded x2 image (channels [ic2:2*ic2]).
@@ -108,9 +109,21 @@ def depad_concat_gemm(ic2=64, oc=128, gbound=20, stack_size=8192, chain_img_h=No
         assert rpc <= gbound, f"no rows_per_core divides gbound={gbound} under {max_cores} cores"
     n_cores = gbound // rpc
     tile_m = rpc * gbound                         # pixels per core (M dim)
-    input_tile_size = tile_m * ic                 # per-core fused input
-    output_tile_size = tile_m * oc
     weight_size = oc * ic + 2 * oc               # conv + BN scale/bias
+
+    # m_split: stream each core's tile_m pixels as `m_split` sub-tiles through the
+    # FIFO (the core loops m_split kernel calls, one chunk in/out per call). This
+    # shrinks the L1 in/out buffers by m_split — the lever that makes the large
+    # re4 (gbound=80, tile_m=320 -> 40KB in + 40KB out overflows L1) GEMM core fit.
+    # Default None: m_split = rpc, i.e. one VALID ROW (gbound px) per sub-tile, so
+    # each chunk is uniformly IMG*ic2 apart in the source (no extra TAP dim). The
+    # re8/re6 paths use rpc=1/2 -> m_split=1/2 (re8 unchanged: 1 chunk == old tile).
+    if m_split is None:
+        m_split = rpc
+    assert tile_m % m_split == 0, f"tile_m={tile_m} not divisible by m_split={m_split}"
+    chunk_m = tile_m // m_split                    # pixels per streamed sub-tile
+    input_tile_size = chunk_m * ic                 # per-chunk fused input
+    output_tile_size = chunk_m * oc
 
     n_cols = (n_cores + cores_per_col - 1) // cores_per_col
 
@@ -131,7 +144,9 @@ def depad_concat_gemm(ic2=64, oc=128, gbound=20, stack_size=8192, chain_img_h=No
 
     RTP_LEN = 6
     rtp_ty = np.ndarray[(RTP_LEN,), np.dtype[np.int32]]
-    init_rtp = np.array([tile_m, 1, ic, oc, 1, 0], dtype=np.int32)
+    # t_h = chunk_m (one streamed sub-tile's M) — the kernel processes one chunk
+    # per call; the core loops m_split chunks reusing the resident weights.
+    init_rtp = np.array([chunk_m, 1, ic, oc, 1, 0], dtype=np.int32)
     rtps = [Buffer(rtp_ty, name=f"rtp_{i}", initial_value=init_rtp, use_write_rtp=True)
             for i in range(n_cores)]
     barriers = [WorkerRuntimeBarrier() for _ in range(n_cores)]
@@ -140,12 +155,17 @@ def depad_concat_gemm(ic2=64, oc=128, gbound=20, stack_size=8192, chain_img_h=No
         barrier.wait_for_value(1)
         t_h = my_rtp[0]; t_w = my_rtp[1]; ic_v = my_rtp[2]
         oc_v = my_rtp[3]; s_v = my_rtp[4]; p_v = my_rtp[5]
+        # weights resident for the whole core; loop m_split sub-tiles, one
+        # in/out chunk per kernel call (shrinks per-buffer L1 by m_split).
         elem_wt = of_wt.acquire(1)
-        elem_in = of_in.acquire(1)
-        elem_out = of_out.acquire(1)
-        kern(elem_in, elem_wt, elem_out, t_h, t_w, ic_v, oc_v, s_v, p_v)
-        of_in.release(1)
-        of_out.release(1)
+        c = 0
+        while c < m_split:
+            elem_in = of_in.acquire(1)
+            elem_out = of_out.acquire(1)
+            kern(elem_in, elem_wt, elem_out, t_h, t_w, ic_v, oc_v, s_v, p_v)
+            of_in.release(1)
+            of_out.release(1)
+            c = c + 1
         of_wt.release(1)
         barrier.release_with_value(1)
 
@@ -189,41 +209,60 @@ def depad_concat_gemm(ic2=64, oc=128, gbound=20, stack_size=8192, chain_img_h=No
         for wf in wt_fifos:
             rt.fill(wf.prod(), W)
 
+        # rows per streamed sub-tile (m_split sub-tiles per core; default 1 row).
+        rows_per_chunk = rpc // m_split
+        assert rpc % m_split == 0 and rows_per_chunk * gbound == chunk_m, (
+            f"m_split={m_split} must divide rpc={rpc} into whole-row chunks")
         last_col = n_cols - 1
         for col in range(n_cols):
             cc = min(cores_per_col, n_cores - col * cores_per_col)
             # Cores in a column own CONSECUTIVE valid rows: core i owns rows
-            # [(col*cpc+i)*rpc : +rpc], so the column covers cc*rpc consecutive
-            # valid rows. The per-core buffer is rpc rows stacked, and the rows
-            # are uniformly IMG*ic2 apart in the padded source => the core dim
-            # and the rpc-row dim MERGE into ONE [cc*rpc rows] dim. This keeps
-            # the gather/drain a single column-wide 4D shim DMA (rpc>1 per-core
-            # fills exhaust the shim NOC). Split/join then divide cc*rpc*gbound
-            # elems into cc cores of rpc*gbound px each.
-            r0 = (col * cores_per_col) * rpc          # first valid row of column
-            nrow = cc * rpc                           # rows in this column
-            # ---- DE-PAD + CONCAT input gather (one column-wide fill) ----
-            # de-pad: valid row r at padded row PAD+r, col PAD; concat half h
-            # (chain=0, x2=1) at source offset h*HALF_ELEMS. Buffer linear =
-            # [cc cores][rpc rows][gbound px][2 halves][ic2] = [nrow][gbound][2][ic2].
-            tap_in = TensorAccessPattern(
-                (IN_ELEMS,),
-                offset=((PAD + r0) * IMG + PAD) * ic2,
-                sizes=[nrow, gbound, 2, ic2],
-                strides=[IMG * ic2, ic2, HALF_ELEMS, 1])
-            rt.fill(col_in_fifos[col].prod(), I, tap_in)
-            # ---- DRAIN: scatter the column's nrow output rows into the seam ----
-            tap_out = TensorAccessPattern(
-                (IMG_ELEMS,),
-                offset=((PAD + r0) * IMG + PAD) * oc,
-                sizes=[1, nrow, gbound, oc],
-                strides=[0, IMG * oc, oc, 1])
-            rt.drain(col_out_fifos[col].cons(), OUT, tap_out,
-                     wait=(col == last_col))
+            # [(col*cpc+i)*rpc : +rpc]. We STREAM each core's rpc rows as m_split
+            # sub-tiles of rows_per_chunk rows; per chunk round cr the column's cc
+            # cores each contribute their cr-th sub-tile. Within a round the cc
+            # cores' sub-tiles are rpc rows apart (core stride rpc*IMG*ic2); each
+            # round is ONE column-wide 4D fill/drain (one BD chain), m_split rounds
+            # over the depth-1 FIFO (lock-paced). m_split=1 == the old single fill.
+            for cr in range(m_split):
+                # first valid row of THIS column's chunk round cr
+                r0 = (col * cores_per_col) * rpc + cr * rows_per_chunk
+                # buffer linear = [cc cores][rows_per_chunk][gbound px][2][ic2].
+                # de-pad: valid row r at padded (PAD+r, PAD); concat half h at
+                # source offset h*HALF_ELEMS. core stride = rpc rows (rpc*IMG*ic2).
+                # rows_per_chunk==1 (the default m_split=rpc): the cc cores' single
+                # rows ARE rpc apart, so the [cc rows] dim merges the per-row dim
+                # away -> a 4D TAP (within the shim 3D+1 limit), == the old layout
+                # when m_split==1 too. rows_per_chunk>1 needs the extra row dim.
+                if rows_per_chunk == 1:
+                    tap_in = TensorAccessPattern(
+                        (IN_ELEMS,),
+                        offset=((PAD + r0) * IMG + PAD) * ic2,
+                        sizes=[cc, gbound, 2, ic2],
+                        strides=[rpc * IMG * ic2, ic2, HALF_ELEMS, 1])
+                    tap_out = TensorAccessPattern(
+                        (IMG_ELEMS,),
+                        offset=((PAD + r0) * IMG + PAD) * oc,
+                        sizes=[1, cc, gbound, oc],
+                        strides=[0, rpc * IMG * oc, oc, 1])
+                else:
+                    tap_in = TensorAccessPattern(
+                        (IN_ELEMS,),
+                        offset=((PAD + r0) * IMG + PAD) * ic2,
+                        sizes=[cc, rows_per_chunk, gbound, 2, ic2],
+                        strides=[rpc * IMG * ic2, IMG * ic2, ic2, HALF_ELEMS, 1])
+                    tap_out = TensorAccessPattern(
+                        (IMG_ELEMS,),
+                        offset=((PAD + r0) * IMG + PAD) * oc,
+                        sizes=[cc, rows_per_chunk, gbound, oc],
+                        strides=[rpc * IMG * oc, IMG * oc, oc, 1])
+                rt.fill(col_in_fifos[col].prod(), I, tap_in)
+                rt.drain(col_out_fifos[col].cons(), OUT, tap_out,
+                         wait=(col == last_col and cr == m_split - 1))
 
     meta = dict(GRID=GRID, IMG=IMG, IMG_H=img_h, IMG_ELEMS=IMG_ELEMS, HALF_ELEMS=HALF_ELEMS,
                 IN_ELEMS=IN_ELEMS, PAD=PAD, TILE=TILE, ic2=ic2, ic=ic, oc=oc,
                 gbound=gbound, tile_m=tile_m, n_cores=n_cores, rows_per_core=rpc,
+                m_split=m_split, chunk_m=chunk_m, rows_per_chunk=rpc // m_split,
                 input_tile_size=input_tile_size, output_tile_size=output_tile_size,
                 weight_size=weight_size, n_cols=n_cols, cores_per_col=cores_per_col)
     return Program(dev, rt).resolve_program(), meta
