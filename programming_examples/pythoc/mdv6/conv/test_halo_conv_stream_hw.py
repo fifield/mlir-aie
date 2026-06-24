@@ -23,7 +23,8 @@ from aie.utils import NPUKernel, DefaultNPURuntime
 from aie.utils.compile import compile_mlir_module
 
 from aie2_halo_conv import halo_conv, TILE, PAD, deinterleave_stream_out
-from test_halo_conv_hw import bf16, to_u16, numpy_conv3x3, tile_b, untile_c
+from test_halo_conv_hw import (bf16, to_u16, numpy_conv3x3, tile_b, untile_c,
+                               pack_halo_weights, bn_silu_ref)
 
 
 def main():
@@ -47,12 +48,15 @@ def main():
     img_bf = bf16(img)
     W = (rng.standard_normal((oc, 9, ic)).astype(np.float32) * 0.15)
     W_bf = bf16(W)
+    bn_w = bf16(rng.standard_normal(oc).astype(np.float32) * 0.5 + 1.0)
+    bn_b = bf16(rng.standard_normal(oc).astype(np.float32) * 0.2)
     SHIFT = PAD - 1
     conv_img = np.zeros_like(img_bf)
     conv_img[:IMG_W - SHIFT, :IMG_W - SHIFT, :] = img_bf[SHIFT:, SHIFT:, :]
-    ref = numpy_conv3x3(conv_img, W_bf, gbound, ic, oc)
+    raw = numpy_conv3x3(conv_img, W_bf, gbound, ic, oc)
+    ref = bn_silu_ref(raw, bn_w, bn_b)
     img_u16 = to_u16(conv_img)
-    wt_u16 = to_u16(bf16(tile_b(W_bf, ic, oc)))
+    wt_u16 = pack_halo_weights(W_bf, bn_w, bn_b, ic, oc, stream_oc="pair")
 
     npu = NPUKernel(str(wd / "final.xclbin"), str(wd / "insts.bin"), kernel_name="MLIR_AIE")
     h = DefaultNPURuntime.load(npu)
@@ -74,8 +78,9 @@ def main():
     d = np.abs(got - ref)
     np.set_printoptions(precision=4, suppress=True, linewidth=160)
     max_diff, mean_diff = float(d.max()), float(d.mean())
-    tol = 0.06
-    ok = max_diff < tol
+    # in-kernel BN amplifies the BFP max tail (~|bn_w|); mean stays ~5e-3.
+    tol = 0.15
+    ok = (max_diff < tol) and (mean_diff < 0.02)
     print(f"\n  STREAMING halo_conv (ic={ic} oc={oc}, N_PAIRS={oc//16}) vs numpy 3x3: "
           f"max_diff={max_diff:.5f} mean={mean_diff:.6f} tol={tol} -> {'PASS' if ok else 'FAIL'}")
     print(f"  got[0,0,:6]={got[0,0,:6]}")

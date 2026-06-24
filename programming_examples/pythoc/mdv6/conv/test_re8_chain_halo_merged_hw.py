@@ -37,7 +37,8 @@ from test_rn3_pair_vector_oneblock_hw import f32_to_bf16_u16, bf16_u16_to_f32
 from test_re8_chain_merged_hw import _make_weight_pairs
 
 from aie2_halo_conv import TILE, PAD
-from test_halo_conv_hw import bf16, to_u16, numpy_conv3x3, tile_b, untile_c
+from test_halo_conv_hw import (bf16, to_u16, numpy_conv3x3, tile_b, untile_c,
+                               pack_halo_weights, bn_silu_ref)
 
 N_ITERS = 3
 GEO = "re8"
@@ -71,7 +72,9 @@ def main():
     # halo weights (host-prepacked, same layout as standalone seam)
     W = (rng.standard_normal((OC, 9, ic)).astype(np.float32) * 0.1)
     W_bf = bf16(W)
-    halo_wt_u16 = to_u16(bf16(tile_b(W_bf, ic, OC)))
+    bn_w = bf16(rng.standard_normal(OC).astype(np.float32) * 0.5 + 1.0)
+    bn_b = bf16(rng.standard_normal(OC).astype(np.float32) * 0.2)
+    halo_wt_u16 = pack_halo_weights(W_bf, bn_w, bn_b, ic, OC)
 
     # ===== run the merged ELF (ONE hw_context) =====
     device = xrt.device(0)
@@ -128,7 +131,8 @@ def main():
     SHIFT = PAD - 1
     seam = np.zeros_like(chain_pad)
     seam[:IMG_W - SHIFT, :IMG_W - SHIFT, :] = chain_pad[SHIFT:, SHIFT:, :]
-    ref = numpy_conv3x3(bf16(seam), W_bf, G, ic, OC)               # [G,G,oc]
+    raw = numpy_conv3x3(bf16(seam), W_bf, G, ic, OC)               # [G,G,oc] raw conv
+    ref = bn_silu_ref(raw, bn_w, bn_b)                            # in-kernel BN+SiLU
 
     got = np.zeros((G, G, OC), np.float32)
     for t in range(N_TILES):
@@ -142,8 +146,8 @@ def main():
     d = np.abs(got - ref)
     np.set_printoptions(precision=4, suppress=True, linewidth=160)
     max_diff, mean_diff = float(d.max()), float(d.mean())
-    tol = 0.06
-    ok = max_diff < tol
+    tol = 0.20  # in-kernel BN amplifies the BFP max tail; mean stays ~7e-3
+    ok = (max_diff < tol) and (mean_diff < 0.02)
     print("\n========= B2c3-1: chain -> halo_c3 in ONE merged ELF =========")
     print(f"  ELF: {Path(elf_path).name}  (sub0=chain, sub1=halo; chain_link (0,2,1,0))")
     print(f"  hw_context: chain+halo = 2 -> 1 (one xrt.hw_context loaded)")

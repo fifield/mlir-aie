@@ -353,3 +353,16 @@ B1 concat→c4 ✓ · KEYSTONE halo-gather 3×3 from padded-HWC ✓. → full re
 - Propagating to re6/re4 would replicate the regression. The wall is bounded by chain/conv COMPUTE + the gc artifact, not dispatch.
 - Banked value: complete gated primitive library + proven full-hop template (default OFF). The shipped win remains the
   default-on vectorization (-26% wall, 518→383ms).
+
+### Accuracy fix: BN(scale+bias)+SiLU IN-KERNEL on f32 accumulator (halo_conv3x3_bfp)
+- CORRECTION: the earlier "#2 bf16-readback-before-SiLU" was a MISREAD — halo output is f32, SiLU ran on f32 (host).
+  Real culprit was #1: BN-scale folded into conv weights BEFORE BFP576 quantization (shared block exponent shift).
+- Fix: adopt the chain's _store_bn_silu_4x8 (no residual) in halo_conv3x3_bfp/_ocb/_ocb1; pass bn_w/bn_b in the chain
+  weight-slot layout (+2*oc); STOP folding scale into weights; REMOVE host bias+SiLU epilogue. Kept f32 tiled-C transport
+  so untile/drain plumbing unchanged. (HW gotcha: streamed unit must be 64-elem-aligned or DMA mis-delivers → all-zeros.)
+- Results: default OFF 0.1423 (bit-exact, untouched). rnm→c3-only 0.1420→0.1425 (≈baseline, was already there).
+  FULL chain→rnm→c3 0.184→0.1818 (tiny). Standalone in-kernel BN+SiLU vs faithful f32 ref: BFP tol (mean ~5-7e-3).
+- HONEST: the kernel is now FAITHFUL (scale-fold error gone, host touch removed) — a correctness win — but the FULL-path
+  accuracy gap is NOT the BN handling; it's dominated by the inherent **BFP576-vs-emulated-mmul** difference (fused c3 uses
+  the BFP hardware matmul; baseline mc_re8_c3 uses emulated mmul<4,8,8>) + the in-merged chain BFP nondeterminism. Those are
+  different IMPLEMENTATIONS of the same algorithm — irreducible without matching the baseline's matmul engine.

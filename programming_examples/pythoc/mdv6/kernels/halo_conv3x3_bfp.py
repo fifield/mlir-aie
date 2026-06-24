@@ -20,15 +20,90 @@ per block (the inline accfloat quant requires this).
 """
 from __future__ import annotations
 
-from pythoc import ptr, i32, bf16, f32, void
+from pythoc import ptr, i16, i32, bf16, f32, void
 from pythoc.aie import (
     aie_vector, load_v, store_v, concat, vector_cast, vector_extract,
     vshuffle, zeros, set_ctrl_reg, v32bf16_to_v32accfloat,
     v64accfloat_to_v64bfp16ebs8, BFP576_BFP576_ACC2048_mac_conf,
+    v32accfloat_to_v32bf16, vector_add, vector_sub, vector_mul, vector_and,
+    broadcast,
 )
 from aie.iron.pythoc import aie_kernel
 
 MAC_CONF = 780
+
+
+@aie_kernel
+def _store_bn_silu_4x8_f32(
+    acc8: aie_vector[f32, 64],
+    output: ptr[f32, True],
+    bn_w_ptr: ptr[bf16, True],
+    bn_b_ptr: ptr[bf16, True],
+    base_sp: i32,
+) -> void:
+    """In-kernel BN (bn_w*x + bn_b) + SiLU on the f32 accumulator, f32 store.
+
+    Mirrors kernels.rep_elan_bf16_pythoc._store_bn_silu_4x8_rows EXACTLY (same
+    bf16-domain rational-sigmoid SiLU math the model's other BFP convs use), but
+    (a) consumes the full 8-pixel f32 accumulator for one output row of an
+    oc-block (acc8 = [8 pix, 8 oc]), (b) stores the bf16 activation widened back
+    to f32 into a per-block tiled-C `[64 pix, 8 oc]` row-major buffer at
+    output[base_sp*8 ..]. Keeping the transport f32 means the host untile/drain
+    plumbing is byte-identical to the old raw-conv path — only the host BN-bias +
+    SiLU epilogue (and the BN-scale weight fold) go away.
+
+    bn_w_ptr/bn_b_ptr point at THIS oc-block's 8 channels (oc_blk-local)."""
+    bn_w8: aie_vector[bf16, 8] = load_v(bn_w_ptr, 8)
+    bn_b8: aie_vector[bf16, 8] = load_v(bn_b_ptr, 8)
+    bn_w16: aie_vector[bf16, 16] = concat(bn_w8, bn_w8)
+    bn_b16: aie_vector[bf16, 16] = concat(bn_b8, bn_b8)
+    bnw32: aie_vector[bf16, 32] = concat(bn_w16, bn_w16)
+    bnb32: aie_vector[bf16, 32] = concat(bn_b16, bn_b16)
+
+    two32: aie_vector[bf16, 32] = vector_cast(broadcast(i16, 32, 0x4000), bf16, 32)
+    one32: aie_vector[bf16, 32] = vector_cast(broadcast(i16, 32, 0x3F80), bf16, 32)
+
+    # acc8 = [8 pix, 8 oc] f32 -> two bf16[32] halves (4 pix each)
+    res_t: aie_vector[bf16, 32] = v32accfloat_to_v32bf16(vector_extract(acc8, 0, 32))
+    res_b: aie_vector[bf16, 32] = v32accfloat_to_v32bf16(vector_extract(acc8, 32, 32))
+
+    # ── top 4 pixels ──
+    t1t: aie_vector[bf16, 32] = vector_mul(res_t, bnw32)
+    t2t: aie_vector[bf16, 32] = vector_add(t1t, bnb32)
+    abt: aie_vector[i16, 32] = vector_and(vector_cast(t2t, i16, 32), broadcast(i16, 32, 0x7FFF))
+    at: aie_vector[bf16, 32] = vector_cast(abt, bf16, 32)
+    dt: aie_vector[bf16, 32] = vector_add(vector_add(at, at), two32)
+    rbt: aie_vector[i16, 32] = vector_sub(broadcast(i16, 32, 0x7EF4), vector_cast(dt, i16, 32))
+    rt: aie_vector[bf16, 32] = vector_cast(rbt, bf16, 32)
+    rt = vector_mul(rt, vector_sub(two32, vector_mul(dt, rt)))
+    rt = vector_mul(rt, vector_sub(two32, vector_mul(dt, rt)))
+    nt: aie_vector[bf16, 32] = vector_add(vector_add(at, t2t), one32)
+    outt: aie_vector[bf16, 32] = vector_mul(t2t, vector_mul(nt, rt))
+
+    # ── bottom 4 pixels ──
+    t1b: aie_vector[bf16, 32] = vector_mul(res_b, bnw32)
+    t2b: aie_vector[bf16, 32] = vector_add(t1b, bnb32)
+    abb: aie_vector[i16, 32] = vector_and(vector_cast(t2b, i16, 32), broadcast(i16, 32, 0x7FFF))
+    ab: aie_vector[bf16, 32] = vector_cast(abb, bf16, 32)
+    db: aie_vector[bf16, 32] = vector_add(vector_add(ab, ab), two32)
+    rbb: aie_vector[i16, 32] = vector_sub(broadcast(i16, 32, 0x7EF4), vector_cast(db, i16, 32))
+    rb: aie_vector[bf16, 32] = vector_cast(rbb, bf16, 32)
+    rb = vector_mul(rb, vector_sub(two32, vector_mul(db, rb)))
+    rb = vector_mul(rb, vector_sub(two32, vector_mul(db, rb)))
+    nb: aie_vector[bf16, 32] = vector_add(vector_add(ab, t2b), one32)
+    outb: aie_vector[bf16, 32] = vector_mul(t2b, vector_mul(nb, rb))
+
+    # widen bf16 activation -> f32, store [pix, 8] row-major (oc=8, contiguous)
+    ft: aie_vector[f32, 32] = v32bf16_to_v32accfloat(outt)
+    fb: aie_vector[f32, 32] = v32bf16_to_v32accfloat(outb)
+    store_v(output + (base_sp + 0) * 8, vector_extract(ft, 0, 8))
+    store_v(output + (base_sp + 1) * 8, vector_extract(ft, 8, 8))
+    store_v(output + (base_sp + 2) * 8, vector_extract(ft, 16, 8))
+    store_v(output + (base_sp + 3) * 8, vector_extract(ft, 24, 8))
+    store_v(output + (base_sp + 4) * 8, vector_extract(fb, 0, 8))
+    store_v(output + (base_sp + 5) * 8, vector_extract(fb, 8, 8))
+    store_v(output + (base_sp + 6) * 8, vector_extract(fb, 16, 8))
+    store_v(output + (base_sp + 7) * 8, vector_extract(fb, 24, 8))
 
 
 @aie_kernel
@@ -83,6 +158,10 @@ def halo_conv3x3_bfp(in_win: ptr[bf16, True], weight: ptr[bf16, True],
     M_BLOCKS: i32 = 8                 # 64 pixels / 8 = 8 rows
     KKMAX: i32 = (ic // 8) * 9
     woff_b: i32 = KKMAX * 64          # per oc-block stride in weights
+    # in-kernel BN+SiLU: bn_w/bn_b for all oc channels appended after the conv
+    # weights (chain layout: bn_w = weight + N_BLOCKS*woff_b, bn_b = bn_w + oc).
+    bn_w: ptr[bf16] = weight + N_BLOCKS * woff_b
+    bn_b: ptr[bf16] = bn_w + oc
 
     # zero the tiled C accumulator
     z: aie_vector[f32, 64] = zeros(f32, 64)
@@ -170,10 +249,12 @@ def halo_conv3x3_bfp(in_win: ptr[bf16, True], weight: ptr[bf16, True],
                 r11: aie_vector[i32, 64] = BFP576_BFP576_ACC2048_mac_conf(a1m, a1e, b1m, b1e, i11, MAC_CONF)
                 acc11 = vector_cast(r11, f32, 64)
                 k = k + 1
-            store_v(c_buf + c00_off, acc00)
-            store_v(c_buf + c01_off, acc01)
-            store_v(c_buf + c10_off, acc10)
-            store_v(c_buf + c11_off, acc11)
+            # in-kernel BN + SiLU (silu(acc*bn_w + bn_b)), f32-widened store into
+            # the per-oc-block tiled-C buffer [64 pix, 8 oc] (base nb*512).
+            _store_bn_silu_4x8_f32(acc00, c_buf + n * 512, bn_w + n * 8, bn_b + n * 8, m * 8)
+            _store_bn_silu_4x8_f32(acc01, c_buf + (n + 1) * 512, bn_w + (n + 1) * 8, bn_b + (n + 1) * 8, m * 8)
+            _store_bn_silu_4x8_f32(acc10, c_buf + n * 512, bn_w + n * 8, bn_b + n * 8, (m + 1) * 8)
+            _store_bn_silu_4x8_f32(acc11, c_buf + (n + 1) * 512, bn_w + (n + 1) * 8, bn_b + (n + 1) * 8, (m + 1) * 8)
             n = n + 2
         m = m + 2
 
@@ -211,6 +292,9 @@ def halo_conv3x3_bfp_ocb(in_win: ptr[bf16, True], weight: ptr[bf16, True],
     # per-pair C-drain: c_buf is the pair's OWN [2, M_BLOCKS, 8, 8] buffer; write
     # at cbase=0. Only ONE pair's C is resident in L1 (PAIR_C = 4KB) at a time.
     cbase: i32 = 0
+    # in-kernel BN+SiLU: this pair's 16 bn_w/bn_b appended after its 2 wt slots.
+    bn_w: ptr[bf16] = weight + 2 * woff_b
+    bn_b: ptr[bf16] = bn_w + 16
 
     # zero this pair's C accumulator: 2 oc-blocks * 8 M_BLOCKS * 64
     z: aie_vector[f32, 64] = zeros(f32, 64)
@@ -296,10 +380,12 @@ def halo_conv3x3_bfp_ocb(in_win: ptr[bf16, True], weight: ptr[bf16, True],
             r11: aie_vector[i32, 64] = BFP576_BFP576_ACC2048_mac_conf(a1m, a1e, b1m, b1e, i11, MAC_CONF)
             acc11 = vector_cast(r11, f32, 64)
             k = k + 1
-        store_v(c_buf + c00_off, acc00)
-        store_v(c_buf + c01_off, acc01)
-        store_v(c_buf + c10_off, acc10)
-        store_v(c_buf + c11_off, acc11)
+        # in-kernel BN + SiLU into the per-pair tiled-C [2, 64 pix, 8 oc]
+        # (block 0 base=0, block 1 base=512).
+        _store_bn_silu_4x8_f32(acc00, c_buf + cbase, bn_w, bn_b, m * 8)
+        _store_bn_silu_4x8_f32(acc01, c_buf + cbase + 512, bn_w + 8, bn_b + 8, m * 8)
+        _store_bn_silu_4x8_f32(acc10, c_buf + cbase, bn_w, bn_b, (m + 1) * 8)
+        _store_bn_silu_4x8_f32(acc11, c_buf + cbase + 512, bn_w + 8, bn_b + 8, (m + 1) * 8)
         m = m + 2
 
 
@@ -327,6 +413,9 @@ def halo_conv3x3_bfp_ocb1(in_win: ptr[bf16, True], weight: ptr[bf16, True],
     M_BLOCKS: i32 = 8
     KKMAX: i32 = (ic // 8) * 9
     cbase: i32 = 0
+    # in-kernel BN+SiLU: this block's 8 bn_w/bn_b appended after its wt slot.
+    bn_w: ptr[bf16] = weight + KKMAX * 64
+    bn_b: ptr[bf16] = bn_w + 8
 
     # zero this block's C: M_BLOCKS * 64
     z: aie_vector[f32, 64] = zeros(f32, 64)
@@ -386,8 +475,9 @@ def halo_conv3x3_bfp_ocb1(in_win: ptr[bf16, True], weight: ptr[bf16, True],
             r10: aie_vector[i32, 64] = BFP576_BFP576_ACC2048_mac_conf(a1m, a1e, b0m, b0e, i10, MAC_CONF)
             acc10 = vector_cast(r10, f32, 64)
             k = k + 1
-        store_v(c_buf + c00_off, acc00)
-        store_v(c_buf + c10_off, acc10)
+        # in-kernel BN + SiLU into this block's tiled-C [64 pix, 8 oc] (base 0).
+        _store_bn_silu_4x8_f32(acc00, c_buf + cbase, bn_w, bn_b, m * 8)
+        _store_bn_silu_4x8_f32(acc10, c_buf + cbase, bn_w, bn_b, (m + 1) * 8)
         m = m + 2
 
 
@@ -398,6 +488,9 @@ KERNEL_EXTRA_GLOBALS = {
     "v32bf16_to_v32accfloat": v32bf16_to_v32accfloat,
     "v64accfloat_to_v64bfp16ebs8": v64accfloat_to_v64bfp16ebs8,
     "BFP576_BFP576_ACC2048_mac_conf": BFP576_BFP576_ACC2048_mac_conf,
+    "v32accfloat_to_v32bf16": v32accfloat_to_v32bf16,
+    "vector_add": vector_add, "vector_sub": vector_sub, "vector_mul": vector_mul,
+    "vector_and": vector_and, "broadcast": broadcast,
     "aie_vector": aie_vector, "MAC_CONF": 780,
 }
-HALO_CONV_HELPERS = [_build_a64_halo]
+HALO_CONV_HELPERS = [_build_a64_halo, _store_bn_silu_4x8_f32]
