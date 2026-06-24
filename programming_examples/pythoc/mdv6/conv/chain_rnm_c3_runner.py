@@ -33,9 +33,62 @@ Gated behind MDV6_FUSE_RE8 in run_re_mc; default OFF.
 """
 from __future__ import annotations
 
+import gc
 import os
 import sys
+import time
+from collections import defaultdict
 from pathlib import Path
+
+# The merged-ELF fused path retains a LARGE graph of frame-invariant live Python
+# objects (the per-geo MLIR build artifacts, the xrt run/BO caches, weight
+# caches — ~3/4 million tracked objects). The profile harness calls gc.collect()
+# every frame, which re-traverses ALL of them: this is the dominant pre_post
+# regression (gc ~100 ms baseline -> ~240 ms fused; the per-frame garbage delta
+# is only ~20 objects, so the cost is the persistent live set, not churn).
+# gc.freeze() moves the current live set to a permanent generation that
+# collect() skips — dropping per-frame gc to ~0.1 ms. We freeze once each geo's
+# static graph is fully built+resident (idempotent; objects created afterward
+# stay collectable). Default ON; MDV6_FUSE_NO_GC_FREEZE=1 disables for A/B.
+_GC_FREEZE = os.environ.get("MDV6_FUSE_NO_GC_FREEZE", "0") in ("", "0", "false", "False")
+
+# Opt-in per-section host-timing diagnostics. Set MDV6_FUSE_TIMING=1 to
+# accumulate per-call wall time of the host marshalling sections (image
+# build, weight pack, BO fill, untile) into _TIMING, then dump_timing().
+_TIMING = defaultdict(lambda: [0.0, 0])   # name -> [total_s, n_calls]
+_TIMING_ON = os.environ.get("MDV6_FUSE_TIMING", "0") not in ("", "0", "false", "False")
+
+
+class _T:
+    """Context manager that accumulates elapsed wall time into _TIMING[name]."""
+    __slots__ = ("name", "t0")
+
+    def __init__(self, name):
+        self.name = name
+
+    def __enter__(self):
+        self.t0 = time.perf_counter()
+        return self
+
+    def __exit__(self, *exc):
+        if _TIMING_ON:
+            e = _TIMING[self.name]
+            e[0] += time.perf_counter() - self.t0
+            e[1] += 1
+        return False
+
+
+def dump_timing(reset=True):
+    """Print accumulated per-section host timing (totals + per-call µs)."""
+    rows = sorted(_TIMING.items(), key=lambda kv: -kv[1][0])
+    print("\n[chain_rnm_c3 host timing]")
+    for name, (tot, n) in rows:
+        if n:
+            print(f"  {name:<22} {tot*1e3:>8.2f} ms  ({n:>4} calls, "
+                  f"{tot*1e6/n:>7.1f} µs/call)")
+    if reset:
+        _TIMING.clear()
+
 
 # Static-weight residency is ON by default for the fused re8 path. Set
 # MDV6_FUSE_RE8_RESIDENT=0 to A/B against the old re-upload-every-call behavior
@@ -136,6 +189,64 @@ def _pad_half(hwc_u16: np.ndarray, IMG: int, ic2: int, G: int,
     return half.reshape(-1)
 
 
+def _pad_half_into(dst_flat: np.ndarray, hwc_u16: np.ndarray, IMG: int,
+                   ic2: int, G: int, img_h: int):
+    """In-place PAD(2): write a [G,G,ic2] HWC tile into the PAD border of the
+    flat img_h*IMG*ic2 `dst_flat` (a reused buffer slice). Zeros the whole half
+    first (so stale rows from a prior hop can't leak through the junk border),
+    then scatters the valid G×G window. Equivalent to `dst[:] = _pad_half(...)`
+    but allocation-free."""
+    view = dst_flat.reshape(img_h, IMG, ic2)
+    view[:] = 0
+    view[PAD:PAD + G, PAD:PAD + G, :] = hwc_u16.reshape(G, G, ic2)
+
+
+# --- REUSED PER-HOP HOST SCRATCH (keyed by geo/shape; filled in place) ---
+# The fused path's dominant per-frame allocator was the untile gather + the
+# stacked-image build (np.zeros(IN_ELEMS) + .copy() + per-half np.zeros), all
+# re-allocated 10x/frame and then scanned by the harness's per-frame
+# gc.collect(). We pool these by (geo) so each hop refills a stable buffer.
+# A/B switch: MDV6_FUSE_NOREUSE=1 restores the old allocate-every-call behavior
+# (fresh np.zeros / gather array per hop) so the host-allocation-churn reduction
+# can be measured in the same process/load window. Default OFF (reuse on).
+_NOREUSE = os.environ.get("MDV6_FUSE_NOREUSE", "0") not in ("", "0", "false", "False")
+
+_IMG_SCRATCH = {}     # geo -> dict(a=u16[IN_ELEMS], b=u16[IN_ELEMS])
+_OUT_SCRATCH = {}     # geo -> dict(f32=f32[G*G*oc], bf16=[ring of torch bf16], i)
+
+# The RETURNED output buffer must survive past the call: within one run_re_mc
+# BOTH x3 and x4 (same geo) are alive simultaneously for the final c4 concat.
+# So the output buffer rotates through a small ring (the f32 gather scratch is
+# transient and single, but the bf16 result must not alias the previous live
+# output). Depth 4 >> the 2 live outputs ever needed, with negligible cost.
+_OUT_RING = 4
+
+
+def _img_scratch(geo, in_elems):
+    if _NOREUSE:
+        return dict(a=np.zeros(in_elems, np.uint16), b=np.zeros(in_elems, np.uint16))
+    s = _IMG_SCRATCH.get(geo)
+    if s is None or s["a"].size != in_elems:
+        s = dict(a=np.zeros(in_elems, np.uint16), b=np.zeros(in_elems, np.uint16))
+        _IMG_SCRATCH[geo] = s
+    return s
+
+
+def _out_scratch(geo, n_out, gbound, oc):
+    if _NOREUSE:
+        return dict(f32=np.empty(n_out, np.float32),
+                    bf16=[torch.empty(gbound, gbound, oc, dtype=torch.bfloat16)], i=0)
+    s = _OUT_SCRATCH.get(geo)
+    if s is None or s["f32"].size != n_out:
+        s = dict(f32=np.empty(n_out, np.float32),
+                 bf16=[torch.empty(gbound, gbound, oc, dtype=torch.bfloat16)
+                       for _ in range(_OUT_RING)],
+                 i=0)
+        _OUT_SCRATCH[geo] = s
+    s["i"] = (s["i"] + 1) % _OUT_RING
+    return s
+
+
 def run_chain_rnm_c3(x1b: torch.Tensor, x2b: torch.Tensor, chain_pairs,
                      rnm_w_u16, c3_w_u16, H, W, oc, mcr_mod=None) -> torch.Tensor:
     """Full re8 hop: rn3 chain(x1b) -> rnm 1x1(concat(chain,x2b)) -> c3 3x3, fused.
@@ -178,13 +289,21 @@ def run_chain_rnm_c3(x1b: torch.Tensor, x2b: torch.Tensor, chain_pairs,
 
     # ---- chain input A: x1b PAD(2)-padded into lower half of widened stacked BO ----
     # The chain half is the tall (IMG_H, IMG) padded image; x2 stacks above it.
-    x1b_u16 = x1b.contiguous().view(torch.uint16).numpy()  # [G,G,ic2]
-    a_u16 = np.zeros(IN_ELEMS, np.uint16)
-    a_u16[:HALF_ELEMS] = _pad_half(x1b_u16, IMG, ic2, G, img_h=IMG_H)
-    # ---- chain output B: copy of A + x2b PAD(2)-padded into upper half ----
-    x2b_u16 = x2b.contiguous().view(torch.uint16).numpy()
-    b_u16 = a_u16.copy()
-    b_u16[HALF_ELEMS:IN_ELEMS] = _pad_half(x2b_u16, IMG, ic2, G, img_h=IMG_H)
+    with _T("image_build"):
+        # Reused stacked-image buffers (filled in place — no per-hop np.zeros /
+        # .copy()). Each hop writes its FULL a/b region before the device reads
+        # it, so cross-hop reuse cannot contaminate.
+        scr = _img_scratch(geo, IN_ELEMS)
+        a_u16, b_u16 = scr["a"], scr["b"]
+        x1b_u16 = x1b.contiguous().view(torch.uint16).numpy()  # [G,G,ic2]
+        # A: lower half = x1b PAD-padded; upper half zeros.
+        _pad_half_into(a_u16[:HALF_ELEMS], x1b_u16, IMG, ic2, G, IMG_H)
+        a_u16[HALF_ELEMS:IN_ELEMS] = 0
+        # B: copy of A (lower half = x1b, chain overwrites in place on device) +
+        # upper half = x2b PAD-padded (survives the ping-pong, the concat half).
+        x2b_u16 = x2b.contiguous().view(torch.uint16).numpy()
+        b_u16[:HALF_ELEMS] = a_u16[:HALF_ELEMS]
+        _pad_half_into(b_u16[HALF_ELEMS:IN_ELEMS], x2b_u16, IMG, ic2, G, IMG_H)
 
     # ---- weights: cache the (slow) packs by weight identity ----
     wkey = (tuple(id(a) for pr in chain_pairs for a in pr),
@@ -213,8 +332,9 @@ def run_chain_rnm_c3(x1b: torch.Tensor, x2b: torch.Tensor, chain_pairs,
     a_bo = mcr._get_merged_bo(device, elf_name, "a", a_u16.nbytes)
     b_bo = mcr._get_merged_bo(device, elf_name, "b", b_u16.nbytes)
     out_bo = mcr._get_merged_bo(device, elf_name, "out", out_elems * 4)
-    mcr._xrt_fill_bo(a_bo, a_u16)
-    mcr._xrt_fill_bo(b_bo, b_u16)
+    with _T("fill_ab"):
+        mcr._xrt_fill_bo(a_bo, a_u16)
+        mcr._xrt_fill_bo(b_bo, b_u16)
     if _RESIDENT_WT:
         # STATIC per-hop (resident pool keyed by wkey, filled once):
         #   wt/gwt/hwt = frame-invariant packed weights; seam = poison PAD border.
@@ -230,6 +350,14 @@ def run_chain_rnm_c3(x1b: torch.Tensor, x2b: torch.Tensor, chain_pairs,
             mcr._xrt_fill_bo(seam_bo, np.zeros(SEAM_ELEMS, np.uint16))  # poison border
             mcr._xrt_fill_bo(hwt_bo, halo_wt_u16)
             _RESIDENT_FILLED.add(wkey)
+            # The static graph for this hop is now fully built + resident. Move
+            # the whole live set (this geo's ELF/cache objects + everything else
+            # constructed so far) into gc's frozen permanent generation so the
+            # harness's per-frame gc.collect() stops re-scanning it. Idempotent;
+            # later hops/geos freeze their own newly-live objects on first fill.
+            if _GC_FREEZE:
+                gc.collect()
+                gc.freeze()
     else:
         # A/B baseline: old behavior — shared per-(elf,role) pool, re-filled every
         # dispatch (the +36 ms weight-reupload tax this experiment removes).
@@ -245,11 +373,19 @@ def run_chain_rnm_c3(x1b: torch.Tensor, x2b: torch.Tensor, chain_pairs,
 
     import pyxrt as _xrt
     out_bo.sync(_xrt.xclBOSyncDirection.XCL_BO_SYNC_BO_FROM_DEVICE, out_elems * 4, 0)
-    out_f32 = np.frombuffer(out_bo.map(), dtype=np.float32, count=out_elems).copy()
-
-    # ---- deinterleave + untile -> [G,G,oc] HWC (vectorized via cached index) ----
-    # The kernel already applied BN + SiLU on the f32 accumulator (un-scaled
-    # weights), so out_f32 IS the final activation — no host epilogue / weight fold.
-    idx = _build_untile_index(hmeta, gbound)
-    got = out_f32[idx].reshape(gbound, gbound, oc)
-    return torch.from_numpy(got).to(torch.bfloat16)
+    with _T("untile_out"):
+        # The BO map is a zero-copy view; gather straight from it into a reused
+        # scratch (np.take with out=) and convert into a reused bf16 torch buffer
+        # — no per-hop allocation of the G*G*oc f32 / bf16 arrays.
+        out_view = np.frombuffer(out_bo.map(), dtype=np.float32, count=out_elems)
+        # ---- deinterleave + untile -> [G,G,oc] HWC (vectorized via cached index) ----
+        # The kernel already applied BN + SiLU on the f32 accumulator (un-scaled
+        # weights), so out_view IS the final activation — no host epilogue / fold.
+        idx = _build_untile_index(hmeta, gbound)
+        osc = _out_scratch(geo, idx.size, gbound, oc)
+        got_f32 = np.take(out_view, idx, out=osc["f32"])
+        # copy_ from a float32 numpy view into the reused bf16 torch buffer
+        # (rotating ring slot — x3/x4 of one run_re_mc must not alias).
+        result = osc["bf16"][osc["i"]]
+        result.copy_(torch.from_numpy(got_f32).reshape(gbound, gbound, oc))
+    return result
