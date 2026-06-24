@@ -98,10 +98,14 @@ def depad_concat_gemm(ic2=64, oc=128, gbound=20, stack_size=8192, chain_img_h=No
     # fold into the column's outer core dim without a 5th shim BD dim).
     cores_per_col = 4
     max_cores = 32
+    # rpc must BOTH divide gbound (so the cc*rpc rows fold into one column-wide
+    # 4D TAP) AND yield <=32 compute tiles. Smallest such rpc minimizes per-core
+    # work. re8 gbound=20->rpc=1(20c); re6 gbound=40->rpc=2(20c); re4 gbound=80->
+    # rpc=4(20c) — NOT rpc=3 (80%3!=0; the merged column TAP needs even rows).
     rpc = 1
-    while (gbound + rpc - 1) // rpc > max_cores:
+    while gbound % rpc != 0 or (gbound + rpc - 1) // rpc > max_cores:
         rpc += 1
-    assert gbound % rpc == 0, f"gbound={gbound} must be divisible by rows_per_core={rpc}"
+        assert rpc <= gbound, f"no rows_per_core divides gbound={gbound} under {max_cores} cores"
     n_cores = gbound // rpc
     tile_m = rpc * gbound                         # pixels per core (M dim)
     input_tile_size = tile_m * ic                 # per-core fused input
