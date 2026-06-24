@@ -39,14 +39,16 @@ from build_merged import _rewrite_sub, _make_dispatcher_block, _resolve_build_di
 from aie2_rn3_chain_geo import rn3_chain_geo, geo_params
 from aie2_depad_concat_gemm import depad_concat_gemm
 from aie2_halo_conv import halo_conv, PAD
+from aie2_halo_conv_mt import halo_conv_mt
 
 
 def build(geo="re8", n_iters=3, ic2=64, oc=128, gbound=20, build_dir=None,
-          stream_oc="block"):
+          stream_oc="block", tpc=1):
     if build_dir is None:
         build_dir = _resolve_build_dir()
     os.makedirs(build_dir, exist_ok=True)
-    elf_name = f"chain_rnm_halo_{geo}_i{n_iters}_oc{oc}_g{gbound}_merged"
+    tpc_tag = f"_tpc{tpc}" if tpc > 1 else ""
+    elf_name = f"chain_rnm_halo_{geo}_i{n_iters}_oc{oc}_g{gbound}{tpc_tag}_merged"
     elf_path = os.path.join(build_dir, f"{elf_name}.elf")
 
     # The chain emits a PAD(2)-padded HWC image whose HEIGHT can EXCEED the
@@ -73,8 +75,19 @@ def build(geo="re8", n_iters=3, ic2=64, oc=128, gbound=20, build_dir=None,
     d_rw, d_args = _rewrite_sub(str(dcg_mod), d_sym, d_seq)
 
     # ---- sub2: halo-gather 3x3 conv (consumer; in img at arg0, shift baked) ----
-    halo_mod, hmeta = halo_conv(ic=oc, oc=oc, gbound=gbound, shift=PAD - 1,
-                                stream_oc=stream_oc)
+    # tpc>1 -> tiles-per-core multi-tile halo (re4 GRID=10 -> 100 tiles can't fit
+    # one-tile-per-core's 100 workers; tpc=4 -> 28 workers). OC=64 needs the same
+    # per-oc-block weight/C streaming, so stream_oc='block' carries through.
+    if tpc > 1:
+        # junk_band=False: the mt halo's input IS the dcg seam (IMG_H==IMG_W, no
+        # junk band) so the seam size matches the producer exactly; junk tiles
+        # read inside the valid image and their output is de-rastered away.
+        halo_mod, hmeta = halo_conv_mt(ic=oc, oc=oc, gbound=gbound, tpc=tpc,
+                                       shift=PAD - 1, stream_oc=stream_oc,
+                                       junk_band=False, auto_place=True)
+    else:
+        halo_mod, hmeta = halo_conv(ic=oc, oc=oc, gbound=gbound, shift=PAD - 1,
+                                    stream_oc=stream_oc)
     assert halo_mod.operation.verify()
     h_sym, h_seq = "sub2_halo", "sub2_halo_seq"
     h_rw, h_args = _rewrite_sub(str(halo_mod), h_sym, h_seq)

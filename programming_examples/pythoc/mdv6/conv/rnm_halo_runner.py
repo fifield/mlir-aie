@@ -137,6 +137,37 @@ def _build_untile_index(hmeta, gbound):
     return idx
 
 
+def _build_untile_index_mt(hmeta, gbound):
+    """Gather index for the tiles-per-core (tpc>1) merged halo OUT.
+
+    The mt halo drains a column-round-packed, BLOCK-major raster-slot stream
+    (n_slots slots, slot == raster tile idx). `idx` (length G*G*oc) such that
+    raw_out[idx].reshape(G,G,oc) == the deinterleave_stream_mt + de-raster +
+    untile_c HWC result. Traced once on an arange so it stays byte-identical."""
+    from aie2_halo_conv_mt import deinterleave_stream_mt, slot_to_tile
+    GRID = hmeta["GRID"]; C_ELEMS = hmeta["C_ELEMS"]; n_slots = hmeta["n_slots"]
+    oc = (C_ELEMS // 64)
+    ckey = ("mt", gbound, oc, n_slots)
+    if ckey in _UNTILE_IDX:
+        return _UNTILE_IDX[ckey]
+    src = np.arange(n_slots * C_ELEMS, dtype=np.int64)
+    flat = deinterleave_stream_mt(src.astype(np.float32), hmeta).astype(np.int64)
+    idx = np.zeros(gbound * gbound * oc, np.int64)
+    for slot in range(n_slots):
+        t = slot_to_tile(slot, hmeta)
+        if t is None:
+            continue
+        tr, tc = t // GRID, t % GRID
+        tile = untile_c(flat[slot * C_ELEMS:(slot + 1) * C_ELEMS].astype(np.float32), oc).astype(np.int64)
+        for pl in range(64):
+            oh, ow = tr * TILE + pl // 8, tc * TILE + pl % 8
+            if oh < gbound and ow < gbound:
+                base = (oh * gbound + ow) * oc
+                idx[base:base + oc] = tile[pl, :]
+    _UNTILE_IDX[ckey] = idx
+    return idx
+
+
 def _ensure_registered():
     """Build + register the fused rnm->halo ELF into the model's shared pool."""
     global _REGISTERED, _ELF_NAME, _META
