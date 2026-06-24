@@ -111,7 +111,8 @@ from rn3_chain_runner import _pack_geo_iter
 from test_rn3_pair_vector_oneblock_hw import f32_to_bf16_u16
 from test_gemm_truth import _pack_weights_blocked
 from rnm_halo_runner import (
-    _silu_kernel, _u16_to_bf16_t, _build_untile_index, _c3_weights_for_halo,
+    _silu_kernel, _u16_to_bf16_t, _build_untile_index, _build_untile_index_mt,
+    _c3_weights_for_halo,
 )
 
 _MCR = None
@@ -123,10 +124,15 @@ _MCR = None
 _GEO_BY_SHAPE = {
     (20, 128): "re8",
     (40, 96): "re6",
+    (80, 64): "re4",
 }
-_GEO_CFG = {  # geo -> (oc, gbound) for the merged build
-    "re8": dict(oc=128, gbound=20),
-    "re6": dict(oc=96, gbound=40),
+_GEO_CFG = {  # geo -> (oc, gbound, tpc) for the merged build
+    "re8": dict(oc=128, gbound=20, tpc=1),
+    "re6": dict(oc=96, gbound=40, tpc=1),
+    # re4 (80x80, oc=64): the heaviest c3. tpc=4 -> tiles-per-core multi-tile halo
+    # (28 workers <= 32) + OC-block streaming (the one-tile path's 100 workers
+    # can't place). dcg m_split shrinks the 80x80 GEMM core to fit L1.
+    "re4": dict(oc=64, gbound=80, tpc=4),
 }
 # per-geo registration state (was module-global; now keyed so re8 + re6 coexist)
 _REG = {}   # geo -> dict(elf_name, meta=(geo_p, dmeta, hmeta))
@@ -167,7 +173,8 @@ def _ensure_registered(geo, n_iters):
     cfg = _GEO_CFG[geo]
     elf_path, dmeta, hmeta = _build_chain_rnm_halo(
         geo=geo, n_iters=n_iters, ic2=geo_params(geo)["IC"],
-        oc=cfg["oc"], gbound=cfg["gbound"], build_dir=bd, stream_oc="block")
+        oc=cfg["oc"], gbound=cfg["gbound"], build_dir=bd, stream_oc="block",
+        tpc=cfg["tpc"])
     if elf_path is None:
         raise RuntimeError(f"chain_rnm_halo merged ELF build failed (geo={geo})")
     elf_name = Path(elf_path).stem
@@ -282,6 +289,9 @@ def run_chain_rnm_c3(x1b: torch.Tensor, x2b: torch.Tensor, chain_pairs,
     SEAM_ELEMS = dmeta["IMG_ELEMS"]
     ic = dmeta["ic"]
     N_TILES, C_ELEMS = hmeta["N_TILES"], hmeta["C_ELEMS"]
+    # mt halo (tpc>1, re4) drains n_slots raster slots (>= N_TILES, junk included).
+    _tpc = _GEO_CFG[geo]["tpc"]
+    n_out_slots = hmeta.get("n_slots", N_TILES) if _tpc > 1 else N_TILES
     gbound = G
 
     entry = mcr._get_merged_kernel(elf_name)
@@ -322,7 +332,7 @@ def run_chain_rnm_c3(x1b: torch.Tensor, x2b: torch.Tensor, chain_pairs,
         _WT_CACHE[wkey] = cached
     chain_wt, gemm_wt_u16, halo_wt_u16 = cached
 
-    out_elems = N_TILES * C_ELEMS
+    out_elems = n_out_slots * C_ELEMS
     # @main args (links (0,2,1,0),(1,2,2,0)):
     #   0=A(chain in) 1=WT(chain) 2=B(chain out=dcg in) 3=gemm_wt
     #   4=seam(dcg out=halo in) 5=halo_wt 6=halo_out
@@ -381,7 +391,8 @@ def run_chain_rnm_c3(x1b: torch.Tensor, x2b: torch.Tensor, chain_pairs,
         # ---- deinterleave + untile -> [G,G,oc] HWC (vectorized via cached index) ----
         # The kernel already applied BN + SiLU on the f32 accumulator (un-scaled
         # weights), so out_view IS the final activation — no host epilogue / fold.
-        idx = _build_untile_index(hmeta, gbound)
+        idx = (_build_untile_index_mt(hmeta, gbound) if _tpc > 1
+               else _build_untile_index(hmeta, gbound))
         osc = _out_scratch(geo, idx.size, gbound, oc)
         got_f32 = np.take(out_view, idx, out=osc["f32"])
         # copy_ from a float32 numpy view into the reused bf16 torch buffer
