@@ -473,3 +473,18 @@ Inner Total-forward-pass timer (true latency, excludes gc artifact), --profile 6
 - Default path (FUSE off): wall 394→338 (-14%, 2.54→2.96 fps), pre_post 103.6→46.8. Honest: harness-gc-artifact + jitter fix,
   NOT a steady-state latency change (inner timer unchanged). Makes the wall metric honest + cuts production jitter for ALL paths.
 - (Residual default pre=39ms is young-gen gc from per-frame numpy churn — the persistent-set scan is what freeze removed.)
+
+### re4 FOLDS — FULL BACKBONE FUSED (re8+re6+re4), verified clean (load 0.87)
+W1 OC=64 multi-tile halo bit-exact 0.125 (L1 27KB via ocb1-in-mt, 28 workers). W2 re4 merged seam bit-exact 0.031, 1 hw_context
+(real blocker was the DCG GEMM 88KB→28KB via m_split streaming, not the halo). W3 wired MDV6_FUSE_RE4 (rep_elan4+rep_elan15).
+| config (default+gc.freeze) | wall | inner | npu_run | launches | fps | acc |
+|--|--|--|--|--|--|--|
+| baseline (FUSE off) | 338 | ~0.30s | 222 | 98 | 2.96 | 0.1423 |
+| re8+re6 | 246 | ~0.245 | 179 | 78 | 4.07 | 0.1848 |
+| **re8+re6+re4** | **218** | **~0.218s** | **160** | **70** | **4.59** | 0.1848 PASS |
+- Full backbone fold: inner latency 0.30→0.218 = **−27% real**, npu_run 222→160 (−62), launches 98→70 (−28). Default bit-exact 0.1423.
+- Committed 03997d792 (agent). Files: aie2_halo_conv_mt.py, halo_conv3x3_bfp_mt.py, aie2_depad_concat_gemm.py (m_split),
+  build_chain_rnm_halo_merged.py, chain_rnm_c3_runner.py, rnm_halo_runner.py, tests, test_full_model_mc.py (MDV6_FUSE_RE4).
+
+## CUMULATIVE (original 518ms → now): vectorization (default,bit-exact) → gc.freeze (default,bit-exact) → re8+re6+re4 fusion (gated 0.1848)
+## = 518 → 218 ms = −58%, 1.93 → 4.59 fps (2.4×). Default-on bit-exact path: 518 → 338 (−35%). Fusion default-on gated only on the 0.1848 accuracy budget.
