@@ -416,3 +416,16 @@ Inner Total-forward-pass timer (true latency, excludes gc artifact), --profile 6
   rnm_halo_runner.py, test_chain_rnm_halo_merged_hw.py, test_full_model_mc.py.
 
 ### Remaining for model-wide: re4 (80×80, mc_re4_c3 18ms — biggest, but shim-BD risk) + accuracy budget (0.1848 vs 0.1423) + gc/alloc churn (so profiler-wall also reflects the win for default-on ship).
+
+### re4 DOES NOT FOLD — compute-tile wall (not the shim-BD risk we flagged)
+- Blocker: aie2_halo_conv.py places 1 worker per 8×8 output tile → re4 80×80 = 10×10 = **100 workers vs 32 compute cores (3.1× overflow)**.
+  Merged re4 ELF fails aiecc placement ("no available compute tiles"). Verified: halo conv ALONE at re4 fails the same way.
+  re8=9 workers, re6=25 — both fit; re4=100 doesn't. The chain (20 tiles) + dcg (20 tiles) sub-devices fit fine; only halo overflows.
+- The documented "re4 TPC=12 → 24 drain BDs > 16 shim" risk was NOT the blocker (chain runs rnm=0 here, dcg picks rpc=4 → fits shim).
+  The real wall is upstream: the halo generator's flat one-tile-per-core model.
+- To fold re4: rewrite aie2_halo_conv.py for **tiles-per-core batching** (each worker does ≥4 output tiles, like the chain's
+  WORKER_TILES/raster) — substantial generator rewrite with the overlapping-window gather at higher tpc, NOT incremental.
+- Secondary fix (committed): dcg rows_per_core now requires gbound%rpc==0 (re4 picked rpc=3 with 80%3≠0 → assert). re8(rpc1)/re6(rpc2) byte-identical, re6 re-verified bit-exact 0.043.
+
+## FUSION TRACK STATE: re8+re6 = verified −15.5% latency (gated). re4 bounded by halo 1-tile/core model.
+## To extend: halo tiles-per-core rewrite (unlocks re4 + makes re6/re8 leaner). To ship re8+re6 default-on: accuracy budget (0.1848) + gc/alloc churn.
