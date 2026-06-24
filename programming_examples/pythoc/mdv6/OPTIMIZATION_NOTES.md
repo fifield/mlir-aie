@@ -378,3 +378,24 @@ B1 concat→c4 ✓ · KEYSTONE halo-gather 3×3 from padded-HWC ✓. → full re
   npu_run trend LOWER for fused (~340 vs ~378 FUSE-OFF) — i.e. fusion may be ~neutral-or-slightly-positive on npu_run.
 - VERDICT: INCONCLUSIVE on wall (unmeasurable under contention). Residency is correct/free/keep, but NOT the lever.
   The real fused costs are chain-kernel compute (~5.3ms/call) + pre_post, not host weight DMA. Need a QUIET machine to get the true A/B.
+
+### CLEAN A/B (load ~1.0, rogue process gone) — VERDICT OVERTURNED: full-hop fusion is a REAL ~10% WIN
+Measured back-to-back at load 0.98-1.14 (genuinely uncontended), --profile 6 each:
+| config | inner-fwd (TRUE) | npu_run | launch_gap | pre_post | wall(profiler) | launches | acc |
+|--|--|--|--|--|--|--|--|
+| OFF    | ~300 ms | 222.0 | 53.8 | 103.7 | 392 | 98 | 0.1423 |
+| rnm→c3 | ~300 ms | 219.1 | 56.8 | 133.3 | 420 | 94 | 0.1425 |
+| FULL   | **~270 ms** | **198.9** | 50.0 | 180.8 | 441 | 90 | 0.1818 |
+
+- **Fusion mechanism CONFIRMED working**: full hop npu_run 222→199 (−23ms); folding the CHAIN in (PDI-swap collapse) is the lever
+  (rnm-only barely moves npu_run since chain stays a separate dispatch).
+- **TRUE per-frame latency (inner Total-forward-pass timer, EXCLUDES harness gc.collect): 300→270 ms = −30ms (−10%), ~3.3→3.7 fps.**
+  Consistent across all 5 warm frames at load 1.0. = npu_run(−23) + launch_gap(−4).
+- **Profiler "wall +49ms" is the gc.collect ARTIFACT**: pre_post 104→181 because the fused path allocates more per-frame host
+  objects → harness per-frame gc.collect inflates. NOT inference latency; a streaming pipeline doesn't gc every frame.
+- CORRECTION: my earlier "+36ms regression / dead track" calls were WRONG — (1) contention noise (rogue dnsmasq-python @728%),
+  (2) wrong metric (gc-contaminated profiler-wall vs true inner latency). Clean+right-metric = fusion WINS ~10%.
+
+### TRACK IS ALIVE. Next levers (now evidence-backed):
+1. Generalize chain-fold to re6/re4 (the big c3 convs) — each block's chain-fold should compound the npu_run reduction.
+2. Reduce the fused path's per-frame host allocation churn (shrinks the gc artifact + helps production jitter).
