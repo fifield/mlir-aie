@@ -32,12 +32,20 @@ Gated behind MDV6_FUSE_RE8 in run_re_mc/run_rn_mc; default OFF.
 """
 from __future__ import annotations
 
+import gc
 import os
 import sys
 from pathlib import Path
 
 import numpy as np
 import torch
+
+# See chain_rnm_c3_runner: the merged-ELF path holds a large frame-invariant
+# live object graph; the harness's per-frame gc.collect() re-scans it (the
+# dominant pre_post regression). Freeze the live set once the fused ELF is
+# registered + weights cached so collect() skips it. Default ON.
+_GC_FREEZE = os.environ.get("MDV6_FUSE_NO_GC_FREEZE", "0") in ("", "0", "false", "False")
+_GC_FROZEN = False
 
 _HERE = Path(__file__).resolve().parent
 _MDV6 = _HERE.parent
@@ -57,6 +65,37 @@ _ELF_NAME = None
 _META = None  # (gmeta, hmeta)
 _WT_CACHE = {}     # id(weights_u16) -> packed buffers (frame-stable weight ids)
 _UNTILE_IDX = {}  # (gbound, oc, N_TILES) -> cached gather index per output shape
+
+# --- REUSED PER-HOP HOST SCRATCH (filled in place; avoids per-call np.zeros) ---
+# Mirrors chain_rnm_c3_runner: the rnm-input S1 host buffer and the output
+# gather/bf16 buffers were re-allocated every dispatch and then scanned by the
+# harness's per-frame gc.collect(). Pool them by output shape. The returned
+# bf16 result rotates through a small ring so x3/x4 (both consumed by the c4
+# concat) never alias.
+_IN_SCRATCH = {}   # n_cores*input_tile_size -> u16 host_in buffer
+_OUT_SCRATCH = {}  # (gbound, oc, n_out) -> dict(f32, bf16=[ring], i)
+_OUT_RING = 4
+
+
+def _in_scratch(n):
+    s = _IN_SCRATCH.get(n)
+    if s is None:
+        s = np.zeros(n, np.uint16)
+        _IN_SCRATCH[n] = s
+    return s
+
+
+def _out_scratch(n_out, gbound, oc):
+    key = (gbound, oc, n_out)
+    s = _OUT_SCRATCH.get(key)
+    if s is None:
+        s = dict(f32=np.empty(n_out, np.float32),
+                 bf16=[torch.empty(gbound, gbound, oc, dtype=torch.bfloat16)
+                       for _ in range(_OUT_RING)],
+                 i=0)
+        _OUT_SCRATCH[key] = s
+    s["i"] = (s["i"] + 1) % _OUT_RING
+    return s
 
 # The model's kernel-side SiLU approximation (mirrors conv3x3_fused_packed_bf16).
 # Matches test_gemm_truth._silu_kernel so the host epilogue is the SAME SiLU the
@@ -184,9 +223,9 @@ def run_rnm_c3(concat_hwc: torch.Tensor, rnm_w_u16, c3_w_u16, H, W, oc,
     entry = mcr._get_merged_kernel(_ELF_NAME)
     device, _elf, _ctx, kernel = entry
 
-    # ---- rnm input: per-core valid-row S1 packing ----
+    # ---- rnm input: per-core valid-row S1 packing (reused host buffer) ----
     fmap_u16 = concat_hwc.contiguous().view(torch.uint16).numpy()  # [G,G,ic]
-    host_in = np.zeros(n_cores * input_tile_size, np.uint16)
+    host_in = _in_scratch(n_cores * input_tile_size)
     for r in range(n_cores):
         host_in[r * input_tile_size:(r + 1) * input_tile_size] = fmap_u16[r].reshape(-1)
 
@@ -215,13 +254,24 @@ def run_rnm_c3(concat_hwc: torch.Tensor, rnm_w_u16, c3_w_u16, H, W, oc,
     mcr._xrt_fill_bo(seam_bo, np.zeros(IMG_ELEMS, np.uint16))  # poison PAD border
     mcr._xrt_fill_bo(hwt_bo, halo_wt_u16)
     mcr._xrt_run_kernel(kernel, [in_bo, gwt_bo, seam_bo, hwt_bo, out_bo])
+    global _GC_FROZEN
+    if _GC_FREEZE and not _GC_FROZEN:
+        # ELF registered + weights cached + BOs allocated: freeze the now-live
+        # object graph so the harness's per-frame gc.collect() stops re-scanning
+        # it (the dominant pre_post cost of the fused path).
+        gc.collect(); gc.freeze()
+        _GC_FROZEN = True
     import pyxrt as _xrt
     out_bo.sync(_xrt.xclBOSyncDirection.XCL_BO_SYNC_BO_FROM_DEVICE, out_elems * 4, 0)
-    out_f32 = np.frombuffer(out_bo.map(), dtype=np.float32, count=out_elems).copy()
+    out_view = np.frombuffer(out_bo.map(), dtype=np.float32, count=out_elems)
 
     # ---- deinterleave + untile -> [G,G,oc] HWC (vectorized via cached index) ----
-    # The kernel already applied BN + SiLU on the f32 accumulator, so out_f32 IS
-    # the final activation (no host epilogue, no BN-scale weight fold).
-    idx = _build_untile_index(hmeta, gbound)   # maps raw out_f32 -> [G*G*oc]
-    got = out_f32[idx].reshape(gbound, gbound, oc)
-    return torch.from_numpy(got).to(torch.bfloat16)
+    # The kernel already applied BN + SiLU on the f32 accumulator, so out_view IS
+    # the final activation (no host epilogue, no BN-scale weight fold). Gather into
+    # reused scratch + a rotating bf16 ring slot (no per-hop allocation).
+    idx = _build_untile_index(hmeta, gbound)   # maps raw out -> [G*G*oc]
+    osc = _out_scratch(idx.size, gbound, oc)
+    got_f32 = np.take(out_view, idx, out=osc["f32"])
+    result = osc["bf16"][osc["i"]]
+    result.copy_(torch.from_numpy(got_f32).reshape(gbound, gbound, oc))
+    return result
