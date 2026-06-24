@@ -56,7 +56,7 @@ _REGISTERED = False
 _ELF_NAME = None
 _META = None  # (gmeta, hmeta)
 _WT_CACHE = {}     # id(weights_u16) -> packed buffers (frame-stable weight ids)
-_UNTILE_IDX = None  # cached gather index for vectorized untile/deinterleave
+_UNTILE_IDX = {}  # (gbound, oc, N_TILES) -> cached gather index per output shape
 
 # The model's kernel-side SiLU approximation (mirrors conv3x3_fused_packed_bf16).
 # Matches test_gemm_truth._silu_kernel so the host epilogue is the SAME SiLU the
@@ -76,13 +76,13 @@ def _build_untile_index(hmeta, gbound):
 
     Derived once by tracing the reference path on an arange (values = source
     positions), so it stays bit-identical to deinterleave_stream_out + untile_c.
-    Cached on _UNTILE_IDX (shape is frame-stable for the re8 hop)."""
-    global _UNTILE_IDX
-    if _UNTILE_IDX is not None:
-        return _UNTILE_IDX
+    Cached per output shape (re8 + re6 each have a distinct (gbound, oc))."""
     N_TILES, C_ELEMS = hmeta["N_TILES"], hmeta["C_ELEMS"]
     GRID = hmeta["GRID"]
     oc = (C_ELEMS // 64)  # C_ELEMS = N_BLK_OC*64; oc = N_BLK_OC*8
+    ckey = (gbound, oc, N_TILES)
+    if ckey in _UNTILE_IDX:
+        return _UNTILE_IDX[ckey]
     src = np.arange(N_TILES * C_ELEMS, dtype=np.int64)
     flat = deinterleave_stream_out(src.astype(np.float32), hmeta).astype(np.int64)
     idx = np.zeros(gbound * gbound * oc, np.int64)
@@ -94,7 +94,7 @@ def _build_untile_index(hmeta, gbound):
             if oh < gbound and ow < gbound:
                 base = (oh * gbound + ow) * oc
                 idx[base:base + oc] = tile[pl, :]
-    _UNTILE_IDX = idx
+    _UNTILE_IDX[ckey] = idx
     return idx
 
 

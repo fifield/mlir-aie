@@ -62,10 +62,21 @@ from rnm_halo_runner import (
 )
 
 _MCR = None
-_REGISTERED = False
-_ELF_NAME = None
-_META = None  # (geo_p, dmeta, hmeta)
-_GEO = "re8"
+# PER-GEO REGISTRY: (H==W, proc) -> geo. The fused full-hop seam supports both
+# the re8 (20x20, proc=128, oc=128) and re6 (40x40, proc=96, oc=96) RepNCSP
+# shapes. re6 appears in rep_elan6/12/18 x2 hops each = 6 hops/frame; re8 in
+# rep_elan8/21 x2 hops = 4 hops/frame. Each geo gets its OWN merged ELF +
+# registration entry (keyed below); the chain image is tall for re6 (52 rows).
+_GEO_BY_SHAPE = {
+    (20, 128): "re8",
+    (40, 96): "re6",
+}
+_GEO_CFG = {  # geo -> (oc, gbound) for the merged build
+    "re8": dict(oc=128, gbound=20),
+    "re6": dict(oc=96, gbound=40),
+}
+# per-geo registration state (was module-global; now keyed so re8 + re6 coexist)
+_REG = {}   # geo -> dict(elf_name, meta=(geo_p, dmeta, hmeta))
 _N_ITERS = 3
 _WT_CACHE = {}    # (id(chain weights tuple), id(rnm_w), id(c3_w)) -> packed buffers
 
@@ -94,26 +105,33 @@ def _resident_wt_bo(device, wkey, role, nbytes):
 
 
 def _ensure_registered(geo, n_iters):
-    """Build + register the full chain->rnm->halo ELF into the model's pool."""
-    global _REGISTERED, _ELF_NAME, _META
+    """Build + register the full chain->rnm->halo ELF for `geo` into the pool."""
+    reg = _REG.get(geo)
+    if reg is not None:
+        return reg
     mcr = _MCR
     bd = getattr(mcr, "_MERGED_BD", None)
+    cfg = _GEO_CFG[geo]
     elf_path, dmeta, hmeta = _build_chain_rnm_halo(
-        geo=geo, n_iters=n_iters, build_dir=bd, stream_oc="block")
+        geo=geo, n_iters=n_iters, ic2=geo_params(geo)["IC"],
+        oc=cfg["oc"], gbound=cfg["gbound"], build_dir=bd, stream_oc="block")
     if elf_path is None:
-        raise RuntimeError("chain_rnm_halo merged ELF build failed")
-    _ELF_NAME = Path(elf_path).stem
-    _META = (geo_params(geo), dmeta, hmeta)
-    entry = mcr._get_merged_kernel(_ELF_NAME)
-    if entry is None:
-        raise RuntimeError(f"fused ELF {_ELF_NAME}.elf not loadable")
-    _REGISTERED = True
-    return entry
+        raise RuntimeError(f"chain_rnm_halo merged ELF build failed (geo={geo})")
+    elf_name = Path(elf_path).stem
+    if mcr._get_merged_kernel(elf_name) is None:
+        raise RuntimeError(f"fused ELF {elf_name}.elf not loadable")
+    reg = dict(elf_name=elf_name, meta=(geo_params(geo), dmeta, hmeta))
+    _REG[geo] = reg
+    return reg
 
 
-def _pad_half(hwc_u16: np.ndarray, IMG: int, ic2: int, G: int) -> np.ndarray:
-    """PAD(2)-pad a [G,G,ic2] uint16 HWC tensor into a flat IMG*IMG*ic2 half."""
-    half = np.zeros((IMG, IMG, ic2), np.uint16)
+def _pad_half(hwc_u16: np.ndarray, IMG: int, ic2: int, G: int,
+              img_h: int = None) -> np.ndarray:
+    """PAD(2)-pad a [G,G,ic2] uint16 HWC tensor into a flat img_h*IMG*ic2 half.
+    img_h defaults to IMG (square, re8); pass the chain's tall height for re6."""
+    if img_h is None:
+        img_h = IMG
+    half = np.zeros((img_h, IMG, ic2), np.uint16)
     half[PAD:PAD + G, PAD:PAD + G, :] = hwc_u16.reshape(G, G, ic2)
     return half.reshape(-1)
 
@@ -134,17 +152,20 @@ def run_chain_rnm_c3(x1b: torch.Tensor, x2b: torch.Tensor, chain_pairs,
     if mcr_mod is not None:
         _MCR = mcr_mod
     mcr = _MCR
-    assert H == W == 20 and oc == 128, "chain_rnm_c3 fused path is the re8 20x20x128 shape"
+    geo = _GEO_BY_SHAPE.get((H, oc))
+    assert H == W and geo is not None, (
+        f"chain_rnm_c3 fused path supports {_GEO_BY_SHAPE} shapes; got H={H} W={W} oc={oc}")
     n_iters = len(chain_pairs)
-
-    if not _REGISTERED:
-        _ensure_registered(_GEO, n_iters)
-    geo_p, dmeta, hmeta = _META
     assert n_iters == _N_ITERS, f"chain_rnm_c3 built for n_iters={_N_ITERS}, got {n_iters}"
+
+    reg = _ensure_registered(geo, n_iters)
+    elf_name = reg["elf_name"]
+    geo_p, dmeta, hmeta = reg["meta"]
 
     ic2, G = geo_p["IC"], geo_p["GBOUND"]
     nt = geo_p["WORKER_TILES"][0]
     IMG = dmeta["IMG"]
+    IMG_H = dmeta["IMG_H"]          # chain image height (tall for re6, == IMG for re8)
     HALF_ELEMS = dmeta["HALF_ELEMS"]
     IN_ELEMS = dmeta["IN_ELEMS"]
     SEAM_ELEMS = dmeta["IMG_ELEMS"]
@@ -152,17 +173,18 @@ def run_chain_rnm_c3(x1b: torch.Tensor, x2b: torch.Tensor, chain_pairs,
     N_TILES, C_ELEMS = hmeta["N_TILES"], hmeta["C_ELEMS"]
     gbound = G
 
-    entry = mcr._get_merged_kernel(_ELF_NAME)
+    entry = mcr._get_merged_kernel(elf_name)
     device, _elf, _ctx, kernel = entry
 
     # ---- chain input A: x1b PAD(2)-padded into lower half of widened stacked BO ----
+    # The chain half is the tall (IMG_H, IMG) padded image; x2 stacks above it.
     x1b_u16 = x1b.contiguous().view(torch.uint16).numpy()  # [G,G,ic2]
     a_u16 = np.zeros(IN_ELEMS, np.uint16)
-    a_u16[:HALF_ELEMS] = _pad_half(x1b_u16, IMG, ic2, G)
+    a_u16[:HALF_ELEMS] = _pad_half(x1b_u16, IMG, ic2, G, img_h=IMG_H)
     # ---- chain output B: copy of A + x2b PAD(2)-padded into upper half ----
     x2b_u16 = x2b.contiguous().view(torch.uint16).numpy()
     b_u16 = a_u16.copy()
-    b_u16[HALF_ELEMS:IN_ELEMS] = _pad_half(x2b_u16, IMG, ic2, G)
+    b_u16[HALF_ELEMS:IN_ELEMS] = _pad_half(x2b_u16, IMG, ic2, G, img_h=IMG_H)
 
     # ---- weights: cache the (slow) packs by weight identity ----
     wkey = (tuple(id(a) for pr in chain_pairs for a in pr),
@@ -188,9 +210,9 @@ def run_chain_rnm_c3(x1b: torch.Tensor, x2b: torch.Tensor, chain_pairs,
     #
     # MUTABLE per-call (shared pool, re-filled every dispatch):
     #   a/b = the stacked x1b|x2 image; out = the result stream.
-    a_bo = mcr._get_merged_bo(device, _ELF_NAME, "a", a_u16.nbytes)
-    b_bo = mcr._get_merged_bo(device, _ELF_NAME, "b", b_u16.nbytes)
-    out_bo = mcr._get_merged_bo(device, _ELF_NAME, "out", out_elems * 4)
+    a_bo = mcr._get_merged_bo(device, elf_name, "a", a_u16.nbytes)
+    b_bo = mcr._get_merged_bo(device, elf_name, "b", b_u16.nbytes)
+    out_bo = mcr._get_merged_bo(device, elf_name, "out", out_elems * 4)
     mcr._xrt_fill_bo(a_bo, a_u16)
     mcr._xrt_fill_bo(b_bo, b_u16)
     if _RESIDENT_WT:
@@ -211,10 +233,10 @@ def run_chain_rnm_c3(x1b: torch.Tensor, x2b: torch.Tensor, chain_pairs,
     else:
         # A/B baseline: old behavior — shared per-(elf,role) pool, re-filled every
         # dispatch (the +36 ms weight-reupload tax this experiment removes).
-        wt_bo = mcr._get_merged_bo(device, _ELF_NAME, "wt", chain_wt.nbytes)
-        gwt_bo = mcr._get_merged_bo(device, _ELF_NAME, "gwt", gemm_wt_u16.nbytes)
-        seam_bo = mcr._get_merged_bo(device, _ELF_NAME, "seam", SEAM_ELEMS * 2)
-        hwt_bo = mcr._get_merged_bo(device, _ELF_NAME, "hwt", halo_wt_u16.nbytes)
+        wt_bo = mcr._get_merged_bo(device, elf_name, "wt", chain_wt.nbytes)
+        gwt_bo = mcr._get_merged_bo(device, elf_name, "gwt", gemm_wt_u16.nbytes)
+        seam_bo = mcr._get_merged_bo(device, elf_name, "seam", SEAM_ELEMS * 2)
+        hwt_bo = mcr._get_merged_bo(device, elf_name, "hwt", halo_wt_u16.nbytes)
         mcr._xrt_fill_bo(wt_bo, chain_wt)
         mcr._xrt_fill_bo(gwt_bo, gemm_wt_u16)
         mcr._xrt_fill_bo(seam_bo, np.zeros(SEAM_ELEMS, np.uint16))

@@ -223,12 +223,21 @@ def run_re_mc(layer, inp, H, W, ic, oc, part, proc,
     # is folded into the halo conv weights and BN-bias+SiLU applied host-side.
     _fuse_rnm_c3 = (os.environ.get("MDV6_FUSE_RE8", "0") not in ('', '0', 'false', 'False')
                     and H == 20 and W == 20 and proc == 128)
+    # MDV6_FUSE_RE6 (default OFF): generalize the FULL-hop fold to the re6
+    # (40x40, proc=96) RepNCSP shape — rep_elan6/12/18, 6 hops/frame. Uses the
+    # SAME run_chain_rnm_c3 (per-geo registry) as re8. ONLY the full chain+rnm+c3
+    # fold is supported for re6 (no rnm->c3-only fallback); the re6 merged ELF
+    # uses the GEO chain (vs the model's default raster), which the full-fold
+    # measurement must net against the dispatch-collapse saving.
+    _fuse_re6_full = (os.environ.get("MDV6_FUSE_RE6", "0") not in ('', '0', 'false', 'False')
+                      and H == 40 and W == 40 and proc == 96)
     # MDV6_FUSE_RE8_FULL (default ON when MDV6_FUSE_RE8 is set): the FULL re8 hop —
     # chain+rnm+c3 in ONE merged ELF (run_chain_rnm_c3), folding the chain's
     # previously-separate ResidentXCLBin dispatch INTO the fused ELF. Setting it to
     # 0 falls back to the rnm->c3-only fusion (run_rnm_c3) with a separate chain.
-    _fuse_full = (_fuse_rnm_c3
+    _fuse_full = ((_fuse_rnm_c3
                   and os.environ.get("MDV6_FUSE_RE8_FULL", "1") not in ('', '0', 'false', 'False'))
+                  or _fuse_re6_full)
     if _fuse_full:
         from conv.chain_rnm_c3_runner import run_chain_rnm_c3
         x1b3, x2b3, pairs3, conv3_mod3 = run_rn_mc(
