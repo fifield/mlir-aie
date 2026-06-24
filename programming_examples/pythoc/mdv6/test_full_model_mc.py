@@ -692,13 +692,33 @@ def _profile_main(n_frames: int, baseline: str | None, out_json: str | None) -> 
     n_warmup = 1 if n_frames > 1 else 0
     n_measure = n_frames - n_warmup
 
+    # Opt-in gc.collect() timing diagnostic (MDV6_FUSE_TIMING=1). The harness
+    # calls gc.collect() every frame; the fused path's extra per-frame host
+    # allocations inflate that collection, landing in pre_post. Measure it.
+    _gc_timing = os.environ.get("MDV6_FUSE_TIMING", "0") not in ('', '0', 'false', 'False')
+    _gc_times = []
+
     last_det = None
     with Profiler(n_warmup=n_warmup, n_measure=n_measure) as prof:
         for i in range(n_frames):
             last_det = _forward_one_frame(model, x)
             if i < n_frames - 1:
                 prof.next_frame()
+            _t_gc = time.perf_counter()
             gc.collect()
+            if _gc_timing and i >= n_warmup:
+                _gc_times.append((time.perf_counter() - _t_gc) * 1000)
+
+    if _gc_timing:
+        if _gc_times:
+            print(f"\n[gc.collect() warm avg] {sum(_gc_times)/len(_gc_times):.2f} ms "
+                  f"over {len(_gc_times)} warm frames  (per-frame: "
+                  f"{', '.join(f'{t:.1f}' for t in _gc_times)})")
+        try:
+            from conv.chain_rnm_c3_runner import dump_timing as _dt
+            _dt()
+        except Exception as _e:
+            print(f"[timing dump skipped: {_e}]")
 
     # Correctness check outside the timed region.
     ok = _check_correctness(ref, last_det)

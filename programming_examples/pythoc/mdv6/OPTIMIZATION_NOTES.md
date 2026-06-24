@@ -429,3 +429,25 @@ Inner Total-forward-pass timer (true latency, excludes gc artifact), --profile 6
 
 ## FUSION TRACK STATE: re8+re6 = verified −15.5% latency (gated). re4 bounded by halo 1-tile/core model.
 ## To extend: halo tiles-per-core rewrite (unlocks re4 + makes re6/re8 leaner). To ship re8+re6 default-on: accuracy budget (0.1848) + gc/alloc churn.
+
+### SHIPPABILITY (agent A) — gc.freeze() is the lever; fused path now WINS on the wall too
+- Diagnosis: the fused-path +77ms pre_post is gc.collect(), NOT per-frame churn. The merged-ELF path holds a ~758,000-object
+  PERSISTENT live set (per-geo MLIR build artifacts + xrt/BO/weight caches); the harness gc.collect() re-traverses it every
+  frame → ~226ms. Per-frame garbage delta is only ~23 objects → the cost is the live-set SIZE, not churn.
+- Fix: gc.collect()+gc.freeze() after fused ELF build + resident weights → moves the set to gc's permanent gen → per-frame
+  gc 226ms → **0.1ms**. Default ON (MDV6_FUSE_NO_GC_FREEZE=1 to A/B). Plus host buffer reuse (stacked image, untile via
+  np.take(out=), 4-deep bf16 output ring since x3/x4 coexist for the c4 concat) — cut untile/image churn ~2×.
+- Result (same load window): RE8+RE6 gc 226→0.1, pre_post 286→13, **wall 557→278 (now BELOW baseline 451)**, inner 0.294→0.276.
+  The profiler wall now REFLECTS the win (was a phantom regression). Production jitter: per-frame gc 170-260ms swings → flat 0.1ms.
+- Accuracy intact: default 0.1423, fused 0.1848 (P3 0.131 / P4 0.167 / P5 0.185; vector ≤0.0312). Verified.
+- NOTE: gc.freeze() is independently valuable — the ~99-226ms/frame gc artifact is the "gc lever" flagged all session;
+  could apply model-wide (baseline too). Files: chain_rnm_c3_runner.py, rnm_halo_runner.py, test_full_model_mc.py (opt-in MDV6_FUSE_TIMING).
+
+### re4 HALO TILES-PER-CORE (agent B) — PLACEMENT SOLVED, prototype GO
+- New files (nothing existing touched): conv/aie2_halo_conv_mt.py, kernels/halo_conv3x3_bfp_mt.py, conv/test_halo_conv_mt_hw.py.
+- Each worker does `tpc` tiles (raster row-major, lifted from rn3_chain_raster); ONE window+C resident at a time (L1 indep of tpc).
+- HW PROOF: small re8 (20×20 OC32 tpc2, 8 workers) bit-exact; **re4 (80×80 GRID10 OC32 tpc4 = 28 workers ≤ 32) PLACES + bit-exact
+  (max_diff 0.156, 2/204800 BFP tail)**. The 100-workers>32-cores wall is GONE.
+- OC=64/128 L1-overflow (full-OC wt slot 72KB/288KB) = the SAME issue ocb1 streaming already solves (orthogonal to tpc) — confirmed
+  by the OC=64 test failing on buffer-alloc (got PAST placement). Effort to a real re4 fold ~0.5-1 day: port ocb1 into the mt
+  core_fn + drain-layout match to dcg + plumb tpc. Bonus: re6/re8 get fewer workers at tpc>1.
