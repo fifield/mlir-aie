@@ -116,23 +116,44 @@ def _ensure_registered():
     return entry
 
 
-def _c3_weights_for_halo(c3_w_u16: np.ndarray, oc: int, ic: int):
-    """Split the model's fuse_bn(c3) buffer into (halo conv weights with BN-scale
-    folded in, BN bias).
+def _c3_weights_for_halo(c3_w_u16: np.ndarray, oc: int, ic: int, stream_block=True):
+    """Pack the model's fuse_bn(c3) buffer into the halo weight slot layout for
+    in-kernel BN+SiLU: RAW (un-scaled) BFP-tiled conv weights with bn_w/bn_b
+    appended (chain layout). The BN scale is NO LONGER folded into the weights —
+    the kernel applies silu(conv(x)*bn_w + bn_b) on the f32 accumulator, so the
+    weights quantize UN-scaled (eliminates the scale-into-BFP rounding error).
 
     c3_w_u16 = [conv_OIHW(oc*ic*9), bn_w(oc), bn_b(oc)] (uint16 bf16).
-    Returns (halo_wt_u16, bn_b_bf16[oc]).
-    """
+
+    stream_block=True (the model's stream_oc="block" path): emit per-oc-block
+    units of [conv slot (KKMAX*64) + bn_w(8) + bn_b(8)], oc-block-major, so the
+    host wt TAP (offset p*WSLOT_PAIR) hands each unit its own conv+bn tail.
+    stream_block=False (non-stream OC<=64 path): [all conv blocks][bn_w(oc)][bn_b(oc)].
+    Returns ONLY the uint16 halo weight buffer (BN bias is now in-kernel)."""
     conv_n = oc * ic * 9
     conv = _u16_to_bf16_t(c3_w_u16[:conv_n]).float().reshape(oc, ic, 3, 3)
-    bn_w = _u16_to_bf16_t(c3_w_u16[conv_n:conv_n + oc]).float()        # [oc]
+    bn_w = _u16_to_bf16_t(c3_w_u16[conv_n:conv_n + oc]).float()          # [oc]
     bn_b = _u16_to_bf16_t(c3_w_u16[conv_n + oc:conv_n + 2 * oc]).float()  # [oc]
-    # Fold BN scale into the conv weights (BN is linear): conv' = scale[oc]*conv.
-    conv_scaled = conv * bn_w.view(oc, 1, 1, 1)
-    # tile_b expects W[oc, 9, ic]; OIHW [oc, ic, 3, 3] -> [oc, 9, ic].
-    W = conv_scaled.reshape(oc, ic, 9).permute(0, 2, 1).contiguous().numpy()
-    halo_wt_u16 = to_u16(bf16(tile_b(bf16(W), ic, oc)))
-    return halo_wt_u16, bn_b
+    # tile_b expects W[oc, 9, ic]; OIHW [oc, ic, 3, 3] -> [oc, 9, ic] (UN-scaled).
+    W = conv.reshape(oc, ic, 9).permute(0, 2, 1).contiguous().numpy()
+    conv_tiled = bf16(tile_b(bf16(W), ic, oc))            # [N_BLK_OC*KKMAX*64]
+    bn_w_u16 = to_u16(bf16(bn_w.numpy()))
+    bn_b_u16 = to_u16(bf16(bn_b.numpy()))
+    n_blk_oc = oc // 8
+    kkmax = (ic // 8) * 9
+    conv_u16 = to_u16(conv_tiled).reshape(n_blk_oc, kkmax * 64)
+    if stream_block:
+        raw = kkmax * 64 + 16                    # 1 conv slot + bn_w(8) + bn_b(8)
+        wslot_pair = ((raw + 63) // 64) * 64      # padded to 64-elem multiple
+        units = []
+        for p in range(n_blk_oc):
+            unit = np.concatenate([conv_u16[p], bn_w_u16[p * 8:(p + 1) * 8],
+                                   bn_b_u16[p * 8:(p + 1) * 8]])
+            if unit.size < wslot_pair:
+                unit = np.concatenate([unit, np.zeros(wslot_pair - unit.size, np.uint16)])
+            units.append(unit)
+        return np.concatenate(units).astype(np.uint16)
+    return np.concatenate([conv_u16.reshape(-1), bn_w_u16, bn_b_u16]).astype(np.uint16)
 
 
 def run_rnm_c3(concat_hwc: torch.Tensor, rnm_w_u16, c3_w_u16, H, W, oc,
@@ -177,10 +198,10 @@ def run_rnm_c3(concat_hwc: torch.Tensor, rnm_w_u16, c3_w_u16, H, W, oc,
         rnm_bnw = _u16_to_bf16_t(rnm_w_u16[oc * ic:oc * ic + oc])
         rnm_bnb = _u16_to_bf16_t(rnm_w_u16[oc * ic + oc:oc * ic + 2 * oc])
         gemm_wt_u16 = _pack_weights_blocked(rnm_conv, rnm_bnw, rnm_bnb)
-        halo_wt_u16, c3_bn_b = _c3_weights_for_halo(np.asarray(c3_w_u16, np.uint16), oc, ic)
-        cached = (gemm_wt_u16, halo_wt_u16, c3_bn_b)
+        halo_wt_u16 = _c3_weights_for_halo(np.asarray(c3_w_u16, np.uint16), oc, ic)
+        cached = (gemm_wt_u16, halo_wt_u16)
         _WT_CACHE[wkey] = cached
-    gemm_wt_u16, halo_wt_u16, c3_bn_b = cached
+    gemm_wt_u16, halo_wt_u16 = cached
 
     out_elems = N_TILES * C_ELEMS
     in_bo = mcr._get_merged_bo(device, _ELF_NAME, "in", host_in.nbytes)
@@ -199,13 +220,8 @@ def run_rnm_c3(concat_hwc: torch.Tensor, rnm_w_u16, c3_w_u16, H, W, oc,
     out_f32 = np.frombuffer(out_bo.map(), dtype=np.float32, count=out_elems).copy()
 
     # ---- deinterleave + untile -> [G,G,oc] HWC (vectorized via cached index) ----
+    # The kernel already applied BN + SiLU on the f32 accumulator, so out_f32 IS
+    # the final activation (no host epilogue, no BN-scale weight fold).
     idx = _build_untile_index(hmeta, gbound)   # maps raw out_f32 -> [G*G*oc]
     got = out_f32[idx].reshape(gbound, gbound, oc)
-
-    # ---- host BN bias + SiLU epilogue (the kernel did raw scale*conv) ----
-    g = torch.from_numpy(got)                       # [G,G,oc] f32 (= scale*conv)
-    g = g.to(torch.bfloat16).to(torch.float32)      # match kernel bf16 rounding
-    g = g + c3_bn_b.view(1, 1, oc)
-    g = g.to(torch.bfloat16).to(torch.float32)
-    g = _silu_kernel(g)
-    return g.to(torch.bfloat16)
+    return torch.from_numpy(got).to(torch.bfloat16)
