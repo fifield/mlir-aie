@@ -708,6 +708,16 @@ def _profile_main(n_frames: int, baseline: str | None, out_json: str | None) -> 
             gc.collect()
             if _gc_timing and i >= n_warmup:
                 _gc_times.append((time.perf_counter() - _t_gc) * 1000)
+            # Model-wide gc.freeze: once the warmup frame has built every ELF/BO
+            # and warmed the caches, move that ~750k-object persistent live set to
+            # gc's permanent generation so the per-frame gc.collect() (and any
+            # automatic gc in a real deployment) stops re-scanning it. Bit-exact;
+            # removes the ~85-100 ms/frame gc artifact + production jitter for
+            # ALL paths (baseline + fused). Opt out with MDV6_NO_GC_FREEZE=1.
+            if (i == n_warmup - 1 and n_warmup > 0
+                    and os.environ.get("MDV6_NO_GC_FREEZE", "0") in ("0", "")):
+                gc.collect()
+                gc.freeze()
 
     if _gc_timing:
         if _gc_times:
