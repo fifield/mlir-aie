@@ -36,7 +36,7 @@ for _p in (str(_HERE), str(_MDV6)):
         sys.path.insert(0, _p)
 
 from build_merged import _rewrite_sub, _make_dispatcher_block, _resolve_build_dir
-from aie2_rn3_chain_geo import rn3_chain_geo
+from aie2_rn3_chain_geo import rn3_chain_geo, geo_params
 from aie2_depad_concat_gemm import depad_concat_gemm
 from aie2_halo_conv import halo_conv, PAD
 
@@ -49,7 +49,15 @@ def build(geo="re8", n_iters=3, ic2=64, oc=128, gbound=20, build_dir=None,
     elf_name = f"chain_rnm_halo_{geo}_i{n_iters}_oc{oc}_g{gbound}_merged"
     elf_path = os.path.join(build_dir, f"{elf_name}.elf")
 
-    half_elems = ((gbound + 7) // 8 * 8 + 4) ** 2 * ic2   # IMG*IMG*ic2 (re8: 50176)
+    # The chain emits a PAD(2)-padded HWC image whose HEIGHT can EXCEED the
+    # square IMG width when WORKER_TILES sums to more grid-rows than the valid
+    # feature map (re6: 6 tile-rows -> 52-row tall buffer, vs 44-wide square).
+    # The chain->x2 stacking boundary must be the chain's REAL IMG_ELEMS so x2
+    # stacks above the tall chain image; the dcg de-pad gather still reads only
+    # the valid rows at the IMG-wide row stride (junk rows never read).
+    cp = geo_params(geo)
+    half_elems = cp["IMG_ELEMS"]                  # chain tall IMG_ELEMS (re8 square: 50176)
+    chain_img_h = cp["IMG_H"]                     # chain image height (re6: 52, re8: 28)
 
     # ---- sub0: rn3 chain (producer; output widened to hold x2 half) ----
     chain_mod = rn3_chain_geo(geo, n_iters=n_iters, rnm=0, stack_x2_ch=half_elems)
@@ -58,7 +66,8 @@ def build(geo="re8", n_iters=3, ic2=64, oc=128, gbound=20, build_dir=None,
     c_rw, c_args = _rewrite_sub(str(chain_mod), c_sym, c_seq)
 
     # ---- sub1: de-pad + concat -> rnm GEMM (consumer/producer; seam at arg2) ----
-    dcg_mod, dmeta = depad_concat_gemm(ic2=ic2, oc=oc, gbound=gbound)
+    dcg_mod, dmeta = depad_concat_gemm(ic2=ic2, oc=oc, gbound=gbound,
+                                       chain_img_h=chain_img_h)
     assert dcg_mod.operation.verify()
     d_sym, d_seq = "sub1_dcg", "sub1_dcg_seq"
     d_rw, d_args = _rewrite_sub(str(dcg_mod), d_sym, d_seq)
