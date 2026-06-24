@@ -44,8 +44,10 @@ from test_halo_conv_hw import (bf16, to_u16, numpy_conv3x3, tile_b, untile_c,
 from aie2_halo_conv import deinterleave_stream_out
 
 N_ITERS = 3
-GEO = "re8"
+GEO = os.environ.get("CRH_GEO", "re8")
 TILE = 8
+# per-geo (oc, gbound) registry — re8 (20x20x128) + re6 (40x40x96)
+_GEO_CFG = {"re8": dict(oc=128, gbound=20), "re6": dict(oc=96, gbound=40)}
 
 
 def _make_weight_pairs(rng, n_iters, ic):
@@ -59,7 +61,10 @@ def _make_weight_pairs(rng, n_iters, ic):
 
 
 def main():
-    elf_path, dmeta, hmeta = build(geo=GEO, n_iters=N_ITERS)
+    cfg = _GEO_CFG[GEO]
+    p0 = geo_params(GEO)
+    elf_path, dmeta, hmeta = build(geo=GEO, n_iters=N_ITERS,
+                                   ic2=p0["IC"], oc=cfg["oc"], gbound=cfg["gbound"])
     if elf_path is None:
         print("FAIL: merged chain->rnm->halo ELF build failed")
         return 1
@@ -113,7 +118,10 @@ def main():
     img = np.zeros(IN_ELEMS, np.float32)
     img[:p["IMG_H"] * IMG * ic2].reshape(p["IMG_H"], IMG, ic2)[PAD:PAD + G, PAD:PAD + G, :] = inp.float().numpy()
     a_u16 = f32_to_bf16_u16(img)
-    x2_padded = np.zeros((IMG, IMG, ic2), np.uint16)
+    # x2 half stacks above the chain image at HALF_ELEMS (== chain IMG_ELEMS,
+    # tall for re6). Pad x2 into the SAME tall (IMG_H, IMG) layout so the dcg
+    # de-pad gather (valid rows [PAD:PAD+G], row stride IMG) reads it correctly.
+    x2_padded = np.zeros((p["IMG_H"], IMG, ic2), np.uint16)
     x2_padded[PAD:PAD + G, PAD:PAD + G, :] = x2.view(torch.uint16).numpy()
     b_u16 = a_u16.copy(); b_u16[HALF_ELEMS:IN_ELEMS] = x2_padded.reshape(-1)
     gemm_wt_u16 = _pack_weights_blocked(rnm_conv, rnm_bnw, rnm_bnb)
