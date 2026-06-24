@@ -366,3 +366,15 @@ B1 concat→c4 ✓ · KEYSTONE halo-gather 3×3 from padded-HWC ✓. → full re
   accuracy gap is NOT the BN handling; it's dominated by the inherent **BFP576-vs-emulated-mmul** difference (fused c3 uses
   the BFP hardware matmul; baseline mc_re8_c3 uses emulated mmul<4,8,8>) + the in-merged chain BFP nondeterminism. Those are
   different IMPLEMENTATIONS of the same algorithm — irreducible without matching the baseline's matmul engine.
+
+### DECISIVE EXPERIMENT — static-weight residency in merged path: PREMISE WAS WRONG
+- Implemented: per-hop resident weight BOs keyed by stable wkey (4 hops × 4 roles), skip-refill after first fill.
+  Gated MDV6_FUSE_RE8_RESIDENT (default ON). Only conv/chain_rnm_c3_runner.py changed; default path untouched.
+- VERIFIED mechanism: SYNC_PROF host→device fills 768→720 = exactly 48 fewer weight syncs (4 BOs × 4 hops × 3/4 frames). Works as designed.
+- DECISIVE FINDING: the +36ms "regression" was MISATTRIBUTED to weight re-upload. XRT BO→device sync is fast bulk DMA:
+  the ENTIRE per-frame weight re-upload tax is only **~0.23ms** (micro-bench: 4 hops × 0.058ms). Residency removes it but it's negligible.
+- Machine SEVERELY CONTENDED (load ~15-17, 9 users): wall swung 552→1030ms, npu_run 213→348ms for IDENTICAL configs.
+  → the original +36ms regression was likely CONTENTION NOISE, not a real fusion cost. In matched windows the agent saw
+  npu_run trend LOWER for fused (~340 vs ~378 FUSE-OFF) — i.e. fusion may be ~neutral-or-slightly-positive on npu_run.
+- VERDICT: INCONCLUSIVE on wall (unmeasurable under contention). Residency is correct/free/keep, but NOT the lever.
+  The real fused costs are chain-kernel compute (~5.3ms/call) + pre_post, not host weight DMA. Need a QUIET machine to get the true A/B.
