@@ -33,8 +33,15 @@ Gated behind MDV6_FUSE_RE8 in run_re_mc; default OFF.
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
+
+# Static-weight residency is ON by default for the fused re8 path. Set
+# MDV6_FUSE_RE8_RESIDENT=0 to A/B against the old re-upload-every-call behavior
+# (weights then route through the shared per-(elf,role) merged BO pool, colliding
+# across the 4 hops and re-filled each dispatch).
+_RESIDENT_WT = os.environ.get("MDV6_FUSE_RE8_RESIDENT", "1") not in ("", "0", "false", "False")
 
 import numpy as np
 import torch
@@ -61,6 +68,29 @@ _META = None  # (geo_p, dmeta, hmeta)
 _GEO = "re8"
 _N_ITERS = 3
 _WT_CACHE = {}    # (id(chain weights tuple), id(rnm_w), id(c3_w)) -> packed buffers
+
+# --- STATIC-WEIGHT RESIDENCY (ports ResidentXCLBinRunner.static_indices) ---
+# The 4 re8 hops/frame share one merged ELF but carry DIFFERENT weights. The
+# shared _get_merged_bo pool keys by (elf, role, size), so the three weight roles
+# (wt/gwt/hwt) and the poison seam COLLIDE across hops — every dispatch re-fills
+# (host->device DMA) the frame-invariant weights. We instead pool the weight +
+# seam BOs by a STABLE per-hop key (the weight-identity tuple `wkey`, identical
+# frame-to-frame because fuse_bn/fuse_repconv cache by module identity), fill+sync
+# each ONCE, and skip the copy+sync on later dispatches. Only the mutable image
+# BOs (a/b) and the output BO stay on the per-call shared pool.
+_RESIDENT_WT_BO = {}      # (wkey, role) -> resident xrt BO (filled once)
+_RESIDENT_FILLED = set()  # wkeys whose weight+seam BOs are already filled+synced
+
+
+def _resident_wt_bo(device, wkey, role, nbytes):
+    """Per-hop resident weight/seam BO, keyed by stable weight identity."""
+    import pyxrt as _xrt
+    k = (wkey, role)
+    bo = _RESIDENT_WT_BO.get(k)
+    if bo is None:
+        bo = _xrt.ext.bo(device, nbytes)
+        _RESIDENT_WT_BO[k] = bo
+    return bo
 
 
 def _ensure_registered(geo, n_iters):
@@ -155,20 +185,40 @@ def run_chain_rnm_c3(x1b: torch.Tensor, x2b: torch.Tensor, chain_pairs,
     # @main args (links (0,2,1,0),(1,2,2,0)):
     #   0=A(chain in) 1=WT(chain) 2=B(chain out=dcg in) 3=gemm_wt
     #   4=seam(dcg out=halo in) 5=halo_wt 6=halo_out
+    #
+    # MUTABLE per-call (shared pool, re-filled every dispatch):
+    #   a/b = the stacked x1b|x2 image; out = the result stream.
     a_bo = mcr._get_merged_bo(device, _ELF_NAME, "a", a_u16.nbytes)
-    wt_bo = mcr._get_merged_bo(device, _ELF_NAME, "wt", chain_wt.nbytes)
     b_bo = mcr._get_merged_bo(device, _ELF_NAME, "b", b_u16.nbytes)
-    gwt_bo = mcr._get_merged_bo(device, _ELF_NAME, "gwt", gemm_wt_u16.nbytes)
-    seam_bo = mcr._get_merged_bo(device, _ELF_NAME, "seam", SEAM_ELEMS * 2)
-    hwt_bo = mcr._get_merged_bo(device, _ELF_NAME, "hwt", halo_wt_u16.nbytes)
     out_bo = mcr._get_merged_bo(device, _ELF_NAME, "out", out_elems * 4)
-
     mcr._xrt_fill_bo(a_bo, a_u16)
-    mcr._xrt_fill_bo(wt_bo, chain_wt)
     mcr._xrt_fill_bo(b_bo, b_u16)
-    mcr._xrt_fill_bo(gwt_bo, gemm_wt_u16)
-    mcr._xrt_fill_bo(seam_bo, np.zeros(SEAM_ELEMS, np.uint16))  # poison PAD border
-    mcr._xrt_fill_bo(hwt_bo, halo_wt_u16)
+    if _RESIDENT_WT:
+        # STATIC per-hop (resident pool keyed by wkey, filled once):
+        #   wt/gwt/hwt = frame-invariant packed weights; seam = poison PAD border.
+        wt_bo = _resident_wt_bo(device, wkey, "wt", chain_wt.nbytes)
+        gwt_bo = _resident_wt_bo(device, wkey, "gwt", gemm_wt_u16.nbytes)
+        seam_bo = _resident_wt_bo(device, wkey, "seam", SEAM_ELEMS * 2)
+        hwt_bo = _resident_wt_bo(device, wkey, "hwt", halo_wt_u16.nbytes)
+        if wkey not in _RESIDENT_FILLED:
+            # First dispatch for this hop: fill+sync its static weight + seam BOs.
+            # Later frames reuse the device-resident copies (no host->device DMA).
+            mcr._xrt_fill_bo(wt_bo, chain_wt)
+            mcr._xrt_fill_bo(gwt_bo, gemm_wt_u16)
+            mcr._xrt_fill_bo(seam_bo, np.zeros(SEAM_ELEMS, np.uint16))  # poison border
+            mcr._xrt_fill_bo(hwt_bo, halo_wt_u16)
+            _RESIDENT_FILLED.add(wkey)
+    else:
+        # A/B baseline: old behavior — shared per-(elf,role) pool, re-filled every
+        # dispatch (the +36 ms weight-reupload tax this experiment removes).
+        wt_bo = mcr._get_merged_bo(device, _ELF_NAME, "wt", chain_wt.nbytes)
+        gwt_bo = mcr._get_merged_bo(device, _ELF_NAME, "gwt", gemm_wt_u16.nbytes)
+        seam_bo = mcr._get_merged_bo(device, _ELF_NAME, "seam", SEAM_ELEMS * 2)
+        hwt_bo = mcr._get_merged_bo(device, _ELF_NAME, "hwt", halo_wt_u16.nbytes)
+        mcr._xrt_fill_bo(wt_bo, chain_wt)
+        mcr._xrt_fill_bo(gwt_bo, gemm_wt_u16)
+        mcr._xrt_fill_bo(seam_bo, np.zeros(SEAM_ELEMS, np.uint16))
+        mcr._xrt_fill_bo(hwt_bo, halo_wt_u16)
     mcr._xrt_run_kernel(kernel, [a_bo, wt_bo, b_bo, gwt_bo, seam_bo, hwt_bo, out_bo])
 
     import pyxrt as _xrt
