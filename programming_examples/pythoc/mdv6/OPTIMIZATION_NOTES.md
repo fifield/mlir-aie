@@ -399,3 +399,20 @@ Measured back-to-back at load 0.98-1.14 (genuinely uncontended), --profile 6 eac
 ### TRACK IS ALIVE. Next levers (now evidence-backed):
 1. Generalize chain-fold to re6/re4 (the big c3 convs) — each block's chain-fold should compound the npu_run reduction.
 2. Reduce the fused path's per-frame host allocation churn (shrinks the gc artifact + helps production jitter).
+
+### re6 GENERALIZED — COMPOUNDS THE WIN (verified clean, load 1.75)
+Inner Total-forward-pass timer (true latency, excludes gc artifact), --profile 6:
+| config | inner warm | npu_run | launches | acc |
+|--|--|--|--|--|
+| baseline (FUSE off) | ~0.297s | 222 | 98 | 0.1423 |
+| re8-only            | ~0.272s | 199 | 90 | 0.1828 |
+| **re8 + re6**       | **~0.251s** | **179** | **78** | 0.1848 PASS |
+- re8+re6 = **−46ms (−15.5%) vs baseline, ~3.4→4.0 fps.** npu_run 222→179 (−43ms), launches 98→78 (−20).
+- The geo-vs-raster re6 chain penalty did NOT cancel the dispatch-collapse saving across 6 re6 hops → net positive, compounds re8.
+- R1 standalone re6 seam bit-exact 0.043 (OC=96 fits L1 easily). Solved: re6 chain emits TALL non-square padded image
+  (52 rows, WORKER_TILES=(2,2,2)>5 valid) → chain_img_h param; 40 rows >32 cores → rows_per_core=2 (merged column TAP).
+- Per-geo registry in run_chain_rnm_c3 (_GEO_BY_SHAPE: (20,128)→re8, (40,96)→re6). Gates MDV6_FUSE_RE8 + MDV6_FUSE_RE6 (default OFF).
+- Default path bit-exact 0.1423. Files: aie2_depad_concat_gemm.py, build_chain_rnm_halo_merged.py, chain_rnm_c3_runner.py,
+  rnm_halo_runner.py, test_chain_rnm_halo_merged_hw.py, test_full_model_mc.py.
+
+### Remaining for model-wide: re4 (80×80, mc_re4_c3 18ms — biggest, but shim-BD risk) + accuracy budget (0.1848 vs 0.1423) + gc/alloc churn (so profiler-wall also reflects the win for default-on ship).
