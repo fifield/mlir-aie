@@ -90,6 +90,68 @@ def untile_c(flat, oc):
     return out
 
 
+def pack_halo_weights(W_bf, bn_w, bn_b, ic, oc, stream_oc=False):
+    """Pack the halo weight buffer for in-kernel BN+SiLU: BFP-tiled conv weights
+    (UN-scaled) with bn_w/bn_b appended in the slot layout the kernel reads.
+
+    W_bf[oc, 9, ic] bf16, bn_w/bn_b[oc] bf16-domain f32. Returns uint16.
+    stream_oc in {False, True/'pair', 'block'} selects the slot layout:
+      - non-stream: [all conv blocks][bn_w(oc)][bn_b(oc)]
+      - 'pair' (BLK_UNIT=2): per-2-oc-block units [conv(2 slots)+bn_w(16)+bn_b(16)]
+      - 'block'(BLK_UNIT=1): per-oc-block  units [conv(1 slot)+bn_w(8)+bn_b(8)]
+    """
+    n_blk_oc = oc // 8
+    kkmax = (ic // 8) * 9
+    conv_u16 = to_u16(bf16(tile_b(W_bf, ic, oc))).reshape(n_blk_oc, kkmax * 64)
+    bn_w_u16 = to_u16(bf16(bn_w))
+    bn_b_u16 = to_u16(bf16(bn_b))
+    if not stream_oc:
+        return np.concatenate([conv_u16.reshape(-1), bn_w_u16, bn_b_u16]).astype(np.uint16)
+    blk_unit = 1 if stream_oc == "block" else 2
+    raw = blk_unit * kkmax * 64 + 2 * (blk_unit * 8)
+    wslot_pair = ((raw + 63) // 64) * 64       # padded to 64-elem multiple
+    units = []
+    for u in range(n_blk_oc // blk_unit):
+        unit = [conv_u16[u * blk_unit + j] for j in range(blk_unit)]
+        unit.append(bn_w_u16[u * blk_unit * 8:(u + 1) * blk_unit * 8])
+        unit.append(bn_b_u16[u * blk_unit * 8:(u + 1) * blk_unit * 8])
+        unit = np.concatenate(unit)
+        if unit.size < wslot_pair:
+            unit = np.concatenate([unit, np.zeros(wslot_pair - unit.size, np.uint16)])
+        units.append(unit)
+    return np.concatenate(units).astype(np.uint16)
+
+
+def _bf16_recip(d):
+    """Mirror the kernel's bf16 reciprocal: exponent-flip seed (0x7EF4 - bits)
+    + two Newton steps r = r*(2 - d*r). d >= 2 (so r in (0, 0.5])."""
+    shp = np.shape(d)
+    dbits = to_u16(bf16(d)).astype(np.int32)
+    rbits = (0x7EF4 - dbits).astype(np.uint16)
+    r = from_u16(rbits).reshape(shp)
+    two = bf16(2.0)
+    r = bf16(r * bf16(two - bf16(d * r)))
+    r = bf16(r * bf16(two - bf16(d * r)))
+    return r
+
+
+def bn_silu_ref(raw_conv, bn_w, bn_b):
+    """Host reference mirroring the in-kernel BN+SiLU (_store_bn_silu_4x8_f32)
+    STEP FOR STEP in the bf16 domain — including the rational-sigmoid Newton
+    reciprocal — so the comparison isolates ONLY the BFP576 matmul error.
+    raw_conv [...,oc] f32 (raw conv accumulator), bn_w/bn_b [oc]."""
+    r = bf16(raw_conv)
+    bw = bn_w.reshape(*([1] * (raw_conv.ndim - 1)), -1)
+    bb = bn_b.reshape(*([1] * (raw_conv.ndim - 1)), -1)
+    t1 = bf16(r * bw)
+    t2 = bf16(t1 + bb)
+    a = bf16(np.abs(t2))
+    d = bf16(bf16(a + a) + bf16(2.0))
+    rr = _bf16_recip(d)
+    n = bf16(bf16(a + t2) + bf16(1.0))
+    return bf16(t2 * bf16(n * rr))
+
+
 def host_im2col_window(img_pad, tr, tc, ic):
     """Reference im2col gather (the path being replaced): pull tile (tr,tc)'s
     WIN x WIN x IC window out of the padded image, contiguous. This is what the
@@ -122,6 +184,8 @@ def main():
     img_bf = bf16(img)
     W = (rng.standard_normal((oc, 9, ic)).astype(np.float32) * 0.15)
     W_bf = bf16(W)
+    bn_w = bf16(rng.standard_normal(oc).astype(np.float32) * 0.5 + 1.0)
+    bn_b = bf16(rng.standard_normal(oc).astype(np.float32) * 0.2)
 
     # The conv consumer's valid output region: a pad-1 3x3 conv on the unpadded
     # feature map == a valid 3x3 conv whose windows start at PAD-1 in the padded
@@ -131,11 +195,13 @@ def main():
     SHIFT = PAD - 1  # = 1
     conv_img = np.zeros_like(img_bf)
     conv_img[:IMG_W - SHIFT, :IMG_W - SHIFT, :] = img_bf[SHIFT:, SHIFT:, :]
-    # numpy reference over conv_img (windows origin tr*8/tc*8 => GBOUND output)
-    ref = numpy_conv3x3(conv_img, W_bf, gbound, ic, oc)        # (gbound,gbound,oc)
+    # numpy reference over conv_img (windows origin tr*8/tc*8 => GBOUND output),
+    # now with the in-kernel BN + SiLU applied on the f32 conv accumulator.
+    raw = numpy_conv3x3(conv_img, W_bf, gbound, ic, oc)        # (gbound,gbound,oc)
+    ref = bn_silu_ref(raw, bn_w, bn_b)
 
     img_u16 = to_u16(conv_img)                                  # device feeds this
-    wt_u16 = to_u16(bf16(tile_b(W_bf, ic, oc)))
+    wt_u16 = pack_halo_weights(W_bf, bn_w, bn_b, ic, oc)
 
     # ---- host-im2col reference path: same windows pulled on host ----
     # Confirm the on-device fill TAP gathers identical windows to host im2col.
@@ -173,9 +239,12 @@ def main():
     np.set_printoptions(precision=4, suppress=True, linewidth=160)
     max_diff = d.max()
     mean_diff = d.mean()
-    # BFP576 tol: block-float quant gives ~1e-2 abs error at this magnitude
-    tol = 0.05
-    ok = max_diff < tol
+    # BFP576 tol: block-float quant gives ~1e-2 abs error; the in-kernel BN
+    # multiplies the conv accumulator by bn_w (~1±0.5) BEFORE SiLU, so the worst
+    # BFP element error is amplified by ~|bn_w| -> a fatter max tail (mean stays
+    # ~5e-3). Gate on mean (tight) + a BN-amplified max bound.
+    tol = 0.15
+    ok = (max_diff < tol) and (mean_diff < 0.02)
     print(f"\n  halo-conv vs numpy 3x3 (BFP576): max_diff={max_diff:.5f} "
           f"mean={mean_diff:.6f} tol={tol} -> {'PASS' if ok else 'FAIL'}")
     print(f"  got[0,0,:6]={got[0,0,:6]}")

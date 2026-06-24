@@ -39,7 +39,8 @@ from aie2_rn3_chain_geo import geo_params, PAD
 from rn3_chain_runner import run_rn3_chain_geo, _pack_geo_iter
 from test_rn3_pair_vector_oneblock_hw import f32_to_bf16_u16, bf16_u16_to_f32
 from test_gemm_truth import _pack_weights_blocked, _torch_reference, _silu_kernel
-from test_halo_conv_hw import bf16, to_u16, numpy_conv3x3, tile_b, untile_c
+from test_halo_conv_hw import (bf16, to_u16, numpy_conv3x3, tile_b, untile_c,
+                               pack_halo_weights, bn_silu_ref)
 from aie2_halo_conv import deinterleave_stream_out
 
 N_ITERS = 3
@@ -98,14 +99,12 @@ def main():
     SHIFT = PAD - 1
     conv_img = np.zeros_like(seam_ref)
     conv_img[:IMG - SHIFT, :IMG - SHIFT, :] = seam_ref[SHIFT:, SHIFT:, :]
-    # c3: fold BN scale into conv weights, halo does raw scale*conv, then BN-bias+SiLU
-    c3_conv_scaled = c3_conv * c3_bnw.reshape(oc, 1, 1, 1)       # [oc,ic,3,3]
-    W3 = c3_conv_scaled.reshape(oc, ic, 9).transpose(0, 2, 1)    # [oc, 9, ic]
+    # c3: in-kernel BN+SiLU on the f32 accumulator -> UN-scaled BFP weights.
+    W3 = c3_conv.reshape(oc, ic, 9).transpose(0, 2, 1)          # [oc, 9, ic]
     W3_bf = bf16(W3)
-    raw = numpy_conv3x3(bf16(conv_img), W3_bf, G, oc, oc)        # [G,G,oc] = scale*conv
-    raw_t = torch.from_numpy(raw).to(torch.bfloat16).to(torch.float32)
-    biased = (raw_t + torch.from_numpy(c3_bnb).view(1, 1, oc)).to(torch.bfloat16).to(torch.float32)
-    ref = _silu_kernel(biased).to(torch.float32).numpy()        # [G,G,oc] final x3
+    c3_bnw_bf = bf16(c3_bnw); c3_bnb_bf = bf16(c3_bnb)
+    raw = numpy_conv3x3(bf16(conv_img), W3_bf, G, oc, oc)        # [G,G,oc] raw conv
+    ref = bn_silu_ref(raw, c3_bnw_bf, c3_bnb_bf).astype(np.float32)  # [G,G,oc] final x3
 
     # ===== merged ELF host buffers =====
     weights = np.concatenate([
@@ -118,7 +117,7 @@ def main():
     x2_padded[PAD:PAD + G, PAD:PAD + G, :] = x2.view(torch.uint16).numpy()
     b_u16 = a_u16.copy(); b_u16[HALF_ELEMS:IN_ELEMS] = x2_padded.reshape(-1)
     gemm_wt_u16 = _pack_weights_blocked(rnm_conv, rnm_bnw, rnm_bnb)
-    halo_wt_u16 = to_u16(bf16(tile_b(W3_bf, oc, oc)))
+    halo_wt_u16 = pack_halo_weights(W3_bf, c3_bnw_bf, c3_bnb_bf, oc, oc, stream_oc="block")
     out_elems = N_TILES * C_ELEMS
 
     device = xrt.device(0)
@@ -160,18 +159,15 @@ def main():
     flat = deinterleave_stream_out(
         np.frombuffer(out_bo.map(), dtype=np.float32, count=out_elems).copy(), hmeta)
 
-    got_raw = np.zeros((G, G, oc), np.float32)
+    # kernel applied BN + SiLU in-kernel: out IS the final activation.
+    got = np.zeros((G, G, oc), np.float32)
     for t in range(N_TILES):
         tr, tc = t // GRID, t % GRID
         tile = untile_c(flat[t * C_ELEMS:(t + 1) * C_ELEMS], oc)
         for pl in range(64):
             oh, ow = tr * TILE + pl // 8, tc * TILE + pl % 8
             if oh < G and ow < G:
-                got_raw[oh, ow, :] = tile[pl, :]
-    # host BN-bias + SiLU epilogue (kernel did raw scale*conv)
-    g = torch.from_numpy(got_raw).to(torch.bfloat16).to(torch.float32)
-    g = (g + torch.from_numpy(c3_bnb).view(1, 1, oc)).to(torch.bfloat16).to(torch.float32)
-    got = _silu_kernel(g).to(torch.float32).numpy()
+                got[oh, ow, :] = tile[pl, :]
 
     d = np.abs(got - ref)
     max_diff, mean_diff = float(d.max()), float(d.mean())

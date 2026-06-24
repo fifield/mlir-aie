@@ -89,7 +89,9 @@ def halo_conv(ic=64, oc=64, gbound=20, n_iters=1, stack_size=4096, shift=0,
     N_BLK_IC = ic // 8
     N_BLK_OC = oc // 8
     WIN_ELEMS = WIN * WIN * ic
-    WSLOT = N_BLK_OC * (N_BLK_IC * 9) * 64  # BFP B layout [ocb, kk, 8, 8]
+    # weight slot = BFP B layout [ocb, kk, 8, 8] + per-channel bn_w(oc)+bn_b(oc)
+    # (in-kernel BN+SiLU on the f32 accumulator; chain-layout bn tail).
+    WSLOT = N_BLK_OC * (N_BLK_IC * 9) * 64 + 2 * oc
     C_ELEMS = N_BLK_OC * TILE * 8 * 8       # [N_BLOCKS, M_BLOCKS=8, 8, 8]
 
     # plumbing #1 + OC=128 C-drain — stream the weights in oc-block UNITS of
@@ -104,8 +106,16 @@ def halo_conv(ic=64, oc=64, gbound=20, n_iters=1, stack_size=4096, shift=0,
         assert N_BLK_OC % BLK_UNIT == 0, "stream_oc needs oc//8 divisible by BLK_UNIT"
     # legacy names: PAIR == one streamed UNIT (BLK_UNIT oc-blocks)
     N_PAIRS = N_BLK_OC // BLK_UNIT          # number of streamed wt/C units
-    WSLOT_PAIR = BLK_UNIT * (N_BLK_IC * 9) * 64
+    # one streamed unit = BLK_UNIT conv wt slots + BLK_UNIT*8 bn_w + bn_b, then
+    # padded up to a 64-elem multiple so the streamed wt BD inner size stays a
+    # clean mmul-block multiple (a non-multiple inner size mis-delivers the
+    # multi-unit (N_PAIRS=16) weight DMA at IC=128 -> kernel stalls, C stays 0).
+    _wslot_raw = BLK_UNIT * (N_BLK_IC * 9) * 64 + 2 * (BLK_UNIT * 8)
+    WSLOT_PAIR = ((_wslot_raw + 63) // 64) * 64
     PAIR_C = BLK_UNIT * TILE * 64           # one unit's tiled C (BLK_UNIT blocks)
+    if stream_oc:
+        # streamed host WT buffer = N_PAIRS units of (padded) WSLOT_PAIR back-to-back
+        WSLOT = N_PAIRS * WSLOT_PAIR
 
     cores_per_col = 4
     n_cols = (N_TILES + cores_per_col - 1) // cores_per_col
@@ -264,7 +274,7 @@ def halo_conv(ic=64, oc=64, gbound=20, n_iters=1, stack_size=4096, shift=0,
                 WSLOT=WSLOT, C_ELEMS=C_ELEMS, N_BLK_IC=N_BLK_IC,
                 N_BLK_OC=N_BLK_OC, TILE=TILE, PAD=PAD, ic=ic, oc=oc, gbound=gbound,
                 stream_oc=bool(stream_oc), BLK_UNIT=BLK_UNIT, PAIR_C=PAIR_C,
-                N_UNITS=N_PAIRS, cores_per_col=cores_per_col)
+                WSLOT_PAIR=WSLOT_PAIR, N_UNITS=N_PAIRS, cores_per_col=cores_per_col)
     return Program(dev, rt).resolve_program(), meta
 
 

@@ -146,10 +146,10 @@ def run_chain_rnm_c3(x1b: torch.Tensor, x2b: torch.Tensor, chain_pairs,
         rnm_bnw = _u16_to_bf16_t(np.asarray(rnm_w_u16, np.uint16)[oc * ic:oc * ic + oc])
         rnm_bnb = _u16_to_bf16_t(np.asarray(rnm_w_u16, np.uint16)[oc * ic + oc:oc * ic + 2 * oc])
         gemm_wt_u16 = _pack_weights_blocked(rnm_conv, rnm_bnw, rnm_bnb)
-        halo_wt_u16, c3_bn_b = _c3_weights_for_halo(np.asarray(c3_w_u16, np.uint16), oc, ic)
-        cached = (chain_wt, gemm_wt_u16, halo_wt_u16, c3_bn_b)
+        halo_wt_u16 = _c3_weights_for_halo(np.asarray(c3_w_u16, np.uint16), oc, ic)
+        cached = (chain_wt, gemm_wt_u16, halo_wt_u16)
         _WT_CACHE[wkey] = cached
-    chain_wt, gemm_wt_u16, halo_wt_u16, c3_bn_b = cached
+    chain_wt, gemm_wt_u16, halo_wt_u16 = cached
 
     out_elems = N_TILES * C_ELEMS
     # @main args (links (0,2,1,0),(1,2,2,0)):
@@ -176,13 +176,8 @@ def run_chain_rnm_c3(x1b: torch.Tensor, x2b: torch.Tensor, chain_pairs,
     out_f32 = np.frombuffer(out_bo.map(), dtype=np.float32, count=out_elems).copy()
 
     # ---- deinterleave + untile -> [G,G,oc] HWC (vectorized via cached index) ----
+    # The kernel already applied BN + SiLU on the f32 accumulator (un-scaled
+    # weights), so out_f32 IS the final activation — no host epilogue / weight fold.
     idx = _build_untile_index(hmeta, gbound)
     got = out_f32[idx].reshape(gbound, gbound, oc)
-
-    # ---- host BN bias + SiLU epilogue (the kernel did raw scale*conv) ----
-    g = torch.from_numpy(got)
-    g = g.to(torch.bfloat16).to(torch.float32)
-    g = g + c3_bn_b.view(1, 1, oc)
-    g = g.to(torch.bfloat16).to(torch.float32)
-    g = _silu_kernel(g)
-    return g.to(torch.bfloat16)
+    return torch.from_numpy(got).to(torch.bfloat16)

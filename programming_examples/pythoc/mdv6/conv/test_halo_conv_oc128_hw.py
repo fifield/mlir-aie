@@ -28,7 +28,7 @@ from aie.utils.compile import compile_mlir_module
 
 from aie2_halo_conv import halo_conv, TILE, PAD, deinterleave_stream_out
 from test_halo_conv_hw import (bf16, to_u16, numpy_conv3x3, tile_b, untile_c,
-                               host_im2col_window)
+                               host_im2col_window, pack_halo_weights, bn_silu_ref)
 from aie2_halo_conv import WIN
 
 
@@ -60,12 +60,15 @@ def main():
     img_bf = bf16(img)
     W = (rng.standard_normal((oc, 9, ic)).astype(np.float32) * 0.15)
     W_bf = bf16(W)
+    bn_w = bf16(rng.standard_normal(oc).astype(np.float32) * 0.5 + 1.0)
+    bn_b = bf16(rng.standard_normal(oc).astype(np.float32) * 0.2)
     SHIFT = PAD - 1
     conv_img = np.zeros_like(img_bf)
     conv_img[:IMG_W - SHIFT, :IMG_W - SHIFT, :] = img_bf[SHIFT:, SHIFT:, :]
-    ref = numpy_conv3x3(conv_img, W_bf, gbound, ic, oc)
+    raw = numpy_conv3x3(conv_img, W_bf, gbound, ic, oc)
+    ref = bn_silu_ref(raw, bn_w, bn_b)
     img_u16 = to_u16(conv_img)
-    wt_u16 = to_u16(bf16(tile_b(W_bf, ic, oc)))
+    wt_u16 = pack_halo_weights(W_bf, bn_w, bn_b, ic, oc, stream_oc="block")
 
     # confirm the on-device fill TAP gathers identical windows to host im2col
     img_u16_hwc = img_u16.reshape(IMG_W, IMG_W, ic)
@@ -99,8 +102,11 @@ def main():
     d = np.abs(got - ref)
     np.set_printoptions(precision=4, suppress=True, linewidth=160)
     max_diff, mean_diff = float(d.max()), float(d.mean())
-    tol = 0.06
-    ok = max_diff < tol
+    # in-kernel BN multiplies the conv accumulator by bn_w (~1±0.5) before SiLU,
+    # so the worst BFP element error is amplified into a fatter max tail; mean
+    # stays ~7e-3. Gate on mean (tight) + a BN-amplified max bound.
+    tol = 0.20
+    ok = (max_diff < tol) and (mean_diff < 0.02)
     print(f"\n  OC=128 C-DRAIN halo_conv (ic={ic} oc={oc}, N_BLK={oc//8}) vs numpy "
           f"3x3 (BFP576): max_diff={max_diff:.5f} mean={mean_diff:.6f} tol={tol} "
           f"-> {'PASS' if ok else 'FAIL'}")
