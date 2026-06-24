@@ -34,7 +34,8 @@ from test_rn3_pair_vector_oneblock_hw import f32_to_bf16_u16, bf16_u16_to_f32
 from test_re8_chain_merged_hw import _make_weight_pairs
 
 from aie2_halo_conv import halo_conv, TILE, PAD, WIN
-from test_halo_conv_hw import (bf16, to_u16, numpy_conv3x3, tile_b, untile_c)
+from test_halo_conv_hw import (bf16, to_u16, numpy_conv3x3, tile_b, untile_c,
+                               pack_halo_weights, bn_silu_ref)
 
 N_ITERS = 3
 GEO = "re8"
@@ -117,8 +118,11 @@ def main():
 
     W = (rng.standard_normal((oc, 9, ic)).astype(np.float32) * 0.1)
     W_bf = bf16(W)
-    wt_u16 = to_u16(bf16(tile_b(W_bf, ic, oc)))
-    ref = numpy_conv3x3(seam_bf, W_bf, G, ic, oc)                       # [G,G,oc]
+    bn_w = bf16(rng.standard_normal(oc).astype(np.float32) * 0.5 + 1.0)
+    bn_b = bf16(rng.standard_normal(oc).astype(np.float32) * 0.2)
+    wt_u16 = pack_halo_weights(W_bf, bn_w, bn_b, ic, oc)
+    raw = numpy_conv3x3(seam_bf, W_bf, G, ic, oc)                       # [G,G,oc]
+    ref = bn_silu_ref(raw, bn_w, bn_b)
 
     npu = NPUKernel(str(wd / "final.xclbin"), str(wd / "insts.bin"), kernel_name="MLIR_AIE")
     h = DefaultNPURuntime.load(npu)
@@ -139,8 +143,8 @@ def main():
     d = np.abs(got - ref)
     np.set_printoptions(precision=4, suppress=True, linewidth=160)
     max_diff, mean_diff = d.max(), d.mean()
-    tol = 0.05
-    ok = (chain_diff < 0.05) and (max_diff < tol)
+    tol = 0.20  # in-kernel BN amplifies the BFP max tail; mean stays ~7e-3
+    ok = (chain_diff < 0.05) and (max_diff < tol) and (mean_diff < 0.02)
     print("\n========= chain -> halo_c3 SEAM (no host im2col) =========")
     print(f"  chain output buffer fed verbatim: memref<{p['IMG_ELEMS']}xui16> "
           f"(28x28x64 PAD(2) HWC) -> halo-conv -> {G}x{G}x{oc}")
