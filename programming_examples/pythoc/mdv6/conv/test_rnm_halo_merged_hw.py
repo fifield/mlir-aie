@@ -34,7 +34,8 @@ import pyxrt as xrt
 from build_rnm_halo_merged import build as build_merged_seam
 from aie2_gemm_pad_out import PAD, TILE
 from test_gemm_truth import _pack_weights_blocked, _torch_reference
-from test_halo_conv_hw import bf16, to_u16, numpy_conv3x3, tile_b, untile_c
+from test_halo_conv_hw import (bf16, to_u16, numpy_conv3x3, tile_b, untile_c,
+                               pack_halo_weights, bn_silu_ref)
 from aie2_halo_conv import deinterleave_stream_out
 
 
@@ -61,6 +62,8 @@ def main():
     bn_b = (0.1 * torch.from_numpy(rng.standard_normal(oc).astype(np.float32))).to(torch.bfloat16)
     W3 = (rng.standard_normal((oc, 9, oc)).astype(np.float32) * 0.1)
     W3_bf = bf16(W3)
+    c3_bn_w = bf16(rng.standard_normal(oc).astype(np.float32) * 0.05 + 1.0)
+    c3_bn_b = bf16(rng.standard_normal(oc).astype(np.float32) * 0.1)
 
     # host -> device packing (S1 layout: per-core valid row)
     fmap_u16 = fmap.view(torch.uint16).numpy()
@@ -68,7 +71,7 @@ def main():
     for r in range(n_cores):
         host_in[r * input_tile_size:(r + 1) * input_tile_size] = fmap_u16[r].reshape(-1)
     gemm_wt_u16 = _pack_weights_blocked(conv_wt, bn_w, bn_b)
-    halo_wt_u16 = to_u16(bf16(tile_b(W3_bf, oc, oc)))
+    halo_wt_u16 = pack_halo_weights(W3_bf, c3_bn_w, c3_bn_b, oc, oc, stream_oc="block")
 
     # ===== run the merged ELF (ONE hw_context) =====
     device = xrt.device(0)
@@ -116,7 +119,8 @@ def main():
     SHIFT = PAD - 1
     conv_img = np.zeros_like(seam_ref)
     conv_img[:IMG - SHIFT, :IMG - SHIFT, :] = seam_ref[SHIFT:, SHIFT:, :]
-    ref = numpy_conv3x3(bf16(conv_img), W3_bf, gbound, oc, oc)   # [G,G,oc]
+    raw = numpy_conv3x3(bf16(conv_img), W3_bf, gbound, oc, oc)   # [G,G,oc]
+    ref = bn_silu_ref(raw, c3_bn_w, c3_bn_b)                     # in-kernel BN+SiLU
 
     got = np.zeros((gbound, gbound, oc), np.float32)
     for t in range(N_TILES):
