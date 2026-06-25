@@ -59,7 +59,8 @@ PAD = 2
 KERNELS_DIR = os.path.join(MDV6, "kernels", "build")
 
 
-def gemm_pad_out(ic=128, oc=128, gbound=20, stack_size=8192):
+def gemm_pad_out(ic=128, oc=128, gbound=20, stack_size=8192,
+                 img_h=None, seam_elems=None, dst_base=0, m_split=None):
     """1x1 GEMM IC->OC over a gbound x gbound valid feature map; the output DRAIN
     writes a PAD(2)-padded IMG x IMG x OC HWC buffer (interior placed, border
     zero), matching halo_conv(ic=oc).img_ty exactly.
@@ -67,28 +68,71 @@ def gemm_pad_out(ic=128, oc=128, gbound=20, stack_size=8192):
     One valid image row per core: tile_m = gbound, n_cores = gbound. Each core
     consumes its row's [gbound, ic] HWC patch (host packs them per-core) and
     emits [gbound, oc]; the drain scatters it into padded row PAD+r.
+
+    WB1 extension (on-device rn1 -> chain stacked BO): the default is a SQUARE
+    IMG x IMG x OC seam (re8). For the rn3-chain stacked-input format the output
+    half is TALL (img_h > IMG, re6/re4) and may be one half of a wider stacked BO:
+      img_h     : output image HEIGHT (rows). None -> IMG (square, re8).
+      seam_elems: TOTAL output BO size in elems. None -> img_h*IMG*oc (one half).
+                  Pass 2*HALF to make the output the full stacked [lower|upper] BO.
+      dst_base  : element offset where this half's padded image starts in the
+                  output BO (0 = lower half, HALF_ELEMS = upper half). The drain
+                  TAP base offset adds dst_base; everything else (the GEMM math,
+                  the per-core valid-row scatter) is identical. The border of the
+                  written half stays whatever the BO held (host zeros it once).
     """
     assert gbound % 4 == 0, f"gbound={gbound} must be %4==0 (mmul<4,8,8>)"
     assert ic % 8 == 0 and oc % 8 == 0
 
     GRID = (gbound + TILE - 1) // TILE
     IMG = GRID * TILE + 2 * PAD                 # padded image width (re8: 28)
-    IMG_ELEMS = IMG * IMG * oc                  # seam BO size (== halo img_ty)
+    if img_h is None:
+        img_h = IMG                             # square seam (re8: img_h == IMG)
+    half_elems = img_h * IMG * oc               # one padded half (tall for re6/re4)
+    if seam_elems is None:
+        seam_elems = half_elems                 # standalone square/tall half
+    IMG_ELEMS = seam_elems                       # actual seam BO size
 
-    tile_m = gbound                             # one valid row per core
-    n_cores = gbound                            # gbound cores
-    input_tile_size = tile_m * ic
-    output_tile_size = tile_m * oc
+    # rows-per-core: one valid image row per core needs gbound cores, which
+    # exceeds the 32-core array for gbound>32 (re6 gbound=40, re4 gbound=80).
+    # Pack `rpc` CONSECUTIVE valid rows per core so n_cores = gbound//rpc <= 32
+    # (rpc must divide gbound so the column-wide drain TAP folds cleanly). re8
+    # gbound=20 -> rpc=1 (20 cores, unchanged). re6 40 -> rpc=2 (20). re4 80 ->
+    # rpc=4 (20). The kernel processes tile_m = rpc*gbound pixels per call.
+    cores_per_col = 4
+    max_cores = 32
+    rpc = 1
+    while gbound % rpc != 0 or (gbound + rpc - 1) // rpc > max_cores:
+        rpc += 1
+        assert rpc <= gbound, f"no rows_per_core divides gbound={gbound} under {max_cores} cores"
+    n_cores = gbound // rpc
+    tile_m = rpc * gbound                        # pixels per core (M dim)
+    # m_split: stream each core's tile_m pixels as `m_split` sub-tiles through the
+    # FIFO (the core loops m_split kernel calls, one chunk in/out per call). Shrinks
+    # the L1 in/out buffers by m_split — the lever that makes the large re4
+    # (rpc=4, tile_m=320 -> 40KB in) GEMM fit alongside the chain in one merged ELF.
+    # Default None: m_split = rpc, i.e. ONE valid row (gbound px) per sub-tile, so
+    # each chunk is one whole row (the drain folds it cleanly). re8/re6 keep rpc=1/2.
+    if m_split is None:
+        m_split = rpc
+    assert tile_m % m_split == 0, f"tile_m={tile_m} not divisible by m_split={m_split}"
+    rows_per_chunk = rpc // m_split
+    assert rpc % m_split == 0 and rows_per_chunk >= 1, (
+        f"m_split={m_split} must divide rpc={rpc} into whole-row chunks")
+    chunk_m = tile_m // m_split                   # pixels per streamed sub-tile
+    input_tile_size = chunk_m * ic
+    output_tile_size = chunk_m * oc
     weight_size = oc * ic + 2 * oc              # conv + BN scale/bias
 
-    cores_per_col = 4
     n_cols = (n_cores + cores_per_col - 1) // cores_per_col
 
+    full_in_tile = tile_m * ic                    # per-core full input (all chunks)
+    total_in = n_cores * full_in_tile             # host input BO size
     dev = NPU2()
     input_ty = np.ndarray[(input_tile_size,), np.dtype[np.uint16]]
     weight_ty = np.ndarray[(weight_size,), np.dtype[np.uint16]]
     output_ty = np.ndarray[(output_tile_size,), np.dtype[np.uint16]]
-    host_in_ty = np.ndarray[(n_cores * input_tile_size,), np.dtype[np.uint16]]
+    host_in_ty = np.ndarray[(total_in,), np.dtype[np.uint16]]
     host_wt_ty = weight_ty
     # OUT is the PADDED seam image — same type as halo_conv(ic=oc).img_ty.
     seam_ty = np.ndarray[(IMG_ELEMS,), np.dtype[np.uint16]]
@@ -100,24 +144,30 @@ def gemm_pad_out(ic=128, oc=128, gbound=20, stack_size=8192):
         np.int32, np.int32, np.int32, np.int32, np.int32, np.int32,
     ])
 
-    # RTP: [tile_h, tile_w, ic, oc, stride, padding] = [tile_m, 1, ic, oc, 1, 0]
+    # RTP: [tile_h, tile_w, ic, oc, stride, padding] = [chunk_m, 1, ic, oc, 1, 0]
+    # (kernel processes one chunk_m sub-tile per call; core loops m_split chunks).
     RTP_LEN = 6
     rtp_ty = np.ndarray[(RTP_LEN,), np.dtype[np.int32]]
-    init_rtp = np.array([tile_m, 1, ic, oc, 1, 0], dtype=np.int32)
+    init_rtp = np.array([chunk_m, 1, ic, oc, 1, 0], dtype=np.int32)
     rtps = [Buffer(rtp_ty, name=f"rtp_{i}", initial_value=init_rtp, use_write_rtp=True)
             for i in range(n_cores)]
     barriers = [WorkerRuntimeBarrier() for _ in range(n_cores)]
+
+    _M_SPLIT = m_split
 
     def core_fn(of_in, of_wt, of_out, kern, my_rtp, barrier):
         barrier.wait_for_value(1)
         t_h = my_rtp[0]; t_w = my_rtp[1]; ic_v = my_rtp[2]
         oc_v = my_rtp[3]; s_v = my_rtp[4]; p_v = my_rtp[5]
         elem_wt = of_wt.acquire(1)
-        elem_in = of_in.acquire(1)
-        elem_out = of_out.acquire(1)
-        kern(elem_in, elem_wt, elem_out, t_h, t_w, ic_v, oc_v, s_v, p_v)
-        of_in.release(1)
-        of_out.release(1)
+        c = 0
+        while c < _M_SPLIT:
+            elem_in = of_in.acquire(1)
+            elem_out = of_out.acquire(1)
+            kern(elem_in, elem_wt, elem_out, t_h, t_w, ic_v, oc_v, s_v, p_v)
+            of_in.release(1)
+            of_out.release(1)
+            c = c + 1
         of_wt.release(1)
         barrier.release_with_value(1)
 
@@ -168,36 +218,49 @@ def gemm_pad_out(ic=128, oc=128, gbound=20, stack_size=8192):
             return n, 1
         in_d1, in_d0 = _factor(input_tile_size)
 
+        last_col = n_cols - 1
         for col in range(n_cols):
             cc = min(cores_per_col, n_cores - col * cores_per_col)
-            # input: gather core c's [tile_m, ic] HWC patch (host packs per-core
-            # contiguous, core c = valid row c).
-            tap_in = TensorAccessPattern(
-                (n_cores * input_tile_size,),
-                offset=col * cores_per_col * input_tile_size,
-                sizes=[1, cc, in_d1, in_d0],
-                strides=[0, input_tile_size, in_d0, 1])
-            rt.fill(col_in_fifos[col].prod(), I, tap_in)
-            # DRAIN: scatter the column's cc core outputs into the PADDED image.
-            # Core (col*cpc + i) owns valid row r = col*cpc + i; its [gbound, oc]
-            # output lands at padded offset ((PAD+r)*IMG + PAD)*oc, contiguous
-            # gbound*oc. The join emits the cc cores back-to-back, so a single
-            # strided TAP places them: outer dim cc, row stride IMG*oc.
-            r0 = col * cores_per_col
-            out_d1, out_d0 = _factor(output_tile_size)
-            tap_out = TensorAccessPattern(
-                (IMG_ELEMS,),
-                offset=((PAD + r0) * IMG + PAD) * oc,
-                # core c (= valid row r0+c) lands at padded row PAD+r0+c (row
-                # stride IMG*oc); within a row output_tile_size = gbound*oc is
-                # contiguous, factored (out_d1,out_d0<=1023) for the DMA BD.
-                sizes=[1, cc, out_d1, out_d0],
-                strides=[0, IMG * oc, out_d0, 1])
-            rt.drain(col_out_fifos[col].cons(), OUT, tap_out,
-                     wait=(col == n_cols - 1))
+          # STREAM m_split sub-tile rounds: per round cr the column's cc cores
+          # each contribute their cr-th chunk (rows_per_chunk rows). One round =
+          # one column-wide fill/drain (one BD chain); m_split rounds over the
+          # depth-1 FIFO (lock-paced). m_split==rpc==1 (re8) == single round.
+            for cr in range(m_split):
+              # input: gather core c's cr-th chunk [chunk_m, ic] HWC. Host packs
+              # per-core full tile_m contiguous; chunk cr is at +cr*input_tile_size
+              # within a core's block (core stride full_in_tile).
+                tap_in = TensorAccessPattern(
+                    (total_in,),
+                    offset=col * cores_per_col * full_in_tile + cr * input_tile_size,
+                    sizes=[1, cc, in_d1, in_d0],
+                    strides=[0, full_in_tile, in_d0, 1])
+                rt.fill(col_in_fifos[col].prod(), I, tap_in)
+                # DRAIN: scatter this round's cc chunks into the PADDED image.
+                # Core (col*cpc+i) owns rpc rows from r_base=(col*cpc+i)*rpc; chunk
+                # cr covers rows r0=r_base+cr*rows_per_chunk .. +rows_per_chunk,
+                # each row gbound*oc at row stride IMG*oc. core stride rpc*IMG*oc.
+                r0 = (col * cores_per_col) * rpc + cr * rows_per_chunk
+                if rows_per_chunk == 1:
+                    out_d1, out_d0 = _factor(output_tile_size)
+                    tap_out = TensorAccessPattern(
+                        (IMG_ELEMS,),
+                        offset=dst_base + ((PAD + r0) * IMG + PAD) * oc,
+                        sizes=[1, cc, out_d1, out_d0],
+                        strides=[0, rpc * IMG * oc, out_d0, 1])
+                else:
+                    tap_out = TensorAccessPattern(
+                        (IMG_ELEMS,),
+                        offset=dst_base + ((PAD + r0) * IMG + PAD) * oc,
+                        sizes=[cc, rows_per_chunk, gbound, oc],
+                        strides=[rpc * IMG * oc, IMG * oc, oc, 1])
+                rt.drain(col_out_fifos[col].cons(), OUT, tap_out,
+                         wait=(col == last_col and cr == m_split - 1))
 
-    meta = dict(GRID=GRID, IMG=IMG, IMG_ELEMS=IMG_ELEMS, PAD=PAD, TILE=TILE,
+    meta = dict(GRID=GRID, IMG=IMG, IMG_H=img_h, HALF_ELEMS=half_elems,
+                IMG_ELEMS=IMG_ELEMS, DST_BASE=dst_base, PAD=PAD, TILE=TILE,
                 ic=ic, oc=oc, gbound=gbound, tile_m=tile_m, n_cores=n_cores,
+                rows_per_core=rpc, m_split=m_split, chunk_m=chunk_m,
+                rows_per_chunk=rows_per_chunk, full_in_tile=full_in_tile,
                 input_tile_size=input_tile_size, output_tile_size=output_tile_size,
                 weight_size=weight_size, n_cols=n_cols, cores_per_col=cores_per_col)
     return Program(dev, rt).resolve_program(), meta

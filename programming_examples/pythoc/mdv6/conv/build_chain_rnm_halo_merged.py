@@ -38,17 +38,19 @@ for _p in (str(_HERE), str(_MDV6)):
 from build_merged import _rewrite_sub, _make_dispatcher_block, _resolve_build_dir
 from aie2_rn3_chain_geo import rn3_chain_geo, geo_params
 from aie2_depad_concat_gemm import depad_concat_gemm
+from aie2_gemm_pad_out import gemm_pad_out
 from aie2_halo_conv import halo_conv, PAD
 from aie2_halo_conv_mt import halo_conv_mt
 
 
 def build(geo="re8", n_iters=3, ic2=64, oc=128, gbound=20, build_dir=None,
-          stream_oc="block", tpc=1):
+          stream_oc="block", tpc=1, fold_rn1=False, rn1_ic=None, rn1_m_split=None):
     if build_dir is None:
         build_dir = _resolve_build_dir()
     os.makedirs(build_dir, exist_ok=True)
     tpc_tag = f"_tpc{tpc}" if tpc > 1 else ""
-    elf_name = f"chain_rnm_halo_{geo}_i{n_iters}_oc{oc}_g{gbound}{tpc_tag}_merged"
+    rn1_tag = f"_rn1{rn1_ic}" if fold_rn1 else ""
+    elf_name = f"chain_rnm_halo_{geo}_i{n_iters}_oc{oc}_g{gbound}{tpc_tag}{rn1_tag}_merged"
     elf_path = os.path.join(build_dir, f"{elf_name}.elf")
 
     # The chain emits a PAD(2)-padded HWC image whose HEIGHT can EXCEED the
@@ -102,10 +104,60 @@ def build(geo="re8", n_iters=3, ic2=64, oc=128, gbound=20, build_dir=None,
     print(f"  seam1: chain.arg2 == dcg.arg0 == {c_args[2]}")
     print(f"  seam2: dcg.arg2   == halo.arg0 == {d_args[2]}")
 
-    subs = [(c_sym, c_seq, c_args), (d_sym, d_seq, d_args), (h_sym, h_seq, h_args)]
-    # dcg.in <- chain.out ; halo.in <- dcg.seam : both seams device-resident.
-    dispatcher = _make_dispatcher_block(subs, chain_links=[(0, 2, 1, 0), (1, 2, 2, 0)])
-    merged = "module {\n" + c_rw + "\n" + d_rw + "\n" + h_rw + "\n" + dispatcher + "\n}\n"
+    # ---- WB1: optional on-device rn1 (two 1x1 GEMMs sharing the chain input) ----
+    # The model's gemm_pair(rn1) runs repncsp.conv1 -> x1b (chain input) and
+    # repncsp.conv2 -> x2b (concat half) on the same input. WB1 folds that launch
+    # into this merged ELF as two gemm_pad_out sub-devices that drain PAD-padded
+    # HWC directly into the stacked chain BO halves:
+    #   rn1a (conv1) -> LOWER half (dst_base=0)        == chain arg0 (A)
+    #   rn1b (conv2) -> UPPER half (dst_base=HALF)      == chain arg2 (B)
+    # Both share the rn1 input (chain_link rn1a.in -> rn1b.in). The chain reads A
+    # on iter 0; its ping-pong final output (n_iters odd) lands in B, whose upper
+    # half (x2b) is never touched by the chain (drains write only the lower-half
+    # interior). A/B borders stay zero (host zeros the resident BOs once).
+    rmeta = None
+    if fold_rn1:
+        ic_in = rn1_ic if rn1_ic is not None else (2 * ic2)
+        IN_ELEMS = c_args_in_elems = 2 * half_elems
+        # rn1a -> lower half (chain A), rn1b -> upper half (chain B). oc = ic2.
+        rn1a_mod, rmeta = gemm_pad_out(ic=ic_in, oc=ic2, gbound=gbound,
+                                       img_h=chain_img_h, seam_elems=IN_ELEMS,
+                                       dst_base=0, m_split=rn1_m_split)
+        rn1b_mod, _ = gemm_pad_out(ic=ic_in, oc=ic2, gbound=gbound,
+                                   img_h=chain_img_h, seam_elems=IN_ELEMS,
+                                   dst_base=half_elems, m_split=rn1_m_split)
+        assert rn1a_mod.operation.verify() and rn1b_mod.operation.verify()
+        ra_sym, ra_seq = "subA_rn1a", "subA_rn1a_seq"
+        rb_sym, rb_seq = "subB_rn1b", "subB_rn1b_seq"
+        ra_rw, ra_args = _rewrite_sub(str(rn1a_mod), ra_sym, ra_seq)
+        rb_rw, rb_args = _rewrite_sub(str(rn1b_mod), rb_sym, rb_seq)
+        # rn1a.out (arg2) must type-match chain.A (c_args[0]); rn1b.out -> chain.B.
+        if ra_args[2] != c_args[0]:
+            raise RuntimeError(f"rn1a.out={ra_args[2]} != chain.A={c_args[0]}")
+        if rb_args[2] != c_args[2]:
+            raise RuntimeError(f"rn1b.out={rb_args[2]} != chain.B={c_args[2]}")
+        if ra_args[0] != rb_args[0]:
+            raise RuntimeError(f"rn1 input type mismatch: {ra_args[0]} vs {rb_args[0]}")
+        print(f"  rn1a  args: {ra_args}  (-> chain A, lower half)")
+        print(f"  rn1b  args: {rb_args}  (-> chain B, upper half)")
+        # sub order: 0=rn1a 1=rn1b 2=chain 3=dcg 4=halo
+        subs = [(ra_sym, ra_seq, ra_args), (rb_sym, rb_seq, rb_args),
+                (c_sym, c_seq, c_args), (d_sym, d_seq, d_args), (h_sym, h_seq, h_args)]
+        chain_links = [
+            (0, 0, 1, 0),   # rn1b.in   <- rn1a.in   (shared chain input)
+            (0, 2, 2, 0),   # chain.A   <- rn1a.out  (lower half = x1b)
+            (1, 2, 2, 2),   # chain.B   <- rn1b.out  (upper half = x2b)
+            (2, 2, 3, 0),   # dcg.in    <- chain.out (B)
+            (3, 2, 4, 0),   # halo.in   <- dcg.seam
+        ]
+        dispatcher = _make_dispatcher_block(subs, chain_links=chain_links)
+        merged = ("module {\n" + ra_rw + "\n" + rb_rw + "\n" + c_rw + "\n"
+                  + d_rw + "\n" + h_rw + "\n" + dispatcher + "\n}\n")
+    else:
+        subs = [(c_sym, c_seq, c_args), (d_sym, d_seq, d_args), (h_sym, h_seq, h_args)]
+        # dcg.in <- chain.out ; halo.in <- dcg.seam : both seams device-resident.
+        dispatcher = _make_dispatcher_block(subs, chain_links=[(0, 2, 1, 0), (1, 2, 2, 0)])
+        merged = "module {\n" + c_rw + "\n" + d_rw + "\n" + h_rw + "\n" + dispatcher + "\n}\n"
 
     mlir_path = os.path.join(build_dir, f"{elf_name}.mlir")
     with open(mlir_path, "w") as f:
@@ -123,6 +175,8 @@ def build(geo="re8", n_iters=3, ic2=64, oc=128, gbound=20, build_dir=None,
         print(f"  {elf_name}: FAIL (rc={r.returncode})\n    {tail}")
         return None, dmeta, hmeta
     print(f"  {elf_name}: OK -> {elf_path}")
+    if rmeta is not None:
+        dmeta = dict(dmeta, rn1=rmeta)   # WB1: stash rn1 input-pack meta
     return elf_path, dmeta, hmeta
 
 
