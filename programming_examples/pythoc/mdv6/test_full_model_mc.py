@@ -95,7 +95,8 @@ def run_elan_mc(model_elan, input_hwc, H, W, ic, oc,
 def run_rn_mc(repncsp, inp, H, W, ic, oc,
               mc_rn1, sc_rn1, mc_rn3, sc_rn3, mc_rnm, sc_rnm,
               trn1, orn1, trn3, orn3, trnm, ornm,
-              return_concat=False, return_chain_inputs=False):
+              return_concat=False, return_chain_inputs=False,
+              return_rn1_inputs=False):
     """If return_concat=True, return (concat, repncsp.conv3) just BEFORE the rnm
     GEMM instead of running it — lets run_re_mc fuse rnm+c3 into one ELF
     (run_rnm_c3) behind MDV6_FUSE_RE8. Only used for the re8 20x20x128 shape.
@@ -114,15 +115,23 @@ def run_rn_mc(repncsp, inp, H, W, ic, oc,
     """
     neck = int(oc * 0.5)
     gemm_rn1 = mc_rn1.replace('mc_', 'gemm_')
-    x1, x2 = run_gemm_pair(gemm_rn1, sc_rn1, inp,
-                            fuse_bn(repncsp.conv1), fuse_bn(repncsp.conv2),
-                            H, W, neck)
-    current = x1
     _chain_geo = {('mc_re6_rn3', 40, 48): 're6', ('mc_re4_rn3', 80, 32): 're4',
                   ('mc_re8_rn3', 20, 64): 're8'}.get((mc_rn3, H, neck))
     use_rn3chain = (os.environ.get('MDV6_USE_RN3CHAIN', '1') not in ('', '0', 'false', 'False')
             and _chain_geo is not None and H == W
             and all(b.residual for b in repncsp.bottleneck))
+    # WB1: return the rn1 INPUT + weights (no gemm_pair launch) so run_chain_rnm_c3
+    # can fold the rn1 pair (conv1->x1b, conv2->x2b) ON-DEVICE into the merged ELF.
+    # Only valid for the rn3-chain geos. Saves the gemm_pair launch + host pad/stack.
+    if return_rn1_inputs and use_rn3chain:
+        from conv.rn3_chain_runner import run_rn3_chain_geo  # noqa: F401 (ensures import path)
+        pairs = [(fuse_repconv(b.conv1), fuse_bn(b.conv2)) for b in repncsp.bottleneck]
+        return (inp, fuse_bn(repncsp.conv1), fuse_bn(repncsp.conv2),
+                pairs, repncsp.conv3)
+    x1, x2 = run_gemm_pair(gemm_rn1, sc_rn1, inp,
+                            fuse_bn(repncsp.conv1), fuse_bn(repncsp.conv2),
+                            H, W, neck)
+    current = x1
     if use_rn3chain:
         from conv.rn3_chain_runner import run_re6_rn3_chain, run_rn3_chain_geo
         pairs = [(fuse_repconv(b.conv1), fuse_bn(b.conv2)) for b in repncsp.bottleneck]
@@ -245,7 +254,28 @@ def run_re_mc(layer, inp, H, W, ic, oc, part, proc,
     _fuse_full = ((_fuse_rnm_c3
                   and os.environ.get("MDV6_FUSE_RE8_FULL", "1") not in ('', '0', 'false', 'False'))
                   or _fuse_re6_full or _fuse_re4_full)
-    if _fuse_full:
+    # WB1: MDV6_FUSE_RN1 (default ON when the geo's full-fold gate is on) folds the
+    # rn1 pair (repncsp.conv1->x1b, conv2->x2b) ON-DEVICE into the merged ELF as two
+    # gemm_pad_out sub-devices draining into the stacked chain BO halves. Removes the
+    # gemm_pair(rn1) launch + the host x1b/x2b pad/stack per hop. MDV6_FUSE_RN1=0
+    # falls back to the host gemm_pair + run_chain_rnm_c3 (the prior full-fold).
+    _fuse_rn1 = (_fuse_full
+                 and os.environ.get("MDV6_FUSE_RN1", "1") not in ('', '0', 'false', 'False'))
+    if _fuse_rn1:
+        from conv.chain_rnm_c3_runner import run_rn1_chain_rnm_c3
+        inp3, w1_3, w2_3, pairs3, conv3_mod3 = run_rn_mc(
+            layer.conv2[0], x2, H, W, half, proc,
+            mc_rn1, sc_rn1, mc_rn3, sc_rn3, mc_rnm, sc_rnm,
+            trn1, orn1, trn3, orn3, trnm, ornm, return_rn1_inputs=True)
+        x3 = run_rn1_chain_rnm_c3(inp3, w1_3, w2_3, pairs3, fuse_bn(conv3_mod3),
+                                  fuse_bn(layer.conv2[1]), H, W, proc, mcr_mod=mcr)
+        inp4, w1_4, w2_4, pairs4, conv3_mod4 = run_rn_mc(
+            layer.conv3[0], x3, H, W, proc, proc,
+            mc_rn1, sc_rn1, mc_rn3, sc_rn3, mc_rnm, sc_rnm,
+            trn1, orn1, trn3, orn3, trnm, ornm, return_rn1_inputs=True)
+        x4 = run_rn1_chain_rnm_c3(inp4, w1_4, w2_4, pairs4, fuse_bn(conv3_mod4),
+                                  fuse_bn(layer.conv3[1]), H, W, proc, mcr_mod=mcr)
+    elif _fuse_full:
         from conv.chain_rnm_c3_runner import run_chain_rnm_c3
         x1b3, x2b3, pairs3, conv3_mod3 = run_rn_mc(
             layer.conv2[0], x2, H, W, half, proc,
