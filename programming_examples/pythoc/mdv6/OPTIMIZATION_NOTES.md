@@ -488,3 +488,22 @@ W1 OC=64 multi-tile halo bit-exact 0.125 (L1 27KB via ocb1-in-mt, 28 workers). W
 
 ## CUMULATIVE (original 518ms → now): vectorization (default,bit-exact) → gc.freeze (default,bit-exact) → re8+re6+re4 fusion (gated 0.1848)
 ## = 518 → 218 ms = −58%, 1.93 → 4.59 fps (2.4×). Default-on bit-exact path: 518 → 338 (−35%). Fusion default-on gated only on the 0.1848 accuracy budget.
+
+### WB1 — rn1 folded into the hop (whole-block step 1), verified clean (load 0.78)
+- rn1 (2× 1×1 gemm) folded on-device via gemm_pad_out → drains PAD-HWC into the chain's stacked BO halves (x1b lower=chain in,
+  x2b upper=concat half), front sub-devices of the merged ELF (5 subs/1 hw_context). Removes the rn1 launch + host x1b/x2b pad/stack.
+  Ping-pong: A/B borders host-zeroed once (resident); n_iters odd → final in B, x2b upper survives. Bit-exact (re8 0.047/re6 0.027/re4 0.016).
+| config | wall | inner | npu_run | launches | fps | acc |
+|--|--|--|--|--|--|--|
+| baseline (default+freeze) | 338 | ~0.30 | 222 | 98 | 2.96 | 0.1423 |
+| re8+re6+re4 hops | 218 | ~0.218 | 160 | 70 | 4.59 | 0.1848 |
+| **+ rn1 (WB1)** | **212** | **~0.21** | **152** | **56** | **4.72** | 0.1848 PASS |
+- Default bit-exact 0.1423. Gate MDV6_FUSE_RN1. Committed 4b80ea22f. Launches 70→56 (-14); small npu_run -8 (not fully flat).
+
+### WB2 (c1→split + concat→c4 block boundary) — assessed, BLOCKED on a missing seam (NOT sub-count)
+- Sub-count/BD OK: a 10-sub-device re8 block ELF compiles rc 0. Real blocker: the inter-hop seam halo(c3) output
+  (f32 tiled-C interleaved stream) → next rn1 input (bf16 plain HWC rows) — the de-interleave+untile+f32→bf16 reformat is
+  host-side, no on-device equivalent. Needs a NEW reformat sub-device (halo-f32-tiled → bf16-HWC), then c1 dual-drain + 4-quarter
+  device-resident concat. Precise next step: build that reformat seam (validate re8 first). Agent stopped vs a fragile partial.
+
+## CUMULATIVE: original 518ms → 212ms (-59%), 1.93→4.72 fps (2.4x), 98→56 launches. Default-on bit-exact: 518→338 (-35%). Fusion gated on 0.1848.
