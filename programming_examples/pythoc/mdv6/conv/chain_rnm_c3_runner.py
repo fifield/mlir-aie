@@ -126,13 +126,16 @@ _GEO_BY_SHAPE = {
     (40, 96): "re6",
     (80, 64): "re4",
 }
-_GEO_CFG = {  # geo -> (oc, gbound, tpc) for the merged build
-    "re8": dict(oc=128, gbound=20, tpc=1),
-    "re6": dict(oc=96, gbound=40, tpc=1),
+_GEO_CFG = {  # geo -> (oc, gbound, tpc, rn1_ic) for the merged build
+    # rn1_ic = the rn1 pair's INPUT channels (= proc; both hops in a geo share it,
+    # since part = 2*proc in all these layers). WB1's on-device rn1 GEMMs are
+    # 1x1 rn1_ic -> ic2 (the chain IC = neck).
+    "re8": dict(oc=128, gbound=20, tpc=1, rn1_ic=128),
+    "re6": dict(oc=96, gbound=40, tpc=1, rn1_ic=96),
     # re4 (80x80, oc=64): the heaviest c3. tpc=4 -> tiles-per-core multi-tile halo
     # (28 workers <= 32) + OC-block streaming (the one-tile path's 100 workers
     # can't place). dcg m_split shrinks the 80x80 GEMM core to fit L1.
-    "re4": dict(oc=64, gbound=80, tpc=4),
+    "re4": dict(oc=64, gbound=80, tpc=4, rn1_ic=64),
 }
 # per-geo registration state (was module-global; now keyed so re8 + re6 coexist)
 _REG = {}   # geo -> dict(elf_name, meta=(geo_p, dmeta, hmeta))
@@ -182,6 +185,33 @@ def _ensure_registered(geo, n_iters):
         raise RuntimeError(f"fused ELF {elf_name}.elf not loadable")
     reg = dict(elf_name=elf_name, meta=(geo_params(geo), dmeta, hmeta))
     _REG[geo] = reg
+    return reg
+
+
+# --- WB1: separate registry for the rn1-folded merged ELF (5 sub-devices) ---
+_REG_RN1 = {}   # geo -> dict(elf_name, meta=(geo_p, dmeta, hmeta), rmeta)
+
+
+def _ensure_registered_rn1(geo, n_iters):
+    """Build + register the rn1-FOLDED ELF (rn1a+rn1b+chain+dcg+halo) for `geo`."""
+    reg = _REG_RN1.get(geo)
+    if reg is not None:
+        return reg
+    mcr = _MCR
+    bd = getattr(mcr, "_MERGED_BD", None)
+    cfg = _GEO_CFG[geo]
+    elf_path, dmeta, hmeta = _build_chain_rnm_halo(
+        geo=geo, n_iters=n_iters, ic2=geo_params(geo)["IC"],
+        oc=cfg["oc"], gbound=cfg["gbound"], build_dir=bd, stream_oc="block",
+        tpc=cfg["tpc"], fold_rn1=True, rn1_ic=cfg["rn1_ic"])
+    if elf_path is None:
+        raise RuntimeError(f"WB1 rn1-folded merged ELF build failed (geo={geo})")
+    elf_name = Path(elf_path).stem
+    if mcr._get_merged_kernel(elf_name) is None:
+        raise RuntimeError(f"WB1 fused ELF {elf_name}.elf not loadable")
+    reg = dict(elf_name=elf_name, meta=(geo_params(geo), dmeta, hmeta),
+               rmeta=dmeta["rn1"])
+    _REG_RN1[geo] = reg
     return reg
 
 
@@ -397,6 +427,156 @@ def run_chain_rnm_c3(x1b: torch.Tensor, x2b: torch.Tensor, chain_pairs,
         got_f32 = np.take(out_view, idx, out=osc["f32"])
         # copy_ from a float32 numpy view into the reused bf16 torch buffer
         # (rotating ring slot — x3/x4 of one run_re_mc must not alias).
+        result = osc["bf16"][osc["i"]]
+        result.copy_(torch.from_numpy(got_f32).reshape(gbound, gbound, oc))
+    return result
+
+
+# ============================ WB1: rn1 folded in ============================
+# Resident, zeroed-once stacked chain BOs (A/B). On-device rn1 writes only the
+# valid windows; the chain writes only the lower-half interior; the PAD borders
+# (and A's unused upper half) stay zero -> no per-frame host pad/stack. Keyed by
+# (wkey) so each hop's A/B survive frame-to-frame (the rn1 input is the only
+# mutable per-frame upload). Two cores' x3/x4 of one block never run concurrently
+# (sequential dispatch), so one A/B pair per hop is safe.
+_RN1_AB_BO = {}        # (wkey, 'a'|'b') -> resident zeroed xrt BO
+_RN1_INSCRATCH = {}    # geo -> reused uint16 host buffer for the packed rn1 input
+
+
+def _rn1_in_scratch(geo, nelems):
+    s = _RN1_INSCRATCH.get(geo)
+    if s is None or s.size != nelems:
+        s = np.zeros(nelems, np.uint16)
+        _RN1_INSCRATCH[geo] = s
+    return s
+
+
+def run_rn1_chain_rnm_c3(inp, rn1_w1_u16, rn1_w2_u16, chain_pairs,
+                         rnm_w_u16, c3_w_u16, H, W, oc, mcr_mod=None):
+    """WB1: rn1 pair + chain + rnm GEMM + c3 3x3, the WHOLE RepNCSP hop INCLUDING
+    the rn1 pair, in ONE merged ELF. Replaces run_chain_rnm_c3 + the host gemm_pair.
+
+    inp        : [G,G,rn1_ic] bf16 HWC, the rn1 input (the c1 split half).
+    rn1_w1_u16 : fuse_bn(repncsp.conv1) flat uint16 -> x1b (chain input, A lower).
+    rn1_w2_u16 : fuse_bn(repncsp.conv2) flat uint16 -> x2b (concat half, B upper).
+    (chain_pairs, rnm_w_u16, c3_w_u16, H, W, oc): same as run_chain_rnm_c3.
+    Returns [G,G,oc] bf16 = c3 output (BN+SiLU applied).
+    """
+    global _MCR
+    if mcr_mod is not None:
+        _MCR = mcr_mod
+    mcr = _MCR
+    geo = _GEO_BY_SHAPE.get((H, oc))
+    assert H == W and geo is not None, (
+        f"rn1_chain_rnm_c3 supports {_GEO_BY_SHAPE} shapes; got H={H} W={W} oc={oc}")
+    n_iters = len(chain_pairs)
+    assert n_iters == _N_ITERS, f"built for n_iters={_N_ITERS}, got {n_iters}"
+
+    reg = _ensure_registered_rn1(geo, n_iters)
+    elf_name = reg["elf_name"]
+    geo_p, dmeta, hmeta = reg["meta"]
+    rmeta = reg["rmeta"]
+
+    ic2, G = geo_p["IC"], geo_p["GBOUND"]
+    nt = geo_p["WORKER_TILES"][0]
+    IN_ELEMS = dmeta["IN_ELEMS"]
+    SEAM_ELEMS = dmeta["IMG_ELEMS"]
+    ic = dmeta["ic"]
+    N_TILES, C_ELEMS = hmeta["N_TILES"], hmeta["C_ELEMS"]
+    _tpc = _GEO_CFG[geo]["tpc"]
+    n_out_slots = hmeta.get("n_slots", N_TILES) if _tpc > 1 else N_TILES
+    gbound = G
+    # rn1 input packing geometry
+    rn1_nc = rmeta["n_cores"]; rn1_rpc = rmeta["rows_per_core"]
+    rn1_full_in = rmeta["full_in_tile"]; rn1_ic = rmeta["ic"]
+
+    entry = mcr._get_merged_kernel(elf_name)
+    device, _elf, _ctx, kernel = entry
+
+    # ---- rn1 input: per-core rpc consecutive valid rows [rpc*G, rn1_ic] HWC ----
+    with _T("image_build"):
+        inp_u16 = inp.contiguous().view(torch.uint16).numpy()       # [G,G,rn1_ic]
+        rn1_in = _rn1_in_scratch(geo, rn1_nc * rn1_full_in)
+        for c in range(rn1_nc):
+            rows = inp_u16[c * rn1_rpc:(c + 1) * rn1_rpc]            # [rpc,G,rn1_ic]
+            rn1_in[c * rn1_full_in:(c + 1) * rn1_full_in] = rows.reshape(-1)
+
+    # ---- weights: cache the (slow) packs by weight identity ----
+    wkey = (tuple(id(a) for pr in chain_pairs for a in pr),
+            id(rn1_w1_u16), id(rn1_w2_u16), id(rnm_w_u16), id(c3_w_u16))
+    cached = _WT_CACHE.get(wkey)
+    if cached is None:
+        chain_wt = np.concatenate([
+            np.tile(_pack_geo_iter(w1, w2, ic2, geo_p["WSLOT"], geo_p["N_BLK"]), nt)
+            for w1, w2 in chain_pairs]).astype(np.uint16)
+
+        def _pack_rn1(w_u16):
+            conv = _u16_to_bf16_t(np.asarray(w_u16, np.uint16)[:ic2 * rn1_ic]).reshape(ic2, rn1_ic)
+            bnw = _u16_to_bf16_t(np.asarray(w_u16, np.uint16)[ic2 * rn1_ic:ic2 * rn1_ic + ic2])
+            bnb = _u16_to_bf16_t(np.asarray(w_u16, np.uint16)[ic2 * rn1_ic + ic2:ic2 * rn1_ic + 2 * ic2])
+            return _pack_weights_blocked(conv, bnw, bnb)
+        rn1a_wt = _pack_rn1(rn1_w1_u16)
+        rn1b_wt = _pack_rn1(rn1_w2_u16)
+
+        rnm_conv = _u16_to_bf16_t(np.asarray(rnm_w_u16, np.uint16)[:oc * ic]).reshape(oc, ic)
+        rnm_bnw = _u16_to_bf16_t(np.asarray(rnm_w_u16, np.uint16)[oc * ic:oc * ic + oc])
+        rnm_bnb = _u16_to_bf16_t(np.asarray(rnm_w_u16, np.uint16)[oc * ic + oc:oc * ic + 2 * oc])
+        gemm_wt_u16 = _pack_weights_blocked(rnm_conv, rnm_bnw, rnm_bnb)
+        halo_wt_u16 = _c3_weights_for_halo(np.asarray(c3_w_u16, np.uint16), oc, ic)
+        cached = (chain_wt, rn1a_wt, rn1b_wt, gemm_wt_u16, halo_wt_u16)
+        _WT_CACHE[wkey] = cached
+    chain_wt, rn1a_wt, rn1b_wt, gemm_wt_u16, halo_wt_u16 = cached
+
+    out_elems = n_out_slots * C_ELEMS
+    # @main args (5 subs; chain_links fold rn1 in):
+    #   0=rn1_in 1=rn1a_wt 2=A(=rn1a.out=chain.A) 3=rn1b_wt 4=B(=rn1b.out=chain.B)
+    #   5=chain_wt 6=gemm_wt 7=seam(=dcg.out=halo.in) 8=halo_wt 9=halo_out
+    in_bo = mcr._get_merged_bo(device, elf_name, "rn1in", rn1_in.nbytes)
+    out_bo = mcr._get_merged_bo(device, elf_name, "out", out_elems * 4)
+    with _T("fill_ab"):
+        mcr._xrt_fill_bo(in_bo, rn1_in)
+
+    # STATIC resident weight + seam BOs (filled once), keyed by wkey.
+    awt_bo = _resident_wt_bo(device, wkey, "awt", rn1a_wt.nbytes)
+    bwt_bo = _resident_wt_bo(device, wkey, "bwt", rn1b_wt.nbytes)
+    wt_bo = _resident_wt_bo(device, wkey, "wt", chain_wt.nbytes)
+    gwt_bo = _resident_wt_bo(device, wkey, "gwt", gemm_wt_u16.nbytes)
+    seam_bo = _resident_wt_bo(device, wkey, "seam", SEAM_ELEMS * 2)
+    hwt_bo = _resident_wt_bo(device, wkey, "hwt", halo_wt_u16.nbytes)
+    # Resident A/B stacked chain BOs — zeroed ONCE; on-device rn1 writes the valid
+    # windows, the chain writes the lower-half interior; borders stay zero.
+    ka = (wkey, "a"); kb = (wkey, "b")
+    a_bo = _RN1_AB_BO.get(ka); b_bo = _RN1_AB_BO.get(kb)
+    if a_bo is None:
+        import pyxrt as _xrt
+        a_bo = _xrt.ext.bo(device, IN_ELEMS * 2); _RN1_AB_BO[ka] = a_bo
+        b_bo = _xrt.ext.bo(device, IN_ELEMS * 2); _RN1_AB_BO[kb] = b_bo
+    if wkey not in _RESIDENT_FILLED:
+        zeros_ab = np.zeros(IN_ELEMS, np.uint16)
+        mcr._xrt_fill_bo(a_bo, zeros_ab)
+        mcr._xrt_fill_bo(b_bo, zeros_ab)
+        mcr._xrt_fill_bo(awt_bo, rn1a_wt)
+        mcr._xrt_fill_bo(bwt_bo, rn1b_wt)
+        mcr._xrt_fill_bo(wt_bo, chain_wt)
+        mcr._xrt_fill_bo(gwt_bo, gemm_wt_u16)
+        mcr._xrt_fill_bo(seam_bo, np.zeros(SEAM_ELEMS, np.uint16))
+        mcr._xrt_fill_bo(hwt_bo, halo_wt_u16)
+        _RESIDENT_FILLED.add(wkey)
+        if _GC_FREEZE:
+            gc.collect()
+            gc.freeze()
+
+    mcr._xrt_run_kernel(kernel, [in_bo, awt_bo, a_bo, bwt_bo, b_bo,
+                                 wt_bo, gwt_bo, seam_bo, hwt_bo, out_bo])
+
+    import pyxrt as _xrt
+    out_bo.sync(_xrt.xclBOSyncDirection.XCL_BO_SYNC_BO_FROM_DEVICE, out_elems * 4, 0)
+    with _T("untile_out"):
+        out_view = np.frombuffer(out_bo.map(), dtype=np.float32, count=out_elems)
+        idx = (_build_untile_index_mt(hmeta, gbound) if _tpc > 1
+               else _build_untile_index(hmeta, gbound))
+        osc = _out_scratch(geo, idx.size, gbound, oc)
+        got_f32 = np.take(out_view, idx, out=osc["f32"])
         result = osc["bf16"][osc["i"]]
         result.copy_(torch.from_numpy(got_f32).reshape(gbound, gbound, oc))
     return result
