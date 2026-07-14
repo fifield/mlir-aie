@@ -30,13 +30,17 @@ module {
 
   aie.device(npu2) @config_device_a {
     aie.runtime_sequence @setup_a(%buf: memref<1024xi32>) {
-      aiex.npu.write32 {address = 0x670000 : ui32, column = 0 : i32, row = 0 : i32, value = 10 : ui32}
+      %wa0 = arith.constant 6750208 : i32
+      %wv0 = arith.constant 10 : i32
+      aiex.npu.write32(%wa0, %wv0) {column = 0 : i32, row = 0 : i32} : i32, i32
     }
   }
 
   aie.device(npu2) @config_device_b {
     aie.runtime_sequence @setup_b(%buf: memref<1024xi32>) {
-      aiex.npu.write32 {address = 0x670000 : ui32, column = 0 : i32, row = 0 : i32, value = 20 : ui32}
+      %wa1 = arith.constant 6750208 : i32
+      %wv1 = arith.constant 20 : i32
+      aiex.npu.write32(%wa1, %wv1) {column = 0 : i32, row = 0 : i32} : i32, i32
     }
   }
 }

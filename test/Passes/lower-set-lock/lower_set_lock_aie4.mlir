@@ -42,36 +42,56 @@ module @test_aie4_lock_addresses {
 
     aie.runtime_sequence(%arg0: memref<1024xi32>) {
       // Compute tile lock 0:  0xAE000 = 712704
-      // CHECK: aiex.npu.write32 {address = 712704 : ui32, column = 0 : i32, row = 2 : i32, value = 1 : ui32}
+      // CHECK: %[[V0:.*]] = arith.constant 1 : i32
+      // CHECK: %[[A0:.*]] = arith.constant 712704 : i32
+      // CHECK: aiex.npu.write32(%[[A0]], %[[V0]]) {column = 0 : i32, row = 2 : i32} : i32, i32
       aiex.set_lock(%lock_ct_0, 1)
       // Compute tile lock 15: 0xAE0F0 = 712944
-      // CHECK: aiex.npu.write32 {address = 712944 : ui32, column = 0 : i32, row = 2 : i32, value = 0 : ui32}
+      // CHECK: %[[V1:.*]] = arith.constant 0 : i32
+      // CHECK: %[[A1:.*]] = arith.constant 712944 : i32
+      // CHECK: aiex.npu.write32(%[[A1]], %[[V1]]) {column = 0 : i32, row = 2 : i32} : i32, i32
       aiex.set_lock(%lock_ct_15, 0)
 
       // Memtile lock 0:  0x10000 = 65536
-      // CHECK: aiex.npu.write32 {address = 65536 : ui32, column = 0 : i32, row = 1 : i32, value = 1 : ui32}
+      // CHECK: %[[V2:.*]] = arith.constant 1 : i32
+      // CHECK: %[[A2:.*]] = arith.constant 65536 : i32
+      // CHECK: aiex.npu.write32(%[[A2]], %[[V2]]) {column = 0 : i32, row = 1 : i32} : i32, i32
       aiex.set_lock(%lock_mt_0, 1)
       // Memtile lock 31: 0x101F0 = 66032
-      // CHECK: aiex.npu.write32 {address = 66032 : ui32, column = 0 : i32, row = 1 : i32, value = 0 : ui32}
+      // CHECK: %[[V3:.*]] = arith.constant 0 : i32
+      // CHECK: %[[A3:.*]] = arith.constant 66032 : i32
+      // CHECK: aiex.npu.write32(%[[A3]], %[[V3]]) {column = 0 : i32, row = 1 : i32} : i32, i32
       aiex.set_lock(%lock_mt_31, 0)
       // Memtile lock 32: 0x50000 = 327680
-      // CHECK: aiex.npu.write32 {address = 327680 : ui32, column = 0 : i32, row = 1 : i32, value = 1 : ui32}
+      // CHECK: %[[V4:.*]] = arith.constant 1 : i32
+      // CHECK: %[[A4:.*]] = arith.constant 327680 : i32
+      // CHECK: aiex.npu.write32(%[[A4]], %[[V4]]) {column = 0 : i32, row = 1 : i32} : i32, i32
       aiex.set_lock(%lock_mt_32, 1)
       // Memtile lock 63: 0x501F0 = 328176
-      // CHECK: aiex.npu.write32 {address = 328176 : ui32, column = 0 : i32, row = 1 : i32, value = 0 : ui32}
+      // CHECK: %[[V5:.*]] = arith.constant 0 : i32
+      // CHECK: %[[A5:.*]] = arith.constant 328176 : i32
+      // CHECK: aiex.npu.write32(%[[A5]], %[[V5]]) {column = 0 : i32, row = 1 : i32} : i32, i32
       aiex.set_lock(%lock_mt_63, 0)
 
       // Shim lock 0:  0x10000 = 65536
-      // CHECK: aiex.npu.write32 {address = 65536 : ui32, column = 0 : i32, row = 0 : i32, value = 1 : ui32}
+      // CHECK: %[[V6:.*]] = arith.constant 1 : i32
+      // CHECK: %[[A6:.*]] = arith.constant 65536 : i32
+      // CHECK: aiex.npu.write32(%[[A6]], %[[V6]]) {column = 0 : i32, row = 0 : i32} : i32, i32
       aiex.set_lock(%lock_sh_0, 1)
       // Shim lock 15: 0x100F0 = 65776
-      // CHECK: aiex.npu.write32 {address = 65776 : ui32, column = 0 : i32, row = 0 : i32, value = 0 : ui32}
+      // CHECK: %[[V7:.*]] = arith.constant 0 : i32
+      // CHECK: %[[A7:.*]] = arith.constant 65776 : i32
+      // CHECK: aiex.npu.write32(%[[A7]], %[[V7]]) {column = 0 : i32, row = 0 : i32} : i32, i32
       aiex.set_lock(%lock_sh_15, 0)
       // Shim lock 16: 0x50000 = 327680
-      // CHECK: aiex.npu.write32 {address = 327680 : ui32, column = 0 : i32, row = 0 : i32, value = 1 : ui32}
+      // CHECK: %[[V8:.*]] = arith.constant 1 : i32
+      // CHECK: %[[A8:.*]] = arith.constant 327680 : i32
+      // CHECK: aiex.npu.write32(%[[A8]], %[[V8]]) {column = 0 : i32, row = 0 : i32} : i32, i32
       aiex.set_lock(%lock_sh_16, 1)
       // Shim lock 31: 0x500F0 = 327920
-      // CHECK: aiex.npu.write32 {address = 327920 : ui32, column = 0 : i32, row = 0 : i32, value = 0 : ui32}
+      // CHECK: %[[V9:.*]] = arith.constant 0 : i32
+      // CHECK: %[[A9:.*]] = arith.constant 327920 : i32
+      // CHECK: aiex.npu.write32(%[[A9]], %[[V9]]) {column = 0 : i32, row = 0 : i32} : i32, i32
       aiex.set_lock(%lock_sh_31, 0)
     }
   }

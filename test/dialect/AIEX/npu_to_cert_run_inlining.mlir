@@ -20,7 +20,9 @@ module {
     // CHECK: aiex.cert.write32(4096, 42)
     // CHECK-NOT: aiex.run
     aie.runtime_sequence @configure(%arg0: memref<16xi32>) {
-      aiex.npu.write32 {address = 0x1000 : ui32, column = 0 : i32, row = 0 : i32, value = 1 : ui32}
+      %wa0 = arith.constant 4096 : i32
+      %wv0 = arith.constant 1 : i32
+      aiex.npu.write32(%wa0, %wv0) {column = 0 : i32, row = 0 : i32} : i32, i32
       aiex.configure @config_device {
         aiex.run @setup(%arg0) : (memref<16xi32>)
       }
@@ -29,7 +31,9 @@ module {
 
   aie.device(npu2) @config_device {
     aie.runtime_sequence @setup(%buf: memref<16xi32>) {
-      aiex.npu.write32 {address = 0x1000 : ui32, column = 0 : i32, row = 0 : i32, value = 42 : ui32}
+      %wa1 = arith.constant 4096 : i32
+      %wv1 = arith.constant 42 : i32
+      aiex.npu.write32(%wa1, %wv1) {column = 0 : i32, row = 0 : i32} : i32, i32
     }
   }
 }

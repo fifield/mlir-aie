@@ -19,7 +19,9 @@ module {
     %tile_0_2 = aie.tile(0, 2)
     %lock_0_2 = aie.lock(%tile_0_2, 0) {init = 1 : i32}
     aie.runtime_sequence @setup_a(%buf: memref<1024xi32>) {
-      aiex.npu.write32 {address = 0x8000 : ui32, column = 0 : i32, row = 2 : i32, value = 10 : ui32}
+      %wa0 = arith.constant 32768 : i32
+      %wv0 = arith.constant 10 : i32
+      aiex.npu.write32(%wa0, %wv0) {column = 0 : i32, row = 2 : i32} : i32, i32
     }
   }
 
@@ -27,7 +29,9 @@ module {
     %tile_0_3 = aie.tile(0, 3)
     %lock_0_3 = aie.lock(%tile_0_3, 1) {init = 2 : i32}
     aie.runtime_sequence @setup_b(%buf: memref<1024xi32>) {
-      aiex.npu.write32 {address = 0x9000 : ui32, column = 0 : i32, row = 3 : i32, value = 20 : ui32}
+      %wa1 = arith.constant 36864 : i32
+      %wv1 = arith.constant 20 : i32
+      aiex.npu.write32(%wa1, %wv1) {column = 0 : i32, row = 3 : i32} : i32, i32
     }
   }
 
@@ -35,7 +39,9 @@ module {
     %tile_0_4 = aie.tile(0, 4)
     %lock_0_4 = aie.lock(%tile_0_4, 2) {init = 3 : i32}
     aie.runtime_sequence @setup_c(%buf: memref<1024xi32>) {
-      aiex.npu.write32 {address = 0xA000 : ui32, column = 0 : i32, row = 4 : i32, value = 30 : ui32}
+      %wa2 = arith.constant 40960 : i32
+      %wv2 = arith.constant 30 : i32
+      aiex.npu.write32(%wa2, %wv2) {column = 0 : i32, row = 4 : i32} : i32, i32
     }
   }
   aie.device (npu2) @main {

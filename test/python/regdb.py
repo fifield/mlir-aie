@@ -467,7 +467,9 @@ module {
     aie.device(npu3) {
     %tile_0_2 = aie.tile(0, 2)
     aie.runtime_sequence() {
-        aiex.npu.write32 {address = 0xA3000 : ui32, column = 0 : i32, row = 2 : i32, value = 1 : ui32}
+        %addr0 = arith.constant 0xA3000 : i32
+        %val0 = arith.constant 1 : i32
+        aiex.npu.write32(%addr0, %val0) {column = 0 : i32, row = 2 : i32} : i32, i32
     }
     }
 }

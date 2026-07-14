@@ -28,9 +28,12 @@
 // BD for S2MM ch0 private pool (bd_id=0)
 // CHECK: aiex.npu.blockwrite({{.*}}) {address = 98304 : ui32} : memref<9xi32>
 // Task queue writes for MM2S ch0, MM2S ch2, and S2MM ch0
-// CHECK: aiex.npu.write32 {address = 99668 : ui32
-// CHECK: aiex.npu.write32 {address = 361812 : ui32
-// CHECK: aiex.npu.write32 {address = 99652 : ui32
+// CHECK: %[[A99668:.*]] = arith.constant 99668 : i32
+// CHECK: aiex.npu.write32(%[[A99668]], %{{.*}}) : i32, i32
+// CHECK: %[[A361812:.*]] = arith.constant 361812 : i32
+// CHECK: aiex.npu.write32(%[[A361812]], %{{.*}}) : i32, i32
+// CHECK: %[[A99652:.*]] = arith.constant 99652 : i32
+// CHECK: aiex.npu.write32(%[[A99652]], %{{.*}}) : i32, i32
 
 module {
   aie.device(npu3z) {
