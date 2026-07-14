@@ -33,7 +33,7 @@ public:
   // The global holding `words`, created at `builder`'s insertion point if the
   // device has none.
   memref::GlobalOp getOrCreate(OpBuilder &builder, mlir::Location loc,
-                               ArrayRef<uint32_t> words);
+                               ArrayRef<uint32_t> words, bool forceUnique = false);
 
   AIE::DeviceOp getDevice() const { return dev; }
 

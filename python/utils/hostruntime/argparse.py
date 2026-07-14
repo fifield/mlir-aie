@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import argparse
 
-DEFAULT_DEV_CHOICES: tuple[str, ...] = ("npu", "npu2")
+DEFAULT_DEV_CHOICES: tuple[str, ...] = ("npu", "npu2", "npu3")
 
 
 def add_compile_args(

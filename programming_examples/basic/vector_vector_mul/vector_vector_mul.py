@@ -8,7 +8,7 @@
 Two int32 vectors are multiplied element-wise on a single AIE compute tile,
 in tile-of-16 sub-vectors fed via three depth-2 ObjectFifos (two in, one out).
 
-Driven via the standard CLI:
+Driven via the standard 3-mode CLI:
 
 * default          — JIT-compile + run on the attached NPU + verify.
 * ``--xclbin-path`` / ``--insts-path`` — compile-only artifact emission.
@@ -80,7 +80,9 @@ def _run_and_verify(opts):
 
 def main():
     p = argparse.ArgumentParser(prog="AIE Vector-Vector Multiply")
-    add_compile_args(p, dev_choices=("npu", "npu2"), with_emit_mlir=True)
+    add_compile_args(
+        p, dev_choices=("npu", "npu2", "npu3", "xcvc1902"), with_emit_mlir=True
+    )
     add_benchmark_args(p)
     p.add_argument(
         "-n",

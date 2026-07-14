@@ -108,6 +108,10 @@ public:
     TK_AIE2PS_Last,
     TK_AIE2_Last = TK_AIE2PS_Last,
     TK_AIE4_NPU3,
+    TK_AIE4_NPU3_1Col,
+    TK_AIE4_NPU3_2Col, // whole array must be last because of how we
+                       // cast/initialize the VirtualizedNPU3TargetModel class
+    TK_AIE4_NPU3_Last,
     TK_AIE4_NPU3Z,
     TK_AIE4_Last,
   };
@@ -1619,6 +1623,30 @@ public:
 
   static bool classof(const AIETargetModel *model) {
     return model->getKind() == TK_AIE4_NPU3;
+  }
+};
+
+// A sub-portion of the Medusa NPU
+class VirtualizedNPU3TargetModel : public BaseNPU3TargetModel {
+
+  static constexpr Properties properties = AIETargetModel::IsVirtualized;
+  int cols;
+
+public:
+  VirtualizedNPU3TargetModel(int _cols, Properties p = None)
+      : BaseNPU3TargetModel(
+            static_cast<TargetModelKind>(
+                static_cast<std::underlying_type_t<TargetModelKind>>(
+                    TK_AIE4_NPU3) +
+                _cols),
+            p | properties),
+        cols(_cols) {}
+
+  int columns() const override { return cols; }
+
+  static bool classof(const AIETargetModel *model) {
+    return model->getKind() >= TK_AIE4_NPU3_1Col &&
+           model->getKind() < TK_AIE4_NPU3_Last;
   }
 };
 

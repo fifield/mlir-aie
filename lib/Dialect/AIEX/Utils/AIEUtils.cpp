@@ -179,7 +179,7 @@ AIEX::BlockwriteData::BlockwriteData(AIE::DeviceOp dev, StringRef prefix)
 
 memref::GlobalOp AIEX::BlockwriteData::getOrCreate(OpBuilder &builder,
                                                    Location loc,
-                                                   ArrayRef<uint32_t> words) {
+                                                   ArrayRef<uint32_t> words, bool forceUnique) {
   int64_t numWords = words.size();
   MemRefType memrefType = MemRefType::get({numWords}, builder.getI32Type());
   TensorType tensorType =
@@ -188,12 +188,16 @@ memref::GlobalOp AIEX::BlockwriteData::getOrCreate(OpBuilder &builder,
 
   // The attribute is uniqued and carries the shape, but not the memref's
   // layout or memory space.
-  memref::GlobalOp &global = byValue[initVal];
-  if (global && global.getType() == memrefType)
-    return global;
-  global = memref::GlobalOp::create(
+  if (!forceUnique) {
+    auto global = byValue.lookup(initVal);
+    if (global && global.getType() == memrefType)
+      return global;
+  }
+  auto global = memref::GlobalOp::create(
       builder, loc, prefix + std::to_string(nextId++),
       builder.getStringAttr("private"), memrefType, initVal, true, nullptr);
+  if (!forceUnique)
+    byValue[initVal] = global;
   return global;
 }
 

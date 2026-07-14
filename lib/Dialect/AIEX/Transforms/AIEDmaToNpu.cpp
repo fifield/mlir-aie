@@ -1076,7 +1076,8 @@ public:
     {
       OpBuilder::InsertionGuard guard(rewriter);
       rewriter.setInsertionPoint(op->getParentOfType<AIE::RuntimeSequenceOp>());
-      global = blockwriteData.getOrCreate(rewriter, op.getLoc(), words);
+      global = blockwriteData.getOrCreate(rewriter, op.getLoc(), words,
+                                           /*forceUnique=*/true);
     }
     auto memref = memref::GetGlobalOp::create(
         rewriter, op.getLoc(), global.getType(), global.getName());

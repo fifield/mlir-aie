@@ -33,12 +33,15 @@ module @rank1 {
 // -----
 
 // Dropping leading size-1 dimensions is a no-op: a rank-3 [1, H, W] access
-// pattern lowers to identical BD data as the explicit rank-4 [1, 1, H, W] form.
-// Both transfers therefore share a single de-duplicated block-write global.
+// pattern lowers to identical BD data as the explicit rank-4 [1, 1, H, W] form
+// (same dense<...> content below). BD data is never de-duplicated -- each BD
+// gets its own global, since BD address fields are patched in place at runtime
+// -- so the two transfers reference distinct globals with identical contents.
 // CHECK-LABEL: @shorten
-// CHECK: memref.global "private" constant @[[G1:blockwrite_data_[0-9]+]] : memref<8xi32> = dense<[32,
+// CHECK: memref.global "private" constant @[[G1:blockwrite_data_[0-9]+]] : memref<8xi32> = dense<[32, 0, 0, 8388608, -2143289329, 33554432, 0, 33554432]>
+// CHECK: memref.global "private" constant @[[G2:blockwrite_data_[0-9]+]] : memref<8xi32> = dense<[32, 0, 0, 8388608, -2143289329, 33554432, 0, 33554432]>
 // CHECK: get_global @[[G1]]
-// CHECK: get_global @[[G1]]
+// CHECK: get_global @[[G2]]
 module @shorten {
   aie.device(npu1) {
     aie.runtime_sequence(%a: memref<64xi32>) {

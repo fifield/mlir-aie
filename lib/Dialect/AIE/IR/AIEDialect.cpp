@@ -275,6 +275,8 @@ static VirtualizedNPU2TargetModel NPU2model5col(5);
 static VirtualizedNPU2TargetModel NPU2model6col(6);
 static VirtualizedNPU2TargetModel NPU2model7col(7);
 static NPU3TargetModel NPU3Model;
+static VirtualizedNPU3TargetModel NPU3model1col(1);
+static VirtualizedNPU3TargetModel NPU3model2col(2);
 static NPU3zTargetModel NPU3zModel;
 
 const AIETargetModel &xilinx::AIE::getTargetModel(Operation *op) {
@@ -329,6 +331,10 @@ const AIETargetModel &xilinx::AIE::getTargetModel(AIEDevice device) {
     return VE3858model;
   case AIEDevice::npu3:
     return NPU3Model;
+  case AIEDevice::npu3_1col:
+    return NPU3model1col;
+  case AIEDevice::npu3_2col:
+    return NPU3model2col;
   case AIEDevice::npu3z:
     return NPU3zModel;
   }

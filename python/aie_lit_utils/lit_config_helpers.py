@@ -104,7 +104,7 @@ class LitConfigHelper:
             "Krackan",
             "Gorgon Point",
         ],
-        "npu3": ["npu3"],
+        "npu3": ["npu3", "npu9"],
     }
 
     PATH_ENV_VARS = {"PATH", "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"}

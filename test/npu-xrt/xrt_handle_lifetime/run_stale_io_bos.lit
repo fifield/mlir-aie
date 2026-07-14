@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 // REQUIRES: ryzen_ai, peano
+// UNSUPPORTED: ryzen_ai_npu3
 //
 // Sibling tests in this directory write the same artifact names, and lit's
 // working directory is the test DIRECTORY rather than the test file, so they

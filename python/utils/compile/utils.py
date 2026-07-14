@@ -377,7 +377,7 @@ def _discard_pch(pch: str, used: os.stat_result) -> None:
 
 
 def resolve_target_arch(device=None) -> str:
-    """Return ``'aie2'`` or ``'aie2p'`` for the given device, or ``'aie2'`` if device is None."""
+    """Return ``'aie2'``, ``'aie2p'``, ``'aie4'``, or ``'aie4z'`` for the given device, or ``'aie2'`` if device is None."""
     if device is None:
         return "aie2"
     from aie.dialects._aie_enum_gen import (  # pyright: ignore[reportMissingImports]
@@ -395,6 +395,10 @@ def resolve_target_arch(device=None) -> str:
         return "aie2p"
     if arch == AIEArch.AIE2:
         return "aie2"
+    if arch == AIEArch.AIE4:
+        return "aie4"
+    if arch == AIEArch.AIE4z:
+        return "aie4z"
     raise RuntimeError(
         f"Unsupported device arch: {arch} (device type: {type(device)})."
     )
