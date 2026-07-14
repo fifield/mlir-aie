@@ -53,6 +53,7 @@
 #include "aie/Conversion/Passes.h"
 #include "aie/Dialect/AIE/IR/AIEDialect.h"
 #include "aie/Dialect/AIE/Transforms/AIEPasses.h"
+#include "aie/Dialect/AIE/Util/AIELocCheckpoint.h"
 #include "aie/Dialect/AIEVec/Analysis/Passes.h"
 #include "aie/Dialect/AIEVec/Pipelines/Passes.h"
 #include "aie/Dialect/AIEVec/TransformOps/DialectExtension.h"
@@ -565,8 +566,13 @@ static void printModuleWithDebugInfo(ModuleOp moduleOp, raw_ostream &os) {
 
 /// Dump an MLIR module to a file if --dump-intermediates is enabled.
 /// Returns true on success, false on failure.
+///
+/// When --keep-loc is also enabled and `stage` is non-empty, fuses
+/// "checkpoint:<stage>" onto every op's Location *on the live module*
+/// just before dumping. The label persists, so subsequent stages inherit
+/// it and a final op carries the chain of every stage it survived.
 static bool dumpModuleToFile(ModuleOp moduleOp, StringRef filePath,
-                             StringRef description) {
+                             StringRef description, StringRef stage = "") {
   if (!dumpIntermediates)
     return true;
 
@@ -577,6 +583,10 @@ static bool dumpModuleToFile(ModuleOp moduleOp, StringRef filePath,
                  << filePath << ": " << ec.message() << "\n";
     return false;
   }
+
+  if (keepLoc && !stage.empty())
+    xilinx::AIE::applyStageLabel(moduleOp, stage);
+
   printModuleWithDebugInfo(moduleOp, file);
   file.close();
 
@@ -4116,7 +4126,8 @@ static LogicalResult generateNpuInstructions(ModuleOp moduleOp,
   sys::path::append(npuLoweredPath, allDevices
                                         ? std::string("all_npu_lowered.mlir")
                                         : devName.str() + "_npu_lowered.mlir");
-  dumpModuleToFile(*clonedModule, npuLoweredPath, "NPU lowered module");
+  dumpModuleToFile(*clonedModule, npuLoweredPath, "NPU lowered module",
+                   "npu-lowered");
 
   // Step 2: Translate to NPU binary
   // Generate instructions for each device's runtime sequences. In single-device
@@ -4275,7 +4286,7 @@ static LogicalResult generateTransactionOutput(ModuleOp moduleOp,
   // Dump intermediate MLIR
   SmallString<128> txnMlirPath(tmpDirName);
   sys::path::append(txnMlirPath, devName.str() + "_txn.mlir");
-  dumpModuleToFile(*clonedModule, txnMlirPath, "Transaction MLIR");
+  dumpModuleToFile(*clonedModule, txnMlirPath, "Transaction MLIR", "txn");
 
   // Copy to output location
   std::error_code ec;
@@ -4373,7 +4384,8 @@ static LogicalResult generateControlPacketOutput(ModuleOp moduleOp,
   // Dump intermediate MLIR for debugging
   SmallString<128> ctrlPktMlirPath(tmpDirName);
   sys::path::append(ctrlPktMlirPath, devName.str() + "_ctrlpkt.mlir");
-  dumpModuleToFile(*clonedModule, ctrlPktMlirPath, "control packet MLIR");
+  dumpModuleToFile(*clonedModule, ctrlPktMlirPath, "control packet MLIR",
+                   "ctrlpkt");
 
   // Translate control packet ops to binary
   std::string ctrlPktBinFileName = formatString(ctrlPktName, devName);
@@ -4441,7 +4453,7 @@ static LogicalResult generateControlPacketOutput(ModuleOp moduleOp,
   SmallString<128> dmaSeqMlirPath(tmpDirName);
   sys::path::append(dmaSeqMlirPath, devName.str() + "_ctrlpkt_dma_seq.mlir");
   dumpModuleToFile(*clonedModule, dmaSeqMlirPath,
-                   "control packet DMA sequence MLIR");
+                   "control packet DMA sequence MLIR", "ctrlpkt-dma-seq");
 
   // Assign PDI IDs after DMA lowering (matches legacy ordering)
   if (generateFullElf || generateElf) {
@@ -5707,7 +5719,7 @@ static LogicalResult compileAIEModule(MLIRContext &context, ModuleOp moduleOp,
   // Dump input MLIR if requested
   SmallString<128> inputPath(tmpDirName);
   sys::path::append(inputPath, "input.mlir");
-  dumpModuleToFile(moduleOp, inputPath, "input MLIR");
+  dumpModuleToFile(moduleOp, inputPath, "input MLIR", "input");
 
   // Detect AIE target early from the input module
   std::string aieTarget = "aie2"; // Default
@@ -5844,7 +5856,7 @@ static LogicalResult compileAIEModule(MLIRContext &context, ModuleOp moduleOp,
   // Dump physical module if requested (for debugging only)
   SmallString<128> physicalPath(tmpDirName);
   sys::path::append(physicalPath, "input_physical.mlir");
-  dumpModuleToFile(moduleOp, physicalPath, "physical module");
+  dumpModuleToFile(moduleOp, physicalPath, "physical module", "input-physical");
 
   // Step 3: Compile cores and generate artifacts for each device
   // Collect device info for full ELF generation if requested
@@ -5891,7 +5903,8 @@ static LogicalResult compileAIEModule(MLIRContext &context, ModuleOp moduleOp,
     SmallString<128> physicalWithElfsPath(tmpDirName);
     sys::path::append(physicalWithElfsPath,
                       devName.str() + "_physical_with_elfs.mlir");
-    dumpModuleToFile(moduleOp, physicalWithElfsPath, "module with ELFs");
+    dumpModuleToFile(moduleOp, physicalWithElfsPath, "module with ELFs",
+                     "physical-with-elfs");
 
     // Generate control packet output BEFORE NPU instructions
     ModuleOp ctrlPktModule = unfilteredModule ? *unfilteredModule : moduleOp;
