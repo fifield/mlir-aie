@@ -11,6 +11,22 @@
 // RUN: aiecc --no-xchesscc --no-xbridge -n --verbose %s | FileCheck %s --check-prefix=DRY
 // RUN: aiecc --no-xchesscc --no-xbridge --aie-generate-npu-insts --verbose %s 2>&1 | FileCheck %s --check-prefix=NPU
 
+// Phase 4 — checkpoint dumps from the split resource-allocation and NPU
+// lowering pipelines. Confirm each intermediate file exists, and that the
+// chain accumulated by dma_to_npu.mlir contains both the early 'input' and
+// late 'dma-to-npu' stage labels. The device here is unnamed, so it takes
+// DeviceOp's default sym_name ("main") and the dumps are main_*.
+// RUN: rm -rf %t_npu_tmp && mkdir -p %t_npu_tmp
+// RUN: aiecc --no-xchesscc --no-xbridge --aie-generate-npu-insts --keep-loc --dump-intermediates --tmpdir=%t_npu_tmp %s
+// RUN: test -f %t_npu_tmp/input.mlir
+// RUN: test -f %t_npu_tmp/objectfifo_expanded.mlir
+// RUN: test -f %t_npu_tmp/main_bd_chains_materialized.mlir
+// RUN: test -f %t_npu_tmp/main_dma_tasks_to_npu.mlir
+// RUN: test -f %t_npu_tmp/main_dma_to_npu.mlir
+// RUN: test -f %t_npu_tmp/main_set_lock_lowered.mlir
+// RUN: test -f %t_npu_tmp/main_npu_lowered.mlir
+// RUN: FileCheck %s --check-prefix=DMA_NPU < %t_npu_tmp/main_dma_to_npu.mlir
+
 // CHECK: Successfully parsed input file
 // CHECK: Found 1 AIE device
 // CHECK: Running resource allocation pipeline in-memory
@@ -24,6 +40,12 @@
 
 // NPU: Generating NPU instructions for device
 // NPU: Compilation completed successfully
+
+// By the time we get to dma_to_npu.mlir, the chain has accumulated several
+// stage labels. We assert the latest (dma-to-npu) and the earliest (input).
+// DMA_NPU-DAG: fused<"checkpoint:dma-to-npu">
+// DMA_NPU-DAG: fused<"checkpoint:input">
+// DMA_NPU-DAG: fused<"checkpoint:objectfifo-expanded">
 
 module {
   aie.device(npu1_1col) {

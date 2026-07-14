@@ -16,6 +16,20 @@
 // RUN: test -f %t_dma_seq.bin.locmap.json
 // RUN: FileCheck %s --check-prefix=DUMP < %t_ctrlpkt_tmp/main_ctrlpkt.mlir
 
+// Phase 4 — checkpoint dumps that fire in the control-packet flow must
+// exist alongside the legacy intermediates. (The NPU-lowering subpipeline
+// dumps — bd_chains_materialized, dma_to_npu, set_lock_lowered — are
+// exercised by a non-ctrlpkt flow and not asserted here.)
+// RUN: test -f %t_ctrlpkt_tmp/input.mlir
+// RUN: test -f %t_ctrlpkt_tmp/input_physical.mlir
+// RUN: test -f %t_ctrlpkt_tmp/objectfifo_expanded.mlir
+// RUN: test -f %t_ctrlpkt_tmp/main_physical_with_elfs.mlir
+// RUN: test -f %t_ctrlpkt_tmp/main_ctrlpkt.mlir
+// RUN: test -f %t_ctrlpkt_tmp/main_ctrlpkt_dma_seq.mlir
+// RUN: FileCheck %s --check-prefix=INPUT_STAGE < %t_ctrlpkt_tmp/input.mlir
+// RUN: FileCheck %s --check-prefix=OBJFIFO_STAGE < %t_ctrlpkt_tmp/objectfifo_expanded.mlir
+// RUN: FileCheck %s --check-prefix=JSON < %t_ctrlpkt.bin.locmap.json
+
 // CHECK: Generating control packets for device
 // CHECK: Running control packet pipeline in-memory
 // CHECK: Wrote {{[0-9]+}} control packet instructions to
@@ -26,6 +40,20 @@
 // CHECK: Compilation completed successfully
 
 // DUMP: loc(
+
+// Every op in input.mlir is wrapped in fused<"checkpoint:input">.
+// INPUT_STAGE-DAG: fused<"checkpoint:input">
+
+// objectfifo_expanded.mlir is dumped between the two resource-allocation
+// halves, i.e. after input.mlir but before input_physical.mlir — so its
+// chain carries input and objectfifo-expanded, and not yet input-physical.
+// OBJFIFO_STAGE-DAG: fused<"checkpoint:objectfifo-expanded">
+// OBJFIFO_STAGE-DAG: fused<"checkpoint:input">
+
+// The locmap JSON sidecar surfaces the checkpoint metadata as a top-level
+// "checkpoint" key on each fused level (the "checkpoint:" prefix is
+// stripped by locToJSON for ergonomics).
+// JSON-DAG: "checkpoint": "input"
 
 module {
   aie.device(npu1) {
