@@ -16,6 +16,10 @@
 #include "xrt/xrt_hw_context.h"
 #include "xrt/xrt_kernel.h"
 
+#include "xrt/experimental/xrt_elf.h"
+#include "xrt/experimental/xrt_ext.h"
+#include "xrt/experimental/xrt_module.h"
+
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -149,24 +153,15 @@ OutBuf<T> make_out(int volume, void (*init)(T *, int)) {
 template <typename Verify, typename TOut, typename... TIns>
 int setup_and_run_aie(Verify verify_results, std::tuple<InBuf<TIns>...> inputs,
                       OutBuf<TOut> output, struct args myargs,
-                      bool enable_ctrl_pkts = false,
-                      int num_trailing_params = 0) {
+                      bool enable_ctrl_pkts = false) {
 
   srand(time(NULL));
 
   constexpr int num_inputs = sizeof...(TIns);
-  // Some designs place scalar/param buffers AFTER the output in the host ABI.
-  // The IRON `transform` runtime sequence, for example, is ordered
-  // [inputs, output, params].  `num_trailing_params` counts how many of the
-  // trailing entries in `inputs` are actually such params: they are bound to
-  // kernel arg slots *after* the output instead of before it.  The verifier
-  // still receives all buffers in declared order (inputs..., params..., out).
-  const int num_real_inputs = num_inputs - num_trailing_params;
 
-  // Load instruction sequence
-  std::vector<uint32_t> instr_v = test_utils::load_instr_binary(myargs.instr);
-  if (myargs.verbosity >= 1)
-    std::cout << "Sequence instr count: " << instr_v.size() << "\n";
+  // AIE4/medusa: --full-elf loads a single design ELF instead of the
+  // xclbin + insts.bin flow.
+  bool use_full_elf = !myargs.full_elf.empty();
 
   // The full-ELF (AIE4) path doesn't yet wire trace or ctrl-pkts buffers
   // into the kernel call (Iron-generated AIE4 designs declare only the
@@ -190,24 +185,50 @@ int setup_and_run_aie(Verify verify_results, std::tuple<InBuf<TIns>...> inputs,
     return 1;
   }
 
-  // The fixed scalar args occupy kernel arg slots 0..2 (opcode, instr, ninstr).
-  // Data buffers start at slot 3, i.e. group_id(3 + data_index).
-  constexpr int kFirstDataArg = 3;
-  // Output slot follows the *real* inputs; trailing params come after it.
-  const int out_arg = kFirstDataArg + num_real_inputs;
-  // Kernel arg slot for the idx-th declared `inputs` entry (real input or
-  // trailing param).
-  auto data_arg_slot = [&](int idx) {
-    return (idx < num_real_inputs) ? (kFirstDataArg + idx)
-                                   : (out_arg + 1 + (idx - num_real_inputs));
-  };
+  xrt::device device(0);
 
-  // Instruction buffer (kernel arg slot 1).
-  auto bo_instr = xrt::bo(device, instr_v.size() * sizeof(int),
-                          XCL_BO_FLAGS_CACHEABLE, kernel.group_id(1));
-  void *bufInstr = bo_instr.map<void *>();
-  memcpy(bufInstr, instr_v.data(), instr_v.size() * sizeof(int));
-  bo_instr.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+  // Per-flow state, kept in outer scope so the run loop below can refer to it.
+  // xrt::hw_context and xrt::ext::kernel are not default-constructible (and may
+  // not be assignable), so we use unique_ptr for the full-ELF objects. The
+  // legacy path uses the xclbin-loaded kernel + an instruction BO.
+  xrt::kernel kernel;
+  std::vector<uint32_t> instr_v;
+  std::optional<xrt::bo> bo_instr;
+
+  std::unique_ptr<xrt::elf> design_elf;
+  std::unique_ptr<xrt::hw_context> ctx_full_elf;
+  std::unique_ptr<xrt::ext::kernel> kernel_full_elf;
+
+  if (use_full_elf) {
+    if (myargs.verbosity >= 1)
+      std::cout << "Loading full ELF: " << myargs.full_elf << "\n";
+    design_elf = std::make_unique<xrt::elf>(myargs.full_elf);
+    ctx_full_elf = std::make_unique<xrt::hw_context>(device, *design_elf);
+    kernel_full_elf =
+        std::make_unique<xrt::ext::kernel>(*ctx_full_elf, myargs.kernel);
+  } else {
+    // Load instruction sequence (legacy flow only).
+    instr_v = test_utils::load_instr_binary(myargs.instr);
+    if (myargs.verbosity >= 1)
+      std::cout << "Sequence instr count: " << instr_v.size() << "\n";
+
+    test_utils::init_xrt_load_kernel(device, kernel, myargs.verbosity,
+                                     myargs.xclbin, myargs.kernel);
+  }
+
+  // The fixed scalar args occupy kernel arg slots 0..2 (opcode, instr, ninstr).
+  // Data buffers start at slot 3, i.e. group_id(3 + data_index). The full-ELF
+  // (AIE4) kernel declares only the data buffers, so it uses no group_ids.
+  constexpr int kFirstDataArg = 3;
+
+  // Instruction buffer (kernel arg slot 1), legacy flow only.
+  if (!use_full_elf) {
+    bo_instr.emplace(device, instr_v.size() * sizeof(int),
+                     XCL_BO_FLAGS_CACHEABLE, kernel.group_id(1));
+    void *bufInstr = bo_instr->map<void *>();
+    memcpy(bufInstr, instr_v.data(), instr_v.size() * sizeof(int));
+    bo_instr->sync(XCL_BO_SYNC_BO_TO_DEVICE);
+  }
 
   if (myargs.verbosity >= 1)
     std::cout << "Writing data into buffer objects.\n";
@@ -226,8 +247,13 @@ int setup_and_run_aie(Verify verify_results, std::tuple<InBuf<TIns>...> inputs,
     int idx = 0;
     auto one = [&](auto &desc, auto &ptr_slot) {
       using T = typename std::remove_reference_t<decltype(desc)>::elem_type;
-      auto bo = xrt::bo(device, desc.volume * sizeof(T), XRT_BO_FLAGS_HOST_ONLY,
-                        kernel.group_id(data_arg_slot(idx)));
+      xrt::bo bo;
+      if (use_full_elf)
+        // Full-ELF (AIE4): user buffers are plain ext BOs, no group_id.
+        bo = xrt::ext::bo{device, desc.volume * sizeof(T)};
+      else
+        bo = xrt::bo(device, desc.volume * sizeof(T), XRT_BO_FLAGS_HOST_ONLY,
+                     kernel.group_id(kFirstDataArg + idx));
       T *mapped = bo.template map<T *>();
       desc.init(mapped, desc.volume);
       bo.sync(XCL_BO_SYNC_BO_TO_DEVICE);
@@ -241,9 +267,14 @@ int setup_and_run_aie(Verify verify_results, std::tuple<InBuf<TIns>...> inputs,
   };
   std::apply(alloc_inputs, inputs);
 
-  // Output buffer follows the real inputs (any params come after it).
-  auto bo_out = xrt::bo(device, output.volume * sizeof(TOut),
-                        XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(out_arg));
+  // Output buffer follows the inputs.
+  const int out_arg = kFirstDataArg + num_inputs;
+  xrt::bo bo_out;
+  if (use_full_elf)
+    bo_out = xrt::ext::bo{device, output.volume * sizeof(TOut)};
+  else
+    bo_out = xrt::bo(device, output.volume * sizeof(TOut),
+                     XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(out_arg));
   TOut *bufOut = bo_out.map<TOut *>();
   output.init(bufOut, output.volume);
   bo_out.sync(XCL_BO_SYNC_BO_TO_DEVICE);
@@ -252,8 +283,11 @@ int setup_and_run_aie(Verify verify_results, std::tuple<InBuf<TIns>...> inputs,
   // enabled, matching what trace lowering appends to the runtime_sequence.
   // Control packets are a trace-side feature, so they are only part of the ABI
   // when tracing is also enabled.
-  const bool use_ctrl_pkts = enable_ctrl_pkts && myargs.trace_size > 0;
-  int next_arg = out_arg + 1 + num_trailing_params;
+  // Trace and control packets are a legacy-flow feature; the full-ELF path
+  // returns early above when either is requested, so these stay off there.
+  const bool use_ctrl_pkts =
+      !use_full_elf && enable_ctrl_pkts && myargs.trace_size > 0;
+  int next_arg = out_arg + 1;
 
   xrt::bo bo_ctrlpkts;
   uint32_t *bufCtrlPkts = nullptr;
@@ -268,7 +302,7 @@ int setup_and_run_aie(Verify verify_results, std::tuple<InBuf<TIns>...> inputs,
   xrt::bo bo_trace;
   char *bufTrace = nullptr;
   int trace_arg = -1;
-  if (myargs.trace_size > 0) {
+  if (!use_full_elf && myargs.trace_size > 0) {
     trace_arg = next_arg++;
     // Allocate a larger trace buffer (driver workaround) that also holds the
     // 8-byte control packet response when control packets are enabled.
@@ -289,8 +323,8 @@ int setup_and_run_aie(Verify verify_results, std::tuple<InBuf<TIns>...> inputs,
     }
   }
 
-  // Sync trace/ctrlpkt buffers to device.
-  if (myargs.trace_size > 0) {
+  // Sync trace/ctrlpkt buffers to device (legacy flow only).
+  if (!use_full_elf && myargs.trace_size > 0) {
     bo_trace.sync(XCL_BO_SYNC_BO_TO_DEVICE);
     if (use_ctrl_pkts)
       bo_ctrlpkts.sync(XCL_BO_SYNC_BO_TO_DEVICE);
@@ -315,28 +349,41 @@ int setup_and_run_aie(Verify verify_results, std::tuple<InBuf<TIns>...> inputs,
       std::cout << "Running Kernel.\n";
 
     auto start = std::chrono::high_resolution_clock::now();
-    unsigned int opcode = 3;
 
-    // Build the kernel argument list to match the declared host ABI exactly:
-    // opcode, instr, ninstr, data buffers..., [ctrlpkt], [trace].
-    xrt::run run(kernel);
-    run.set_arg(0, opcode);
-    run.set_arg(1, bo_instr);
-    run.set_arg(2, instr_v.size());
-    for (int i = 0; i < num_inputs; i++)
-      run.set_arg(data_arg_slot(i), in_bos[i]);
-    run.set_arg(out_arg, bo_out);
-    if (ctrlpkt_arg >= 0)
-      run.set_arg(ctrlpkt_arg, bo_ctrlpkts);
-    if (trace_arg >= 0)
-      run.set_arg(trace_arg, bo_trace);
-    run.start();
-    run.wait();
+    if (use_full_elf) {
+      // Full-ELF (AIE4) kernel signature is just the user buffers, in order
+      // (inputs..., then output); no opcode/instr preamble.
+      xrt::run run(*kernel_full_elf);
+      int arg = 0;
+      for (int i = 0; i < num_inputs; i++)
+        run.set_arg(arg++, in_bos[i]);
+      run.set_arg(arg++, bo_out);
+      run.start();
+      run.wait();
+    } else {
+      unsigned int opcode = 3;
+
+      // Build the kernel argument list to match the declared host ABI exactly:
+      // opcode, instr, ninstr, data buffers..., [ctrlpkt], [trace].
+      xrt::run run(kernel);
+      run.set_arg(0, opcode);
+      run.set_arg(1, *bo_instr);
+      run.set_arg(2, instr_v.size());
+      for (int i = 0; i < num_inputs; i++)
+        run.set_arg(kFirstDataArg + i, in_bos[i]);
+      run.set_arg(out_arg, bo_out);
+      if (ctrlpkt_arg >= 0)
+        run.set_arg(ctrlpkt_arg, bo_ctrlpkts);
+      if (trace_arg >= 0)
+        run.set_arg(trace_arg, bo_trace);
+      run.start();
+      run.wait();
+    }
 
     auto stop = std::chrono::high_resolution_clock::now();
     bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
     if (!use_full_elf && myargs.trace_size > 0)
-      bo_trace->sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+      bo_trace.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
 
     if (iter < myargs.n_warmup_iterations)
       /* Warmup iterations do not count towards average runtime. */

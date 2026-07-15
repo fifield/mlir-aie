@@ -115,7 +115,7 @@ def memcpy(
 
 def _make_argparser():
     p = argparse.ArgumentParser(prog="AIE Memcpy")
-    add_compile_args(p, with_elf=True)
+    add_compile_args(p, with_elf=True, with_emit_mlir=True)
     p.add_argument("-l", "--length", type=int, default=16384, help="transfer size")
     p.add_argument("-co", "--cols", type=int, default=1, help="number of columns")
     p.add_argument(

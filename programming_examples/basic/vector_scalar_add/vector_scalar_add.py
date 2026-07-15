@@ -53,7 +53,7 @@ def vector_scalar_add(
 
 def _make_argparser():
     p = argparse.ArgumentParser(prog="AIE Vector Scalar Add")
-    add_compile_args(p, with_elf=True, with_pdi=True)
+    add_compile_args(p, with_elf=True, with_pdi=True, with_emit_mlir=True)
     p.add_argument(
         "--problem-size",
         type=int,

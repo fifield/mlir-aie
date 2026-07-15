@@ -47,7 +47,7 @@ def vector_reduce_add(
 
 def _make_argparser():
     p = argparse.ArgumentParser(prog="AIE Vector Reduce Add")
-    add_compile_args(p)
+    add_compile_args(p, with_emit_mlir=True)
     p.add_argument("-n", "--num-elements", type=int, default=1024)
     return p
 
