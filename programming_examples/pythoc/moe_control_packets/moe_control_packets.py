@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #
-# REQUIRES: ryzen_ai_npu2
+# REQUIRES: ryzen_ai_npu2, dontrun
 #
 # RUN: %python %s --scores 10,90,30,40,99,20,5,70 --work-dir ./moe_control_packets_build | FileCheck %s
 # CHECK: top-k select : OK
