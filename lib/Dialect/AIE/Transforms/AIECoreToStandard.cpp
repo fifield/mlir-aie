@@ -814,6 +814,37 @@ struct AIECoreToStandardPass
     }
     const auto &targetModel = deviceOp.getTargetModel();
 
+    // Each core body is later outlined into a module-level function, so it must
+    // be self-contained. CSE/canonicalization can hoist constant operands --
+    // e.g. the lock values that are now SSA operands -- out of the core into
+    // the enclosing device region, where they are shared with the mem/shim DMA
+    // blocks. Such an external reference would dangle once the device (and the
+    // hoisted constant) is erased. Sink a private copy of every
+    // externally-defined constant used inside a core back into that core.
+    deviceOp.walk([&](CoreOp core) {
+      Block &entry = core.getBody().front();
+      DenseMap<Value, Value> localCopies;
+      SmallVector<std::pair<OpOperand *, Value>> toRewrite;
+      core.getBody().walk([&](Operation *op) {
+        for (OpOperand &operand : op->getOpOperands()) {
+          Value v = operand.get();
+          Operation *def = v.getDefiningOp();
+          if (!def || core->isProperAncestor(def))
+            continue; // block argument or already defined inside the core
+          if (!def->hasTrait<mlir::OpTrait::ConstantLike>())
+            continue;
+          Value &copy = localCopies[v];
+          if (!copy) {
+            OpBuilder b(&entry, entry.begin());
+            copy = b.clone(*def)->getResult(0);
+          }
+          toRewrite.emplace_back(&operand, copy);
+        }
+      });
+      for (auto &[operand, copy] : toRewrite)
+        operand->set(copy);
+    });
+
     // Copy data layout attribute from DeviceOp to ModuleOp if present
     if (auto dlAttr = deviceOp->getAttr(DLTIDialect::kDataLayoutAttrName)) {
       m->setAttr(DLTIDialect::kDataLayoutAttrName, dlAttr);

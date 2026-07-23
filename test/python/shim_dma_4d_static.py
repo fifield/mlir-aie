@@ -25,7 +25,7 @@ with mlir_mod_ctx() as ctx:
         cons = lock(shim, init=0)
 
         # CHECK: aie.shim_dma
-        # CHECK: aie.dma_bd(%{{.+}} : memref<256xi32>, 0, 256, [<size = 4, stride = 64>, <size = 4, stride = 4>, <size = 4, stride = 16>, <size = 4, stride = 1>])
+        # CHECK: aie.dma_bd(%{{.+}} : memref<256xi32> offset = 0 len = 256 sizes = [4, 4, 4, 4] strides = [64, 4, 16, 1])
         @shim_mem(shim)
         def sd(block):
             dma_start(DMAChannelDir.MM2S, 0, dest=block[1], chain=block[2])
@@ -34,8 +34,9 @@ with mlir_mod_ctx() as ctx:
                 dma_bd(
                     ext,
                     offset=0,
-                    len=256,
-                    dimensions=[(4, 64), (4, 4), (4, 16), (4, 1)],
+                    transfer_len=256,
+                    sizes=[4, 4, 4, 4],
+                    strides=[64, 4, 16, 1],
                 )
                 use_lock(cons, LockAction.Release, value=1)
                 EndOp()

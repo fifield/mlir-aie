@@ -1765,8 +1765,12 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
   //   * --load-pdi-to-ctrl-pkt expands the configuration into control packets
   //     (via the same expand-load-pdi machinery), which likewise needs the
   //     compiled cores.
+  //   * AIE4's --generate-full-elf path runs the same
+  //     `convert-aie-to-transaction` pass (as part of the cert pipeline) to
+  //     produce the control code, so it needs the same ELF-patched cores.
   bool npuTransactionsNeedCoresLowered =
-      expandLoadPdis.getValue() || generateTxn || loadPdiToCtrlPkt.getValue();
+      expandLoadPdis.getValue() || generateTxn || loadPdiToCtrlPkt.getValue() ||
+      generateFullElf;
   auto &sequencePlacement =
       physical.filter("sequencePlacement", [](const ModRef &) { return true; });
   EdgeWithTypedOutput<ModRef> &npuLoweringInput =
@@ -2491,9 +2495,51 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
 
   // Combined ELF: all PDIs + NPU insts bundled
   // + control packet data, if any.
+  // AIE4 "cert" control code: convert-aie-to-transaction + aie-npu-to-cert +
+  // cert-legalize-pages over the *whole* module (aie-npu-to-cert's
+  // device-name option defaults to "main" and folds every other device's
+  // load-pdi references into that device's cert sections), then
+  // `--aie-cert-to-asm` to text. Every AIE4 device's full-elf instances share
+  // this single assembly file (see makeAie4ConfigJson). Non-AIE4 modules
+  // never reach the (expensive, AIE4-specific) pipeline: the value is empty
+  // and unused, since fullElfConfig only reads it under moduleHasAie4Device.
+  auto &certAsm = npuLowered.map<std::string>(
+      "full_elf_cert.mlir.asm",
+      [&context](const Item<ModRef> &item,
+                 Item<std::string> &out) -> mlir::LogicalResult {
+        mlir::ModuleOp mod = item.get().get();
+        if (!moduleHasAie4Device(mod)) {
+          out.value = std::string{};
+          return mlir::success();
+        }
+        ModRef clone = mod.clone();
+        auto pm = getAie4CertPipeline(clone->getContext(), /*elfDir=*/"");
+        if (!pm || mlir::failed(pm->run(*clone)))
+          return mlir::failure();
+        std::string asmText;
+        if (mlir::failed(
+                xilinx::AIE::AIETranslateToUcDma(clone.get(), asmText)))
+          return mlir::failure();
+        out.value = std::move(asmText);
+        return mlir::success();
+      });
+
+  // Selects aiebu-asm's `-t` target for the full-ELF config: AIE4 uses the
+  // cert-based aie4_config format; every other target keeps the aie2_config
+  // format unchanged.
+  auto &fullElfConfigType = npuLowered.map<std::string>(
+      "full_elf_config_type.txt", [](const ModRef &mod) -> std::string {
+        return moduleHasAie4Device(mod.get()) ? "aie4_config" : "aie2_config";
+      });
+
+  // Combined ELF config: AIE2/AIE2P bundle all PDIs + per-sequence NPU insts +
+  // control-packet data (+ patch info) into an aie2_config JSON; AIE4 has no
+  // PDIs or control packets (folded into the cert control code) and every
+  // instance points at the shared cert assembly instead (aie4_config JSON) --
+  // see makeAie4ConfigJson / certAsm above.
   auto &fullElfConfig =
       bundle(npuLoweredPerDeviceFullElf.out, pdi.out, npuInstsFullElf.out,
-             fullElfCtrlpkt.out, fullElfPatchInfo.out)
+             fullElfCtrlpkt.out, fullElfPatchInfo.out, certAsm.out)
           .join<llvm::json::Value>(
               "full_elf_config.json",
               [fullElfInputPath](
@@ -2502,7 +2548,23 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
                   const Node<std::vector<char>> &instsBins,
                   const Node<std::vector<char>> &ctrlPkts,
                   const Node<llvm::json::Value> &patchInfos,
+                  const Node<std::string> &certAsmNode,
                   Item<llvm::json::Value> &out) -> mlir::LogicalResult {
+                bool isAie4 = !devices.items.empty() &&
+                              moduleHasAie4Device(
+                                  devices.items.front().get().module.get());
+                if (isAie4) {
+                  if (certAsmNode.items.empty() ||
+                      certAsmNode.items.front().get().empty()) {
+                    llvm::errs() << "aiecc: AIE4 full-elf: missing cert "
+                                    "control-code assembly\n";
+                    return mlir::failure();
+                  }
+                  out.value = makeAie4ConfigJson(
+                      devices,
+                      absolutePath(certAsmNode.items.front().asFile()));
+                  return mlir::success();
+                }
                 llvm::StringMap<std::string> pdiPaths, instsPaths;
                 llvm::StringMap<std::string> ctrlPktPaths, patchInfoPaths;
                 for (const auto &item : pdis.items) {
@@ -2524,20 +2586,31 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
 
 #ifdef AIECC_HAS_AIEBU_CONFIG_ELF
   auto &fullElf =
-      bundle(fullElfConfig.out, npuInstsFullElf.out, fullElfCtrlpkt.out,
-             fullElfPatchInfo.out)
+      bundle(fullElfConfigType.out, fullElfConfig.out, npuInstsFullElf.out,
+             fullElfCtrlpkt.out, fullElfPatchInfo.out)
           .join<File>(
-              llvm::sys::path::filename(fullElfName.getValue()).str() +
-                  ".unstamped",
-              [fullElfInputPath](const Node<llvm::json::Value> &config,
-                                 const Node<std::vector<char>> &instsBins,
-                                 const Node<std::vector<char>> &ctrlPkts,
-                                 const Node<llvm::json::Value> &patchInfos,
-                                 Item<File> &out) -> mlir::LogicalResult {
+              llvm::sys::path::filename(fullElfName.getValue()).str() + ".unstamped",
+              [fullElfInputPath,
+               cmd = ShellCommand{"aiebu-asm"}
+                         .arg("-t")
+                         .value()
+                         .arg("-j")
+                         .input()
+                         .arg("-o")
+                         .output()](const Node<std::string> &configType,
+                                    const Node<llvm::json::Value> &config,
+                                    const Node<std::vector<char>> &instsBins,
+                                    const Node<std::vector<char>> &ctrlPkts,
+                                    const Node<llvm::json::Value> &patchInfos,
+                                    Item<File> &out) -> mlir::LogicalResult {
+                if (configType.items.empty() || config.items.empty())
+                  return mlir::failure();
                 // The config is still written: the Python JIT reads the
                 // kernel name from it.
                 const auto &configItem = config.items.front();
                 (void)configItem.asFile();
+                if (configType.items.front().get() == "aie4_config")
+                  return cmd(configType.items.front(), configItem, out);
                 if (dryRun) {
                   std::error_code ec;
                   llvm::raw_fd_ostream f(out.filePath, ec);
@@ -2563,15 +2636,23 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
                                        out, verbose);
               });
 #else
-  auto &fullElf = fullElfConfig.map<File>(
-      llvm::sys::path::filename(fullElfName.getValue()).str() + ".unstamped",
-      ShellCommand{"aiebu-asm"}
-          .arg("-t")
-          .arg("aie2_config")
-          .arg("-j")
-          .input()
-          .arg("-o")
-          .output());
+  auto &fullElf =
+      bundle(fullElfConfigType.out, fullElfConfig.out)
+          .join<File>(
+              llvm::sys::path::filename(fullElfName.getValue()).str() + ".unstamped",
+              [cmd = ShellCommand{"aiebu-asm"}
+                         .arg("-t")
+                         .value()
+                         .arg("-j")
+                         .input()
+                         .arg("-o")
+                         .output()](const Node<std::string> &configType,
+                                    const Node<llvm::json::Value> &config,
+                                    Item<File> &out) -> mlir::LogicalResult {
+                if (configType.items.empty() || config.items.empty())
+                  return mlir::failure();
+                return cmd(configType.items.front(), config.items.front(), out);
+              });
 #endif // AIECC_HAS_AIEBU_CONFIG_ELF
 
   //--------------------------------------------------------------------------//

@@ -5897,6 +5897,14 @@ LogicalResult UseLockOp::verify() {
     if (!(*this)->getBlock())
       return (*this)->emitOpError("is not in a block.");
 
+    // Locks inside a DMA/BD block are configured statically (via MMIO / BD
+    // registers), so the value must be a compile-time constant. Dynamic lock
+    // values are only supported inside cores (see UseLockOp docs).
+    if (!getConstantLockValue(*this).has_value())
+      return (*this)->emitOpError(
+          "lock value in a DMA/BD block must be a compile-time constant "
+          "(defined by an arith.constant)");
+
     if (targetModel.getTargetArch() == AIEArch::AIE1 &&
         UsesOneLockInDMABlock::verifyTrait(*this).failed())
       return (*this)->emitOpError(

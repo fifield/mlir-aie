@@ -113,6 +113,16 @@ inline std::string detectAIETarget(mlir::ModuleOp m,
   return "aie2";
 }
 
+// True if any device in `m` targets AIE4. AIE4's --generate-full-elf uses the
+// cert pipeline (see getAie4CertPipeline) and the aie4_config JSON format
+// instead of the aie2_config path every other target uses.
+inline bool moduleHasAie4Device(mlir::ModuleOp m) {
+  for (auto devOp : m.getOps<xilinx::AIE::DeviceOp>())
+    if (detectAIETarget(m, devOp.getSymName()) == "aie4")
+      return true;
+  return false;
+}
+
 // Per-core key `"<devName>_core_<col>_<row>"` — shared across compiled-elfs /
 // pre-baked-elfs / ldscripts nodes for bundle-by-key zips.
 inline std::string coreKey(xilinx::AIE::CoreOp coreOp) {
@@ -2111,6 +2121,30 @@ getTransactionPipeline(mlir::MLIRContext *ctx, llvm::StringRef elfDir,
   if (mlir::failed(mlir::parsePassPipeline(pipelineStr, dpm))) {
     return nullptr;
   }
+  return pm;
+}
+
+// AIE4 "cert" pipeline: transaction generation, followed by lowering the
+// transaction into the AIE4 firmware's cert representation. Mirrors
+// `builtin.module(aie.device(convert-aie-to-transaction{elf-dir=<elfDir>}),
+// aie-npu-to-cert, aie.device(cert-legalize-pages))`. `aie-npu-to-cert` runs
+// module-wide (its `device-name` option defaults to "main" and absorbs every
+// other device's load-pdi references into that device's cert sections), so
+// this pipeline is meant to run once over the whole module, not per device.
+// Feeds `--aie-cert-to-asm` (AIETranslateToUcDma) to produce the control-code
+// assembly consumed by `aiebu-asm -t aie4_config`. Returns nullptr on parse
+// failure.
+inline std::unique_ptr<mlir::PassManager>
+getAie4CertPipeline(mlir::MLIRContext *ctx, llvm::StringRef elfDir) {
+  namespace X = xilinx::AIEX;
+  auto pm = std::make_unique<mlir::PassManager>(ctx);
+  std::string txnPipelineStr =
+      ("convert-aie-to-transaction{elf-dir=" + elfDir + "}").str();
+  auto &dpm = pm->nest<xilinx::AIE::DeviceOp>();
+  if (mlir::failed(mlir::parsePassPipeline(txnPipelineStr, dpm)))
+    return nullptr;
+  pm->addPass(X::createAIENpuToCertPass());
+  pm->nest<xilinx::AIE::DeviceOp>().addPass(X::createAIECertPagesPass());
   return pm;
 }
 

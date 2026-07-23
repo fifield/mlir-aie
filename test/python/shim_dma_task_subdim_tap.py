@@ -16,7 +16,7 @@
 # Each case builds one task and FileChecks the emitted BD. The fix must:
 #  - normalize rank < 4 (leading size > 1) to the canonical 4-dim BD, no repeat
 #  - leave the common rank-4 leading-unit case unchanged
-#  - keep repeat_count for a genuine rank-4 iteration dim (no over-correction)
+#  - reject a strided outermost (iteration) dim (unsupported through this helper)
 #  - work the same for the explicit sizes=/strides= path as for tap=
 #  - coalesce a tap of rank > 4 to fit
 #  - pass constant sizes of rank > 4 that do not fit, from a tap or explicit,
@@ -86,10 +86,12 @@ case("rank3", (4, 64, 1024), [64, 4, 1024], [1024, 65536, 1])
 # CHECK-NOT: repeat_count
 case("rank4_lead1", (1, 1, 64, 4096), [1, 1, 64, 4096], [0, 0, 4096, 1])
 
-# rank 4, leading > 1: a genuine iteration dim, repeat_count MUST be kept.
+# rank 4, leading > 1 with a nonzero outer stride: a strided iteration dim is
+# not supported through this objectfifo helper (the repeats re-read the same
+# block instead of advancing), so it must be rejected rather than silently
+# emit a wrong BD.
 # CHECK-LABEL: CASE rank4_lead4
-# CHECK: aie.dma_bd(%{{.*}} : memref<32768xbf16> offset = {{.*}} len = {{.*}} sizes = [4, 1, 8, 1024] strides = [8192, 0, 1024, 1])
-# CHECK: repeat_count = 3
+# CHECK: RAISED ValueError
 case("rank4_lead4", (4, 1, 8, 1024), [4, 1, 8, 1024], [8192, 0, 1024, 1])
 
 # a pure repeat stays outermost as the repeat_count; the padding goes after it.

@@ -270,6 +270,11 @@ struct AIEDMATasksToNPUPass
               [&](AIE::NextBDOp lock_op) { return WalkResult::advance(); })
           .Case<AIE::EndOp>(
               [&](AIE::EndOp lock_op) { return WalkResult::advance(); })
+          // Constants materialize the compile-time values that feed BD
+          // size/stride/offset/len and lock-value operands. They do not lower
+          // to NPU instructions themselves (their constant is read directly).
+          .Case<arith::ConstantOp>(
+              [&](arith::ConstantOp cst_op) { return WalkResult::advance(); })
           .Default([&](Operation *inner_op) {
             auto error = block.getParentOp()->emitOpError(
                 "Unsupported operation within BD block.");
@@ -842,6 +847,17 @@ struct AIEDMATasksToNPUPass
     assert(bdIdAttr && "static bd_id must be assigned (checked by "
                        "verifyBdInBlock before lowering)");
     uint32_t bd_id = *bdIdAttr;
+
+    // A runtime-valued len would be silently baked to the buffer's element
+    // count by getLenInBytes() on this static lowering path. Reject it with a
+    // clear diagnostic (mirroring the runtime-valued size/stride guard below)
+    // rather than encode a wrong length; genuinely runtime lengths arrive via
+    // the dynamic BD-word encoder (--aie-npu-to-cpp).
+    if (bd_op.getLen() && !bd_op.getConstantLen().has_value())
+      return bd_op->emitOpError(
+          "runtime-valued BD len is not supported on the static NPU lowering "
+          "path; use a compile-time constant len or the dynamic EmitC path "
+          "(--aie-npu-to-cpp)");
     int64_t offset = bd_op.getOffsetInBytes();
     uint64_t len = bd_op.getLenInBytes();
     uint64_t len_addr_granularity = len * 8 / addr_granularity;
@@ -857,6 +873,7 @@ struct AIEDMATasksToNPUPass
              << len << " bytes falls below minimum hardware transfer unit of "
              << (addr_granularity / 8) << " bytes.";
     }
+    // Process strides/wraps.
     // The owning storage must outlive the ArrayRef view below.
     std::optional<llvm::SmallVector<AIE::BDDimLayoutAttr>> dimsStorage =
         bd_op.getConstantDimensions();

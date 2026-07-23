@@ -42,12 +42,13 @@ module {
     %lock_0 = aie.lock(%tile_0_0, 0) {init = 0 : i32}
     %lock_1 = aie.lock(%tile_0_0, 1) {init = 0 : i32}
     %shim_dma_0_0 = aie.shim_dma(%tile_0_0) {
+      %c1_i32 = arith.constant 1 : i32
       // MM2S channel 0 -> ^bb1
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // shared by both MM2S ch0 and ch2
-      aie.use_lock(%lock_0, Acquire, 1)
-      aie.dma_bd(%ext_buf : memref<64xi32>, 0, 64, [<size = 64, stride = 1>]) {bd_id = 0 : i32}
-      aie.use_lock(%lock_1, Release, 1)
+      aie.use_lock(%lock_0, Acquire, %c1_i32)
+      aie.dma_bd(%ext_buf : memref<64xi32> offset = 0 len = 64 sizes = [64] strides = [1]) {bd_id = 0 : i32}
+      aie.use_lock(%lock_1, Release, %c1_i32)
       aie.next_bd ^bb2
     ^bb2:  // end block
       aie.end
@@ -58,9 +59,9 @@ module {
       // S2MM channel 0 -> ^bb5
       %2 = aie.dma_start(S2MM, 0, ^bb5, ^bb2)
     ^bb5:
-      aie.use_lock(%lock_1, Acquire, 1)
-      aie.dma_bd(%ext_buf : memref<64xi32>, 0, 64, [<size = 64, stride = 1>]) {bd_id = 0 : i32}
-      aie.use_lock(%lock_0, Release, 1)
+      aie.use_lock(%lock_1, Acquire, %c1_i32)
+      aie.dma_bd(%ext_buf : memref<64xi32> offset = 0 len = 64 sizes = [64] strides = [1]) {bd_id = 0 : i32}
+      aie.use_lock(%lock_0, Release, %c1_i32)
       aie.next_bd ^bb2
     }
   }

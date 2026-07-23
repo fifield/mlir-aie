@@ -32,10 +32,10 @@ with mlir_mod_ctx() as ctx:
         @runtime_sequence(Nty)
         def seq(A):
             # CHECK: aiex.dma_configure_task_for @b {
-            # CHECK: aie.dma_bd(%arg0 : memref<256xi32>, 0, 8, [<size = 5, stride = 0>,
+            # CHECK: aie.dma_bd(%arg0 : memref<256xi32> offset = 0 len = 8 sizes = [5, 1, 1, 8] strides = [0, 0, 0, 1])
             # CHECK: } {repeat_count = 4 : i32}
             shim_dma_single_bd_task(
-                of_b, A, sizes=[5, 1, 1, 1, 8], strides=[0, 0, 0, 0, 1]
+                of_b, A, sizes=[5, 1, 1, 8], strides=[0, 0, 0, 1]
             )
 
     print(ctx.module)
@@ -56,7 +56,7 @@ try:
             @runtime_sequence(Nty)
             def seq(A):
                 shim_dma_single_bd_task(
-                    of_a, A, sizes=[5, 3, 2, 2, 4], strides=[48, 16, 8, 4, 1]
+                    of_a, A, sizes=[5, 2, 2, 4], strides=[48, 8, 4, 1]
                 )
 
     print("NO ERROR")

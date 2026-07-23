@@ -36,26 +36,27 @@ module @test_aie4_shim_dma_no_fold {
     %lock1 = aie.lock(%shim, 1) {init = 0 : i32}
 
     %shim_dma = aie.shim_dma(%shim) {
+      %c1_i32 = arith.constant 1 : i32
       %0 = aie.dma_start(MM2S, 0, ^bd0, ^end)
     ^bd0:
-      aie.use_lock(%lock0, Acquire, 1)
-      aie.dma_bd(%buf0 : memref<64xi32>, 0, 64, [<size = 64, stride = 1>]) {bd_id = 0 : i32}
-      aie.use_lock(%lock1, Release, 1)
+      aie.use_lock(%lock0, Acquire, %c1_i32)
+      aie.dma_bd(%buf0 : memref<64xi32> offset = 0 len = 64 sizes = [64] strides = [1]) {bd_id = 0 : i32}
+      aie.use_lock(%lock1, Release, %c1_i32)
       aie.next_bd ^bd1
     ^bd1:
-      aie.use_lock(%lock0, Acquire, 1)
-      aie.dma_bd(%buf1 : memref<64xi32>, 0, 64, [<size = 64, stride = 1>]) {bd_id = 1 : i32}
-      aie.use_lock(%lock1, Release, 1)
+      aie.use_lock(%lock0, Acquire, %c1_i32)
+      aie.dma_bd(%buf1 : memref<64xi32> offset = 0 len = 64 sizes = [64] strides = [1]) {bd_id = 1 : i32}
+      aie.use_lock(%lock1, Release, %c1_i32)
       aie.next_bd ^bd2
     ^bd2:
-      aie.use_lock(%lock0, Acquire, 1)
-      aie.dma_bd(%buf0 : memref<64xi32>, 0, 64, [<size = 64, stride = 1>]) {bd_id = 0 : i32}
-      aie.use_lock(%lock1, Release, 1)
+      aie.use_lock(%lock0, Acquire, %c1_i32)
+      aie.dma_bd(%buf0 : memref<64xi32> offset = 0 len = 64 sizes = [64] strides = [1]) {bd_id = 0 : i32}
+      aie.use_lock(%lock1, Release, %c1_i32)
       aie.next_bd ^bd3
     ^bd3:
-      aie.use_lock(%lock0, Acquire, 1)
-      aie.dma_bd(%buf1 : memref<64xi32>, 0, 64, [<size = 64, stride = 1>]) {bd_id = 1 : i32}
-      aie.use_lock(%lock1, Release, 1)
+      aie.use_lock(%lock0, Acquire, %c1_i32)
+      aie.dma_bd(%buf1 : memref<64xi32> offset = 0 len = 64 sizes = [64] strides = [1]) {bd_id = 1 : i32}
+      aie.use_lock(%lock1, Release, %c1_i32)
       aie.next_bd ^bd0
     ^end:
       aie.end
@@ -85,17 +86,18 @@ module @test_aie4_shim_dma_no_block_merge {
     %lock1 = aie.lock(%shim, 1) {init = 0 : i32}
 
     %shim_dma = aie.shim_dma(%shim) {
+      %c1_i32 = arith.constant 1 : i32
       // ---- Channel 0 ----
       %0 = aie.dma_start(MM2S, 0, ^ch0_bd0, ^ch2_start)
     ^ch0_bd0:
-      aie.use_lock(%lock0, Acquire, 1)
-      aie.dma_bd(%buf0 : memref<64xi32>, 0, 64, [<size = 64, stride = 1>]) {bd_id = 0 : i32}
-      aie.use_lock(%lock1, Release, 1)
+      aie.use_lock(%lock0, Acquire, %c1_i32)
+      aie.dma_bd(%buf0 : memref<64xi32> offset = 0 len = 64 sizes = [64] strides = [1]) {bd_id = 0 : i32}
+      aie.use_lock(%lock1, Release, %c1_i32)
       aie.next_bd ^ch0_bd1
     ^ch0_bd1:
-      aie.use_lock(%lock0, Acquire, 1)
-      aie.dma_bd(%buf1 : memref<64xi32>, 0, 64, [<size = 64, stride = 1>]) {bd_id = 1 : i32}
-      aie.use_lock(%lock1, Release, 1)
+      aie.use_lock(%lock0, Acquire, %c1_i32)
+      aie.dma_bd(%buf1 : memref<64xi32> offset = 0 len = 64 sizes = [64] strides = [1]) {bd_id = 1 : i32}
+      aie.use_lock(%lock1, Release, %c1_i32)
       aie.next_bd ^ch0_end
     ^ch0_end:
       aie.end
@@ -104,14 +106,14 @@ module @test_aie4_shim_dma_no_block_merge {
     ^ch2_start:
       %1 = aie.dma_start(MM2S, 2, ^ch2_bd0, ^done)
     ^ch2_bd0:
-      aie.use_lock(%lock0, Acquire, 1)
-      aie.dma_bd(%buf0 : memref<64xi32>, 0, 64, [<size = 64, stride = 1>]) {bd_id = 0 : i32}
-      aie.use_lock(%lock1, Release, 1)
+      aie.use_lock(%lock0, Acquire, %c1_i32)
+      aie.dma_bd(%buf0 : memref<64xi32> offset = 0 len = 64 sizes = [64] strides = [1]) {bd_id = 0 : i32}
+      aie.use_lock(%lock1, Release, %c1_i32)
       aie.next_bd ^ch2_bd1
     ^ch2_bd1:
-      aie.use_lock(%lock0, Acquire, 1)
-      aie.dma_bd(%buf1 : memref<64xi32>, 0, 64, [<size = 64, stride = 1>]) {bd_id = 1 : i32}
-      aie.use_lock(%lock1, Release, 1)
+      aie.use_lock(%lock0, Acquire, %c1_i32)
+      aie.dma_bd(%buf1 : memref<64xi32> offset = 0 len = 64 sizes = [64] strides = [1]) {bd_id = 1 : i32}
+      aie.use_lock(%lock1, Release, %c1_i32)
       aie.next_bd ^ch2_end
     ^ch2_end:
       aie.end

@@ -8,7 +8,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// REQUIRES: valid_xchess_license, aietools_aie4, !hsa, aiesimulator
+// REQUIRES: valid_xchess_license, aietools_aie4, aiesimulator
 
 // RUN: xchesscc_wrapper aie4 -c %S/kernel.cc
 // RUN: %PYTHON aiecc.py --alloc-scheme=basic-sequential --xchesscc --xbridge --no-compile-host --aie-generate-txn --txn-name=transaction.bin --aiesim %s %test_utils_flags %S/test.cpp

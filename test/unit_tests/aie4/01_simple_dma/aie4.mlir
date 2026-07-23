@@ -39,16 +39,17 @@ module @test_dma_to_txn {
     %lock_0_2_0 = aie.lock(%tile_0_2, 1)
 
     %mem_0_2 = aie.mem(%tile_0_2) {
+      %c1_i32 = arith.constant 1 : i32
       %0 = aie.dma_start(S2MM, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb2
-      aie.use_lock(%lock_0_2, AcquireGreaterEqual, 1)
-      aie.dma_bd(%buf02_0 : memref<256xi32>, 0, 256) {bd_id = 0 : i32, next_bd_id = 1 : i32}
-      aie.use_lock(%lock_0_2_0, Release, 1)
+      aie.use_lock(%lock_0_2, AcquireGreaterEqual, %c1_i32)
+      aie.dma_bd(%buf02_0 : memref<256xi32> offset = 0 len = 256) {bd_id = 0 : i32, next_bd_id = 1 : i32}
+      aie.use_lock(%lock_0_2_0, Release, %c1_i32)
       aie.next_bd ^bb2
     ^bb2:  // pred: ^bb1
-      aie.use_lock(%lock_0_2, AcquireGreaterEqual, 1)
-      aie.dma_bd(%buf02_1 : memref<256xi32>, 0, 256) {bd_id = 1 : i32, next_bd_id = 0 : i32}
-      aie.use_lock(%lock_0_2_0, Release, 1)
+      aie.use_lock(%lock_0_2, AcquireGreaterEqual, %c1_i32)
+      aie.dma_bd(%buf02_1 : memref<256xi32> offset = 0 len = 256) {bd_id = 1 : i32, next_bd_id = 0 : i32}
+      aie.use_lock(%lock_0_2_0, Release, %c1_i32)
       aie.next_bd ^bb1
     ^bb3:  // pred: ^bb0
       aie.end
@@ -60,16 +61,17 @@ module @test_dma_to_txn {
     %lock_0_0 = aie.lock(%tile_0_0, 0) { init = 2 : i32 }
     %lock_0_0_0 = aie.lock(%tile_0_0, 1)
     %mem_0_0 = aie.shim_dma(%tile_0_0) {
+      %c1_i32 = arith.constant 1 : i32
       %0 = aie.dma_start(MM2S, 0, ^bb1, ^bb3)
     ^bb1:  // 2 preds: ^bb0, ^bb2
-      aie.use_lock(%lock_0_0, AcquireGreaterEqual, 1)
-      aie.dma_bd(%buf00_0 : memref<256xi32>, 0, 256) {bd_id = 0 : i32, next_bd_id = 1 : i32}
-      aie.use_lock(%lock_0_0_0, Release, 1)
+      aie.use_lock(%lock_0_0, AcquireGreaterEqual, %c1_i32)
+      aie.dma_bd(%buf00_0 : memref<256xi32> offset = 0 len = 256) {bd_id = 0 : i32, next_bd_id = 1 : i32}
+      aie.use_lock(%lock_0_0_0, Release, %c1_i32)
       aie.next_bd ^bb2
     ^bb2:  // pred: ^bb1
-      aie.use_lock(%lock_0_0, AcquireGreaterEqual, 1)
-      aie.dma_bd(%buf00_1 : memref<256xi32>, 0, 256) {bd_id = 1 : i32, next_bd_id = 0 : i32}
-      aie.use_lock(%lock_0_0_0, Release, 1)
+      aie.use_lock(%lock_0_0, AcquireGreaterEqual, %c1_i32)
+      aie.dma_bd(%buf00_1 : memref<256xi32> offset = 0 len = 256) {bd_id = 1 : i32, next_bd_id = 0 : i32}
+      aie.use_lock(%lock_0_0_0, Release, %c1_i32)
       aie.next_bd ^bb1
     ^bb3:  // pred: ^bb0
       aie.end

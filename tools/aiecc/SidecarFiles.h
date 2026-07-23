@@ -356,6 +356,54 @@ makeFullElfConfigJson(const Node<OpInModule<xilinx::AIE::DeviceOp>> &devices,
   return O{{"xrt-kernels", std::move(xrtKernels)}};
 }
 
+// Full-ELF config.json fed to `aiebu-asm -t aie4_config`. AIE4's control code
+// is a single "cert" assembly shared by the whole module (produced by the
+// cert pipeline — convert-aie-to-transaction, aie-npu-to-cert,
+// cert-legalize-pages — then `--aie-cert-to-asm`), not a per-runtime-sequence
+// transaction binary, so every instance across every device points at the
+// same `certAsmPath` and there is no PDIs section (aie-npu-to-cert already
+// folded every device's load-pdi references into the cert control code).
+// Argument count matches makeFullElfConfigJson: max(3, max runtime-seq
+// arity); AIE4 argument names are integers rather than "arg_N" strings.
+inline llvm::json::Value
+makeAie4ConfigJson(const Node<OpInModule<xilinx::AIE::DeviceOp>> &devices,
+                   llvm::StringRef certAsmPath) {
+  using O = llvm::json::Object;
+
+  llvm::json::Array xrtKernels;
+  for (const auto &item : devices.items) {
+    const std::string &devName = item.key;
+    xilinx::AIE::DeviceOp devOp = item.get().op;
+
+    int argCount = 3;
+    devOp.walk([&](xilinx::AIE::RuntimeSequenceOp seq) {
+      if (!seq.getBody().empty())
+        argCount =
+            std::max<int>(argCount, seq.getBody().front().getNumArguments());
+    });
+    llvm::json::Array arguments;
+    for (int i = 0; i < argCount; ++i)
+      arguments.push_back(
+          O{{"name", i},
+            {"type", "char *"},
+            {"offset", llvm::formatv("0x{0}", llvm::utohexstr(i * 8)).str()}});
+
+    llvm::json::Array instances;
+    devOp.walk([&](xilinx::AIE::RuntimeSequenceOp seq) {
+      instances.push_back(O{{"id", seq.getSymName().str()},
+                            {"ctrl_code_file", certAsmPath.str()}});
+    });
+    if (instances.empty())
+      continue;
+
+    xrtKernels.push_back(O{{"name", devName},
+                           {"arguments", std::move(arguments)},
+                           {"instance", std::move(instances)}});
+  }
+
+  return O{{"xrt-kernels", std::move(xrtKernels)}};
+}
+
 // external_buffers.json patch fed to `aiebu-asm -t aie2txn -j` (or the
 // in-memory `aiebu_assembler_get_elf` patch argument) when assembling a
 // combined control-packet ELF. Describes the runtime control-packet buffer:
