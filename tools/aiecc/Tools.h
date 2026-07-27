@@ -201,6 +201,8 @@ inline std::string getChessTarget(llvm::StringRef aieTarget) {
     return "target_aie_ml";
   if (t == "aie2p")
     return "target_aie2p";
+  if (t == "aie4")
+    return "target_aie4";
   if (t == "aie" || t == "aie1")
     return "target";
   llvm::errs() << "aiecc: unsupported AIE target for Chess toolchain: "
@@ -230,13 +232,15 @@ inline std::string getChessIntrinsicWrapperPath(llvm::StringRef arch,
 }
 
 // The `__AIEARCH__` define a host program is compiled with, keyed off the
-// device's AIE generation (AIE1=10, AIE2/AIEML=20, AIE2P=21).
+// device's AIE generation (AIE1=10, AIE2/AIEML=20, AIE2P=21, AIE4=42).
 inline std::string aieArchDefine(llvm::StringRef target) {
   std::string t = target.lower();
   if (t == "aie2" || t == "aieml")
     return "-D__AIEARCH__=20";
   if (t == "aie2p")
     return "-D__AIEARCH__=21";
+  if (t == "aie4")
+    return "-D__AIEARCH__=42";
   return "-D__AIEARCH__=10";
 }
 

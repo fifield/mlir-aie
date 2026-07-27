@@ -5600,6 +5600,11 @@ struct ConvertAIEVecToLLVMPass
   }
 
   void runOnOperation() override {
+    // AIEVec has no AIE4 lowering yet; AIE4 modules never contain AIEVec ops,
+    // so there is nothing for this pass to do.
+    if (aieTarget == "aie4")
+      return;
+
     ModuleOp module = getOperation();
     std::optional<AIEVecTargetInfo> targetInfo =
         parseAIEVecTarget(aieTarget, module);

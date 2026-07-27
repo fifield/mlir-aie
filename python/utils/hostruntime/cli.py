@@ -56,6 +56,8 @@ def _runtime_device_name(device: Any) -> str:
         return "npu"
     if target_arch == "aie2p":
         return "npu2"
+    if target_arch == "aie4":
+        return "npu3"
     raise RuntimeError(f"Unsupported runtime target architecture: {target_arch}")
 
 
