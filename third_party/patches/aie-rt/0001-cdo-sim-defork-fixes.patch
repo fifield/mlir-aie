@@ -7,7 +7,6 @@ index aa353c51..d06a5882 100644
  	XAIE_IO_CUSTOM_OP_NEXT,
  	XAIE_IO_LOAD_PM_END_INTERNAL = 200,
 -	XAIE_IO_CUSTOM_OP_MAX = UCHAR_MAX,
-+	/* add new op here */
 +	XAIE_IO_CUSTOM_OP_MAX
  } XAie_TxnOpcode;
  
@@ -87,7 +86,6 @@ index 64391b93..a01db97e 100644
 @@ -35,7 +35,16 @@
  
  #ifdef __AIESIM__ /* AIE simulator */
- 
 -#include "main_rts.h"
 +#include <stdint.h>
 +
@@ -99,7 +97,6 @@ index 64391b93..a01db97e 100644
 +
 +void ess_NpiWrite32(uint64_t Addr, uint Data);
 +uint ess_NpiRead32(uint64_t Addr);
- 
  #endif
  
 diff --git a/driver/src/io_backend/xaie_io.c b/driver/src/io_backend/xaie_io.c
