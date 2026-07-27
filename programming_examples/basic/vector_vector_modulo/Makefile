@@ -42,16 +42,16 @@ endif
 $(eval $(call jit_xclbin,${xclbin_target},${insts_target},${aie_py_src},${aieargs}))
 $(eval $(call build_host_exe,${targetname},_build,test.cpp))
 
-# npu3: emit the resolved MLIR, then aiecc.py packs a single full ELF.
+# npu3: emit the resolved MLIR, then aiecc packs a single full ELF.
 build/aie.mlir: ${srcdir}/${aie_py_src}
 	mkdir -p ${@D}
 	python3 $< ${emit_mlir_args} > $@
 
 ${design_elf_target}: build/aie.mlir
 	mkdir -p ${@D}
-	cd ${@D} && aiecc.py --tmpdir=project --no-compile-host \
+	cd ${@D} && aiecc --tmpdir=project \
 		--no-xchesscc --no-xbridge \
-		--generate-full-elf --full-elf-name=$(@F) $(<F)
+		--get-full-elf --full-elf-name=$(@F) $(<F)
 
 .PHONY: run
 ifeq (${devicename},npu3)

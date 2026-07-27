@@ -50,8 +50,8 @@ shim_dma_bw.mlir: shim_dma_bw_placed.py shim_dma_bw_config.py force
 	python shim_dma_bw_placed.py $(GEN_ARGS) > $@
 
 shim_dma_bw.elf: shim_dma_bw.mlir
-	aiecc.py -v --tmpdir=project --xchesscc --xbridge --no-compile-host \
-		--generate-full-elf --full-elf-name=$@ $<
+	aiecc -v --tmpdir=project --xchesscc --xbridge \
+		--get-full-elf --full-elf-name=$@ $<
 
 run: shim_dma_bw.elf
 	python host.py --elf shim_dma_bw.elf $(HOST_ARGS)

@@ -7,7 +7,7 @@ all: passthrough_dmas_placed.elf test.exe
 	python $< > $@
 
 %.elf: %.mlir 
-	aiecc.py -v --tmpdir=project --xchesscc --xbridge --no-compile-host \
-			--generate-full-elf --full-elf-name=$@ $<
+	aiecc -v --tmpdir=project --xchesscc --xbridge \
+			--get-full-elf --full-elf-name=$@ $<
 clean:
 	rm -rf project passthrough_dmas_placed.mlir passthrough_dmas_placed.elf test.exe

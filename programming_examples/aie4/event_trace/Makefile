@@ -22,13 +22,13 @@ project/scale.o: vector_scalar_mul.cc
 	cd project && xchesscc_wrapper aie4 -I $(AIETOOLS_DIR)/include -c $(CURDIR)/$< -o scale.o
 
 event_trace.elf: aie_trace.mlir project/scale.o
-	aiecc.py -v --tmpdir=project --xchesscc --xbridge --no-compile-host \
-		--generate-full-elf --full-elf-name=$@ $<
+	aiecc -v --tmpdir=project --xchesscc --xbridge \
+		--get-full-elf --full-elf-name=$@ $<
 
 # Base design without trace — for verifying data path independently
 base.elf: base.mlir project/scale.o
-	aiecc.py -v --tmpdir=project_base --xchesscc --xbridge --no-compile-host \
-		--generate-full-elf --full-elf-name=$@ $<
+	aiecc -v --tmpdir=project_base --xchesscc --xbridge \
+		--get-full-elf --full-elf-name=$@ $<
 
 run: test.exe event_trace.elf
 	./test.exe event_trace.elf

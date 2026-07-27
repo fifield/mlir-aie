@@ -38,16 +38,16 @@ gemv_placed_trace.mlir: gemv_placed.py
 	python $< -d npu3 -i 1 --trace --trace_size $(TRACE_SIZE) > $@
 
 gemv_4096_192_cascade.elf: gemv_placed.mlir project/kernel.o
-	aiecc.py -v --tmpdir=project --xchesscc --xbridge --no-compile-host \
-		--generate-full-elf --full-elf-name=$@ $<
+	aiecc -v --tmpdir=project --xchesscc --xbridge \
+		--get-full-elf --full-elf-name=$@ $<
 
 gemv_4096_192_cascade_bench.elf: gemv_placed_bench.mlir project/kernel.o
-	aiecc.py -v --tmpdir=project_bench --xchesscc --xbridge --no-compile-host \
-		--generate-full-elf --full-elf-name=$@ $<
+	aiecc -v --tmpdir=project_bench --xchesscc --xbridge \
+		--get-full-elf --full-elf-name=$@ $<
 
 gemv_4096_192_cascade_trace.elf: gemv_placed_trace.mlir project/kernel.o
-	aiecc.py -v --tmpdir=project_trace --xchesscc --xbridge --no-compile-host \
-		--generate-full-elf --full-elf-name=$@ $<
+	aiecc -v --tmpdir=project_trace --xchesscc --xbridge \
+		--get-full-elf --full-elf-name=$@ $<
 
 # Run correctness + per-call benchmark (single iter per call).
 run: test.exe gemv_4096_192_cascade.elf

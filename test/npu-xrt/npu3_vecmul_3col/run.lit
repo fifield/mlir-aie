@@ -4,7 +4,7 @@
 // REQ: ryzen_ai_npu3, peano
 //
 // RUN: %run_on_npu3% python %S/vector_vector_mul.py -o vector_vector_mul.mlir
-// RUN: %python aiecc.py --generate-full-elf --no-xchesscc --no-xbridge --full-elf-name=vector_vector_mul.elf vector_vector_mul.mlir
+// RUN: %aiecc --get-full-elf --no-xchesscc --no-xbridge --full-elf-name=vector_vector_mul.elf vector_vector_mul.mlir
 // RUN: clang %S/test.cpp -o test.exe -std=c++17 -Wall %xrt_flags -lrt -lstdc++ %test_utils_flags
 // RUN: %run_on_npu3% ./test.exe
 

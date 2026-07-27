@@ -6,8 +6,8 @@ all: vector_vector_mul.elf test.exe
 %.mlir: %.py
 	python $< -o $@
 
-%.elf: %.mlir 
-	aiecc.py -v --tmpdir=project --xchesscc --xbridge --no-compile-host \
-			--generate-full-elf --full-elf-name=$@ $<
+%.elf: %.mlir
+	aiecc -v --tmpdir=project --no-xchesscc --no-xbridge \
+			--get-full-elf --full-elf-name=$@ $<
 clean:
 	rm -rf project vector_vector_mul.mlir vector_vector_mul.elf test.exe

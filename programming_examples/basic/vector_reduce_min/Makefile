@@ -41,7 +41,7 @@ endif
 $(eval $(call jit_xclbin,${xclbin_target},${insts_target},${aie_py_src},${aieargs}))
 
 # npu3 / AIE4 (medusa): compile the compute kernel with the AIE4 flags so
-# aiecc.py finds reduce_min.cc.o in the build/ cwd when packing the full ELF.
+# aiecc finds reduce_min.cc.o in the build/ cwd when packing the full ELF.
 ifeq (${devicename},npu3)
 VPATH := ${srcdir}/../../../aie_kernels/aie4
 else
@@ -58,7 +58,7 @@ else
 	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -c $< -o ${@F}
 endif
 
-# npu3: emit the resolved MLIR, then aiecc.py packs a single full ELF.
+# npu3: emit the resolved MLIR, then aiecc packs a single full ELF.
 build/aie.mlir: ${srcdir}/${aie_py_src}
 	mkdir -p ${@D}
 	python3 $< ${emit_mlir_args} > $@
@@ -79,9 +79,9 @@ ${design_elf_target}: build/aie.mlir build/reduce_min.cc.o
 	    cp reduce_min.cc.o "$$obj"; \
 	    llvm-objcopy --redefine-sym reduce_min_vector=$${digest}_reduce_min_vector "$$obj"; \
 	  fi
-	cd ${@D} && aiecc.py --tmpdir=project --no-compile-host \
+	cd ${@D} && aiecc --tmpdir=project \
 		--no-xchesscc --no-xbridge \
-		--generate-full-elf --full-elf-name=$(@F) $(<F)
+		--get-full-elf --full-elf-name=$(@F) $(<F)
 
 $(eval $(call build_host_exe,${targetname},_build,test.cpp))
 

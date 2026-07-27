@@ -9,7 +9,7 @@
 # `make run` loads them via test.cpp (xrt xclbin + insts flow).
 #
 # npu3 / AIE4 (medusa) has no xclbin flow yet: emit the resolved MLIR and
-# have aiecc.py package a single full ELF (build/design.elf); `make run`
+# have aiecc package a single full ELF (build/design.elf); `make run`
 # loads it via xrt::elf + xrt::ext::kernel("main:sequence") (test.cpp
 # --full-elf path).  ``use_placed=1`` swaps the @iron.jit design for the
 # explicitly-placed one (which prints MLIR from positional device/col args).
@@ -68,7 +68,7 @@ else
 	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS}  -c $< -o ${@F}
 endif
 
-# npu3: emit the resolved MLIR, then aiecc.py packs a single full ELF.
+# npu3: emit the resolved MLIR, then aiecc packs a single full ELF.
 build/aie.mlir: ${srcdir}/${aie_py_src}
 	mkdir -p ${@D}
 	python3 $< ${emit_mlir_args} > $@
@@ -89,9 +89,9 @@ ${design_elf_target}: build/aie.mlir build/reduce_add.cc.o
 	    cp reduce_add.cc.o "$$obj"; \
 	    llvm-objcopy --redefine-sym reduce_add_vector=$${digest}_reduce_add_vector "$$obj"; \
 	  fi
-	cd ${@D} && aiecc.py --tmpdir=project --no-compile-host \
+	cd ${@D} && aiecc --tmpdir=project \
 		--no-xchesscc --no-xbridge \
-		--generate-full-elf --full-elf-name=$(@F) $(<F)
+		--get-full-elf --full-elf-name=$(@F) $(<F)
 
 .PHONY: run
 ifeq (${devicename},npu3)

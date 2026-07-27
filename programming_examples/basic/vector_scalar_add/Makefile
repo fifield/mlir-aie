@@ -14,7 +14,7 @@
 #                          NPU2 only — runlist isn't implemented on Phoenix)
 #
 # npu3 / AIE4 (medusa) has no xclbin flow yet: emit the resolved MLIR and
-# have aiecc.py package a single full ELF (build/design.elf); `make run`
+# have aiecc package a single full ELF (build/design.elf); `make run`
 # loads it via xrt::elf + xrt::ext::kernel("main:sequence") (test.cpp
 # --full-elf path).  ``use_placed=1`` swaps the @iron.jit design for the
 # explicitly-placed one (which prints MLIR from a positional device arg).
@@ -57,16 +57,16 @@ endif
 # npu / npu2: @iron.jit xclbin + insts + elf-wrapped insts.
 $(eval $(call jit_xclbin_elf,${xclbin_target},${insts_target},${elf_target},${aie_py_src},${aieargs}))
 
-# npu3: emit the resolved MLIR, then aiecc.py packs a single full ELF.
+# npu3: emit the resolved MLIR, then aiecc packs a single full ELF.
 build/aie.mlir: ${srcdir}/${aie_py_src}
 	mkdir -p ${@D}
 	python3 $< ${emit_mlir_args} > $@
 
 ${design_elf_target}: build/aie.mlir
 	mkdir -p ${@D}
-	cd ${@D} && aiecc.py --tmpdir=project --no-compile-host \
+	cd ${@D} && aiecc --tmpdir=project \
 		--no-xchesscc --no-xbridge \
-		--generate-full-elf --full-elf-name=$(@F) $(<F)
+		--get-full-elf --full-elf-name=$(@F) $(<F)
 
 $(eval $(call build_host_exe,${targetname},_build,test.cpp))
 $(eval $(call build_host_exe,${runlist_targetname},_build_runlist,test_runlist.cpp,-DTEST_SRC=test_runlist.cpp))

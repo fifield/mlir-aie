@@ -10,10 +10,10 @@
 # lets iron build the .o into the same dir, no separate Makefile rule needed.
 #
 # npu3 / AIE4 (medusa) has no xclbin flow yet: emit the resolved MLIR and
-# have aiecc.py package a single full ELF (build/design.elf); `make run`
+# have aiecc package a single full ELF (build/design.elf); `make run`
 # loads it via xrt::elf + xrt::ext::kernel("main:sequence") (test.cpp
 # --full-elf path).  The passthrough compute kernel is compiled to
-# build/passThrough.cc.o with PEANOWRAP4_FLAGS for aiecc.py to pick up.
+# build/passThrough.cc.o with PEANOWRAP4_FLAGS for aiecc to pick up.
 
 srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 
@@ -53,7 +53,7 @@ build/%.cc.o: %.cc
 	mkdir -p ${@D}
 	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP4_FLAGS} -c $< -o ${@F}
 
-# npu3: emit the resolved MLIR, then aiecc.py packs a single full ELF.
+# npu3: emit the resolved MLIR, then aiecc packs a single full ELF.
 build/aie.mlir: ${srcdir}/${aie_py_src}
 	mkdir -p ${@D}
 	python3 $< ${emit_mlir_args} > $@
@@ -64,7 +64,7 @@ ${design_elf_target}: build/aie.mlir build/passThrough.cc.o
 	# kernel by a content-digest object name with a digest-prefixed symbol
 	# (e.g. passThroughLine_<hash>.o / <hash>_passThroughLine) that the jit
 	# toolchain normally produces in-process.  --emit-mlir does not compile
-	# kernels and aiecc.py --generate-full-elf only STAGES pre-built .o files,
+	# kernels and aiecc --get-full-elf only STAGES pre-built .o files,
 	# so materialise whatever link_with name the emitted MLIR asks for from the
 	# one compiled object, renaming the symbol to match, then let aiecc pack the
 	# full ELF.  No-op for the bypass path (no kernel) and the bare name.
@@ -74,9 +74,9 @@ ${design_elf_target}: build/aie.mlir build/passThrough.cc.o
 	    cp passThrough.cc.o "$$obj"; \
 	    llvm-objcopy --redefine-sym passThroughLine=$${digest}_passThroughLine "$$obj"; \
 	  fi
-	cd ${@D} && aiecc.py --tmpdir=project --no-compile-host \
+	cd ${@D} && aiecc --tmpdir=project \
 		--no-xchesscc --no-xbridge \
-		--generate-full-elf --full-elf-name=$(@F) $(<F)
+		--get-full-elf --full-elf-name=$(@F) $(<F)
 
 .PHONY: run
 ifeq (${devicename},npu3)
