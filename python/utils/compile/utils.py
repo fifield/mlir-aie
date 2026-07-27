@@ -48,6 +48,7 @@ def resolve_target_arch(device=None) -> str:
         f"Unsupported device arch: {arch} (device type: {type(device)})."
     )
 
+
 def _make_ir_inlinable(ir_path: str, symbol_name: str) -> None:
     """Rewrite an emitted LLVM IR kernel so aiecc inlines it into the core.
 
@@ -82,6 +83,7 @@ def compile_cxx_core_function(
     source_path: str,
     target_arch: str,
     output_path: str,
+    symbol_name: str | None = None,
     include_dirs: list[str] | None = None,
     compile_args: list[str] | None = None,
     cwd: str | None = None,
@@ -97,6 +99,11 @@ def compile_cxx_core_function(
         target_arch (str): Target architecture, e.g., aie2.
         output_path (str): Output object file path (``.o``), or LLVM IR file
             (``.ll``) when ``inline`` is True.
+        symbol_name (str, optional): Required when ``inline`` is True; names the
+            LLVM ``define`` for the kernel that ``_make_ir_inlinable`` rewrites
+            to ``alwaysinline`` / ``linkonce_odr``.  Must match the symbol as it
+            appears in the freshly emitted ``.ll`` (i.e. the name the source
+            defines the function under).
         include_dirs (list[str], optional): List of include directories to add with -I.
         compile_args (list[str], optional): Additional compile arguments
             forwarded verbatim to the chosen compiler.
@@ -342,6 +349,20 @@ def compile_external_kernel(func, kernel_dir, target_arch):
     if func._compiled:
         return
 
+    # inline + symbol_prefix is unsupported: the MLIR func.call uses the
+    # prefixed func._name, but an inline kernel is emitted as a textual .ll whose
+    # ``define`` carries the un-prefixed _original_name. Object mode reconciles
+    # the two via an llvm-objcopy --redefine-sym rename, which cannot rewrite a
+    # .ll. Fail loudly here rather than downstream in objcopy or as a silent
+    # call/define name mismatch at llvm-link time.
+    if getattr(func, "_inline", False) and getattr(func, "_symbol_prefix", None):
+        raise NotImplementedError(
+            f"ExternalFunction '{func._name}': inline=True combined with "
+            "symbol_prefix is not supported (an inline kernel is emitted as "
+            "LLVM IR and cannot be symbol-renamed). Use inline without a "
+            "symbol_prefix, or drop inline for this kernel."
+        )
+
     # Skip if the object file already exists (cache hit).
     output_file = os.path.join(kernel_dir, func.object_file_name)
     if os.path.exists(output_file):
@@ -360,6 +381,10 @@ def compile_external_kernel(func, kernel_dir, target_arch):
             source_path=source_file,
             target_arch=target_arch,
             output_path=output_file,
+            # The source is compiled under _original_name, so that is the symbol
+            # in the emitted .ll ``define`` that _make_ir_inlinable must rewrite.
+            # (inline + symbol_prefix is rejected above, so no rename applies.)
+            symbol_name=func._original_name,
             include_dirs=func._include_dirs,
             compile_args=func._compile_flags,
             cwd=str(kernel_dir),
@@ -386,6 +411,9 @@ def compile_external_kernel(func, kernel_dir, target_arch):
             source_path=source_file,
             target_arch=target_arch,
             output_path=output_file,
+            # _original_name is the symbol in the emitted .ll ``define`` (see
+            # the source_string branch above).
+            symbol_name=func._original_name,
             include_dirs=include_dirs,
             compile_args=func._compile_flags,
             cwd=kernel_dir,
