@@ -124,6 +124,7 @@ def install_eudsl(req_file, target_dir):
             install_dir,
             "--no-deps",
             "--no-build-isolation",
+            "--no-cache-dir",
             "--config-settings",
             config_setting,
         ]
