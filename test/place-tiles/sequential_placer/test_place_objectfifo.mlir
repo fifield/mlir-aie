@@ -383,3 +383,30 @@ module @linked_fifos_averaged_column {
     // CHECK-NOT: aie.logical_tile
   }
 }
+
+// -----
+
+// Two inputs into one AIE4 core tile. An npu3 core tile has 2 S2MM
+// (input) but only 1 MM2S (output) channel, so this fits exactly and must
+// place cleanly -- the canonical 2-in/1-out elementwise shape.
+//
+// Paired with @npu3_two_outputs_exceeds_capacity in test_place_errors.mlir:
+// together they pin both directions, so the placer's DMA budgets cannot be
+// swapped again without one of the two failing. npu1/npu2 cannot catch
+// that on their own because their budgets are 2 in each direction.
+// CHECK-LABEL: @npu3_two_inputs_fits
+module @npu3_two_inputs_fits {
+  aie.device(npu3) {
+    // CHECK-DAG: %[[CORE:.*]] = aie.tile(0, 2)
+    %core = aie.logical_tile<CoreTile>(0, 2)
+    %mem1 = aie.logical_tile<MemTile>(?, ?)
+    %mem2 = aie.logical_tile<MemTile>(?, ?)
+
+    aie.objectfifo @in1 (%mem1, {%core}, 2 : i32) : !aie.objectfifo<memref<16xi32>>
+    aie.objectfifo @in2 (%mem2, {%core}, 2 : i32) : !aie.objectfifo<memref<16xi32>>
+
+    // CHECK: aie.core(%[[CORE]])
+    aie.core(%core) { aie.end }
+    // CHECK-NOT: aie.logical_tile
+  }
+}

@@ -271,6 +271,12 @@ LogicalResult SequentialPlacer::place(DeviceOp device) {
       continue;
     auto [peerIn, peerOut] =
         totalComputePeers(lt.getOperation(), computePeerAdjacency);
+    // Use getDMACapacity() rather than the LogicalTileOp accessors: those
+    // are named from the stream switch's point of view, so
+    // getNumDestConnections(DMA) is the *MM2S* count and
+    // getNumSourceConnections(DMA) is the *S2MM* count -- the opposite of
+    // the in/out sense meant here. The two agree on AIE2/AIE2P (2 channels
+    // each way) but not on AIE4, where a core tile has 2 S2MM and 1 MM2S.
     auto [inBudget, outBudget] =
         getDMACapacity(*targetModel, lt.getCanonicalTileID());
     auto [nonPeerIn, nonPeerOut] =
@@ -867,7 +873,12 @@ LogicalResult SequentialPlacer::validateAndUpdateChannelUsage(
 
   if (!hasAvailableChannels(tile, inChannels, outChannels) &&
       !fitsSharingShim(tile, logicalTile, {inChannels, outChannels})) {
-    // The same capacity as hasAvailableChannels, so the message matches it.
+    // Must use the same capacity source as hasAvailableChannels() above,
+    // otherwise the diagnostic contradicts the check that produced it. The
+    // LogicalTileOp accessors are stream-switch-oriented and report MM2S
+    // for "dest" and S2MM for "source", which is inverted with respect to
+    // in/out here -- harmless on AIE2/AIE2P (2 channels each way) but not
+    // on AIE4, where a core tile has 2 S2MM and 1 MM2S.
     auto [maxIn, maxOut] = getDMACapacity(*targetModel, tile);
     int availIn = maxIn - availability.inputChannelsUsed[tile];
     int availOut = maxOut - availability.outputChannelsUsed[tile];
@@ -1095,11 +1106,13 @@ void SequentialPlacer::countTurns(
     if (!tile || !requirements.count(tile))
       continue;
     auto &[in, out] = requirements[tile];
+    // getDMACapacity(), not the stream-switch-oriented tile accessors, which
+    // report in/out inverted (see the needNeighborIn computation above).
+    auto [maxIn, maxOut] =
+        getDMACapacity(*targetModel, tile.getCanonicalTileID());
     for (bool coreDrains : {true, false}) {
       int &need = coreDrains ? in : out;
-      auto [inBudget, outBudget] =
-          getDMACapacity(*targetModel, tile.getCanonicalTileID());
-      int budget = coreDrains ? inBudget : outBudget;
+      int budget = coreDrains ? maxIn : maxOut;
       if (need <= budget)
         continue;
       llvm::MapVector<Operation *, SmallVector<ObjectFifoCreateOp>> byTile;

@@ -45,6 +45,25 @@ module @three_outputs_exceeds_capacity {
 
 // -----
 
+// Same overflow on an AIE4 device, where the per-direction DMA budgets
+// differ: an npu3 core tile has 2 S2MM (input) but only 1 MM2S (output)
+// channel, so two outputs overflow where npu1 would have room.
+module @npu3_two_outputs_exceeds_capacity {
+  aie.device(npu3) {
+    // CHECK: error: tile (0, 2) requires 0 input/2 output DMA channels, but only 2 input/1 output available
+    %core = aie.logical_tile<CoreTile>(0, 2)
+    %mem1 = aie.logical_tile<MemTile>(?, ?)
+    %mem2 = aie.logical_tile<MemTile>(?, ?)
+
+    aie.objectfifo @out1 (%core, {%mem1}, 2 : i32) : !aie.objectfifo<memref<16xi32>>
+    aie.objectfifo @out2 (%core, {%mem2}, 2 : i32) : !aie.objectfifo<memref<16xi32>>
+
+    aie.core(%core) { aie.end }
+  }
+}
+
+// -----
+
 // MemTile DMA exhaustion on single-column device
 module @memtile_exhaustion {
   aie.device(npu1_1col) {

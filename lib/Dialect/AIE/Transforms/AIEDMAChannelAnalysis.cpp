@@ -13,6 +13,22 @@ using namespace mlir;
 using namespace xilinx;
 using namespace xilinx::AIE;
 
+/// Number of physical DMA channels a tile has in one direction.
+///
+/// The tile accessors are named from the stream switch's point of view, which
+/// is the reverse of the DMA's, so they read backwards here: MM2S (tile memory
+/// -> stream) enters the switchbox on a *slave* port and so is
+/// getNumDestConnections(), while S2MM (stream -> tile memory) leaves on a
+/// *master* port and is getNumSourceConnections(). Every channel-index path
+/// must go through this helper: they disagreed once, which was invisible on
+/// AIE1/AIE2/AIE2P (2 channels each way) but wrong on AIE4, where a core tile
+/// has 2 S2MM and only 1 MM2S.
+static int getMaxDMAChannels(TileLike tile, DMAChannelDir dir) {
+  return dir == DMAChannelDir::MM2S
+             ? tile.getNumDestConnections(WireBundle::DMA)
+             : tile.getNumSourceConnections(WireBundle::DMA);
+}
+
 Value DMAChannelAnalysis::getTileKey(Value tile) {
   auto tileOp = cast<TileLike>(tile.getDefiningOp());
   auto col = tileOp.tryGetCol();
