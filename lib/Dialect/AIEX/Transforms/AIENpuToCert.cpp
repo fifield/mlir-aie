@@ -1479,9 +1479,9 @@ static void updateCostForOp(Operation &o, AIE::DeviceOp deviceOp,
   } else if (isa<AIEX::CertRelAcqSyncOp>(o)) {
     text_cost += 12; // encoded REL_ACQ_SYNC instruction size
   } else if (isa<AIEX::CertWaitTCTSOp>(o)) {
-    text_cost += 8; // wait tct
+    text_cost += 8; // ISA_OPSIZE_WAIT_TCTS
   } else if (isa<AIEX::CertMaskWrite32Op, AIEX::CertMaskPoll32Op>(o)) {
-    text_cost += 16; // mask write / poll
+    text_cost += 16; // ISA_OPSIZE_MASK_WRITE_32 / MASK_POLL_32
   } else if (isa<AIEX::CertWrite32Op>(o)) {
     text_cost += 12; // ISA_OPSIZE_WRITE_32
   } else if (isa<AIEX::CertApplyOffset57Op>(o)) {

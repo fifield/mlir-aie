@@ -2127,7 +2127,8 @@ getTransactionPipeline(mlir::MLIRContext *ctx, llvm::StringRef elfDir,
 // AIE4 "cert" pipeline: transaction generation, followed by lowering the
 // transaction into the AIE4 firmware's cert representation. Mirrors
 // `builtin.module(aie.device(convert-aie-to-transaction{elf-dir=<elfDir>}),
-// aie-npu-to-cert, aie.device(cert-legalize-pages))`. `aie-npu-to-cert` runs
+// aie-npu-to-cert, aie.device(cert-legalize-pages, aie-cert-verify))`.
+// `aie-npu-to-cert` runs
 // module-wide (its `device-name` option defaults to "main" and absorbs every
 // other device's load-pdi references into that device's cert sections), so
 // this pipeline is meant to run once over the whole module, not per device.
@@ -2144,7 +2145,14 @@ getAie4CertPipeline(mlir::MLIRContext *ctx, llvm::StringRef elfDir) {
   if (mlir::failed(mlir::parsePassPipeline(txnPipelineStr, dpm)))
     return nullptr;
   pm->addPass(X::createAIENpuToCertPass());
-  pm->nest<xilinx::AIE::DeviceOp>().addPass(X::createAIECertPagesPass());
+  auto &certDpm = pm->nest<xilinx::AIE::DeviceOp>();
+  certDpm.addPass(X::createAIECertPagesPass());
+  // aie-cert-verify runs last, after page legalization and placement lowering,
+  // where final pages and uC (group) assignments are known. It turns CERT
+  // firmware constraints (barrier co-location, one wait_tcts per actor, remote
+  // barrier rendezvous, preempt-count parity, id budgets) into compile-time
+  // diagnostics instead of hardware hangs.
+  certDpm.addPass(X::createAIECertVerifyPass());
   return pm;
 }
 

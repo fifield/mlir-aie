@@ -1431,6 +1431,10 @@ public:
   }
   uint32_t getDmaBdIterBits(AIETileType tileType) const override { return 6; }
 
+  /// AIE4 has two microcontrollers (CERT job-runners) per column; the CERT
+  /// group/uC id for column `col` is `2*col + half` (half in {0,1}).
+  uint32_t getNumMicrocontrollersPerColumn() const override { return 2; }
+
   std::optional<TileID> getMemWest(TileID src) const override;
   std::optional<TileID> getMemEast(TileID src) const override;
   std::optional<TileID> getMemNorth(TileID src) const override;
