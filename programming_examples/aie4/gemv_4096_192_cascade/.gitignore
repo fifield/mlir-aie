@@ -1,0 +1,10 @@
+# Build artifacts (regenerable via `make` / `gemv_placed.py`)
+*.elf
+*.exe
+gemv_placed*.mlir
+project*/
+
+# Trace outputs (`make run_trace`)
+trace.bin
+trace.json
+trace_timeline.png

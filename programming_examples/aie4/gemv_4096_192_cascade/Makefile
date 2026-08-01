@@ -18,24 +18,41 @@ ITERS       ?= 1
 BENCH_ITERS ?= 100
 TRACE_SIZE  ?= 8192
 
+# Design geometry (rebuild after changing -- `make clean` first):
+#   COLS    = number of compute columns (1, 2 or 3); N = COLS * 64
+#   STREAMS = per-column shim weight-stream MM2S channels (2 or 4)
+#   K       = contraction length (multiple of 256; <= ~7680 for L1 budget)
+#   BUF_DEPTH = shim->memtile weight stream FIFO depth (lives in memtile SRAM)
+#   AW_DEPTH  = memtile->core AW_lo FIFO depth (lives in core L1)
+#   WHI_DEPTH = memtile->core W_hi  FIFO depth (lives in core L1)
+COLS        ?= 3
+STREAMS     ?= 2
+K           ?= 4096
+BUF_DEPTH   ?= 2
+AW_DEPTH    ?= 1
+WHI_DEPTH   ?= 1
+
+DEPTH_FLAGS := --bufdepth $(BUF_DEPTH) --awdepth $(AW_DEPTH) --whidepth $(WHI_DEPTH)
+
 all: gemv_4096_192_cascade.elf gemv_4096_192_cascade_bench.elf test.exe
 
 %.exe: ${srcdir}/%.cpp
-	clang -std=c++17 -lstdc++ -I/opt/xilinx/xrt/include -L/opt/xilinx/xrt/lib \
+	clang -std=c++17 -lstdc++ -DN_COLS=$(COLS) -DK_TOTAL=$(K) \
+		-I/opt/xilinx/xrt/include -L/opt/xilinx/xrt/lib \
 		-luuid -lxrt_coreutil $< -o $@
 
 project/kernel.o: ${srcdir}/kernel.cc
 	mkdir -p project
-	cd project && xchesscc_wrapper aie4 -I $(AIETOOLS_DIR)/include -c $(abspath $<) -o kernel.o
+	cd project && xchesscc_wrapper aie4 -DK_TOTAL=$(K) -I $(AIETOOLS_DIR)/include -c $(abspath $<) -o kernel.o
 
 gemv_placed.mlir: ${srcdir}/gemv_placed.py
-	python $< -d npu3 -i $(ITERS) > $@
+	python $< -d npu3 -c $(COLS) -s $(STREAMS) -k $(K) -i $(ITERS) $(DEPTH_FLAGS) > $@
 
 gemv_placed_bench.mlir: ${srcdir}/gemv_placed.py
-	python $< -d npu3 -i $(BENCH_ITERS) > $@
+	python $< -d npu3 -c $(COLS) -s $(STREAMS) -k $(K) -i $(BENCH_ITERS) $(DEPTH_FLAGS) > $@
 
 gemv_placed_trace.mlir: ${srcdir}/gemv_placed.py
-	python $< -d npu3 -i 1 --trace --trace_size $(TRACE_SIZE) > $@
+	python $< -d npu3 -c $(COLS) -s $(STREAMS) -k $(K) -i 1 $(DEPTH_FLAGS) --trace --trace_size $(TRACE_SIZE) > $@
 
 gemv_4096_192_cascade.elf: gemv_placed.mlir project/kernel.o
 	aiecc -v --tmpdir=project --xchesscc --xbridge \

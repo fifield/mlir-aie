@@ -20,16 +20,24 @@
 using namespace aie;
 using namespace me_primitive;
 
-// Problem geometry (npu3, 3 cols x 4 compute rows = 12 cores).
-// Total problem: M=1, K=4096, N=192, INT8 x INT8 -> INT32.
-// Per-row K slice = 4096 / 4 rows = 1024.
-// Per-col N slice = 192  / 3 cols = 64 (= tile_N).
+// Problem geometry (npu3, up to 3 cols x 4 compute rows = 12 cores).
+// Total problem: M=1, K=K_TOTAL (default 4096), N=cols*64, INT8 x INT8 -> INT32.
+// K is split evenly across the 4 compute rows, then tiled into tile_K chunks,
+// so K_TOTAL must be a multiple of N_rows*tile_K (=256).  Pass -DK_TOTAL=<K>
+// (from the Makefile `K` variable) to build a different contraction length;
+// this must match the --ktotal passed to gemv_placed.py.
+#ifndef K_TOTAL
+#define K_TOTAL 4096
+#endif
 constexpr unsigned tile_K          = 64;
 constexpr unsigned tile_N          = 64;
-constexpr unsigned K_per_row       = 1024;
-constexpr unsigned K_tiles_per_row = K_per_row / tile_K;  // 16
+constexpr unsigned N_rows          = 4;                   // COMPUTE_ROWS count
+static_assert(K_TOTAL % (N_rows * tile_K) == 0,
+              "K_TOTAL must be a multiple of N_rows*tile_K (=256)");
+constexpr unsigned K_per_row       = K_TOTAL / N_rows;    // 1024 @ K=4096
+constexpr unsigned K_tiles_per_row = K_per_row / tile_K;  // 16   @ K=4096
 constexpr unsigned N_per_col       = tile_N;              // 64
-constexpr unsigned A_slice_bytes   = K_per_row;           // 1024
+constexpr unsigned A_slice_bytes   = K_per_row;           // 1024 @ K=4096
 
 // Per-K-tile staging count: half from each weight pointer.
 // v128int8 carries 128 INT8 (= 32 cols of 4-byte words). Two weight

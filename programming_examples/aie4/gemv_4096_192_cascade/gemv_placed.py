@@ -10,18 +10,21 @@
 #   pacifica-apps/kernels/llama2/llama_4096_512/iron.py
 #
 # This example demonstrates:
-#   - 12-core spatial tiling (3 cols x 4 rows)
-#   - Activation broadcast from a single shim to all 12 compute cores
+#   - Spatial tiling across a configurable 1..3 cols x 4 rows (--cols)
+#   - Activation broadcast from a single shim to all compute cores
 #   - Per-column weight fan-out through the memtile (object_fifo_link)
+#   - Configurable 2 or 4 weight streams (shim MM2S) per column (--streams)
 #   - North->south cascade reduction within each column
 #
-# Problem: M=1, K=4096, N=192, INT8 x INT8 -> INT32.
+# Problem: M=1, K via --ktotal (default 4096), N = cols*64 (192 for 3 cols),
+# INT8 x INT8 -> INT32.
 #
 # NPU3 shim DMA budget = 4 MM2S + 2 S2MM per shim, so the shim cannot
 # afford one weight stream per (c, r) directly.  Instead each compute
-# column's shim sends a single 256-KB blob of all 4 row weight slabs
-# to its memtile, and the memtile splits that blob into 4 per-core
-# FIFOs via object_fifo_link (the vector_add_multicol pattern).
+# column's shim sends its row weight slabs to its memtile over `--streams`
+# MM2S channels (2 or 4), and the memtile splits each stream into the
+# per-core FIFOs via object_fifo_link (the vector_add_multicol pattern).
+# More streams = more parallel shim DMA channels = higher weight-load BW.
 
 import argparse
 import sys
@@ -34,52 +37,107 @@ from aie.extras.context import mlir_mod_ctx
 from aie.helpers.dialects.scf import _for as range_
 
 
-# Hardware partitioning
-N_COLS         = 3
+# Hardware partitioning.  N_COLS is configurable (1, 2 or 3) via --cols;
+# COMPUTE_ROWS is fixed at the 4 compute rows of an npu3 column.
 COMPUTE_ROWS   = [2, 3, 4, 5]
 N_ROWS         = len(COMPUTE_ROWS)
 
-# Problem geometry (must match constants in kernel.cc)
+# Problem geometry (must match constants in kernel.cc).  TILE_K/TILE_N are
+# fixed by the 64x64 staging-matrix kernel; N_TOTAL scales with N_COLS and
+# the K-derived byte sizes scale with K_TOTAL -- both computed in my_gemv.
 TILE_K         = 64
 TILE_N         = 64
-K_TOTAL        = 4096
-N_TOTAL        = N_COLS * TILE_N            # 192
-K_PER_ROW      = K_TOTAL // N_ROWS          # 1024
-K_TILES_PER_ROW = K_PER_ROW // TILE_K       # 16
 N_PER_COL      = TILE_N                     # 64
 
-# Per-core data sizes.  Each core's 64-KB weight slab is split along
-# the N dimension and streamed via TWO parallel shim MM2S channels
-# (mirroring the source design's two weight streams).  W_lo carries N
-# cols 0..31 of every K-tile; W_hi carries N cols 32..63.
-#
-# Compute tiles have only 2 input DMA channels.  Since each core needs
-# A + W_lo + W_hi (= 3 streams), we embed this core's per-row 1024-byte
-# A slice at the FRONT of its W_lo buffer:
-#   AW_lo per core = [A_row_slice 1 KB | W_lo_slab 32 KB] = 33 KB
-#   W_hi  per core = 32 KB
-# Two FIFOs per core, fits the 2-input-channel budget.
-A_SLICE_BYTES        = K_PER_ROW                              # 1024 B per row
-W_HALF_BYTES         = K_PER_ROW * TILE_N // 2                # 32768 B
-AW_LO_PER_CORE_BYTES = A_SLICE_BYTES + W_HALF_BYTES           # 33792 B
-W_HI_PER_CORE_BYTES  = W_HALF_BYTES                           # 32768 B
-AW_LO_COL_BYTES      = N_ROWS * AW_LO_PER_CORE_BYTES          # 135168 B per shim->memtile blob
-W_HI_COL_BYTES       = N_ROWS * W_HI_PER_CORE_BYTES           # 131072 B per shim->memtile blob
+BUF_DEPTH      = 2       # shim -> memtile stream FIFO depth (memtile SRAM)
+AW_LO_DEPTH    = 1       # memtile -> core AW_lo FIFO depth (core L1)
+W_HI_DEPTH     = 1       # memtile -> core W_hi  FIFO depth (core L1)
 
-BUF_DEPTH            = 2
+# The shim BD's outermost (iteration) size field is 6 bits, so one shim
+# descriptor can repeat a transfer at most 64 times.
+MAX_BD_REPEAT  = 64
+
+# Approx. per-core L1 budget for the two weight buffers (AW_lo + W_hi).
+# AIE4 core local memory is 128 KB; reserve headroom for the C buffer and
+# stack.  Per-core weight bytes = depth * K_per_row * (1 + TILE_N).
+L1_WEIGHT_BUDGET = 128 * 1024 - 3 * 1024    # ~125 KB
 
 
-def my_gemv(dev, iters_per_call=1, enable_trace=False, trace_size=8192):
+def my_gemv(dev, n_cols=3, weight_streams=2, k_total=4096,
+            iters_per_call=1, enable_trace=False, trace_size=8192,
+            buf_depth=BUF_DEPTH, aw_lo_depth=AW_LO_DEPTH,
+            w_hi_depth=W_HI_DEPTH):
+    # Column count (1..3) and per-column shim weight-stream count (2 or 4).
+    N_COLS  = n_cols
+    N_TOTAL = N_COLS * TILE_N
+
+    # K (contraction length) is configurable via --ktotal.  It is split
+    # evenly across the N_ROWS compute rows and each row's slice is tiled
+    # into TILE_K chunks, so K_TOTAL must be a multiple of N_ROWS*TILE_K.
+    K_TOTAL = k_total
+    if K_TOTAL % (N_ROWS * TILE_K) != 0:
+        raise ValueError(
+            f"K_TOTAL must be a multiple of N_ROWS*TILE_K "
+            f"(={N_ROWS * TILE_K}); got {K_TOTAL}")
+    K_PER_ROW       = K_TOTAL // N_ROWS
+    K_TILES_PER_ROW = K_PER_ROW // TILE_K
+
+    # Per-core data sizes.  Each core's weight slab is split along N into two
+    # halves streamed via parallel shim MM2S channels: W_lo carries N cols
+    # 0..31 of every K-tile, W_hi cols 32..63.  Compute tiles have only 2
+    # input DMA channels and each core needs A + W_lo + W_hi (3 streams), so
+    # this core's per-row A slice (K_PER_ROW bytes) is embedded at the FRONT
+    # of its AW_lo buffer -- two FIFOs per core, within the 2-channel budget.
+    #   AW_lo per core = [A_slice | W_lo half-slab]
+    #   W_hi  per core = W_hi half-slab
+    A_SLICE_BYTES        = K_PER_ROW
+    W_HALF_BYTES         = K_PER_ROW * TILE_N // 2
+    AW_LO_PER_CORE_BYTES = A_SLICE_BYTES + W_HALF_BYTES
+    W_HI_PER_CORE_BYTES  = W_HALF_BYTES
+    AW_LO_COL_BYTES      = N_ROWS * AW_LO_PER_CORE_BYTES
+    W_HI_COL_BYTES       = N_ROWS * W_HI_PER_CORE_BYTES
+
+    # L1 footprint guard (approximate; the chess build is the real check).
+    # The per-core FIFO depths multiply the L1 cost, so deepening the
+    # memtile->core hop trades L1 for pipelining.
+    per_core_weight_bytes = (aw_lo_depth * AW_LO_PER_CORE_BYTES
+                             + w_hi_depth * W_HI_PER_CORE_BYTES)
+    if per_core_weight_bytes > L1_WEIGHT_BUDGET:
+        raise ValueError(
+            f"K_TOTAL={K_TOTAL} with AW_lo depth {aw_lo_depth} / W_hi depth "
+            f"{w_hi_depth} needs {per_core_weight_bytes} B of weight "
+            f"buffers per core, over the ~{L1_WEIGHT_BUDGET} B L1 budget; "
+            f"reduce K_TOTAL or the per-core depths "
+            f"(K <= ~7680 for the default depth-1 4-row layout)")
+
+    # Each column's weight payload has two "kinds": AW_lo (A slice + low
+    # N-half) and W_hi (high N-half).  Each kind is split across
+    # streams_per_kind = weight_streams // 2 shim MM2S channels along the
+    # row dimension, rows_per_stream rows per channel.  weight_streams=2 ->
+    # one channel per kind (all N_ROWS rows); weight_streams=4 -> two
+    # channels per kind (N_ROWS/2 rows each).  Either way the memtile fans
+    # each stream out to its row group's per-core FIFOs, so each compute
+    # tile still consumes exactly 2 input FIFOs.
+    if weight_streams not in (2, 4):
+        raise ValueError(f"weight_streams must be 2 or 4, got {weight_streams}")
+    streams_per_kind = weight_streams // 2
+    if N_ROWS % streams_per_kind != 0:
+        raise ValueError(
+            f"N_ROWS={N_ROWS} not divisible by streams_per_kind={streams_per_kind}")
+    rows_per_stream    = N_ROWS // streams_per_kind
+    aw_lo_stream_bytes = rows_per_stream * AW_LO_PER_CORE_BYTES
+    w_hi_stream_bytes  = rows_per_stream * W_HI_PER_CORE_BYTES
+
     @device(dev)
     def device_body():
         # ---------------------------------------------------------------
         # Element types
         # ---------------------------------------------------------------
-        aw_lo_ty       = np.ndarray[(AW_LO_PER_CORE_BYTES,), np.dtype[np.int8]]
-        w_hi_ty        = np.ndarray[(W_HI_PER_CORE_BYTES,),  np.dtype[np.int8]]
-        aw_lo_col_ty   = np.ndarray[(AW_LO_COL_BYTES,),      np.dtype[np.int8]]
-        w_hi_col_ty    = np.ndarray[(W_HI_COL_BYTES,),       np.dtype[np.int8]]
-        c_slab_ty      = np.ndarray[(N_PER_COL,),            np.dtype[np.int32]]
+        aw_lo_ty        = np.ndarray[(AW_LO_PER_CORE_BYTES,), np.dtype[np.int8]]
+        w_hi_ty         = np.ndarray[(W_HI_PER_CORE_BYTES,),  np.dtype[np.int8]]
+        aw_lo_stream_ty = np.ndarray[(aw_lo_stream_bytes,),   np.dtype[np.int8]]
+        w_hi_stream_ty  = np.ndarray[(w_hi_stream_bytes,),    np.dtype[np.int8]]
+        c_slab_ty       = np.ndarray[(N_PER_COL,),            np.dtype[np.int32]]
 
         # Host tensors: A is gone (embedded), W tensor is per-col
         # [AW_lo_blob | W_hi_blob] concatenated.
@@ -117,67 +175,92 @@ def my_gemv(dev, iters_per_call=1, enable_trace=False, trace_size=8192):
         mems  = [tile(c, 1) for c in range(N_COLS)]
         cores = [[tile(c, r) for r in COMPUTE_ROWS] for c in range(N_COLS)]
 
-        # Required Control32 packetflow per shim (sibling examples do this).
-        for c in range(N_COLS):
-            packetflow(
-                c,
-                shims[c],
-                WireBundle.Control32,
-                0,
-                [{"dest": shims[0], "port": WireBundle.Controller32, "channel": 0}],
-            )
+        # Required Control32 packetflows per shim.  On AIE4, shim DMA
+        # completion tokens for MM2S channels 2/3 return on Control32:1, so
+        # 4-stream designs need both control return ports routed to the
+        # controller.
+        control_return_channels = 2 if weight_streams > 2 else 1
+        for ctrl_ch in range(control_return_channels):
+            for c in range(N_COLS):
+                packetflow(
+                    c,
+                    shims[c],
+                    WireBundle.Control32,
+                    ctrl_ch,
+                    [
+                        {
+                            "dest": shims[0],
+                            "port": WireBundle.Controller32,
+                            "channel": 0,
+                        }
+                    ],
+                )
 
         # ---------------------------------------------------------------
-        # Weights: each column's shim sends TWO blobs to its memtile via
-        # two parallel MM2S channels:
-        #   AW_lo blob (135 KB) = per-row [A_slice 1 KB | W_lo_slab 32 KB]
-        #                         x N_ROWS rows
-        #   W_hi  blob (128 KB) = per-row W_hi_slab 32 KB x N_ROWS rows
-        # The memtile splits each blob into 4 per-(c,r) FIFOs via
-        # object_fifo_link with row offsets.  The activation slice rides
-        # along inside AW_lo so the per-core compute tile only consumes
-        # 2 input FIFOs (within the 2-input-channel hard limit).
+        # Weights: each column's shim drives `weight_streams` MM2S channels.
+        # The per-column payload has two kinds -- AW_lo (per-row
+        # [A_slice 1 KB | W_lo_slab 32 KB]) and W_hi (per-row W_hi_slab
+        # 32 KB) -- and each kind is split across streams_per_kind channels
+        # along the row dimension (rows_per_stream rows per channel):
+        #   weight_streams=2 -> 1 channel/kind carrying all N_ROWS rows
+        #                       (AW_lo blob 135 KB, W_hi blob 128 KB)
+        #   weight_streams=4 -> 2 channels/kind carrying N_ROWS/2 rows each
+        # The memtile splits each stream into its row group's per-(c,r)
+        # FIFOs via object_fifo_link with per-core offsets.  The activation
+        # slice rides along inside AW_lo so each compute tile only consumes
+        # 2 input FIFOs (within the 2-input-channel hard limit), regardless
+        # of how many shim streams feed the memtile.
         #
         # Per-core L1 footprint: AW_lo (33 KB, depth 1) + W_hi (32 KB,
         # depth 1) + C (256 B, depth 2) + stack ~1 KB = ~66 KB.  Fits in
         # the 128-KB AIE4 core local memory.
         # ---------------------------------------------------------------
-        aw_lo_shim_to_mem = []
-        w_hi_shim_to_mem  = []
-        aw_lo_per_core    = [[None] * N_ROWS for _ in range(N_COLS)]
-        w_hi_per_core     = [[None] * N_ROWS for _ in range(N_COLS)]
-        aw_lo_row_offsets = [r_idx * AW_LO_PER_CORE_BYTES for r_idx in range(N_ROWS)]
-        w_hi_row_offsets  = [r_idx * W_HI_PER_CORE_BYTES  for r_idx in range(N_ROWS)]
+        aw_lo_per_core = [[None] * N_ROWS for _ in range(N_COLS)]
+        w_hi_per_core  = [[None] * N_ROWS for _ in range(N_COLS)]
+        aw_lo_streams  = [[None] * streams_per_kind for _ in range(N_COLS)]
+        w_hi_streams   = [[None] * streams_per_kind for _ in range(N_COLS)]
         for c in range(N_COLS):
-            aw_lo_shim_to_mem.append(
-                object_fifo(f"AWlo_s{c}", shims[c], mems[c], BUF_DEPTH,
-                            aw_lo_col_ty)
-            )
-            w_hi_shim_to_mem.append(
-                object_fifo(f"Whi_s{c}",  shims[c], mems[c], BUF_DEPTH,
-                            w_hi_col_ty)
-            )
-            aw_fifos, hi_fifos = [], []
+            # Per-core consumer FIFOs (always 2 per core: AW_lo + W_hi).
             for r_idx in range(N_ROWS):
                 aw_lo_per_core[c][r_idx] = object_fifo(
                     f"AWlo_m{c}_r{r_idx}", mems[c], cores[c][r_idx],
-                    1, aw_lo_ty,
+                    aw_lo_depth, aw_lo_ty,
                 )
                 w_hi_per_core[c][r_idx] = object_fifo(
                     f"Whi_m{c}_r{r_idx}",  mems[c], cores[c][r_idx],
-                    1, w_hi_ty,
+                    w_hi_depth, w_hi_ty,
                 )
-                aw_fifos.append(aw_lo_per_core[c][r_idx])
-                hi_fifos.append(w_hi_per_core[c][r_idx])
-            object_fifo_link(aw_lo_shim_to_mem[c], aw_fifos, [], aw_lo_row_offsets)
-            object_fifo_link(w_hi_shim_to_mem[c],  hi_fifos, [], w_hi_row_offsets)
+            # One shim->memtile FIFO per (kind, row group), each linked to
+            # the rows_per_stream cores of its group with per-core offsets.
+            for g in range(streams_per_kind):
+                rows = range(g * rows_per_stream, (g + 1) * rows_per_stream)
+                aw_lo_streams[c][g] = object_fifo(
+                    f"AWlo_s{c}_g{g}", shims[c], mems[c], buf_depth,
+                    aw_lo_stream_ty,
+                )
+                w_hi_streams[c][g] = object_fifo(
+                    f"Whi_s{c}_g{g}",  shims[c], mems[c], buf_depth,
+                    w_hi_stream_ty,
+                )
+                object_fifo_link(
+                    aw_lo_streams[c][g],
+                    [aw_lo_per_core[c][r] for r in rows],
+                    [],
+                    [i * AW_LO_PER_CORE_BYTES for i in range(rows_per_stream)],
+                )
+                object_fifo_link(
+                    w_hi_streams[c][g],
+                    [w_hi_per_core[c][r] for r in rows],
+                    [],
+                    [i * W_HI_PER_CORE_BYTES for i in range(rows_per_stream)],
+                )
 
         # ---------------------------------------------------------------
         # Output: one S2MM per column from the cascade root (row index 0
         # = hw row 2) directly to its column's shim.  64 INT32 = 256 B.
         # ---------------------------------------------------------------
         c_fifos = [
-            object_fifo(f"C_c{c}", cores[c][0], shims[c], BUF_DEPTH, c_slab_ty)
+            object_fifo(f"C_c{c}", cores[c][0], shims[c], buf_depth, c_slab_ty)
             for c in range(N_COLS)
         ]
 
@@ -279,39 +362,68 @@ def my_gemv(dev, iters_per_call=1, enable_trace=False, trace_size=8192):
         #   C: per column, 256-byte drain (64 INT32)
         # Layout (whole W tensor, per col): [AW_lo blob | W_hi blob].
         #
-        # When iters_per_call > 1 we issue the full task batch repeatedly
-        # inside a single kernel invocation -- the cores' infinite outer
-        # loop already keeps them ready to consume each new batch.  This
-        # amortizes the XRT host launch overhead so the benchmark
-        # measures device-side steady-state throughput.
+        # When iters_per_call > 1 the batch is issued ONCE with the shim
+        # BD's hardware repeat_count set to iters_per_call, not as an
+        # unrolled Python loop of start/await pairs.
+        #
+        # PERF (measured on npu3, K=4096/COLS=3/STREAMS=2): the unrolled
+        # form put a dma_start_task + dma_await_task barrier between every
+        # iteration, which fully drains the shim->memtile->core->cascade
+        # pipeline each time.  A two-point fit over K=2048 and K=4096
+        # showed ~7.5 us/iter of iteration-invariant cost against only
+        # ~7.5 ns/KB of marginal transfer cost (~133 GB/s marginal), i.e.
+        # over half of each 13.5 us iteration was barrier, not data.  That
+        # is why deepening the objectfifos does nothing here: with a
+        # barrier every iteration there is nothing to prefetch across.
+        # Folding the repeat into a single descriptor per channel lets the
+        # shim stream continuously, back-pressured only by the consuming
+        # objectfifo's locks (the same pattern shim_dma_memtile_bw uses to
+        # reach its ~110-115 GB/s).
         # ---------------------------------------------------------------
         col_stride = AW_LO_COL_BYTES + W_HI_COL_BYTES
 
-        def emit_one_batch(W, C):
+        def emit_one_batch(W, C, reps=1):
+            # `reps` becomes the shim BD's hardware repeat_count (sizes[0]
+            # with a zero outer stride): ONE descriptor per channel that
+            # re-issues the same transfer `reps` times back to back.  The
+            # consuming objectfifo sees `reps` objects and back-pressures
+            # the shim through its own locks, so the shim streams
+            # continuously instead of being drained and restarted per
+            # iteration.  See the perf note above emit_one_batch's caller.
             tasks = []
             for c in range(N_COLS):
                 col_base = c * col_stride
-                tasks.append(
-                    shim_dma_single_bd_task(
-                        aw_lo_shim_to_mem[c], W,
-                        offset=col_base,
-                        sizes=[1, 1, 1, AW_LO_COL_BYTES],
-                        issue_token=True,
+                # AW_lo streams: contiguous row groups at the front of the
+                # column blob.
+                for g in range(streams_per_kind):
+                    tasks.append(
+                        shim_dma_single_bd_task(
+                            aw_lo_streams[c][g], W,
+                            offset=col_base + g * aw_lo_stream_bytes,
+                            sizes=[reps, 1, 1, aw_lo_stream_bytes],
+                            strides=[0, 0, 0, 1],
+                            issue_token=True,
+                        )
                     )
-                )
-                tasks.append(
-                    shim_dma_single_bd_task(
-                        w_hi_shim_to_mem[c], W,
-                        offset=col_base + AW_LO_COL_BYTES,
-                        sizes=[1, 1, 1, W_HI_COL_BYTES],
-                        issue_token=True,
+                # W_hi streams: contiguous row groups immediately after the
+                # AW_lo blob in the column blob.
+                hi_base = col_base + AW_LO_COL_BYTES
+                for g in range(streams_per_kind):
+                    tasks.append(
+                        shim_dma_single_bd_task(
+                            w_hi_streams[c][g], W,
+                            offset=hi_base + g * w_hi_stream_bytes,
+                            sizes=[reps, 1, 1, w_hi_stream_bytes],
+                            strides=[0, 0, 0, 1],
+                            issue_token=True,
+                        )
                     )
-                )
                 tasks.append(
                     shim_dma_single_bd_task(
                         c_fifos[c], C,
                         offset=c * N_PER_COL,
-                        sizes=[1, 1, 1, N_PER_COL],
+                        sizes=[reps, 1, 1, N_PER_COL],
+                        strides=[0, 0, 0, 1],
                         issue_token=True,
                     )
                 )
@@ -321,6 +433,17 @@ def my_gemv(dev, iters_per_call=1, enable_trace=False, trace_size=8192):
             dma_start_task(*tasks)
             dma_await_task(*tasks)
 
+        def emit_iters(W, C, total):
+            # The shim BD's outermost (iteration) size field is 6 bits, so a
+            # single descriptor can repeat at most MAX_BD_REPEAT times.  Split
+            # the requested iteration count into as few chunks as possible;
+            # only the chunk boundaries pay the start/await pipeline drain.
+            remaining = total
+            while remaining > 0:
+                reps = min(remaining, MAX_BD_REPEAT)
+                emit_one_batch(W, C, reps)
+                remaining -= reps
+
         if enable_trace:
             trace_ty = np.ndarray[(trace_size,), np.dtype[np.int32]]
 
@@ -328,20 +451,31 @@ def my_gemv(dev, iters_per_call=1, enable_trace=False, trace_size=8192):
             def sequence(W, C, T):
                 trace_start_config("core_trace")
                 trace_host_config(buffer_size=trace_size, arg_idx=2)
-                for _ in range(iters_per_call):
-                    emit_one_batch(W, C)
+                emit_iters(W, C, iters_per_call)
         else:
             @runtime_sequence(w_tensor_ty, c_tensor_ty)
             def sequence(W, C):
-                for _ in range(iters_per_call):
-                    emit_one_batch(W, C)
+                emit_iters(W, C, iters_per_call)
 
 
 # -----------------------------------------------------------------------
 parser = argparse.ArgumentParser(description="High-perf GEMV (cascade) for npu3")
 parser.add_argument("-d", "--dev", default="npu3", help="AIE device (npu3 only)")
+parser.add_argument("-c", "--cols", type=int, default=3, choices=(1, 2, 3),
+                    help="Number of compute columns (N = cols * 64)")
+parser.add_argument("-s", "--streams", type=int, default=2, choices=(2, 4),
+                    help="Per-column shim weight-stream (MM2S) channels")
+parser.add_argument("-k", "--ktotal", type=int, default=4096,
+                    help="Contraction length K (multiple of N_ROWS*TILE_K=256; "
+                         "<= ~7680 for the default layout)")
 parser.add_argument("-i", "--iters", type=int, default=1,
                     help="GEMV iterations per kernel call (batch factor)")
+parser.add_argument("--bufdepth", type=int, default=BUF_DEPTH,
+                    help="shim->memtile weight stream FIFO depth (memtile SRAM)")
+parser.add_argument("--awdepth", type=int, default=AW_LO_DEPTH,
+                    help="memtile->core AW_lo FIFO depth (core L1)")
+parser.add_argument("--whidepth", type=int, default=W_HI_DEPTH,
+                    help="memtile->core W_hi FIFO depth (core L1)")
 parser.add_argument("--trace", action="store_true",
                     help="Enable event trace (emits extra trace buffer arg)")
 parser.add_argument("--trace_size", type=int, default=8192,
@@ -353,9 +487,15 @@ if args.dev != "npu3":
 
 with mlir_mod_ctx() as ctx:
     my_gemv(AIEDevice.npu3,
+            n_cols=args.cols,
+            weight_streams=args.streams,
+            k_total=args.ktotal,
             iters_per_call=args.iters,
             enable_trace=args.trace,
-            trace_size=args.trace_size)
+            trace_size=args.trace_size,
+            buf_depth=args.bufdepth,
+            aw_lo_depth=args.awdepth,
+            w_hi_depth=args.whidepth)
     res = ctx.module.operation.verify()
     if res is True:
         print(ctx.module)

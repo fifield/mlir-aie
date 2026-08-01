@@ -50,11 +50,25 @@
 #include <xrt/xrt_device.h>
 #include <xrt/xrt_kernel.h>
 
-constexpr int N_COLS         = 3;
+// N_COLS (1..3) is set at compile time to match the --cols passed to
+// gemv_placed.py.  The weight-stream count (--streams) is internal to the
+// device design (shim->memtile partitioning) and does NOT change the host
+// data layout, so the host harness does not need to know it.
+#ifndef N_COLS
+#define N_COLS 3
+#endif
+static_assert(N_COLS >= 1 && N_COLS <= 3, "N_COLS must be 1, 2, or 3");
 constexpr int N_ROWS         = 4;        // compute rows per column
 constexpr int TILE_K         = 64;
 constexpr int TILE_N         = 64;
-constexpr int K_TOTAL        = 4096;
+// K_TOTAL (contraction length) is set at compile time to match the --ktotal
+// passed to gemv_placed.py (and -DK_TOTAL passed to kernel.cc). Must be a
+// multiple of N_ROWS*TILE_K (=256).
+#ifndef K_TOTAL
+#define K_TOTAL 4096
+#endif
+static_assert(K_TOTAL % (N_ROWS * TILE_K) == 0,
+              "K_TOTAL must be a multiple of N_ROWS*TILE_K (=256)");
 constexpr int N_TOTAL        = N_COLS * TILE_N;          // 192
 constexpr int K_PER_ROW      = K_TOTAL / N_ROWS;         // 1024
 constexpr int K_TILES_PER_ROW = K_PER_ROW / TILE_K;      // 16
@@ -117,10 +131,18 @@ static inline size_t pack_a_byte(int c, int k) {
 
 // Usage: test.exe [elf_file] [iters_per_call] [trace_elems]
 //   elf_file       default "gemv_4096_192_cascade_bench.elf"
-//   iters_per_call number of GEMV iterations baked into the elf's
-//                  runtime sequence (matches `-i` passed to gemv_placed.py);
-//                  per-call wall time is divided by this value when
-//                  reporting steady-state throughput.
+//   iters_per_call MUST equal the `-i` value the ELF was built with (the
+//                  number of GEMV iterations baked into its runtime
+//                  sequence): 1 for the default ELF, BENCH_ITERS (100) for
+//                  the bench ELF.  This is NOT a runtime knob -- the ELF
+//                  always runs exactly its baked-in count per launch.  The
+//                  measured per-launch wall time is divided by this value to
+//                  report per-iteration throughput, so passing a number that
+//                  does NOT match the build just rescales the reported
+//                  numbers by a constant and produces meaningless throughput
+//                  (e.g. passing 10000 against the 100-iter bench ELF makes
+//                  every metric look 100x too fast).  Use `make run_bench`,
+//                  which always passes the matching value.
 //   trace_elems    if elf name contains "trace", allocate a trace buffer
 //                  of this many INT32 elements (default 8192) and write
 //                  it to trace.bin after the run.
@@ -267,11 +289,13 @@ int main(int argc, const char *argv[]) {
 
   std::vector<double> us_per_call;
   us_per_call.reserve(OUTER);
+  double us_launch_min = 1e30;  // raw per-launch wall time (NOT divided)
   for (int i = 0; i < OUTER; i++) {
     auto t0 = std::chrono::high_resolution_clock::now();
     launch();
     auto t1 = std::chrono::high_resolution_clock::now();
     double us_outer = std::chrono::duration<double, std::micro>(t1 - t0).count();
+    us_launch_min = std::min(us_launch_min, us_outer);
     us_per_call.push_back(us_outer / iters_per_call);
   }
 
@@ -319,6 +343,36 @@ int main(int argc, const char *argv[]) {
   report("median:", us_median);
   report("mean:",   us_mean);
   report("max:",    us_max);
+
+  // ------------------------------------------------------------------
+  // Plausibility guard.  The ELF runs a FIXED number of GEMVs per launch
+  // (its build-time `-i` value); iters_per_call must match it.  If it does
+  // not, the per-iteration numbers above are just the (constant) per-launch
+  // time rescaled by a wrong divisor.  Each GEMV must stream W_BYTES from
+  // DDR through the shim DMAs, so the implied weight-load bandwidth cannot
+  // exceed the device's physical DDR/shim ceiling.  npu3 peaks well under
+  // ~100 GB/s on this path (see shim_dma_memtile_bw); anything above this
+  // generous ceiling means iters_per_call does not match the ELF.
+  constexpr double SANE_PEAK_GBS = 300.0;
+  const double best_gbs = bytes_per_call / us_min / 1e3;
+  std::cout << "\n  (raw per-launch wall time: " << std::fixed
+            << std::setprecision(2) << us_launch_min
+            << " us; reported per-iter = this / iters_per_call="
+            << iters_per_call << ")\n";
+  if (best_gbs > SANE_PEAK_GBS) {
+    std::cerr << "\nWARNING: implied " << std::fixed << std::setprecision(0)
+              << best_gbs << " GB/s exceeds the physical ceiling (~"
+              << SANE_PEAK_GBS << " GB/s).\n"
+              << "         iters_per_call=" << iters_per_call
+              << " almost certainly does NOT match the ELF's baked-in `-i`"
+              << " count.\n"
+              << "         The ELF runs a fixed number of GEMVs per launch;"
+              << " pass that exact number\n"
+              << "         (1 for the default ELF, BENCH_ITERS for the bench"
+              << " ELF) or use `make run_bench`.\n"
+              << "         Reported per-iteration throughput is invalid.\n";
+    return 2;
+  }
 
   return 0;
 }
