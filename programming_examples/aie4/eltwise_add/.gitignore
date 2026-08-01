@@ -1,0 +1,5 @@
+# Build artifacts (regenerable via `make`)
+*.elf
+*.exe
+eltwise_add_placed.mlir
+project/

@@ -1,0 +1,5 @@
+# Build artifacts (regenerable via `make`)
+*.elf
+*.exe
+passthrough_dmas_placed.mlir
+project/

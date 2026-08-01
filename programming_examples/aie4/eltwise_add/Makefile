@@ -1,9 +1,11 @@
+srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
+
 all: eltwise_add_placed.elf test.exe
 
-%.exe: %.cpp
+%.exe: ${srcdir}/%.cpp
 	clang -std=c++17 -lstdc++ -I/opt/xilinx/xrt/include -L/opt/xilinx/xrt/lib -luuid -lxrt_coreutil $< -o $@
 
-%.mlir: %.py
+%.mlir: ${srcdir}/%.py
 	python $< -d npu3 -i1s 2048 -i2s 2048 -os 2048 > $@
 
 %.elf: %.mlir 

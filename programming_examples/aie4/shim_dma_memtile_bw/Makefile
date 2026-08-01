@@ -4,6 +4,8 @@
 #
 # (c) Copyright 2026 Advanced Micro Devices, Inc. or its affiliates
 
+srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
+
 CHANNELS ?= 12
 CHANNEL_ORDER ?= roundrobin
 BYTES_PER_CHANNEL ?= 16MiB
@@ -46,15 +48,15 @@ HOST_ARGS = \
 
 all: shim_dma_bw.elf
 
-shim_dma_bw.mlir: shim_dma_bw_placed.py shim_dma_bw_config.py force
-	python shim_dma_bw_placed.py $(GEN_ARGS) > $@
+shim_dma_bw.mlir: ${srcdir}/shim_dma_bw_placed.py ${srcdir}/shim_dma_bw_config.py force
+	python ${srcdir}/shim_dma_bw_placed.py $(GEN_ARGS) > $@
 
 shim_dma_bw.elf: shim_dma_bw.mlir
 	aiecc -v --tmpdir=project --xchesscc --xbridge \
 		--get-full-elf --full-elf-name=$@ $<
 
 run: shim_dma_bw.elf
-	python host.py --elf shim_dma_bw.elf $(HOST_ARGS)
+	python ${srcdir}/host.py --elf shim_dma_bw.elf $(HOST_ARGS)
 
 clean:
 	rm -rf project shim_dma_bw.mlir shim_dma_bw.elf

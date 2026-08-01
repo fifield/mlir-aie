@@ -14,19 +14,19 @@ trace_size = 8192
 
 all: event_trace.elf test.exe
 
-%.exe: %.cpp
+%.exe: ${srcdir}/%.cpp
 	clang -std=c++17 -lstdc++ -I/opt/xilinx/xrt/include -L/opt/xilinx/xrt/lib -luuid -lxrt_coreutil $< -o $@
 
-project/scale.o: vector_scalar_mul.cc
+project/scale.o: ${srcdir}/vector_scalar_mul.cc
 	mkdir -p project
-	cd project && xchesscc_wrapper aie4 -I $(AIETOOLS_DIR)/include -c $(CURDIR)/$< -o scale.o
+	cd project && xchesscc_wrapper aie4 -I $(AIETOOLS_DIR)/include -c $(abspath $<) -o scale.o
 
-event_trace.elf: aie_trace.mlir project/scale.o
+event_trace.elf: ${srcdir}/aie_trace.mlir project/scale.o
 	aiecc -v --tmpdir=project --xchesscc --xbridge \
 		--get-full-elf --full-elf-name=$@ $<
 
 # Base design without trace — for verifying data path independently
-base.elf: base.mlir project/scale.o
+base.elf: ${srcdir}/base.mlir project/scale.o
 	aiecc -v --tmpdir=project_base --xchesscc --xbridge \
 		--get-full-elf --full-elf-name=$@ $<
 

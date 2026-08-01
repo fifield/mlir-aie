@@ -1,9 +1,11 @@
+srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
+
 all: passthrough_dmas_placed.elf test.exe
 
-%.exe: %.cpp
+%.exe: ${srcdir}/%.cpp
 	clang -std=c++17 -lstdc++ -I/opt/xilinx/xrt/include -L/opt/xilinx/xrt/lib -luuid -lxrt_coreutil $< -o $@
 
-%.mlir: %.py
+%.mlir: ${srcdir}/%.py
 	python $< > $@
 
 %.elf: %.mlir 

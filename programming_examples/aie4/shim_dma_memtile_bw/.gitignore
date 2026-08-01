@@ -1,0 +1,4 @@
+# Build artifacts (regenerable via `make`)
+*.elf
+shim_dma_bw.mlir
+project/

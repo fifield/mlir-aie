@@ -20,21 +20,21 @@ TRACE_SIZE  ?= 8192
 
 all: gemv_4096_192_cascade.elf gemv_4096_192_cascade_bench.elf test.exe
 
-%.exe: %.cpp
+%.exe: ${srcdir}/%.cpp
 	clang -std=c++17 -lstdc++ -I/opt/xilinx/xrt/include -L/opt/xilinx/xrt/lib \
 		-luuid -lxrt_coreutil $< -o $@
 
-project/kernel.o: kernel.cc
+project/kernel.o: ${srcdir}/kernel.cc
 	mkdir -p project
-	cd project && xchesscc_wrapper aie4 -I $(AIETOOLS_DIR)/include -c $(CURDIR)/$< -o kernel.o
+	cd project && xchesscc_wrapper aie4 -I $(AIETOOLS_DIR)/include -c $(abspath $<) -o kernel.o
 
-gemv_placed.mlir: gemv_placed.py
+gemv_placed.mlir: ${srcdir}/gemv_placed.py
 	python $< -d npu3 -i $(ITERS) > $@
 
-gemv_placed_bench.mlir: gemv_placed.py
+gemv_placed_bench.mlir: ${srcdir}/gemv_placed.py
 	python $< -d npu3 -i $(BENCH_ITERS) > $@
 
-gemv_placed_trace.mlir: gemv_placed.py
+gemv_placed_trace.mlir: ${srcdir}/gemv_placed.py
 	python $< -d npu3 -i 1 --trace --trace_size $(TRACE_SIZE) > $@
 
 gemv_4096_192_cascade.elf: gemv_placed.mlir project/kernel.o

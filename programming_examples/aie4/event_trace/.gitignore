@@ -1,0 +1,9 @@
+# Build artifacts (regenerable via `make`)
+*.elf
+*.exe
+project/
+
+# Trace outputs (`make run_base`)
+trace.bin
+trace.json
+trace_timeline.png

@@ -1,9 +1,11 @@
+srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
+
 all: vector_vector_mul.elf test.exe
 
-%.exe: %.cpp
+%.exe: ${srcdir}/%.cpp
 	clang -std=c++17 -lstdc++ -I/opt/xilinx/xrt/include -L/opt/xilinx/xrt/lib -luuid -lxrt_coreutil $< -o $@
 
-%.mlir: %.py
+%.mlir: ${srcdir}/%.py
 	python $< -o $@
 
 %.elf: %.mlir
