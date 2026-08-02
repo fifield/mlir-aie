@@ -1,45 +1,44 @@
 # AIE4 Medusa Branch README
 
-## Quick setup from pre-built wheel
+## Getting started from the nightly wheel
 
-The quickest way to get started with medusa-dev branch is to use a prebuilt wheel from `/group/xrlabs/jefff/aie4/latest-wheels`
-The wheels are [built nightly](https://gitenterprise.xilinx.com/XRLabs/mlir-aie/actions/workflows/buildWheel.yml) from medusa-dev branch.
+The [nightly wheel workflow](https://gitenterprise.xilinx.com/XRLabs/mlir-aie/actions/workflows/buildWheel.yml)
+builds `medusa-dev` with Python 3.12 and publishes it to
+`/group/xrlabs/jefff/aie4/latest-wheels`. The same workflow installs its newly
+built wheel on an NPU3 Medusa runner and runs the `passthrough_kernel`
+programming example below.
 
-The
-[`utils/medusa_setup.sh`](https://gitenterprise.xilinx.com/XRLabs/mlir-aie/blob/medusa-dev/utils/medusa_setup.sh)
-script can be used to install from the latest nightly wheel, or used as an example:
+On a Medusa/NPU3 runner, clone the branch and create a clean Python 3.12
+environment:
 
 ```bash
-# The setup script will pip install mlir-aie and its dependencies, so create and activate a fresh venv
-# The wheel is built for python 3.12
-python3.12 -m venv venv
-source venv/bin/activate
-
-# install mlir-aie from wheel using the example setup script
 git clone -b medusa-dev --single-branch https://gitenterprise.xilinx.com/XRLabs/mlir-aie.git
-mlir-aie/utils/medusa_setup.sh
+cd mlir-aie
+
+python3.12 -m venv aie-venv
+source aie-venv/bin/activate
+python -m pip install --upgrade pip
+
+# Install mlir-aie from the latest nightly wheel and generate medusa_env.sh.
+source utils/medusa_setup.sh
+
+# Install the AIE4 Peano toolchain available on the Medusa runner.
+python -m pip install /scratch/github/llvm_aie-1.9.0.dev20260611145819+g33c9a5c2-py3-none-manylinux_2_38_x86_64.whl
+export PEANO_INSTALL_DIR="$(python -m pip show llvm-aie | awk '/^Location:/{print $2}')/lnx64.o/tools/peano"
+
+source /opt/xilinx/xrt/setup.sh
+source medusa_env.sh
 ```
 
-The `medusa_setup.sh` script will create an environment setup script named
-`medusa_env.sh`. This script sets up the environment for mlir-aie (iron), 
-mesimulato and vitis. It can be used directly or used as an example.
-
-Source the envrionment setup script and try an example:
+Build and run a small full-ELF example on the attached NPU3:
 
 ```bash
-# setup environment
-source medusa_env.sh
-
-# build programming example
-cd mlir-aie/programming_examples/aie4/eltwise_add
-
-# make test.exe and eltwise_add_placed.elf:
-# - test.cpp → test.exe
-# - eltwise_add_placed.py → eltwise_add_placed.mlir
-# - aiecc.py --generate-full-elf --full-elf-name=eltwise_add_placed.elf eltwise_add_placed.mlir
-make
+make -C programming_examples/basic/passthrough_kernel \
+  devicename=npu3 use_placed=1 run
 ```
-The makefile
+
+The command builds the placed AIE4 design and its C++ host executable, then
+loads the full ELF through XRT. A successful run exits with status zero.
 ## Building from Source
 
 This branch must be built against a version of Vitis containing the aie4
