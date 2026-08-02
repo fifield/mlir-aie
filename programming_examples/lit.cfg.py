@@ -30,7 +30,7 @@ config.name = "AIE_PROGRAMMING_EXAMPLES"
 config.test_format = lit.formats.ShTest()
 
 # suffixes: A list of file extensions to treat as test files.
-config.suffixes = [".lit"]
+config.suffixes = [".lit", '.mlir']
 
 # test_source_root: The root path where tests are located.
 config.test_source_root = os.path.dirname(__file__)
@@ -55,6 +55,11 @@ config.substitutions.append(
     )
 )
 config.substitutions.append(("%aietools", config.vitis_aietools_dir))
+
+# Setup test library substitutions
+LitConfigHelper.setup_test_lib_substitutions(
+    config, config.aie_obj_root, config.aieHostTarget
+)
 
 # Not using run_on_board anymore, need more specific per-platform commands
 config.substitutions.append(("%run_on_board", "echo"))

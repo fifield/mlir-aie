@@ -477,6 +477,8 @@ xilinx::AIE::AIETranslateToXAIEV2(ModuleOp module, raw_ostream &output,
   std::string AIE1_device("XAIE_DEV_GEN_AIE");
   std::string AIE2_device("XAIE_DEV_GEN_AIEML");
   std::string AIE2p_device("XAIE_DEV_GEN_AIE2P");
+  std::string AIE4_device("XAIE_DEV_GEN_AIE4");
+  std::string AIE4z_device("XAIE_DEV_GEN_AIE4Z");
   std::string device;
   switch (arch) {
   case AIEArch::AIE1:
@@ -488,12 +490,14 @@ xilinx::AIE::AIETranslateToXAIEV2(ModuleOp module, raw_ostream &output,
   case AIEArch::AIE2p:
     device = AIE2p_device;
     break;
-  case AIEArch::AIE2ps:
-    // AIE2PS configures the array through a CERT ELF instead of this libxaie
-    // source (see AIE2PSTargetModel). Listed here so that a new AIEArch still
-    // raises -Wswitch.
-    return targetOp.emitOpError(
-        "--aie-generate-xaie is not supported for the AIE2PS architecture");
+  case AIEArch::AIE4:
+    device = AIE4_device;
+    break;
+  case AIEArch::AIE4z:
+    device = AIE4z_device;
+    break;
+  default:
+    return module.emitOpError("Unsupported aie.device");
   }
   output << "  ctx->XAieConfig->AieGen = " << device << ";\n";
   output << "  ctx->XAieConfig->BaseAddr = 0x20000000000;\n";
