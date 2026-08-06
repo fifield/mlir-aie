@@ -9,7 +9,7 @@ all: vector_vector_mul.elf test.exe
 	python $< -o $@
 
 %.elf: %.mlir
-	aiecc -v --tmpdir=project --no-xchesscc --no-xbridge \
+	aiecc -v --tmpdir=project \
 			--get-full-elf --full-elf-name=$@ $<
 clean:
 	rm -rf project vector_vector_mul.mlir vector_vector_mul.elf test.exe

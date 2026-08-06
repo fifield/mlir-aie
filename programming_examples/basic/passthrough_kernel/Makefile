@@ -49,7 +49,6 @@ build/aie.mlir: ${srcdir}/${aie_py_src}
 build/design.elf: build/aie.mlir build/passThrough.cc.o
 	mkdir -p ${@D}
 	cd ${@D} && aiecc --tmpdir=project \
-		--no-xchesscc --no-xbridge \
 		--get-full-elf --full-elf-name=$(@F) $(<F)
 
 ${targetname}.exe: ${srcdir}/test.cpp

@@ -90,7 +90,6 @@ ${design_elf_target}: build/aie.mlir build/reduce_add.cc.o
 	    llvm-objcopy --redefine-sym reduce_add_vector=$${digest}_reduce_add_vector "$$obj"; \
 	  fi
 	cd ${@D} && aiecc --tmpdir=project \
-		--no-xchesscc --no-xbridge \
 		--get-full-elf --full-elf-name=$(@F) $(<F)
 
 .PHONY: run

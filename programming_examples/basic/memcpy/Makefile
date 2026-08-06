@@ -75,7 +75,6 @@ ${design_elf_target}: build/aie.mlir build/passThrough.cc.o
 	    llvm-objcopy --redefine-sym passThroughLine=$${digest}_passThroughLine "$$obj"; \
 	  fi
 	cd ${@D} && aiecc --tmpdir=project \
-		--no-xchesscc --no-xbridge \
 		--get-full-elf --full-elf-name=$(@F) $(<F)
 
 .PHONY: run

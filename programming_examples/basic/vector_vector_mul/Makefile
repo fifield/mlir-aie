@@ -64,7 +64,6 @@ build/aie_npu3.mlir: ${srcdir}/${aie_py_src}
 build/design.elf: build/aie_npu3.mlir
 	mkdir -p ${@D}
 	cd ${@D} && aiecc --tmpdir=project \
-		--no-xchesscc --no-xbridge \
 		--get-full-elf --full-elf-name=$(@F) $(<F)
 
 $(eval $(call build_host_exe,${targetname},_build,test.cpp))

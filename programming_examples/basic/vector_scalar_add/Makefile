@@ -65,7 +65,6 @@ build/aie.mlir: ${srcdir}/${aie_py_src}
 ${design_elf_target}: build/aie.mlir
 	mkdir -p ${@D}
 	cd ${@D} && aiecc --tmpdir=project \
-		--no-xchesscc --no-xbridge \
 		--get-full-elf --full-elf-name=$(@F) $(<F)
 
 $(eval $(call build_host_exe,${targetname},_build,test.cpp))

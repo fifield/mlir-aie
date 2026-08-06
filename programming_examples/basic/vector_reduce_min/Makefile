@@ -80,7 +80,6 @@ ${design_elf_target}: build/aie.mlir build/reduce_min.cc.o
 	    llvm-objcopy --redefine-sym reduce_min_vector=$${digest}_reduce_min_vector "$$obj"; \
 	  fi
 	cd ${@D} && aiecc --tmpdir=project \
-		--no-xchesscc --no-xbridge \
 		--get-full-elf --full-elf-name=$(@F) $(<F)
 
 $(eval $(call build_host_exe,${targetname},_build,test.cpp))
