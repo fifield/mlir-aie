@@ -503,8 +503,11 @@ int64_t AIEX::NpuDmaMemcpyNdOp::getOffsetInBytes() {
 // d4 (repeat) is intentionally excluded.
 bool AIEX::isLinearTransfer(llvm::ArrayRef<int64_t> sizes,
                             llvm::ArrayRef<int64_t> strides) {
-  return sizes[1] == 1 && sizes[2] == 1 && sizes[3] == 1 && strides[0] == 1 &&
-         strides[1] == 0 && strides[2] == 0 && strides[3] == 0;
+  // Only the 5-slot form has a d3 at index 3; in the 4-slot
+  // [d0, d1, d2, iteration] form index 3 is the repeat.
+  bool noD3 = sizes.size() < 5 || (sizes[3] == 1 && strides[3] == 0);
+  return sizes[1] == 1 && sizes[2] == 1 && strides[0] == 1 && strides[1] == 0 &&
+         strides[2] == 0 && noD3;
 }
 
 // Returns true when sizes/strides (innermost-first) describe a contiguous
@@ -521,7 +524,10 @@ bool AIEX::isContiguousTransfer(llvm::ArrayRef<int64_t> sizes,
     return false;
   if (sizes[2] > 1 && strides[2] != sizes[0] * sizes[1])
     return false;
-  if (sizes[3] > 1 && strides[3] != sizes[0] * sizes[1] * sizes[2])
+  // Only the 5-slot form has a d3 at index 3; in the 4-slot
+  // [d0, d1, d2, iteration] form index 3 is the repeat.
+  if (sizes.size() >= 5 && sizes[3] > 1 &&
+      strides[3] != sizes[0] * sizes[1] * sizes[2])
     return false;
   return true;
 }
@@ -974,14 +980,25 @@ AIEX::NpuDmaMemcpyNdOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
         return getConstantIntValue(s).value();
       });
   normalizeMemcpyNdDimVector(inputOffsets, 0);
+  // isDecomposableNdDmaPattern/NdDmaPattern use the legacy 4-slot
+  // [d0, d1, d2, iteration] convention (no d3 slot); inputSizes/inputStrides
+  // are normalized to 5 slots [d0, d1, d2, d3, iteration]. Only attempt
+  // decomposition when there's no genuine d3 loop to drop.
+  bool hasRealD3 = inputSizes[3] > 1;
+  llvm::SmallVector<int64_t, 4> legacySizes = {inputSizes[0], inputSizes[1],
+                                               inputSizes[2], inputSizes[4]};
+  llvm::SmallVector<int64_t, 4> legacyStrides = {
+      inputStrides[0], inputStrides[1], inputStrides[2], inputStrides[4]};
+  llvm::SmallVector<int64_t, 4> legacyOffsets = {
+      inputOffsets[0], inputOffsets[1], inputOffsets[2], inputOffsets[4]};
   // aie-decompose-large-dma-bd leaves a transfer with a runtime length
   // alone, so it must be legal as written.
   // AIE1 patterns must fit directly, even when the decomposition pass is
   // scheduled: verification must not rely on it to legalize AIE1 transfers.
-  if (!isAIE1 && !hasLengthParameter &&
+  if (!isAIE1 && !hasLengthParameter && !hasRealD3 &&
       AIEX::isDecomposableNdDmaPattern(getOperation(), buffer, targetModel, col,
-                                       row, inputOffsets, inputSizes,
-                                       inputStrides)) {
+                                       row, legacyOffsets, legacySizes,
+                                       legacyStrides)) {
     // ok: will be decomposed before lowering
   } else if (failed(verifyStridesWraps(
                  *this, [&] { return emitOpError(); }, buffer, col, row,

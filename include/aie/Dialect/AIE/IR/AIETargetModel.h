@@ -1412,6 +1412,20 @@ public:
 
   uint32_t getAddressGenGranularity() const override { return 32; }
 
+  /// Return the number of packet-rule slots per stream-switch slave port.
+  /// Per the AIE4 register database, each Stream_Switch_*_Subordinate_*
+  /// port exposes Slot0-Slot3 (4 slots), same as AIE1/AIE2.
+  uint32_t getNumSlaveSlots() const override { return 4; }
+  /// Return the largest packet id the stream switch can route. Per the AIE4
+  /// register database, the Packet_ID field (e.g. DMA_BD*_8) and the
+  /// stream-switch slot `id` field are both 5 bits wide, same as AIE1/AIE2.
+  uint32_t getMaxPacketId() const override { return 31; }
+  /// Out_Of_Order_BD_ID is a 4-bit field on every AIE4 tile class (see the
+  /// shim/memtile/core BD word packing in AIEDmaToNpu.cpp).
+  uint32_t getMaxOutOfOrderId() const override { return 15; }
+  /// The queue-command repeat_count field is 8 bits, as on AIE2.
+  uint32_t getMaxRepeatCount() const override { return 255; }
+
   // AIE4 DMA BD field widths from the register database: core tiles have
   // 9-bit wrap / 15-bit step fields, mem tiles 12-bit wrap / 23-bit step,
   // and shim tiles 12-bit wrap / 22-bit step. Iteration_Wrap is 6-bit
@@ -1429,6 +1443,7 @@ public:
       return 22;
     }
   }
+  /// Iteration_Wrap is a 6-bit field, as on AIE1/AIE2.
   uint32_t getDmaBdIterBits(AIETileType tileType) const override { return 6; }
 
   /// AIE4 has two microcontrollers (CERT job-runners) per column; the CERT
@@ -1502,6 +1517,36 @@ public:
         tileType == AIETileType::ShimNOCTile)
       return 4;
     return 3;
+  }
+  uint64_t getDmaBdMaxLen(AIETileType tileType) const override {
+    // Buffer_Length field width per the AIE4 register database (identical
+    // on AIE4z): core tile (module "memory") 15 bits, mem tile 23 bits,
+    // shim a full 32-bit register.
+    switch (tileType) {
+    case AIETileType::MemTile:
+      return (1ull << 23) - 1;
+    case AIETileType::CoreTile:
+      return (1ull << 15) - 1;
+    default:
+      return 0xFFFFFFFFull;
+    }
+  }
+  uint32_t getDmaBdWrapBits(AIETileType tileType) const override {
+    // D0/D1/D2_Wrap field width per the AIE4 register database: core tile
+    // 9 bits, mem tile and shim 12 bits.
+    return tileType == AIETileType::CoreTile ? 9 : 12;
+  }
+  uint32_t getDmaBdStepBits(AIETileType tileType) const override {
+    // Stepsize field width per the AIE4 register database: core tile
+    // 15 bits, mem tile 23 bits, shim 22 bits.
+    switch (tileType) {
+    case AIETileType::MemTile:
+      return 23;
+    case AIETileType::CoreTile:
+      return 15;
+    default:
+      return 22;
+    }
   }
 
   uint32_t getBdPoolId(int col, int row, int channel,

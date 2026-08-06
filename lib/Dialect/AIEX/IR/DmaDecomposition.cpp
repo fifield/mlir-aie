@@ -426,18 +426,27 @@ bool AIEX::patternPassesVerification(Operation *forOp,
                                      bool skipTransformationChecks) {
   if (pattern.sizes.size() != kNdDmaDims)
     return false;
-  SmallVector<int64_t, kNdDmaDims> hwSizes(kNdDmaDims);
-  SmallVector<int64_t, kNdDmaDims> hwStrides(kNdDmaDims);
-  getHardwareStridesWraps(tm, forOp, referencedBufType, pattern.sizes,
-                          pattern.strides, hwSizes, hwStrides);
+  // NdDmaPattern's 4 slots are [d0, d1, d2, iteration] (kNdDmaDims has no
+  // dedicated d3), while getHardwareStridesWraps/verifyStridesWraps use 5
+  // slots [d0, d1, d2, d3, iteration]. Insert an identity d3 (size 1, stride
+  // 0) and move the pattern's iteration value from slot 3 to slot 4 — this
+  // decomposition never produces a genuine d3 loop.
+  SmallVector<int64_t, 5> sizes = {pattern.sizes[0], pattern.sizes[1],
+                                   pattern.sizes[2], 1, pattern.sizes[3]};
+  SmallVector<int64_t, 5> strides = {pattern.strides[0], pattern.strides[1],
+                                     pattern.strides[2], 0, pattern.strides[3]};
+  SmallVector<int64_t, 5> hwSizes(5);
+  SmallVector<int64_t, 5> hwStrides(5);
+  getHardwareStridesWraps(tm, forOp, referencedBufType, sizes, strides, hwSizes,
+                          hwStrides);
 
   // Location-only: an op diagnostic prints the whole enclosing sequence.
   ScopedDiagnosticHandler handler(forOp->getContext(),
                                   [](Diagnostic &) { return success(); });
   return succeeded(verifyStridesWraps(
       forOp, [&] { return mlir::emitError(forOp->getLoc()); },
-      referencedBufType, tileCol, tileRow, pattern.sizes, pattern.strides,
-      hwSizes, hwStrides, skipTransformationChecks));
+      referencedBufType, tileCol, tileRow, sizes, strides, hwSizes, hwStrides,
+      skipTransformationChecks));
 }
 
 bool AIEX::isDecomposableNdDmaPattern(Operation *forOp,
