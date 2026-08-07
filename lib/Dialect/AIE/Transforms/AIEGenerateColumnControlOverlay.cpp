@@ -43,7 +43,7 @@ struct AIEAssignTileCtrlIDsPass
     DeviceOp device = getOperation();
     const auto &targetModel = device.getTargetModel();
 
-    if (targetModel.getTargetArch() != AIEArch::AIE2)
+    if (!isa<AIE2TargetModel>(targetModel))
       return;
 
     auto tileIDMap =
@@ -69,7 +69,7 @@ struct AIEGenerateColumnControlOverlayPass
     AIEDialect::IsCtrlPktOverlayAttrHelper marker(&getContext());
     for (DeviceOp device : getOperation().getOps<DeviceOp>())
       if (!marker.isAttrPresent(device) && !device.getOverlayAttr() &&
-          device.getTargetModel().getTargetArch() == AIEArch::AIE2 &&
+          isa<AIE2TargetModel>(device.getTargetModel()) &&
           (configuration || !collectTokenIssuingTiles({device}).empty()))
         groups[device.getDevice()].push_back(device);
     for (auto &[target, users] : groups)

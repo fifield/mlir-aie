@@ -5,6 +5,7 @@
 // enqueue the good BD and arm the lock (see README.md).
 //
 // REQUIRES: ryzen_ai, peano
+// UNSUPPORTED: ryzen_ai_npu3
 //
 // RUN: cp %S/aie.mlir aie_arch.mlir
 // RUN: %run_on_npu1% sed 's/NPUDEVICE/npu1_1col/g' -i aie_arch.mlir
