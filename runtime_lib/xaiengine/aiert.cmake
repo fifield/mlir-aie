@@ -67,6 +67,9 @@ function(add_aiert_headers TARGET SRCPATH BUILDPATH INSTALLPATH)
       DEPENDS ${file})
     list(APPEND _header_targets ${TARGET}-${basefile})
   endforeach()
+
+  # Aggregate both loops: the top-level headers were previously left out, so
+  # depending on ${TARGET}-headers did not get you xaiengine.h.
   add_custom_target(${TARGET}-headers ALL DEPENDS ${_header_targets})
 
   # Install too

@@ -19,6 +19,14 @@ concurrency:
 
 env:
   DEBIAN_FRONTEND: noninteractive
+  # This runner's /tmp is an 11G volume shared with everything else on the
+  # box and routinely sits near full; the MLIR wheel download alone does not
+  # fit. Keep pip's transient files on the workspace volume so the job does
+  # not depend on free space outside its own workspace. PIP_CACHE_DIR is set
+  # below with the other runner caches.
+  TMPDIR: ${{ github.workspace }}/.tmp
+  TMP: ${{ github.workspace }}/.tmp
+  TEMP: ${{ github.workspace }}/.tmp
 
 jobs:
   # ============================================================================
@@ -47,6 +55,7 @@ jobs:
 
       - name: Setup Python venv and dependencies
         run: |
+          mkdir -p "$TMPDIR" "$PIP_CACHE_DIR"
           python3.12 -m venv aie-venv
           source aie-venv/bin/activate
           python -m pip install --upgrade pip
@@ -105,6 +114,13 @@ jobs:
           popd
 
       - name: Run XRT NPU3 tests
+        # Lit adds a per-test directory below TMPDIR and multiprocessing adds
+        # an AF_UNIX socket below that. The workspace path is too long for the
+        # socket, so use the shorter temp directory on the same /scratch volume.
+        env:
+          TMPDIR: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+          TEMP: ${{ runner.temp }}
         run: |
           source aie-venv/bin/activate
           source /opt/xilinx/xrt/setup.sh

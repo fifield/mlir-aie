@@ -22,6 +22,13 @@ apply_aie_rt_vendor_patches(
     ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/aie-rt
     ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/patches/aie-rt)
 
+set(XAIE_SOURCE_DIR "../third_party/aie-rt/driver/src")
+add_aiert_headers(xaienginecdo_static
+        ${XAIE_SOURCE_DIR}
+        ${AIE_BINARY_DIR}/include/xaienginecdo_static
+        ${CMAKE_INSTALL_PREFIX}/include/xaienginecdo_static
+)
+
 set(AIE_RUNTIME_TEST_TARGET_VAL ${AIR_RUNTIME_TEST_TARGET})
 if(NOT x86_64_TOOLCHAIN_FILE)
   set(x86_64_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/toolchainFiles/toolchain_x86_64.cmake")
@@ -132,7 +139,10 @@ foreach(target ${AIE_RUNTIME_TARGETS})
           -DAIE_RUNTIME_TARGET=${target}
           -DLibXAIE_INC_DIR=${XILINX_XAIE_INCLUDE_DIR}
           -DXRT_ROOT=${XRT_ROOT}
-      DEPENDS ${testLibDependsOnXaiengine}
+      # test_lib overrides LibXAIE_INC_DIR with the top-level build's
+      # xaienginecdo_static include directory. ExternalProject's DEPENDS option
+      # orders these header copies before all of test_lib's internal steps.
+      DEPENDS ${testLibDependsOnXaiengine} xaienginecdo_static-headers
       BUILD_ALWAYS true
       STEP_TARGETS clean build install test
       USES_TERMINAL_CONFIGURE true
@@ -145,14 +155,8 @@ foreach(target ${AIE_RUNTIME_TARGETS})
   endif()
 endforeach()
 
-set(XAIE_SOURCE_DIR "../third_party/aie-rt/driver/src")
 set(BOOTGEN_SOURCE_DIR ${PROJECT_SOURCE_DIR}/../third_party/bootgen)
 
-add_aiert_headers(xaienginecdo_static
-        ${XAIE_SOURCE_DIR}
-        ${AIE_BINARY_DIR}/include/xaienginecdo_static
-        ${CMAKE_INSTALL_PREFIX}/include/xaienginecdo_static
-)
 add_aiert_library(xaienginecdo_static ${XAIE_SOURCE_DIR} STATIC)
 
 target_link_libraries(xaienginecdo_static PRIVATE cdo_driver_mlir_aie)
