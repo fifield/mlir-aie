@@ -28,6 +28,13 @@ if [ $TARGET == "AIE" ]
   then
     AIEARCH=versal_prod
     AIETARGET=versal_prod
+    # The xchesscc binary rejects every spelling of AIE1 we can hand it --
+    # versal_prod, aie and aie1 all come back as "Unrecognized architecture".
+    # Omitting --aiearch is the correct invocation anyway: with no arch given,
+    # xchesscc falls back to me_DIR=data/versal_prod/lib and the generic
+    # tps/lnx64/target chess env, which is exactly what AIE1 wants.  Since
+    # --aiearch is what normally sets __AIE_ARCH__ for aie_api, define it here.
+    ARCH_ARGS=(-D__AIE_ARCH__=10 -D__AIEARCH__=10)
 elif [ $TARGET == "AIE2" ]
   then
     AIEARCH=aie2
@@ -49,6 +56,12 @@ fi
 LIBDIR=${AIETOOLS}/data/${AIETARGET}/lib
 INCDIR=${AIETOOLS}/include
 
+# Every architecture but AIE1 selects itself with --aiearch; see above.
+if [ ${#ARCH_ARGS[@]} -eq 0 ]
+  then
+    ARCH_ARGS=(--aiearch "${AIEARCH}")
+fi
+
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 # __AIENGINE__ selects the real (non-graph) aie_api implementation and is
 # required by upstream aie.hpp.  __AIE_ARCH__ (the arch selector aie_api reads)
@@ -57,4 +70,4 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 # -D__AIE_API_AIE_ADF_HPP__ pre-trips aie_api's aie_adf.hpp include guard so
 # stock upstream aie_api never pulls in <adf.h> (no mlir-aie kernel uses adf::
 # symbols); this lets us track unforked Xilinx/aie_api.
-xchesscc --aiearch "${AIEARCH}" -p me -C Release_LLVM -D__AIENGINE__ -D__AIE_API_AIE_ADF_HPP__ -I "${INCDIR}" -P "${LIBDIR}" -d -f "$@"
+xchesscc "${ARCH_ARGS[@]}" -p me -C Release_LLVM -D__AIENGINE__ -D__AIE_API_AIE_ADF_HPP__ -I "${INCDIR}" -P "${LIBDIR}" -d -f "$@"

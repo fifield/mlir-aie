@@ -23,7 +23,7 @@ concurrency:
 env:
   DEBIAN_FRONTEND: noninteractive
   LM_LICENSE_FILE: 1757@xsjlicsrvip:2100@aiengine-eng
-  VITIS: /proj/primebuilds/9999.0_PRIME_0819_1/installs/lin64/HEAD/Vitis
+  VITIS: /proj/primebuilds/2026.2_PRIME_0601_1/installs/lin64/HEAD/Vitis
   CMAKE_ARGS: |
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \

@@ -36,7 +36,7 @@ jobs:
     name: XRT NPU3 Tests
     runs-on: ryzen-ai-npu3
     env:
-      VITIS: /proj/primebuilds/9999.0_PRIME_0819_1/installs/lin64/HEAD/Vitis
+      VITIS: /proj/primebuilds/2026.2_PRIME_0601_1/installs/lin64/HEAD/Vitis
       LM_LICENSE_FILE: 1757@172.19.220.188:2100@172.19.6.231
       XDG_CACHE_HOME: /scratch/github/actions-runner/_work/_temp/xdg-cache
       PIP_CACHE_DIR: /scratch/github/actions-runner/_work/_temp/pip-cache
