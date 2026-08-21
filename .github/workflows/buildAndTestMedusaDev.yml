@@ -118,6 +118,9 @@ jobs:
         # an AF_UNIX socket below that. The workspace path is too long for the
         # socket, so use the shorter temp directory on the same /scratch volume.
         env:
+          # Cap aiecc's internal per-design scheduler independently of lit's
+          # test-level -j setting to stay within this runner's memory limit.
+          AIECC_JOBS: "1"
           TMPDIR: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
           TEMP: ${{ runner.temp }}
