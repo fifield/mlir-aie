@@ -290,6 +290,10 @@ static LogicalResult checkRemoteBarrierParties(AIE::DeviceOp device) {
 
 // The register `op` writes, if any. cert.write32_d only reads registers.
 static std::optional<uint32_t> registerWrittenBy(Operation &op) {
+  if (auto o = dyn_cast<AIEX::CertMovOp>(op))
+    return o.getDest();
+  if (auto o = dyn_cast<AIEX::CertAddOp>(op))
+    return o.getDest();
   if (auto o = dyn_cast<AIEX::CertUcDmaWriteDesOp>(op))
     return o.getWaitHandle();
   if (auto o = dyn_cast<AIEX::CertRead32Op>(op))

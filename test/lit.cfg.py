@@ -296,6 +296,14 @@ if _aiebu_asm is not None:
         )
     )
 
+# aiebu-asm assembles the CERT control code the emitter produces; it is the only
+# ground truth for the assembly syntax. LitConfigHelper.prepend_path mutates the
+# TEST SUBPROCESS PATH (llvm_config.config.environment["PATH"]), not
+# os.environ, so a bare shutil.which("aiebu-asm") would consult the lit driver's
+# own shell and misfire. Pass the directory explicitly, as the two gates above do.
+if shutil.which("aiebu-asm", path=config.xrt_bin_dir) is not None:
+    config.available_features.add("aiebu_asm")
+
 # HRX Python runtime: gate the HRX-only Python tests (test/python/npu-hrx) on
 # libhrx being locatable, so they only run where the HRX backend can load. This
 # checks a runtime value (aie.utils.has_hrx), not just importability.

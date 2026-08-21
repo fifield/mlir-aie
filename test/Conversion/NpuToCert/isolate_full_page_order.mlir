@@ -19,7 +19,11 @@
 
 // A single-op load_pdi job that is NOT the last job on its page: the isolated
 // page used to land after the whole parent page, so the write32 ran before the
-// reconfiguration it was supposed to follow.
+// reconfiguration it was supposed to follow. Pin the first resulting page to
+// the load_pdi job as well: moving the first job must not leave an empty parent
+// page behind.
+// CHECK: aiex.cert.page {
+// CHECK-NEXT: aiex.cert.job(1)
 // CHECK: aiex.cert.load_pdi(1, @cfg)
 // CHECK: aiex.cert.write32(4096, 1)
 aie.device(npu2) {
