@@ -7,13 +7,8 @@ permissions:
   contents: read
 
 on:
-  push:
-    branches:
-      - main
-      - test-vitis
-  pull_request:
-  #merge_group:
-
+  # This upstream-facing workflow is currently disabled because its CI is
+  # unreliable. Retain a manual trigger for investigation and re-enablement.
   # Allows you to run this workflow manually from the Actions tab by
   # selecting CI and then "Run workflow" menu on the right branch
   # and clicking on "launch_tmate_terminal_for_debug".

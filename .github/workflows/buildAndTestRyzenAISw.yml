@@ -8,10 +8,8 @@ permissions:
   packages: read
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
+  # This workflow is currently disabled because the Ryzen AI software CI is
+  # unavailable. Retain a manual trigger for investigation and re-enablement.
   workflow_dispatch:
     inputs:
       AIE_COMMIT:
@@ -19,9 +17,6 @@ on:
         type: string
         required: false
         default: ''
-  schedule:
-    # Runs at midnight (00:00) every day
-    - cron: '0 0 * * *'
 
 defaults:
   run:

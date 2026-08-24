@@ -6,24 +6,10 @@ name: Build and Test with AIE tools on Ryzen AI (Windows)
 permissions:
   contents: read
 
+# This workflow is currently disabled because the Windows runner is unavailable.
+# Retain an explicit manual trigger for investigation and re-enablement.
 on:
-  # No `push` on main: the merge queue already tests the exact commit that
-  # merging pushes there, so a postsubmit run re-tests an identical SHA. main is
-  # admin-enforced with a required merge queue and no force pushes, so nothing
-  # can reach it without a merge_group run having tested it first. The nightly
-  # schedule below still covers main for environment drift.
-  #
-  # test-ryzen-ai is kept: it is a manual push target that does not go through
-  # the queue, so it has no merge_group run to inherit.
-  push:
-    branches:
-      - test-ryzen-ai
-  pull_request:
-    types: [opened, synchronize, reopened]
-  merge_group:
-  schedule:
-    # Runs at midnight (00:00) every day
-    - cron: '0 0 * * *'
+  workflow_dispatch:
 
 concurrency:
   # A PR number if a pull request and otherwise the commit hash. This cancels
