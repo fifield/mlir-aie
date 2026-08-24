@@ -16,6 +16,11 @@
 // now also caught by verifyStridesWraps, at 'aie.dma_bd', with the same
 // message as limit+2.
 
+// NOTE: the iteration dimension is slot 4 in this tree's 5-slot
+// [d0,d1,d2,d3,iteration] access-pattern convention (AIE4 gained a real D3
+// addressing dimension), so its diagnostics say "Size 4"/"Stride 4" where the
+// older 4-slot numbering said 3. The limits themselves are unchanged.
+
 // RUN: aie-opt --split-input-file --verify-diagnostics --aie-dma-tasks-to-npu %s
 
 // ===== D0 stride =====
@@ -153,7 +158,7 @@ module @iterstride_limit_plus1 {
     %tile_0_0 = aie.tile(0, 0)
     aie.runtime_sequence(%arg0: memref<4194304xi32>) {
       %t1 = aiex.dma_configure_task(%tile_0_0, MM2S, 0) {
-        // expected-error@+1 {{'aie.dma_bd' op Stride 3 is 1048577 (encoded as 1048576), which exceeds the [1:1048576] range.}}
+        // expected-error@+1 {{'aie.dma_bd' op Stride 4 is 1048577 (encoded as 1048576), which exceeds the [1:1048576] range.}}
         aie.dma_bd(%arg0 : memref<4194304xi32> offset = 0 len = 1 sizes = [2, 1, 1, 1] strides = [1048577, 0, 0, 1]) {bd_id = 0 : i32}
         aie.end
       }
@@ -168,7 +173,7 @@ module @iterstride_limit_plus2 {
     %tile_0_0 = aie.tile(0, 0)
     aie.runtime_sequence(%arg0: memref<4194304xi32>) {
       %t1 = aiex.dma_configure_task(%tile_0_0, MM2S, 0) {
-        // expected-error@+1 {{'aie.dma_bd' op Stride 3 is 1048578 (encoded as 1048577), which exceeds the [1:1048576] range.}}
+        // expected-error@+1 {{'aie.dma_bd' op Stride 4 is 1048578 (encoded as 1048577), which exceeds the [1:1048576] range.}}
         aie.dma_bd(%arg0 : memref<4194304xi32> offset = 0 len = 1 sizes = [2, 1, 1, 1] strides = [1048578, 0, 0, 1]) {bd_id = 0 : i32}
         aie.end
       }

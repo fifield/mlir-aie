@@ -5,7 +5,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// RUN: aie-opt --split-input-file --aie-objectFifo-stateful-transform="dynamic-objFifos=false" %s | FileCheck %s
+// RUN: aie-opt --split-input-file --aie-objectFifo-stateful-transform %s | FileCheck %s
 
 // AIE4 is the first target whose core tiles have a different number of DMA
 // channels in each direction: 2 S2MM but only 1 MM2S. That makes it the only

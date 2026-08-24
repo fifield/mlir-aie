@@ -973,11 +973,6 @@ struct AIEDMATasksToNPUPass
       if (!treatAsLinear && bd_op.getLengthStateTableIdxAttr())
         AIE::placeRuntimeLengthDimension(input_sizes, input_strides);
 
-      if (dims->size() > 2) {
-        d2size = (tm.isMemTile(tile.getCol(), tile.getRow()))
-                     ? (*dims)[2].getSize()
-                     : 0;
-      }
       if (padDims.has_value()) {
         if (!tm.isMemTile(tile.getCol(), tile.getRow()))
           return bd_op->emitOpError()
@@ -1025,12 +1020,11 @@ struct AIEDMATasksToNPUPass
         // d2_stride
         d2stride = strides[2];
 
-        // TODO: d2_size is a dead field; AIEDmaToNpu.cpp memtile word-packing
-        // never writes it (see its `// TODO: D2Size`); the real D2 repeat
-        // count is carried entirely by buffer_length, same as on shim tiles.
-        d2size = (tm.isMemTile(tile.getCol(), tile.getRow())) ? sizes[2] : 0;
+        // d2_size indexes the same innermost-first array as d0/d1 above. On a
+        // shim tile there is no D2 wrap register (the repeat count rides in
+        // buffer_length), so it stays 0 there.
+        d2size = tm.isMemTile(tile.getCol(), tile.getRow()) ? sizes[2] : 0;
 
-        // AIE4 shim tiles do have a real D2 wrap plus a D3 address dimension.
         if (useD3AddressDim) {
           d2size = sizes[2];
           d3size = sizes[3];

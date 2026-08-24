@@ -5,7 +5,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// RUN: not aie-opt --aie-objectFifo-stateful-transform="dynamic-objFifos=false" %s 2>&1 | FileCheck %s
+// RUN: not aie-opt --aie-objectFifo-stateful-transform %s 2>&1 | FileCheck %s
 
 // An npu3 (AIE4) core tile has 2 S2MM but only 1 MM2S DMA channel, so MM2S
 // channel 1 does not exist and must be rejected.

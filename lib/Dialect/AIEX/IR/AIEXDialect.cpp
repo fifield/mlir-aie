@@ -1092,12 +1092,15 @@ LogicalResult AIEX::NpuWriteBdOp::verify() {
   if (oooId != 0 && getEnablePacket() == 0)
     return emitOpError("out_of_order_id requires a packet-enabled BD");
 
-  // Every value on this op is already the hardware-encoded field value (wrap
-  // fields unbiased, stepsize/iteration fields biased actual-1), so the
-  // legal encoded range for a B-bit field is simply [0, 2^B - 1].
   bool isAIE4 = isa<AIE::AIE4TargetModel>(targetModel);
   bool isShim = targetModel.isShimNOCTile(getColumn(), getRow());
   bool isMemTile = targetModel.isMemTile(getColumn(), getRow());
+  // Every value on this op is already the hardware-encoded field value (wrap
+  // fields unbiased, stepsize/iteration fields biased actual-1), so the legal
+  // encoded range for a B-bit field is [0, 2^B - 1]. The widths are per tile
+  // class and per generation, so take them from the target model rather than
+  // a flat per-arch constant: an AIE2 core tile has an 8-bit wrap where the
+  // mem tile has 10, and AIE4 widens both (ArchSpec v1.5).
   AIE::AIETileType tileType = targetModel.getTileType(getColumn(), getRow());
   uint32_t wrapBits = targetModel.getDmaBdWrapBits(tileType);
   uint32_t stepBits = targetModel.getDmaBdStepBits(tileType);
@@ -1105,8 +1108,7 @@ LogicalResult AIEX::NpuWriteBdOp::verify() {
   uint32_t maxWrap = wrapBits > 0 ? (1u << wrapBits) - 1 : 0;
   uint32_t maxStep = stepBits > 0 ? (1u << stepBits) - 1 : 0;
   uint32_t maxIter = iterBits > 0 ? (1u << iterBits) - 1 : 0;
-  // The AIE4 MemTile D3_Stepsize field is 23 bits wide.
-  uint32_t maxD3Stride = (isAIE4 && isMemTile) ? 0x7FFFFF : maxStep;
+  uint32_t maxD3Stride = maxStep;
 
   if (isAIE4 && getD0Stride() != 0)
     return emitOpError("AIE4 D0 stride is implied by hardware and must be 0.");

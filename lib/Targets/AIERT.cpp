@@ -417,13 +417,11 @@ configureLocksInBdBlock(const AIE::AIETargetModel &targetModel,
   return success();
 }
 
-static LogicalResult configureBdInBlock(const AIE::AIETargetModel &targetModel,
-                                        XAie_DevInst *devInst,
-                                        XAie_DmaDesc &dmaTileBd, Block &block,
-                                        uint32_t channel,
-                                        AIE::DMAChannelDir dir, int col,
-                                        int row, int bdId,
-                                        std::optional<int> nextBdId) {
+static LogicalResult
+configureBdInBlock(const AIE::AIETargetModel &targetModel,
+                   XAie_DevInst *devInst, XAie_DmaDesc &dmaTileBd, Block &block,
+                   uint32_t channel, AIE::DMAChannelDir dir, int col, int row,
+                   int bdId, std::optional<int> nextBdId) {
   std::optional<int> packetType;
   std::optional<int> packetID;
 
@@ -1463,7 +1461,6 @@ void xilinx::AIE::AIERTControl::startTransaction() {
   //  [AIE ERROR] _XAie_LoadDataMemSection():337: Unable to turn ECC On for Data
   //  Memory XAie_LoadElf failed with XAIE_FEATURE_NOT_SUPPORTED
   TRY_XAIE_API_FATAL_ERROR(XAie_TurnEccOff, &aiert->devInst);
-
 
   TRY_XAIE_API_FATAL_ERROR(XAie_StartTransaction, &aiert->devInst,
                            XAIE_TRANSACTION_DISABLE_AUTO_FLUSH);
