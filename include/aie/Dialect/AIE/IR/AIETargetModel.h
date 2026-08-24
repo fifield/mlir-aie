@@ -1420,11 +1420,14 @@ public:
   /// register database, the Packet_ID field (e.g. DMA_BD*_8) and the
   /// stream-switch slot `id` field are both 5 bits wide, same as AIE1/AIE2.
   uint32_t getMaxPacketId() const override { return 31; }
-  /// Out_Of_Order_BD_ID is a 4-bit field on every AIE4 tile class (see the
-  /// shim/memtile/core BD word packing in AIEDmaToNpu.cpp).
+  /// Out-of-order BD index is a 4-bit field ([8:5] of the stream packet
+  /// header, AIE4 ArchSpec v1.5 Table 3-35), matching the 4-bit
+  /// Out_Of_Order_BD_ID in every AIE4 module's BD registers.
   uint32_t getMaxOutOfOrderId() const override { return 15; }
-  /// The queue-command repeat_count field is 8 bits, as on AIE2.
-  uint32_t getMaxRepeatCount() const override { return 255; }
+  /// Repeat count is bits [27:16] of the DMA task word -- 12 bits, widened
+  /// from AIE2's 8 (AIE4 ArchSpec v1.5 Table 3-25; the v1.1 change list records
+  /// "Task queue repeat count - 256 (8-bit) -> 4k (12-bit)").
+  uint32_t getMaxRepeatCount() const override { return 4095; }
 
   // AIE4 DMA BD field widths from the register database: core tiles have
   // 9-bit wrap / 15-bit step fields, mem tiles 12-bit wrap / 23-bit step,

@@ -220,16 +220,31 @@ public:
     // the offset of the task queue register in the tile
     uint32_t queue_offset = ctrl_offset + 0x4;
 
-    // Command word: bd_id in the START_BD_ID field, repeat_count [23:16],
-    // issue-token bit [31]. START_BD_ID is 6 bits on a mem tile (48 BDs) and 4
-    // bits on core/shim tiles, so mask to the tile class instead of a flat 0xF
-    // (a flat 0xF silently truncates a mem-tile head bd_id >= 16).
+    // Command word: bd_id in the START_BD_ID field, repeat_count based at bit
+    // 16, issue-token bit [31]. START_BD_ID is 6 bits on a mem tile (48 BDs)
+    // and 4 bits on core/shim tiles, so mask to the tile class instead of a
+    // flat 0xF (a flat 0xF silently truncates a mem-tile head bd_id >= 16).
+    // On an AIE4b shim the 4-bit mask is load-bearing in a second way: the
+    // upper BD pool starts at id 16 (getBdPoolStartId) and the hardware field
+    // indexes a 16-entry bank, so masking *is* the bank-local conversion that
+    // getDmaBdAddress performs explicitly for the BD register block --
+    // 18 & 0xF == 18 - 16. Widening it to the 6-bit Start BD ID of the generic
+    // task format (ArchSpec v1.5 Table 3-25) would break that; see
+    // test/Conversion/DmaToNpu/dma_to_npu_aie4_shim_upper_pool_bdid.mlir.
+    // The repeat field width is generation-specific -- 8 bits [23:16] on AIE2,
+    // widened to 12 bits [27:16] on AIE4 (ArchSpec v1.5 Table 3-25) -- so take
+    // the mask from the target model, which is also what the op verifier
+    // range-checks against. The two cannot drift apart that way.
     // bd_id and repeat_count may be runtime SSA; all-constant folds to one
     // constant (byte-identical to the static path), else built with arith.
     Location loc = op->getLoc();
     auto i32ty = rewriter.getIntegerType(32);
     uint32_t bdIdMask =
         tm.isMemTile(op.getColumn(), op.getRow()) ? 0x3Fu : 0xFu;
+    // getMaxRepeatCount() is an all-ones field max; 0 means "no repeat support"
+    // on this target, in which case the verifier has already required 0 here.
+    uint32_t repeatMask =
+        tm.getMaxRepeatCount() ? tm.getMaxRepeatCount() : 0xFFu;
     std::optional<uint32_t> bd_id = getConstantIntOperand(op.getBdId());
     std::optional<uint64_t> repeat_cnt =
         getConstantInt64Operand(op.getRepeatCount());
@@ -253,16 +268,16 @@ public:
 
     Value cmdVal;
     if (bd_id && repeat_cnt) {
-      cmdVal = createConstantI32(rewriter, loc,
-                                 (*bd_id & bdIdMask) |
-                                     ((*repeat_cnt & 0xFF) << 16) | issueBit);
+      cmdVal = createConstantI32(
+          rewriter, loc,
+          (*bd_id & bdIdMask) | ((*repeat_cnt & repeatMask) << 16) | issueBit);
     } else {
-      // (bd_id & bdIdMask) | ((repeat & 0xFF) << 16) | issueBit, as arith over
-      // the runtime operands (a constant field folds to its contribution).
-      // A runtime repeat_count is masked to its 8-bit field below, so an
-      // out-of-range value would silently wrap to a different number of
-      // executions. Refuse the dispatch instead (host-side guard); the
-      // unsigned compare also rejects a negative count (zero executions).
+      // (bd_id & bdIdMask) | ((repeat & repeatMask) << 16) | issueBit, as
+      // arith over the runtime operands (a constant field folds to its
+      // contribution). A runtime repeat_count is masked to its field below, so
+      // an out-of-range value would silently wrap to a different number of
+      // executions. Refuse the dispatch instead (host-side guard); the unsigned
+      // compare also rejects a negative count (zero executions).
       Value repeat;
       if (repeat_cnt) {
         repeat = createConstantI32(rewriter, loc, *repeat_cnt);
@@ -290,7 +305,7 @@ public:
           createConstantI32(rewriter, loc, bdIdMask));
       cmd = rewriter.createOrFold<arith::OrIOp>(loc, cmd, bdField);
       Value masked = rewriter.createOrFold<arith::AndIOp>(
-          loc, repeat, createConstantI32(rewriter, loc, 0xFF));
+          loc, repeat, createConstantI32(rewriter, loc, repeatMask));
       Value shifted = rewriter.createOrFold<arith::ShLIOp>(
           loc, masked, createConstantI32(rewriter, loc, 16));
       cmdVal = rewriter.createOrFold<arith::OrIOp>(loc, cmd, shifted);
