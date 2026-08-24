@@ -11,15 +11,15 @@ upstream yet, applied automatically at CMake configure time (see
 [#3851](https://github.com/Xilinx/mlir-aie/issues/3851) tracks what is needed
 to drop them.
 
-- `0001-cdo-sim-defork-fixes.patch`: works around aie-rt's
-  `cdo_rts.h`/`main_rts.h` dependencies on Vitis-only headers by replacing the
-  includes with local forward declarations (`xaie_cdo.c`, `xaie_sim.c`), adds
-  an explicit backend-selection parameter to `XAie_IOInit` and a matching
-  `Backend` field on `XAie_Config` (`xaiegbl.c`/`.h`, `xaie_io.c`/`.h`) that
-  `lib/Targets/AIERT.cpp` depends on to select the CDO backend, and carries a
-  few minor build/warning fixes. Upstream:
-  [Xilinx/aie-rt#25](https://github.com/Xilinx/aie-rt/pull/25), together with
-  an `AIERT.cpp` change to call `XAie_SetupBackendConfig`.
+- `0001-cdo-sim-defork-fixes.patch`: works around aie-rt's `main_rts.h`
+  dependency on a Vitis-only header by replacing the include in `xaie_sim.c`
+  with local forward declarations, and drops an `UCHAR_MAX` initializer on
+  `XAIE_IO_CUSTOM_OP_MAX` in `xaie_txn.h` (minor build/warning fix). Our
+  pinned commit already carries an equivalent defork fix for `xaie_cdo.c`'s
+  `cdo_rts.h` dependency and no longer has the `RscArrPerTile` leak in
+  `xaie_io_common.c` natively, so this patch no longer needs to touch either
+  file — re-check both if this patch stops applying after a submodule bump.
+  Upstream: [Xilinx/aie-rt#25](https://github.com/Xilinx/aie-rt/pull/25).
 - `0002-elfloader-zero-bss-gap.patch`: `_XAie_LoadDataMemSection` wrote
   `p_memsz` bytes from a buffer (`ElfMem + p_offset`) holding only `p_filesz`
   valid ones, substituting a zeroed buffer only when `p_filesz == 0`. That
@@ -62,3 +62,7 @@ to drop them.
   upstream applied to `_XAie_AppendDDRPatch_opt` in aa07f57f. The buffer is
   already zero-initialised, so the serialized bytes are unchanged. Upstream:
   [Xilinx/aie-rt#33](https://github.com/Xilinx/aie-rt/pull/33).
+
+Note: `0003` is maintained against this branch's aie-rt pin, where
+`_XAie_AppendBlockWrite32`/`_opt` take `(Cmd, TxnPtr)` rather than upstream's
+`(DevInst, Cmd, TxnPtr)`; regenerate it if the submodule is bumped.
