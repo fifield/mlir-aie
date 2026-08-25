@@ -58,3 +58,8 @@ warmups and samples, and prints best and average bandwidth.
 
 `shim_dma_bw_config.py` is shared between generator and host so the compiled
 DMA access pattern and host-side accounting match.
+
+## Historical Results
+
+See the [2026-05-18 benchmark report](reports/shim_dma_bw_report_20260518.md)
+for hardware measurements and observed limitations.

@@ -74,8 +74,7 @@ iteration transfer passed, and `CHANNELS=12` with a 4 KiB single iteration
 transfer passed. This points to a remaining runtime/design issue for longer
 transfers once the third shim/memtile channel per column is active.
 
-## Raw Logs
+## Source Data
 
-- `reports/shim_dma_bw_raw_20260518T212517Z.log`
-- `reports/shim_dma_bw_stable_raw_20260518T215345Z.log`
-- `reports/shim_dma_bw_raw_20260518T200229Z.log`
+The raw execution logs are intentionally omitted; the measured samples needed
+to interpret these results are retained in the tables above.
