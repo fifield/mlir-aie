@@ -319,7 +319,7 @@ class XRTHostRuntime(HostRuntime):
             "Krackan",
             "Gorgon Point",
         ],
-        "npu3": ["npu3", "Medusa"],
+        "npu3": ["npu3", "npu9", "Medusa"],
     }
     _tensor_class = XRTTensor
 
