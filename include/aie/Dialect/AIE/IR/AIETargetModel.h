@@ -519,14 +519,12 @@ public:
                                DMAChannelDir dir) const = 0;
 
   /// Return the number of BD slots available in the given pool.
-  virtual uint32_t getNumBDsInPool(int col, int row,
-                                   uint32_t poolId) const = 0;
+  virtual uint32_t getNumBDsInPool(int col, int row, uint32_t poolId) const = 0;
 
   /// Return the first valid BD ID in the given pool.
   /// For global-namespace architectures (e.g. AIE2 memtile) pools may start
   /// at non-zero offsets. For per-channel architectures this is always 0.
-  virtual uint32_t getBdPoolStartId(int col, int row,
-                                    uint32_t poolId) const {
+  virtual uint32_t getBdPoolStartId(int col, int row, uint32_t poolId) const {
     return 0;
   }
 
@@ -559,8 +557,8 @@ public:
   /// submitted on channel `channel` with direction `dir`.
   /// Derived from pool information: a BD ID is accessible iff it falls within
   /// the pool's [startId, startId + numBDs) range.
-  bool isBdChannelAccessible(int col, int row, uint32_t bd_id,
-                             int channel, DMAChannelDir dir) const {
+  bool isBdChannelAccessible(int col, int row, uint32_t bd_id, int channel,
+                             DMAChannelDir dir) const {
     uint32_t pool = getBdPoolId(col, row, channel, dir);
     uint32_t start = getBdPoolStartId(col, row, pool);
     uint32_t count = getNumBDsInPool(col, row, pool);
@@ -875,8 +873,7 @@ public:
     // AIE1 core and shim tiles both have a 6-bit Iteration_Wrap field.
     return 6;
   }
-  uint32_t getNumBDsInPool(int col, int row,
-                           uint32_t poolId) const override {
+  uint32_t getNumBDsInPool(int col, int row, uint32_t poolId) const override {
     return 16;
   }
 
@@ -933,8 +930,7 @@ protected:
   static constexpr Properties properties =
       AIETargetModel::UsesSemaphoreLocks |
       AIETargetModel::UsesMultiDimensionalBDs |
-      AIETargetModel::UsesBDIteration |
-      AIETargetModel::SupportsOutOfOrderDMA;
+      AIETargetModel::UsesBDIteration | AIETargetModel::SupportsOutOfOrderDMA;
 
 public:
   uint8_t getTxnDeviceGen() const override { return 2; } // XAIE_DEV_GEN_AIEML
@@ -1025,14 +1021,12 @@ public:
       return (channel & 1); // even channels → pool 0, odd → pool 1
     return 0;               // single shared pool
   }
-  uint32_t getNumBDsInPool(int col, int row,
-                           uint32_t poolId) const override {
+  uint32_t getNumBDsInPool(int col, int row, uint32_t poolId) const override {
     if (isMemTile(col, row))
       return 24;
     return 16;
   }
-  uint32_t getBdPoolStartId(int col, int row,
-                            uint32_t poolId) const override {
+  uint32_t getBdPoolStartId(int col, int row, uint32_t poolId) const override {
     // Memtile pool 1 (odd channels) starts at BD 24.
     if (isMemTile(col, row) && poolId == 1)
       return 24;
@@ -1103,13 +1097,13 @@ public:
 
 // AIE2PS base model
 class AIE2PSTargetModel : public AIE2TargetModel {
+  static constexpr Properties properties = AIETargetModel::IsNPU;
+
 public:
   uint8_t getTxnDeviceGen() const override { return 5; } // XAIE_DEV_GEN_AIE2PS
 
-  AIE2PSTargetModel(TargetModelKind k) : AIE2TargetModel(k) {
-    // AIE2PS is an NPU but uses CERT ELF, not CDO/xclbin.
-    addModelProperty(AIETargetModel::IsNPU);
-  }
+  AIE2PSTargetModel(TargetModelKind k, Properties p = 0)
+      : AIE2TargetModel(k, p | properties) {}
 
   AIEArch getTargetArch() const override { return AIEArch::AIE2ps; }
   // AIE2P/AIE2PS: a full-width (512-bit) vector access requires 512-bit
@@ -1640,19 +1634,17 @@ public:
     return 0;
   }
 
-  uint32_t getNumBDsInPool(int col, int row,
-                           uint32_t poolId) const override {
+  uint32_t getNumBDsInPool(int col, int row, uint32_t poolId) const override {
     if (isShimNOCTile(col, row) && poolId >= ControlMM2SPoolBase &&
         poolId < ControlMM2SPoolBase + PrivatePoolNamespaceSize)
       return 8; // AIE4 shim control-MM2S has 8 private BDs per channel.
     if (isShimNOCTile(col, row) && poolId >= TraceS2MMPoolBase &&
         poolId < TraceS2MMPoolBase + PrivatePoolNamespaceSize)
       return 4; // AIE4 shim trace-S2MM has 4 private BDs per channel.
-    return 16; // All AIE4 BD pools contain 16 BDs.
+    return 16;  // All AIE4 BD pools contain 16 BDs.
   }
 
-  uint32_t getBdPoolStartId(int col, int row,
-                            uint32_t poolId) const override {
+  uint32_t getBdPoolStartId(int col, int row, uint32_t poolId) const override {
     // AIE4b shim: pool 1 starts at BD 16 (global namespace).
     if (isShimNOCTile(col, row) && getTargetArch() != AIEArch::AIE4z &&
         poolId == 1)
