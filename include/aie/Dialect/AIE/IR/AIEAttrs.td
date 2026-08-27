@@ -105,7 +105,7 @@ def AIEArch
     : I32EnumAttr<"AIEArch", "AIE Architecture",
                   [I32EnumAttrCase<"AIE1", 1>, I32EnumAttrCase<"AIE2", 2>,
                    I32EnumAttrCase<"AIE2p", 3>, I32EnumAttrCase<"AIE2ps", 4>,
-                   I32EnumAttrCase<"AIE4", 5>, I32EnumAttrCase<"AIE4z", 5>,
+                   I32EnumAttrCase<"AIE4", 5>, I32EnumAttrCase<"AIE4z", 6>,
 ]> {
 
   let cppNamespace = "xilinx::AIE";
@@ -132,7 +132,7 @@ def AIEDevice
            I32EnumAttrCase<"npu2_3col", 11>, I32EnumAttrCase<"npu2_4col", 12>,
            I32EnumAttrCase<"npu2_5col", 13>, I32EnumAttrCase<"npu2_6col", 14>,
            I32EnumAttrCase<"npu2_7col", 15>, I32EnumAttrCase<"xcve3858", 16>,
-           I32EnumAttrCase<"aie4", 17>, I32EnumAttrCase<"npu3z", 18>,
+           I32EnumAttrCase<"npu3", 17>, I32EnumAttrCase<"npu3z", 18>,
            I32EnumAttrCase<"npu3_1col", 19>, I32EnumAttrCase<"npu3_2col", 20>,
 ]> {
 
