@@ -74,6 +74,29 @@ module @test_shim_noc_tile_elements {
 
 // -----
 
+// Test all four NPU3 shim MM2S channels with LogicalTileOp<ShimNOCTile>.
+// Logical tile destination connections correspond to source ShimMux ports.
+module @test_npu3_logical_shim_mm2s_channels {
+  aie.device(npu3) {
+    %shim_tile = aie.logical_tile<ShimNOCTile>(?, ?)
+    %shim_dma = aie.shim_dma(%shim_tile) {
+      %dma0 = aie.dma_start(MM2S, 0, ^end, ^dma1)
+    ^dma1:
+      %dma1_token = aie.dma_start(MM2S, 1, ^end, ^dma2)
+    ^dma2:
+      %dma2_token = aie.dma_start(MM2S, 2, ^end, ^dma3)
+    ^dma3:
+      %dma3_token = aie.dma_start(MM2S, 3, ^end, ^end)
+    ^end:
+      aie.end
+    }
+    aie.end
+  }
+}
+
+
+// -----
+
 // Test ObjectFifoCreateOp with LogicalTileOp
 // CHECK-LABEL: @test_objectfifo_shim_to_core
 // CHECK: %[[SHIM:.*]] = aie.logical_tile<ShimNOCTile>(?, ?)
@@ -242,4 +265,3 @@ module @test_cascade_flow_mixed {
     aie.end
   }
 }
-

@@ -109,6 +109,30 @@ module @test_has_valid_dma_channels {
 
 // -----
 
+// NPU3 ShimNOCTile has 4 MM2S channels; using 5 distinct channels is invalid.
+// CHECK: error{{.*}}'aie.shim_dma' op uses more output channels than available on this tile
+module @test_npu3_logical_shim_too_many_mm2s_channels {
+  aie.device(npu3) {
+    %tile = aie.logical_tile<ShimNOCTile>(?, ?)
+    aie.shim_dma(%tile) {
+      %dma0 = aie.dma_start(MM2S, 0, ^end, ^dma1)
+    ^dma1:
+      %dma1_token = aie.dma_start(MM2S, 1, ^end, ^dma2)
+    ^dma2:
+      %dma2_token = aie.dma_start(MM2S, 2, ^end, ^dma3)
+    ^dma3:
+      %dma3_token = aie.dma_start(MM2S, 3, ^end, ^dma4)
+    ^dma4:
+      %dma4_token = aie.dma_start(MM2S, 4, ^end, ^end)
+    ^end:
+      aie.end
+    }
+    aie.end
+  }
+}
+
+// -----
+
 // HasValidBDs trait verification with LogicalTileOp
 // CHECK: error{{.*}}'aie.mem' op has more than 16 blocks
 module @test_has_valid_bds {
