@@ -1811,6 +1811,17 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
   EdgeWithTypedOutput<ModRef> *ctrlPktExpanded =
       ctrlPkt ? &expandPipeline(npuMaterialized) : nullptr;
 
+  // A design may instead carry hand-written `aiex.control_packet` ops rather
+  // than getting them from load-pdi expansion. Those still have to be lowered
+  // into a shim control-DMA transfer before the rest of the tail runs,
+  // otherwise they survive into transaction/cert generation and fail to
+  // legalize. `--generate-ctrl-pkt-overlay` is already required for such a
+  // design (it is what routes shim control-DMA to each tile's TileControl
+  // port), so it also selects the extra lowering step here. Unlike the
+  // load-pdi flow the sequence is not necessarily straight-line, so it keeps
+  // the default tail.
+  bool userCtrlPkt = ctrlPktOverlay.getValue() && !ctrlPkt;
+
   // The default tail unrolls runtime-sequence loops and pools dynamic BDs; the
   // ctrl-packet sequence is straight-line and only needs the per-device tail,
   // after its control packets are lowered to DMA.
@@ -1826,10 +1837,15 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
                 .map<ModRef>(
                     "ctrlpkt_npu_lowered.mlir",
                     PassPipeline{getPerDeviceDmaLoweringPipeline(&context)})
-          : npuMaterialized
+      : userCtrlPkt
+          ? npuMaterialized
+                .map<ModRef>("ctrlpkt_to_dma.mlir",
+                             PassPipeline{getCtrlPktToDmaPipeline(&context)})
                 .map<ModRef>("npu_dma_lowered.mlir",
-                             PassPipeline{getNpuDmaLoweringPipeline(&context)})
-                .takesInput();
+                             PassPipeline{getNpuDmaLoweringPipeline(&context)}).takesInput()
+          : npuMaterialized.map<ModRef>(
+                "npu_dma_lowered.mlir",
+                PassPipeline{getNpuDmaLoweringPipeline(&context)}).takesInput();
 
   // The control-packet extraction point: the ctrl-pkt flow reads its data off
   // the expanded module before the DMA lowering rewrites it (see
@@ -2425,8 +2441,12 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
 
   // `ctrlPktSeqs` contains every runtime sequence that may carry control-packet
   // data, honoring --device-name / --sequence-name (as `perSeq` does).
+  // Hand-written control packets (`--generate-ctrl-pkt-overlay` without
+  // --load-pdi-to-ctrl-pkt) live in the same pre-DMA-lowering module, so they
+  // are extracted from the same split; the `fullElfCtrlpktNonEmpty` filter
+  // below drops sequences that turn out to carry no control packets.
   auto &ctrlPktSeqs =
-      (loadPdiToCtrlPkt.getValue()
+      ((loadPdiToCtrlPkt.getValue() || userCtrlPkt)
            ? static_cast<EdgeWithTypedOutput<OpInModule<RuntimeSequenceOp>> &>(
                  ctrlPktExpandedPerSeq)
            : static_cast<EdgeWithTypedOutput<OpInModule<RuntimeSequenceOp>> &>(
@@ -2493,6 +2513,27 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
   };
 #endif // AIECC_HAS_AIEBU_CONFIG_ELF
 
+  // AIE4 needs the same information in a different shape: the payload path
+  // lives inside the buffer entry instead of a sibling `ctrl_packet_file`
+  // field (see makeAie4PatchInfoJson). Emitted as its own node so both forms
+  // can coexist; only the matching one is referenced by the config.
+  auto &fullElfAie4PatchInfo =
+      bundle(fullElfCtrlpkt.out, ctrlPktSeqs.out)
+          .map<llvm::json::Value>(
+              "full_elf_{0}.aie4_patch_info.json",
+              [](const Item<std::vector<char>> &binItem,
+                 const Item<OpInModule<RuntimeSequenceOp>> &seqItem,
+                 Item<llvm::json::Value> &out) -> mlir::LogicalResult {
+                RuntimeSequenceOp seq = seqItem.get().op;
+                int argIdx = seq.getBody().empty()
+                                 ? 0
+                                 : seq.getBody().front().getNumArguments();
+                out.value =
+                    makeAie4PatchInfoJson(argIdx, (int64_t)binItem.get().size(),
+                                          absolutePath(binItem.asFile()));
+                return mlir::success();
+              });
+
   // Combined ELF: all PDIs + NPU insts bundled
   // + control packet data, if any.
   // AIE4 "cert" control code: convert-aie-to-transaction + aie-npu-to-cert +
@@ -2534,12 +2575,14 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
 
   // Combined ELF config: AIE2/AIE2P bundle all PDIs + per-sequence NPU insts +
   // control-packet data (+ patch info) into an aie2_config JSON; AIE4 has no
-  // PDIs or control packets (folded into the cert control code) and every
+  // PDIs and folds load-pdi references into the cert control code, so every
   // instance points at the shared cert assembly instead (aie4_config JSON) --
-  // see makeAie4ConfigJson / certAsm above.
+  // see makeAie4ConfigJson / certAsm above. AIE4 control-packet payloads are
+  // referenced through the per-sequence patch-info file.
   auto &fullElfConfig =
       bundle(npuLoweredPerDeviceFullElf.out, pdi.out, npuInstsFullElf.out,
-             fullElfCtrlpkt.out, fullElfPatchInfo.out, certAsm.out)
+             fullElfCtrlpkt.out, fullElfPatchInfo.out, certAsm.out,
+             fullElfAie4PatchInfo.out)
           .join<llvm::json::Value>(
               "full_elf_config.json",
               [fullElfInputPath](
@@ -2549,6 +2592,7 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
                   const Node<std::vector<char>> &ctrlPkts,
                   const Node<llvm::json::Value> &patchInfos,
                   const Node<std::string> &certAsmNode,
+                  const Node<llvm::json::Value> &aie4PatchInfos,
                   Item<llvm::json::Value> &out) -> mlir::LogicalResult {
                 bool isAie4 = !devices.items.empty() &&
                               moduleHasAie4Device(
@@ -2560,9 +2604,12 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
                                     "control-code assembly\n";
                     return mlir::failure();
                   }
+                  llvm::StringMap<std::string> aie4PatchInfoPaths;
+                  for (const auto &item : aie4PatchInfos.items)
+                    aie4PatchInfoPaths[item.key] = absolutePath(item.asFile());
                   out.value = makeAie4ConfigJson(
-                      devices,
-                      absolutePath(certAsmNode.items.front().asFile()));
+                      devices, absolutePath(certAsmNode.items.front().asFile()),
+                      aie4PatchInfoPaths);
                   return mlir::success();
                 }
                 llvm::StringMap<std::string> pdiPaths, instsPaths;

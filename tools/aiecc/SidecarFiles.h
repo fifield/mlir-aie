@@ -356,6 +356,26 @@ makeFullElfConfigJson(const Node<OpInModule<xilinx::AIE::DeviceOp>> &devices,
   return O{{"xrt-kernels", std::move(xrtKernels)}};
 }
 
+// Patch-info JSON for an AIE4 full-ELF control-packet buffer, referenced from
+// the aie4_config instance's `patch_info_file`. Unlike the AIE2 form
+// (makePatchInfoJson plus a sibling `ctrl_packet_file` field), AIE4 carries the
+// payload path inside the buffer entry itself; `aiebu-asm` emits it as a
+// `.ctrlpkt-<xrt_id>.<grp>` section. `xrtId` is the runtime-sequence argument
+// slot the control buffer occupies, and must match the third operand of the
+// `APPLY_OFFSET_57` in the cert control code -- that is what relocates the shim
+// control-MM2S BD's base address onto this section.
+inline llvm::json::Value makeAie4PatchInfoJson(int xrtId,
+                                               int64_t ctrlPktSizeBytes,
+                                               llvm::StringRef ctrlPktPath) {
+  using O = llvm::json::Object;
+  return O{{"external_buffers",
+            O{{"buffer0", O{{"xrt_id", xrtId},
+                            {"logical_id", xrtId},
+                            {"size_in_bytes", ctrlPktSizeBytes},
+                            {"ctrl_pkt_buffer", true},
+                            {"path", ctrlPktPath.str()}}}}}};
+}
+
 // Full-ELF config.json fed to `aiebu-asm -t aie4_config`. AIE4's control code
 // is a single "cert" assembly shared by the whole module (produced by the
 // cert pipeline — convert-aie-to-transaction, aie-npu-to-cert,
@@ -365,9 +385,16 @@ makeFullElfConfigJson(const Node<OpInModule<xilinx::AIE::DeviceOp>> &devices,
 // folded every device's load-pdi references into the cert control code).
 // Argument count matches makeFullElfConfigJson: max(3, max runtime-seq
 // arity); AIE4 argument names are integers rather than "arg_N" strings.
+//
+// `patchInfoPaths` (keyed per runtime sequence as "<device>_<sequence>" via
+// `npuSeqKey`, optional) carries that sequence's control-packet patch-info JSON
+// -- see makeAie4PatchInfoJson. It is attached to the matching instance so the
+// assembler emits the sequence's control-packet payload as a `.ctrlpkt-*`
+// section and relocates the shim control-MM2S BD onto it.
 inline llvm::json::Value
 makeAie4ConfigJson(const Node<OpInModule<xilinx::AIE::DeviceOp>> &devices,
-                   llvm::StringRef certAsmPath) {
+                   llvm::StringRef certAsmPath,
+                   const llvm::StringMap<std::string> &patchInfoPaths = {}) {
   using O = llvm::json::Object;
 
   llvm::json::Array xrtKernels;
@@ -390,8 +417,12 @@ makeAie4ConfigJson(const Node<OpInModule<xilinx::AIE::DeviceOp>> &devices,
 
     llvm::json::Array instances;
     devOp.walk([&](xilinx::AIE::RuntimeSequenceOp seq) {
-      instances.push_back(O{{"id", seq.getSymName().str()},
-                            {"ctrl_code_file", certAsmPath.str()}});
+      O inst{{"id", seq.getSymName().str()},
+             {"ctrl_code_file", certAsmPath.str()}};
+      if (auto patchIt = patchInfoPaths.find(npuSeqKey(devName, seq.getSymName()));
+          patchIt != patchInfoPaths.end())
+        inst["patch_info_file"] = patchIt->second;
+      instances.push_back(std::move(inst));
     });
     if (instances.empty())
       continue;

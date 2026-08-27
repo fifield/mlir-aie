@@ -313,7 +313,7 @@ AIE1TargetModel::getDmaControlAddress(int col, int row, int channel,
     llvm_unreachable(
         "AIE1TargetModel::getDmaControlAddress called for non-DMA tile");
 
-  if (direction == AIE::DMAChannelDir::MM2S)
+  if (isMM2S(direction))
     offset += 010;
 
   return ((col & 0xff) << getColumnShift()) | ((row & 0x1f) << getRowShift()) |
@@ -983,15 +983,15 @@ AIE2TargetModel::getDmaControlAddress(int col, int row, int channel,
   uint32_t offset = 0;
   if (isShimNOCTile(col, row)) {
     offset = 0x0001D200 + (channel * 0x8);
-    if (direction == AIE::DMAChannelDir::MM2S)
+    if (isMM2S(direction))
       offset += 0x10;
   } else if (isMemTile(col, row)) {
     offset = 0x000A0600 + (channel * 0x8);
-    if (direction == AIE::DMAChannelDir::MM2S)
+    if (isMM2S(direction))
       offset += 0x30;
   } else if (isCoreTile(col, row)) {
     offset = 0x0001DE00 + (channel * 0x8);
-    if (direction == AIE::DMAChannelDir::MM2S)
+    if (isMM2S(direction))
       offset += 0x10;
   } else {
     llvm_unreachable(
@@ -1872,7 +1872,23 @@ uint64_t AIE4TargetModel::getDmaBdAddress(int col, int row, uint32_t bd_id,
     // (lower pool: ids 0..15, upper pool: ids 16..31). Convert to bank-local
     // index by subtracting the pool start when targeting the upper pool.
     bool isAIE4z = getTargetArch() == AIEArch::AIE4z;
-    if (direction == AIE::DMAChannelDir::MM2S) {
+    if (direction == AIE::DMAChannelDir::ControlMM2S) {
+      // AIE4 shim control-MM2S has its own pool of 8 private BDs per channel.
+      numBds = 8;
+      offset = 0x00018300;
+      if (channel >= 1) {
+        offset |= 0x00040000;
+        channel -= 1;
+      }
+    } else if (direction == AIE::DMAChannelDir::TraceS2MM) {
+      // AIE4 shim trace-S2MM has its own pool of 4 private BDs per channel.
+      numBds = 4;
+      offset = 0x00018480;
+      if (channel >= 1) {
+        offset |= 0x00040000;
+        channel -= 1;
+      }
+    } else if (isMM2S(direction)) {
       if (isAIE4z) {
         offset = 0x00018C40;
       } else {
@@ -1907,7 +1923,7 @@ uint64_t AIE4TargetModel::getDmaBdAddress(int col, int row, uint32_t bd_id,
     // Base address for S2MM channel 0
     offset = 0x00008000;
     // Each BD is 11 words (0x2C bytes), 16 BDs per channel
-    if (direction == AIE::DMAChannelDir::MM2S) {
+    if (isMM2S(direction)) {
       offset = 0x00008C00; // MM2S base
     }
     offset += ((channel % 4) * 4 * 0x30) + (bd_id * 0x30);
@@ -1924,10 +1940,8 @@ uint64_t AIE4TargetModel::getDmaBdAddress(int col, int row, uint32_t bd_id,
   } else {
     llvm_unreachable("unimplemented");
   }
-  if (isCoreTile(col, row))
-    row = row + (5 * getNumMemTileRows()) - 1; // account for memtile rows
-  return ((col & 0xff) << getColumnShift()) | ((row & 0x1f) << getRowShift()) |
-         offset;
+  // getTileAddress() accounts for the 5MiB MEM tile address rows.
+  return getTileAddress(col, row) | offset;
 }
 
 uint32_t AIE4TargetModel::getDmaBdAddressOffset(int col, int row) const {
@@ -1944,7 +1958,15 @@ AIE4TargetModel::getDmaControlAddress(int col, int row, int channel,
                                       AIE::DMAChannelDir direction) const {
   uint32_t offset = 0;
   if (isShimNOCTile(col, row)) {
-    if (direction == AIE::DMAChannelDir::S2MM) {
+    if (direction == AIE::DMAChannelDir::ControlMM2S) {
+      offset = 0x00018560;
+      if (channel >= 1)
+        offset |= 0x00040000;
+    } else if (direction == AIE::DMAChannelDir::TraceS2MM) {
+      offset = 0x00018548;
+      if (channel >= 1)
+        offset |= 0x00040000;
+    } else if (isS2MM(direction)) {
       uint32_t o[] = {0x00018540, 0x00058540, 0x000185D0, 0x000185D8};
       offset = o[channel];
     } else {
@@ -1953,7 +1975,7 @@ AIE4TargetModel::getDmaControlAddress(int col, int row, int channel,
       offset = o[channel];
     }
   } else if (isMemTile(col, row)) {
-    if (direction == AIE::DMAChannelDir::S2MM) {
+    if (isS2MM(direction)) {
       offset = 0x00009E00 + (channel * 0x8);
     } else {
       offset = 0x00009E60 + (channel * 0x8);
@@ -1961,7 +1983,7 @@ AIE4TargetModel::getDmaControlAddress(int col, int row, int channel,
     if (channel >= 4)
       offset += 0x40000;
   } else if (isCoreTile(col, row)) {
-    if (direction == AIE::DMAChannelDir::S2MM) {
+    if (isS2MM(direction)) {
       offset = 0x000ACE00 + (channel * 0x8);
     } else {
       offset = 0x000ACE10 + (channel * 0x8);
@@ -1970,10 +1992,8 @@ AIE4TargetModel::getDmaControlAddress(int col, int row, int channel,
     llvm_unreachable(
         "AIE4TargetModel::getDmaControlAddress unimplemented tile type");
   }
-  if (isCoreTile(col, row))
-    row = row + (5 * getNumMemTileRows()) - 1; // account for memtile rows
-  return ((col & 0xff) << getColumnShift()) | ((row & 0x1f) << getRowShift()) |
-         offset;
+  // getTileAddress() accounts for the 5MiB MEM tile address rows.
+  return getTileAddress(col, row) | offset;
 }
 
 std::optional<uint32_t>
@@ -2189,6 +2209,8 @@ AIE4TargetModel::getNumSourceSwitchboxConnections(int col, int row,
         return 0;
       return 2;
     }
+    case WireBundle::TileControl:
+      return 2;
     case WireBundle::SouthControl:
     case WireBundle::Switch32:
       return 2;

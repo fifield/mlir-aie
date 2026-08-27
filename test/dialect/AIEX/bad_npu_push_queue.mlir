@@ -12,7 +12,7 @@ module {
     aie.runtime_sequence(%in : memref<128x4x2x8xi32>, %buf : memref<32xi32>, %out : memref<8192xi32>) {
       %rc = arith.constant 3 : i32
       %bd = arith.constant 28 : i32
-      // expected-error@+1 {{BD ID exceeds the maximum ID.}}
+      // expected-error@+1 {{BD ID 28 is not accessible from channel (MM2S, 0)}}
       aiex.npu.push_queue (0, 0, MM2S:0) bd_id %bd repeat %rc {issue_token = false} : i32, i32
     }
   }

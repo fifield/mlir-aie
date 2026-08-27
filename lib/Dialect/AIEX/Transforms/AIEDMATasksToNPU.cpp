@@ -981,7 +981,7 @@ struct AIEDMATasksToNPUPass
           return bd_op->emitOpError()
                  << "Mismatch number of dimensions between padding(s)"
                  << " and wrap(s) and stride(s).";
-        if (channelDir == AIE::DMAChannelDir::MM2S) {
+        if (AIE::isMM2S(channelDir)) {
           for (size_t i = 0; i < padDims->size(); i++) {
             int j = padDims->size() - i - 1;
             padBefore[i] = (*padDims)[j].getConstPadBefore();
@@ -1078,7 +1078,7 @@ struct AIEDMATasksToNPUPass
       }
     } else {
       if (padDims && tm.isMemTile(tile.getCol(), tile.getRow()) &&
-          channelDir == AIE::DMAChannelDir::MM2S) {
+          AIE::isMM2S(channelDir)) {
         return bd_op->emitOpError()
                << "Padding requires n-d data layouts expressed as "
                << "wrap(s) and stride(s).";

@@ -10,16 +10,23 @@
 // A memtile partitions its BDs by channel parity: even channels reach bd_id
 // 0-23, odd channels reach bd_id 24-47. A user-pinned bd_id on the wrong
 // parity is rejected.
+//
+// The HasValidBDs trait verifier enforces the same invariant for BD chains
+// reached from an aie.dma_start, and runs before this pass, so the first case
+// below surfaces the verifier's diagnostic. The second uses the aie.dma region
+// form, whose blocks the verifier's dma_start walk does not reach, so the
+// pass's own check is what catches it -- both checks are load-bearing.
 
 // dma_start: even channel with a bd_id from the odd range.
 module {
   aie.device(npu2) {
     %t = aie.tile(0, 1)
     %b = aie.buffer(%t) : memref<1xi32>
+    // expected-error@+1 {{bd_id 24 is not accessible from channel (S2MM, 0), whose BD pool spans ids 0 to 23}}
     aie.memtile_dma(%t) {
         aie.dma_start(S2MM, 0, ^bd0, ^end)
       ^bd0:
-        // expected-error@+1 {{assigned bd_id 24 is not accessible from channel 0 on this tile}}
+        // expected-note@+1 {{this BD}}
         aie.dma_bd(%b : memref<1xi32>) { bd_id = 24 : i32 }
         aie.next_bd ^end
       ^end:

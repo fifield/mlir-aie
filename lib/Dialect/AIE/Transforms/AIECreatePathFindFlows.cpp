@@ -300,6 +300,9 @@ static std::optional<std::pair<TileID, Port>> linkedInput(TileID tile,
   case WireBundle::South32:
     return std::pair{TileID{tile.col, tile.row - 1},
                      Port{WireBundle::North32, out.channel}};
+  case WireBundle::NorthControl:
+    return std::pair{TileID{tile.col, tile.row + 1},
+                     Port{WireBundle::SouthControl, out.channel}};
   default:
     return std::nullopt;
   }
@@ -307,10 +310,20 @@ static std::optional<std::pair<TileID, Port>> linkedInput(TileID tile,
 
 /// Whether the connection out of `out` at `tile` leads, through `settings`, to
 /// `finalPort` at `finalTile`.
-static bool findPathToDest(const SwitchSettings &settings, TileID tile,
-                           Port out, TileID finalTile, Port finalPort) {
+static bool findPathToDestImpl(const SwitchSettings &settings, TileID tile,
+                               Port out, TileID finalTile, Port finalPort,
+                               std::set<std::pair<TileID, Port>> &visited) {
   if (tile == finalTile && out == finalPort)
     return true;
+  if (!visited.insert({tile, out}).second)
+    return false;
+  // Kept from the control-overlay routing; the bridge porting commit replaces
+  // this legacy same-port continuation with explicit output-to-input wires.
+  if (auto current = settings.find(tile); current != settings.end())
+    for (auto [src, dest] : llvm::zip(current->second.srcs, current->second.dsts))
+      if (src == out && findPathToDestImpl(settings, tile, dest, finalTile,
+                                          finalPort, visited))
+        return true;
   std::optional<std::pair<TileID, Port>> next = linkedInput(tile, out);
   if (!next)
     return false;
@@ -323,8 +336,14 @@ static bool findPathToDest(const SwitchSettings &settings, TileID tile,
       llvm::zip(setting->second.srcs, setting->second.dsts), [&](auto link) {
         auto [src, dest] = link;
         return src == in &&
-               findPathToDest(settings, neighbour, dest, finalTile, finalPort);
+               findPathToDestImpl(settings, neighbour, dest, finalTile, finalPort, visited);
       });
+}
+
+static bool findPathToDest(const SwitchSettings &settings, TileID tile,
+                           Port out, TileID finalTile, Port finalPort) {
+  std::set<std::pair<TileID, Port>> visited;
+  return findPathToDestImpl(settings, tile, out, finalTile, finalPort, visited);
 }
 
 /// Every node `successors` reaches from `start`, with the node a breadth-first
@@ -1363,6 +1382,7 @@ struct PacketPlan {
   // ports it reaches, provided it alone feeds them and every packet goes to
   // all of them.
   std::map<TileID, SmallVector<Connect, 4>> circuitHops;
+  std::set<std::pair<TileID, Connect>> overlayCircuitHops;
   std::map<TileID, ArbiterPlan> plans;
 };
 
@@ -1688,6 +1708,59 @@ void PacketFlowRouting::findCircuitHops() {
         for (Port p : setting.dsts)
           claimedMasters.insert({tileId, p});
       }
+  // Control injection is fixed circuit wiring, independent of the optional
+  // optimization that saves packet arbiters on transit hops. Packet trees can
+  // share outputs and split by ID, so validate before making them unconditional.
+  for (auto &[tileId, connects] : switchboxes) {
+    std::set<Port> injected;
+    for (const auto &[conn, flowID] : connects)
+      if (conn.src.bundle == WireBundle::TileControl)
+        injected.insert(conn.src);
+    for (Port slave : injected) {
+      std::set<Port> reached;
+      std::map<int, std::set<Port>> reachedByID;
+      for (const auto &[conn, flowID] : connects)
+        if (conn.src == slave) {
+          reached.insert(conn.dst);
+          reachedByID[flowID].insert(conn.dst);
+        }
+      bool exclusive = !claimedSlaves.count({tileId, slave}) &&
+          llvm::all_of(reached, [&](Port master) {
+            return !claimedMasters.count({tileId, master});
+          }) &&
+          llvm::all_of(reachedByID, [&](const auto &entry) {
+            return entry.second == reached;
+          }) &&
+          llvm::all_of(connects, [&](const auto &entry) {
+            return !reached.count(entry.first.dst) || entry.first.src == slave;
+          });
+      if (!exclusive) {
+        for (const auto &[conn, flowID] : connects)
+          if (conn.src == slave || reached.count(conn.dst))
+            hazardConnections.insert({tileId, conn});
+        if (!planFailure)
+          planFailure = llvm::formatv(
+              "at tile ({0}, {1}), mandatory control injection from {2} "
+              "requires exclusive outputs and identical destinations for "
+              "every packet ID.", tileId.col, tileId.row, describePort(slave));
+        continue;
+      }
+      for (const auto &[conn, flowID] : connects) {
+        if (conn.src != slave)
+          continue;
+        auto &hops = circuitHops[tileId];
+        if (!llvm::is_contained(hops, conn))
+          hops.push_back(conn);
+        if (markedFlows.contains({{tileId, conn.src}, flowID}))
+          overlayCircuitHops.insert({tileId, conn});
+        claimedMasters.insert({tileId, conn.dst});
+      }
+      claimedSlaves.insert({tileId, slave});
+      llvm::erase_if(connects, [&](const auto &entry) {
+        return entry.first.src == slave;
+      });
+    }
+  }
   for (auto &[tileId, connects] : switchboxes) {
     if (!circuitSwitchHops ||
         targetModel.isShimNOCorPLTile(tileId.col, tileId.row))
@@ -2705,8 +2778,11 @@ LogicalResult PacketPlan::emit(DeviceOp device, OpBuilder &builder,
         for (const auto &flow : llvm::make_first_range(slaveFlowLocs))
           if (flow.first == PhysPort{tileId, hop.src})
             passing.push_back(flow);
-        ConnectOp::create(builder, locOf(passing, tileLoc), hop.src.bundle,
-                          hop.src.channel, hop.dst.bundle, hop.dst.channel);
+        auto connect = ConnectOp::create(builder, locOf(passing, tileLoc),
+                                         hop.src.bundle, hop.src.channel,
+                                         hop.dst.bundle, hop.dst.channel);
+        if (overlayCircuitHops.count({tileId, hop}))
+          overlay.setAttr(connect, unit);
       }
 
     // The master sets of this tile, in port order, and the amsels they take.

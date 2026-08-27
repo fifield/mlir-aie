@@ -50,19 +50,22 @@ module @core_tile {
 
 // -----
 
-// Mem tile (0,1), S2MM channel 0. The mem tile START_BD_ID field is 6 bits (48
+// Mem tile (0,1), S2MM channel 1. The mem tile START_BD_ID field is 6 bits (48
 // BDs), so head BD id 24 rides through push_queue whole (the tile-class masking
-// happens later, in aie-dma-to-npu).
+// happens later, in aie-dma-to-npu). Channel 1 rather than 0 because mem tile
+// BD pools split on channel parity -- odd channels own ids 24..47 -- so 24 is
+// both greater than 15 (what this test is about) and reachable from the
+// channel it is pushed on.
 // CHECK-LABEL: @mem_tile
 // CHECK: aiex.npu.maskwrite32(%{{.*}}, %{{.*}}, %{{.*}}) {column = 0 : i32, row = 1 : i32}
 // CHECK: %[[BD:.*]] = arith.constant 24 : i32
-// CHECK: aiex.npu.push_queue(0, 1, S2MM : 0) bd_id %[[BD]] repeat %{{.*}} {issue_token = false}
+// CHECK: aiex.npu.push_queue(0, 1, S2MM : 1) bd_id %[[BD]] repeat %{{.*}} {issue_token = false}
 module @mem_tile {
   aie.device(npu2) {
     %mt = aie.tile(0, 1)
     %pl = aie.lock(%mt, 0) {init = 2 : i32}
     %cl = aie.lock(%mt, 1) {init = 0 : i32}
-    aie.objectfifo_rearm_binding @r channels(%mt : index) locks(%pl, %cl : index, index) {channel_dirs = array<i32: 0>, channel_indices = array<i32: 0>, lock_inits = array<i32: 2, 0>, head_bd_ids = array<i32: 24>, repeat_counts = array<i32: 0>}
+    aie.objectfifo_rearm_binding @r channels(%mt : index) locks(%pl, %cl : index, index) {channel_dirs = array<i32: 0>, channel_indices = array<i32: 1>, lock_inits = array<i32: 2, 0>, head_bd_ids = array<i32: 24>, repeat_counts = array<i32: 0>}
     aie.runtime_sequence() {
       aiex.dma_channel_reset_for(@r)
     }
@@ -90,14 +93,16 @@ module @npu1_core {
 // -----
 
 // The binding is the sole source of truth: even with a resident aie.memtile_dma
-// chain present that says bd_id 24 / repeat 7, the re-push uses the binding's
+// chain present that says bd_id 20 / repeat 7, the re-push uses the binding's
 // head_bd_ids 5 / repeat_counts 3 -- proof the lowering reads the binding and
-// does not re-scan the emitted chain.
+// does not re-scan the emitted chain. Both ids sit in channel 0's pool (0..23),
+// which is what makes the resident chain valid IR; only their difference
+// matters to what this test asserts.
 // CHECK-LABEL: @binding_wins
 // CHECK-DAG: %[[BD:.*]] = arith.constant 5 : i32
 // CHECK-DAG: %[[RC:.*]] = arith.constant 3 : i32
 // CHECK: aiex.npu.push_queue(0, 1, S2MM : 0) bd_id %[[BD]] repeat %[[RC]] {issue_token = false}
-// CHECK-NOT: arith.constant 24 : i32
+// CHECK-NOT: arith.constant 20 : i32
 // CHECK-NOT: arith.constant 7 : i32
 module @binding_wins {
   aie.device(npu2) {
@@ -110,7 +115,7 @@ module @binding_wins {
     ^bd:
       %c1 = arith.constant 1 : i32
       aie.use_lock(%pl, AcquireGreaterEqual, %c1)
-      aie.dma_bd(%buf : memref<64xi32> offset = 0 len = 64) {bd_id = 24 : i32, next_bd_id = 24 : i32}
+      aie.dma_bd(%buf : memref<64xi32> offset = 0 len = 64) {bd_id = 20 : i32, next_bd_id = 20 : i32}
       aie.use_lock(%cl, Release, %c1)
       aie.next_bd ^bd
     ^end:

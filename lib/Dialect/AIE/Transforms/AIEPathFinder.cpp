@@ -375,8 +375,11 @@ void Pathfinder::initialize(int maxCol, int maxRow,
         // from north to south
         SmallVector<std::pair<WireBundle, WireBundle>> northToSouth = {
             {WireBundle::North, WireBundle::South}};
-        if (isAIE4)
+        if (isAIE4) {
           northToSouth.push_back({WireBundle::North32, WireBundle::South32});
+          northToSouth.push_back(
+              {WireBundle::NorthControl, WireBundle::SouthControl});
+        }
         interconnect(col, row, col, row + 1, northToSouth);
       }
       if (col > 0) {
@@ -806,7 +809,12 @@ void Pathfinder::buildRoutingGraph() {
         {{src.coords.col, src.coords.row + 1},
          {WireBundle::South32, src.port.channel}},
         {{src.coords.col + 1, src.coords.row},
-         {WireBundle::West32, src.port.channel}}};
+         {WireBundle::West32, src.port.channel}},
+        // AIE4 control stream switch routing (control packets travel south to
+        // north, shim -> core), created in initialize() as
+        // NorthControl -> SouthControl.
+        {{src.coords.col, src.coords.row + 1},
+         {WireBundle::SouthControl, src.port.channel}}};
     for (const auto &[neighborCoords, neighborPort] : neighbors) {
       auto nIt = graph.find({src.coords, neighborCoords});
       if (nIt != graph.end() &&

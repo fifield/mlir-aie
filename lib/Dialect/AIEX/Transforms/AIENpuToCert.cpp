@@ -358,19 +358,44 @@ struct NpuSyncToCertWaitTCTS : OpConversionPattern<AIEX::NpuSyncOp> {
 
     const std::vector<int> chan2actor_shim_s2mm = {0, 2, 3, 4};
     const std::vector<int> chan2actor_shim_mm2s = {6, 7, 8, 9, 10, 11, 12, 13};
+    // FIXME: this looks off by one against AIE4 arch spec v1.5 Table 3-23,
+    // whose MEM column starts at S2MM0 = actor 0, i.e. {0, 1, ..., 7}. Nothing
+    // in tree currently issues an aiex.npu.sync against a mem tile, so the
+    // entry is unexercised and unverified on hardware; left as found rather
+    // than changed blind.
     const std::vector<int> chan2actor_mem_s2mm = {1, 2, 3, 4, 5, 6, 7};
     const std::vector<int> chan2actor_mem_mm2s = {16, 17, 18, 19, 20,
                                                   22, 23, 24, 25, 26};
     const std::vector<int> chan2actor_tile_s2mm = {0, 1};
     const std::vector<int> chan2actor_tile_mm2s = {6};
+    // AIE4 arch spec v1.5 Table 3-23 ("Actor IDs"): the shim control-MM2S and
+    // trace-S2MM channels are *not* part of the regular MM2S/S2MM actor ranges.
+    // Ctrl_MM2S0/1 are actors 16/17 and Trace_S2MM is actor 1.
+    const std::vector<int> chan2actor_shim_ctrl_mm2s = {16, 17};
+    const std::vector<int> chan2actor_shim_trace_s2mm = {1};
 
     const auto &tm = AIE::getTargetModel(op);
-    const bool isS2MM =
-        direction == static_cast<std::underlying_type_t<AIE::DMAChannelDir>>(
-                         AIE::DMAChannelDir::S2MM);
+    auto dirEnum = static_cast<AIE::DMAChannelDir>(direction);
+    const bool isS2MM = dirEnum == AIE::DMAChannelDir::S2MM;
 
     const std::vector<int> *chan2actor = nullptr;
-    if (tm.isCoreTile(col, row))
+    const char *dirName = isS2MM ? "S2MM" : "MM2S";
+    if (dirEnum == AIE::DMAChannelDir::ControlMM2S ||
+        dirEnum == AIE::DMAChannelDir::TraceS2MM) {
+      // Control-MM2S and trace-S2MM only exist on the shim.
+      if (!tm.isShimNOCTile(col, row))
+        return op.emitOpError()
+               << "direction " << stringifyDMAChannelDir(dirEnum)
+               << " is only valid on a shim tile, but tile (" << col << ", "
+               << row << ") is not one";
+      if (dirEnum == AIE::DMAChannelDir::ControlMM2S) {
+        chan2actor = &chan2actor_shim_ctrl_mm2s;
+        dirName = "ControlMM2S";
+      } else {
+        chan2actor = &chan2actor_shim_trace_s2mm;
+        dirName = "TraceS2MM";
+      }
+    } else if (tm.isCoreTile(col, row))
       chan2actor = isS2MM ? &chan2actor_tile_s2mm : &chan2actor_tile_mm2s;
     else if (tm.isMemTile(col, row))
       chan2actor = isS2MM ? &chan2actor_mem_s2mm : &chan2actor_mem_mm2s;
@@ -380,7 +405,7 @@ struct NpuSyncToCertWaitTCTS : OpConversionPattern<AIEX::NpuSyncOp> {
     size_t chanIdx = static_cast<size_t>(channel);
     if (chanIdx >= chan2actor->size()) {
       op.emitError("invalid DMA channel ")
-          << channel << " for " << (isS2MM ? "S2MM" : "MM2S")
+          << channel << " for " << dirName
           << " direction in NpuSyncToCertWaitTCTS conversion";
       return failure();
     }

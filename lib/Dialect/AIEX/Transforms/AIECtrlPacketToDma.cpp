@@ -33,7 +33,8 @@ static ShimDMAAllocationOp getCtrlPktShimAlloc(DeviceOp device, int col) {
   AIEDialect::IsCtrlPktOverlayAttrHelper overlay(device.getContext());
   for (auto alloc : device.getOps<AIE::ShimDMAAllocationOp>())
     if (overlay.isAttrPresent(alloc) &&
-        alloc.getChannelDir() == AIE::DMAChannelDir::MM2S &&
+        (alloc.getChannelDir() == AIE::DMAChannelDir::MM2S ||
+         alloc.getChannelDir() == AIE::DMAChannelDir::ControlMM2S) &&
         alloc.getTileOp().colIndex() == col)
       return alloc;
   return {};
@@ -146,7 +147,8 @@ struct AIECtrlPacketToDmaPass
 
         // Read requests must end their DMA transfer.
         bool batchable = ctrlPktOp.getOpcode() == 0;
-        if (targetModel.getTargetArch() == AIEArch::AIE2p && batchable &&
+        if ((targetModel.getTargetArch() == AIEArch::AIE2p ||
+             isa<AIE4TargetModel>(targetModel)) && batchable &&
             !new_batch && batches.back().tileId == TileID{col, row}) {
           // Add to existing batch
           batches.back().totalSize += ctrlPktSize;
@@ -203,7 +205,12 @@ struct AIECtrlPacketToDmaPass
 
         Value shimRow = AIEX::createConstantI32(builder, loc, 0);
         Value shimCol = AIEX::createConstantI32(builder, loc, col);
-        Value dir = AIEX::createConstantI32(builder, loc, 1); // MM2S
+        // AIE4 control packets are sourced from the shim control-MM2S port.
+        Value dir = AIEX::createConstantI32(
+            builder, loc,
+            static_cast<int32_t>(isa<AIE4TargetModel>(targetModel)
+                                     ? AIE::DMAChannelDir::ControlMM2S
+                                     : AIE::DMAChannelDir::MM2S));
         Value chan = AIEX::createConstantI32(builder, loc, batchIt->shimChan);
         Value col_num = AIEX::createConstantI32(builder, loc, 1);
         Value row_num = AIEX::createConstantI32(builder, loc, 1);

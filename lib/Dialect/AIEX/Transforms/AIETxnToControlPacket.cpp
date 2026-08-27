@@ -144,15 +144,17 @@ struct AIELegalizeControlPacketPass
           AIELegalizeControlPacketPass> {
   void runOnOperation() override {
     AIE::DeviceOp device = getOperation();
+    const auto &targetModel = device.getTargetModel();
+    uint32_t maxPayloadSize = AIEX::getCtrlPktMaxPayloadWords(targetModel);
 
     ConversionTarget target(getContext());
-    target.addDynamicallyLegalOp<AIEX::NpuControlPacketOp>([](Operation *op) {
+    target.addDynamicallyLegalOp<AIEX::NpuControlPacketOp>([maxPayloadSize](Operation *op) {
       auto packetOp = cast<AIEX::NpuControlPacketOp>(op);
-      return !packetOp.getData() || fitsInLine(packetOp, 4);
+      return !packetOp.getData() || fitsInLine(packetOp, maxPayloadSize);
     });
 
     RewritePatternSet patterns(&getContext());
-    patterns.add<ControlPacketSplitPattern>(&getContext(), 4);
+    patterns.add<ControlPacketSplitPattern>(&getContext(), maxPayloadSize);
 
     if (failed(applyPartialConversion(device, target, std::move(patterns)))) {
       signalPassFailure();

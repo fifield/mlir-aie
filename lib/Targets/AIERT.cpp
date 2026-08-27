@@ -99,6 +99,14 @@ static const std::map<xilinx::AIE::WireBundle, StrmSwPortType>
         {xilinx::AIE::WireBundle::Controller32, StrmSwPortType::_32B_UCTRLR},
         {xilinx::AIE::WireBundle::PLIO32, StrmSwPortType::_32B_PL}};
 
+static XAie_DmaDirection toXAieDmaDirection(xilinx::AIE::DMAChannelDir dir) {
+  if (dir == xilinx::AIE::DMAChannelDir::ControlMM2S)
+    return DMA_MM2S_CTRL;
+  if (dir == xilinx::AIE::DMAChannelDir::TraceS2MM)
+    return DMA_S2MM_TRACE;
+  return xilinx::AIE::isS2MM(dir) ? DMA_S2MM : DMA_MM2S;
+}
+
 #ifndef NDEBUG
 
 // https://stackoverflow.com/a/32230306
@@ -192,6 +200,24 @@ using namespace mlir;
 using namespace xilinx;
 
 #define DEBUG_TYPE "aie-aiert"
+
+static StrmSwPortType getStrmSwPortType(const AIE::AIETargetModel &targetModel,
+                                        int col, int row,
+                                        AIE::WireBundle bundle,
+                                        bool isSourcePort) {
+  if (isSourcePort && bundle == AIE::WireBundle::TileControl &&
+      isa<AIE::AIE4TargetModel>(targetModel) &&
+      targetModel.isShimNOCTile(col, row))
+    return StrmSwPortType::DMA_CTRL;
+
+  return WIRE_BUNDLE_TO_STRM_SW_PORT_TYPE.at(bundle);
+}
+
+static bool hasTileControlMasterSet(Block &block) {
+  return llvm::any_of(block.getOps<AIE::MasterSetOp>(), [](auto masterSetOp) {
+    return masterSetOp.getDestBundle() == AIE::WireBundle::TileControl;
+  });
+}
 
 llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const XAie_LocType &loc) {
   os << "XAie_LocType(col: " << std::to_string(loc.Col)
@@ -624,9 +650,12 @@ configureBdInBlock(const AIE::AIETargetModel &targetModel,
   auto tileLoc = XAie_TileLoc(col, row);
   if (isa<AIE::AIE4TargetModel>(targetModel) &&
       (targetModel.isMemTile(col, row) ||
+       (targetModel.isShimNOCTile(col, row) &&
+        (dir == AIE::DMAChannelDir::ControlMM2S ||
+         dir == AIE::DMAChannelDir::TraceS2MM)) ||
        (isa<AIE::NPU3zTargetModel>(targetModel) &&
         targetModel.isShimNOCTile(col, row)))) {
-    XAie_DmaDirection d = dir == AIE::DMAChannelDir::S2MM ? DMA_S2MM : DMA_MM2S;
+    XAie_DmaDirection d = toXAieDmaDirection(dir);
     TRY_XAIE_API_EMIT_ERROR(bdOp, XAie_DmaWriteBdPvtBuffPool, devInst,
                             &dmaTileBd, tileLoc, channel, d, bdId);
   } else {
@@ -642,8 +671,7 @@ LogicalResult xilinx::AIE::AIERTControl::pushToBdQueueAndEnable(
     int bdId, int repeatCount, uint32_t padValue, bool outOfOrder,
     bool configureChannel, bool pushTask) {
   TxnLocBracket bracket(*this, op.getLoc());
-  XAie_DmaDirection direction =
-      channelDir == DMAChannelDir::S2MM ? DMA_S2MM : DMA_MM2S;
+  XAie_DmaDirection direction = toXAieDmaDirection(channelDir);
   auto tileLoc = XAie_TileLoc(col, row);
   if (configureChannel && padValue != 0 && direction == DMA_MM2S &&
       targetModel.isMemTile(col, row)) {
@@ -674,7 +702,8 @@ LogicalResult xilinx::AIE::AIERTControl::pushToBdQueueAndEnable(
                               &aiert->devInst, tileLoc, chNum, direction,
                               &startQueueCfg);
   } else if (pushTask) {
-    bool enTokenIssue = tileLoc.Row == 0 && direction == DMA_S2MM;
+    bool enTokenIssue = tileLoc.Row == 0 &&
+                        (direction == DMA_S2MM || direction == DMA_S2MM_TRACE);
     TRY_XAIE_API_EMIT_ERROR(op, XAie_DmaChannelSetStartQueue, &aiert->devInst,
                             tileLoc, chNum, direction, bdId, repeatCount,
                             enTokenIssue);
@@ -797,9 +826,11 @@ xilinx::AIE::AIERTControl::configureSwitches(DeviceOp &targetOp,
       TxnLocBracket bracket(*this, connectOp.getLoc());
       TRY_XAIE_API_EMIT_ERROR(
           switchboxOp, XAie_StrmConnCctEnable, &aiert->devInst, tileLoc,
-          WIRE_BUNDLE_TO_STRM_SW_PORT_TYPE.at(connectOp.getSourceBundle()),
+          getStrmSwPortType(targetModel, col, row, connectOp.getSourceBundle(),
+                            /*isSourcePort=*/true),
           connectOp.sourceIndex(),
-          WIRE_BUNDLE_TO_STRM_SW_PORT_TYPE.at(connectOp.getDestBundle()),
+          getStrmSwPortType(targetModel, col, row, connectOp.getDestBundle(),
+                            /*isSourcePort=*/false),
           connectOp.destIndex());
     }
 
@@ -1087,6 +1118,26 @@ xilinx::AIE::AIERTControl::addInitConfig(DeviceOp &targetOp,
   if (failed(verifyDMAChannelsResolved(targetOp)))
     return failure();
 
+  // Core tiles that receive control packets on their TileControl port need the
+  // core processor bus enabled so control packets can reach the tile's
+  // memory-mapped registers. (Isolation registers are deliberately left alone
+  // on medusa; see "Don't set isolation registers on medusa".)
+  if (isa<AIE4TargetModel>(targetOp.getTargetModel())) {
+    for (auto switchboxOp : targetOp.getOps<SwitchboxOp>()) {
+      int col = switchboxOp.colIndex();
+      int row = switchboxOp.rowIndex();
+      if (!targetModel.isCoreTile(col, row))
+        continue;
+      Block &b = switchboxOp.getConnections().front();
+      if (!hasTileControlMasterSet(b))
+        continue;
+      constexpr uint32_t coreProcessorBusOffset = 0x000A3060;
+      TRY_XAIE_API_EMIT_ERROR(switchboxOp, XAie_Write32, &aiert->devInst,
+                              targetModel.getTileAddress(col, row) +
+                                  coreProcessorBusOffset,
+                              /*Enable=*/1);
+    }
+  }
   if (isa<NPU3zTargetModel>(targetOp.getTargetModel())) {
     // set compatability mode
     uint32_t mode = 0x1; // Native

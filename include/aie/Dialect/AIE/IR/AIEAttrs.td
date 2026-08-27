@@ -145,9 +145,18 @@ def ObjectFifoPort : I32EnumAttr<"ObjectFifoPort", "Ports of an object FIFO",
   let cppNamespace = "xilinx::AIE";
 }
 
-def DMAChannelDir
-    : I32EnumAttr<"DMAChannelDir", "DMA Channel direction",
-                  [I32EnumAttrCase<"S2MM", 0>, I32EnumAttrCase<"MM2S", 1>]> {
+def DMAChannelDir: I32EnumAttr<"DMAChannelDir",
+  "DMA Channel direction. ControlMM2S/TraceS2MM are MM2S/S2MM variants "
+  "backed by separate hardware BD pools and address ranges (AIE4 shim "
+  "control-packet and trace DMA queues); the numeric values also match the "
+  "direction field encoded into aiex.npu.sync instructions, so they must "
+  "stay distinct literal cases rather than derived flags.",
+  [
+    I32EnumAttrCase<"S2MM", 0>,
+    I32EnumAttrCase<"MM2S", 1>,
+    I32EnumAttrCase<"ControlMM2S", 2>,
+    I32EnumAttrCase<"TraceS2MM", 3>
+  ]> {
   let cppNamespace = "xilinx::AIE";
 }
 

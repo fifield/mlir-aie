@@ -660,6 +660,8 @@ LogicalResult xilinx::AIE::AIETranslateControlPacketsToUI32Vec(
   }
 
   const AIETargetModel &tm = deviceOp.getTargetModel();
+  bool isAIE4 = isa<AIE4TargetModel>(tm);
+
   Block &entry = seq.getBody().front();
   for (auto &o : entry) {
     auto packetOp = dyn_cast<AIEX::NpuControlPacketOp>(o);
@@ -690,8 +692,10 @@ LogicalResult xilinx::AIE::AIETranslateControlPacketsToUI32Vec(
     if (!data && length)
       size = *length;
 
-    auto parity = [](uint32_t n) {
+    auto parity = [&isAIE4](uint32_t n) {
       uint32_t p = 0;
+      if (isAIE4)
+        return false; // parity check is defeatured in aie4
       while (n) {
         p += n & 1;
         n >>= 1;
@@ -709,25 +713,64 @@ LogicalResult xilinx::AIE::AIETranslateControlPacketsToUI32Vec(
     uint32_t hdr = 0;
     if (info)
       hdr = (info.getPktType() & 0x7) << 12 | (info.assignedId() & 0xff);
+    else
+      destTile->emitWarning("Expected controller_id attribute");
     words[0] = hdr | (0x1 & parity(hdr)) << 31;
 
-    // `beats` gets two bits, directly above the address, so an oversized
-    // payload corrupts the address instead of truncating. The verifier
-    // rejects empty payloads and long reads; a long write is legal until
-    // --aie-legalize-control-packet splits it, so it is caught here.
-    if (size > AIEX::NpuControlPacketOp::getMaxDataWords())
-      return packetOp.emitOpError()
-             << "payload is " << size
-             << " words; a control packet carries at most "
-             << AIEX::NpuControlPacketOp::getMaxDataWords()
-             << " on the wire. Run --aie-legalize-control-packet before "
-                "translating.";
+    // control packet header
+    uint32_t addr = 0;
+    if (isAIE4) {
+      uint32_t tileBase = tm.getTileAddress(col, row);
+      uint32_t packetAddress = packetOp.getAddress();
+      if (packetAddress < tileBase)
+        return packetOp.emitError()
+               << "control packet address 0x"
+               << llvm::utohexstr(packetAddress)
+               << " is below tile base address 0x" << llvm::utohexstr(tileBase);
 
-    uint32_t addr = packetOp.getAddress() & 0xFFFFF;
+      addr = packetAddress - tileBase;
+      if (addr & 0x3)
+        return packetOp.emitError()
+               << "AIE4 control packet address 0x" << llvm::utohexstr(addr)
+               << " is not 4-byte aligned";
+      addr >>= 2;
+      // Bits 20-0 of the control word hold the tile-local word address (AIE4
+      // ArchSpec v1.5 Table 3-28), i.e. 8MiB of byte address space. A wider
+      // address would overflow into the beats and opcode fields.
+      //
+      // This is the encodability bound, deliberately looser than the address
+      // space a tile actually owns (PoR: 1MiB for core/shim tiles, 5MiB for MEM
+      // tiles, ArchSpec v1.5 section 3.5.6). Addresses within the field but
+      // outside the tile's allocation are a runtime SLVERR, not an encoding
+      // error, so they are not rejected here.
+      if (addr > 0x1fffff)
+        return packetOp.emitError()
+               << "AIE4 control packet tile-local address 0x"
+               << llvm::utohexstr(addr << 2)
+               << " does not fit in the 21-bit control-word address field";
+    } else {
+      addr = packetOp.getAddress() & 0xFFFFF;
+    }
+    // The beats field is only 4 bits wide on AIE4 (2 on earlier targets), so a
+    // word count outside the supported range cannot be encoded. The op
+    // verifier rejects out-of-range read lengths and aie-legalize-ctrl-packet
+    // splits oversized write payloads; catch anything that slipped past both
+    // rather than masking it into a different, silently wrong length.
+    uint32_t maxWords = AIEX::getCtrlPktMaxPayloadWords(tm);
+    if (size < 1 || size > maxWords)
+      return packetOp.emitError()
+             << "control packet payload of " << size
+             << " 32-bit words cannot be encoded; expected 1 to " << maxWords
+             << " (run aie-legalize-ctrl-packet to split large writes)";
+
     uint32_t beats = size - 1;
     uint32_t opc = packetOp.getOpcode();
     uint32_t id = packetOp.getStreamId();
-    hdr = id << 24 | opc << 22 | beats << 20 | addr;
+    if (isAIE4) {
+      hdr = (id & 0x1f) << 27 | (opc & 0x3) << 25 | (beats & 0xf) << 21 | addr;
+    } else {
+      hdr = id << 24 | opc << 22 | beats << 20 | addr;
+    }
     words[1] = hdr | (0x1 & parity(hdr)) << 31;
 
     // configuration data

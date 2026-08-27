@@ -522,6 +522,46 @@ struct HasSomeTerminator {
   }
 };
 
+static LogicalResult verifyAIE4ShimDMAChannel(Operation *op, TileLike tile,
+                                              DMAChannelDir direction,
+                                              int channel) {
+  const auto &targetModel = getTargetModel(op);
+  auto col = tile.tryGetCol();
+  auto row = tile.tryGetRow();
+  // Before --aie-place-tiles the tile is still an aie.logical_tile with no
+  // coordinates, so defer every target-model check to the post-placement
+  // re-verify, mirroring SwitchboxOp::verify.
+  if (!col || !row)
+    return success();
+
+  if (!isa<AIE4TargetModel>(targetModel) ||
+      !targetModel.isShimNOCTile(*col, *row)) {
+    // ControlMM2S and TraceS2MM are AIE4 shim-NOC hardware. Reject them
+    // elsewhere rather than ignoring them: HasValidDMAChannels deliberately
+    // skips these directions when counting data-port usage, so one that
+    // reached another tile type would escape channel bounding altogether, and
+    // a non-AIE4 getDmaBdAddress would silently encode TraceS2MM as a data
+    // S2MM.
+    if (isSpecializedShimDMAChannel(direction))
+      return op->emitOpError() << stringifyDMAChannelDir(direction)
+                               << " is only available on AIE4 shim NOC tiles";
+    return success();
+  }
+
+  std::optional<int> channelCount;
+  if (direction == DMAChannelDir::TraceS2MM)
+    channelCount = 1;
+  else if (direction == DMAChannelDir::ControlMM2S)
+    channelCount = 2;
+  if (!channelCount || channel < *channelCount)
+    return success();
+
+  return op->emitOpError() << stringifyDMAChannelDir(direction) << " channel "
+                           << channel
+                           << " is out of range; expected 0 <= channel < "
+                           << *channelCount;
+}
+
 // Check that the given DMA-like op (e.g. MemOp, ShimDMAOp)
 // has valid BDs.
 template <typename ConcreteType>
@@ -533,7 +573,7 @@ LogicalResult HasValidBDs<ConcreteType>::verifyTrait(Operation *op) {
   if (!tile)
     return op->emitOpError("tile must implement TileLike interface");
 
-  int bdMax = targetModel.getNumBDs(tile.getTileType());
+  int bdMax = targetModel.getTotalNumBDs(tile.getTileType());
 
   auto col = tile.tryGetCol();
   auto row = tile.tryGetRow();
@@ -589,6 +629,40 @@ LogicalResult HasValidBDs<ConcreteType>::verifyTrait(Operation *op) {
                   << chan.channel << ") exceeds limit of " << poolMax << " BDs")
               .attachNote(bdOps.front().getLoc())
               .append("no space for this BD");
+        }
+
+        // A pinned bd_id must fall inside the pool its owning channel can
+        // reach. DMABDOp::verify only bounds it by the flat per-tile BD count
+        // (32 on an AIE4b shim), which is far looser than the real banks. Two
+        // ways that bites: bd_id 8 on a control-MM2S channel clears the flat
+        // check but resolves to the trace-S2MM bank's base address, and an id
+        // below 16 on a shim MM2S channel >= 2 underflows the `bd_id -= 16`
+        // bank-local conversion in getDmaBdAddress. This is the first point
+        // where the owning channel is known, so the precise bound belongs here.
+        uint32_t poolStart = targetModel.getBdPoolStartId(*col, *row, poolId);
+        auto checkBdId = [&](DMABDOp bdOp, std::optional<int32_t> id,
+                             StringRef what) -> LogicalResult {
+          if (!id || *id < 0)
+            return success();
+          if (targetModel.isBdChannelAccessible(*col, *row,
+                                                static_cast<uint32_t>(*id),
+                                                chan.channel, chan.direction))
+            return success();
+          return (op->emitOpError(what)
+                  << " " << *id << " is not accessible from channel ("
+                  << stringifyDMAChannelDir(chan.direction) << ", "
+                  << chan.channel << "), whose BD pool spans ids " << poolStart
+                  << " to " << (poolStart + static_cast<uint32_t>(poolMax) - 1))
+              .attachNote(bdOp.getLoc())
+              .append("this BD");
+        };
+        for (auto bdOp : bdOps) {
+          if (failed(checkBdId(bdOp, bdOp.getBdId(), "bd_id")))
+            return failure();
+          // next_bd_id names a hardware BD the same channel must be able to
+          // reach, so it is bounded by the same pool.
+          if (failed(checkBdId(bdOp, bdOp.getNextBdId(), "next_bd_id")))
+            return failure();
         }
       }
     }
@@ -650,6 +724,11 @@ LogicalResult HasValidDMAChannels<ConcreteType>::verifyTrait(Operation *op) {
   Region &body = element.getBody();
   if (body.empty())
     return op->emitOpError("should have non-empty body");
+
+  TileLike tile = element.getTileLike();
+  if (!tile)
+    return op->emitOpError("tile must implement TileLike interface");
+
   for (auto &bodyOp : body.getOps()) {
     // check for duplicate DMA channels within the same ShimDMAOp
     if (auto dmaStart = dyn_cast<DMAStartOp>(bodyOp)) {
@@ -659,18 +738,24 @@ LogicalResult HasValidDMAChannels<ConcreteType>::verifyTrait(Operation *op) {
       }
       DMAChannel dmaChan = {dmaStart.getChannelDir(),
                             dmaStart.getChannelIndex()};
+      if (failed(verifyAIE4ShimDMAChannel(dmaStart, tile, dmaChan.direction,
+                                          dmaChan.channel)))
+        return failure();
+      // The AIE4 shim's control-MM2S and trace-S2MM channels are separate
+      // hardware from the data DMA ports and consume no WireBundle::DMA
+      // connection, so counting them against the data limits below would
+      // reject legal configurations (e.g. both data S2MM channels plus trace).
+      // verifyAIE4ShimDMAChannel has already bounded their channel indices.
+      if (isSpecializedShimDMAChannel(dmaChan.direction))
+        continue;
       // check if number of input and output channels is more than available
       // hardware
-      if (dmaChan.direction == DMAChannelDir::S2MM)
+      if (isS2MM(dmaChan.direction))
         inputChannels.insert(dmaChan);
       else
         outputChannels.insert(dmaChan);
     }
   }
-
-  TileLike tile = element.getTileLike();
-  if (!tile)
-    return op->emitOpError("tile must implement TileLike interface");
 
   auto named = [&](DMAChannelDir dir) -> size_t {
     return llvm::count_if(namedChannels,
@@ -4470,6 +4555,10 @@ LogicalResult DMAOp::verify() {
     return emitOpError("DMAOp can only appear in single block region");
   if (!parentOp->getRegion(0).getOps<DMAStartOp>().empty())
     return emitOpError("DMAOp is not compatible with DMAStart ops");
+  TileLike tile = cast<TileElement>(parentOp).getTileLike();
+  if (failed(verifyAIE4ShimDMAChannel(getOperation(), tile, getChannelDir(),
+                                      getChannelIndex())))
+    return failure();
   auto bdRegions = getBds();
   for (auto &bdRegion : bdRegions) {
     if (!bdRegion.hasOneBlock())
@@ -6049,6 +6138,10 @@ WireBundle xilinx::AIE::getConnectingBundle(WireBundle dir) {
     return WireBundle::West32;
   case WireBundle::West32:
     return WireBundle::East32;
+  case WireBundle::NorthControl:
+    return WireBundle::SouthControl;
+  case WireBundle::SouthControl:
+    return WireBundle::NorthControl;
   default:
     return dir;
   }

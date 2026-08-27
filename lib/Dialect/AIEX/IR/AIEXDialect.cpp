@@ -1029,13 +1029,23 @@ LogicalResult AIEX::NpuDmaWaitOp::verify() {
 
 LogicalResult AIEX::NpuPushQueueOp::verify() {
   const auto &targetModel = AIE::getTargetModel(*this);
-  auto numBds = targetModel.getNumBDs(getColumn(), getRow());
   // bd_id and repeat_count are SSA operands; range-check them only when they
   // are compile-time constants. A runtime repeat_count is checked on the host
   // when lowered (AIEDmaToNpu); a runtime bd_id comes from the tile's BD pool.
+  //
+  // Check membership of the target channel's own BD pool rather than the flat
+  // per-tile count: the AIE4 shim's control-MM2S and trace-S2MM channels have
+  // private 8- and 4-BD banks, so an id inside the flat count (32 on an AIE4b
+  // shim) can still name a neighbouring bank's registers. isBdChannelAccessible
+  // tests the pool's [startId, startId + numBDs) range, which matters because
+  // pools do not all start at 0 -- the AIE4b shim's upper MM2S pool spans ids
+  // 16..31.
   if (std::optional<uint32_t> bdId = getConstantIntOperand(getBdId());
-      bdId && *bdId >= numBds)
-    return emitOpError("BD ID exceeds the maximum ID.");
+      bdId && !targetModel.isBdChannelAccessible(getColumn(), getRow(), *bdId,
+                                                 getChannel(), getDirection()))
+    return emitOpError("BD ID ") << *bdId << " is not accessible from channel ("
+                                 << stringifyDMAChannelDir(getDirection())
+                                 << ", " << getChannel() << ").";
   uint32_t maxRepeat = targetModel.getMaxRepeatCount();
   if (std::optional<uint64_t> repeatCount =
           getConstantInt64Operand(getRepeatCount());
@@ -1074,12 +1084,24 @@ LogicalResult AIEX::NpuPushQueueOp::verify() {
 
 LogicalResult AIEX::NpuWriteBdOp::verify() {
   const auto &targetModel = AIE::getTargetModel(*this);
-  auto numBds = targetModel.getNumBDs(getColumn(), getRow());
   bool isLinearTransfer = (getD0Size() >= 1) && (getD1Size() == 1) &&
                           (getD2Size() <= 1) && (getD3Size() <= 1) &&
                           (getIterationSize() == 0);
-  if (getBdId() >= numBds)
-    return emitOpError("BD ID exceeds the maximum ID.");
+  // See NpuPushQueueOp::verify -- membership of the target channel's own BD
+  // pool, not the flat per-tile count. `direction` is a plain i32 here rather
+  // than a DMAChannelDir attribute, so validate it before converting: an
+  // out-of-range value would otherwise fall through getBdPoolId's
+  // if-chain and be silently treated as S2MM.
+  std::optional<AIE::DMAChannelDir> direction =
+      AIE::symbolizeDMAChannelDir(static_cast<uint32_t>(getDirection()));
+  if (!direction)
+    return emitOpError("invalid direction ") << getDirection();
+  if (!targetModel.isBdChannelAccessible(getColumn(), getRow(), getBdId(),
+                                         getChannel(), *direction))
+    return emitOpError("BD ID ")
+           << getBdId() << " is not accessible from channel ("
+           << stringifyDMAChannelDir(*direction) << ", " << getChannel()
+           << ").";
   if (getPacketId() > 31)
     return emitOpError("Packet ID exceeds the maximum supported by 5 bits.");
   if (getPacketType() > 7)
@@ -2232,9 +2254,7 @@ LogicalResult AIEX::DMAStartBdChainOp::verify() {
 
 uint32_t AIEX::NpuControlPacketOp::getRowFromAddr() {
   const auto &targetModel = AIE::getTargetModel(*this);
-  uint32_t addr = getAddress();
-  uint32_t rowInt = (addr >> targetModel.getRowShift()) & 0x1f;
-  return rowInt;
+  return targetModel.getRowFromAddress(getAddress());
 }
 
 uint32_t AIEX::NpuControlPacketOp::getColumnFromAddr() {
@@ -2244,9 +2264,21 @@ uint32_t AIEX::NpuControlPacketOp::getColumnFromAddr() {
   return colInt;
 }
 
+uint32_t
+AIEX::getCtrlPktMaxPayloadWords(const AIE::AIETargetModel &targetModel) {
+  return isa<AIE::AIE4TargetModel>(targetModel) ? 16 : 4;
+}
+
+std::optional<uint32_t>
+AIEX::getCtrlPktPayloadWords(AIEX::NpuControlPacketOp op) {
+  if (auto data = op.getData())
+    return data->size();
+  return op.getLength();
+}
+
 LogicalResult AIEX::NpuControlPacketOp::verify() {
-  // The 2-bit operation field: 0 write, 1 read, 2 write with response, 3
-  // reserved. A wider value would also spill into the stream ID.
+  // Operation encoding, AIE4 arch spec: "00" write, "01" read,
+  // "10" write with response. "11" is reserved and yields undefined behavior.
   uint32_t opcode = getOpcode();
   if (opcode > 2)
     return emitOpError("opcode ")
@@ -2262,22 +2294,26 @@ LogicalResult AIEX::NpuControlPacketOp::verify() {
     return emitOpError(
         "control packet with a write opcode requires a data payload");
 
-  // The word count is encoded as (words - 1), so 0 cannot be represented.
-  std::optional<uint32_t> words;
-  if (auto data = getData())
-    words = data->size();
-  else
-    words = getLength();
+  // The payload word count is encoded as (words - 1) in a fixed-width field of
+  // the control word, so a count outside the supported range cannot be
+  // represented and would silently alias onto a different length. Per AIE4
+  // arch spec, a mismatch between the encoded word count and the actual
+  // payload is undefined behavior, so reject rather than truncate.
+  std::optional<uint32_t> words = getCtrlPktPayloadWords(*this);
   if (!words)
     return emitOpError("read control packet requires a length attribute");
   if (*words < 1)
     return emitOpError("control packet payload must be at least 1 word");
 
-  // Reads are never split, so their length must already fit one packet.
-  if (isRead && *words > getMaxDataWords())
+  // Oversized *write* payloads are legal here: aie-legalize-ctrl-packet splits
+  // them into conforming packets. Read requests are never split, so their
+  // length must already conform.
+  const auto &targetModel = AIE::getTargetModel(*this);
+  uint32_t maxWords = getCtrlPktMaxPayloadWords(targetModel);
+  if (isRead && *words > maxWords)
     return emitOpError("read control packet length ")
-           << *words << " exceeds the maximum of " << getMaxDataWords()
-           << " 32-bit words";
+           << *words << " exceeds the maximum of " << maxWords
+           << " 32-bit words for this target";
 
   return success();
 }

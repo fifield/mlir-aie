@@ -1077,7 +1077,7 @@ def AIE_NpuSyncOp : AIEX_Op<"npu.sync", []> {
     `(` $column `,` $row `,` $direction `,` $channel `,` $column_num `,` $row_num `)` attr-dict `:` type(operands)
   }];
   let description = [{
-    The sync operation blocks execution of the instruction stream until a task-complete token (TCT) is received on `column`, `row`, channel `channel`, direction `direction` (where `0` is `S2MM` and `1` is `MM2S`).
+    The sync operation blocks execution of the instruction stream until a task-complete token (TCT) is received on `column`, `row`, channel `channel`, direction `direction` (where `0` is `S2MM`, `1` is `MM2S`, `2` is `ControlMM2S`, and `3` is `TraceS2MM`).
 
     All parameters are SSA values. Use `arith.constant` for compile-time-known
     values; pass runtime sequence arguments (or values derived from them)
@@ -1299,10 +1299,12 @@ def AIE_NpuControlPacketOp : AIEX_Op<"control_packet", []> {
     The control_packet operation represents a low-level AIE control packet header
     and payload.
 
-    `opcode` is 0 (write), 1 (read), or 2 (write with response); 3 is
-    reserved. A write carries its payload in `data`. A read carries no `data`;
-    `length` gives the number of words to read, at most 4. A write payload may
-    be longer than 4 words: `aie-legalize-control-packet` splits it.
+    A write (opcode 0 or 2) carries its payload in `data`. A read (opcode 1)
+    carries no payload and instead requests `length` 32-bit words, which the
+    target returns on the control-packet response port. The word count is
+    encoded as (words - 1) in a fixed-width field of the control word, so it
+    must be in [1, 16] on AIE4 and [1, 4] on earlier targets; oversized *write*
+    payloads are split into conforming packets by aie-legalize-ctrl-packet.
   }];
   let hasVerifier = 1;
   let extraClassDeclaration = [{

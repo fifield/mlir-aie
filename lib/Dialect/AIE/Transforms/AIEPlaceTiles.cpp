@@ -13,6 +13,8 @@
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Transforms/DialectConversion.h"
 
+#include "llvm/ADT/SmallSet.h"
+
 #include <cmath>
 #include <map>
 
@@ -90,13 +92,30 @@ static void emitAIE4ControlWiring(DeviceOp device) {
   if (!isa<AIE4TargetModel>(targetModel))
     return;
 
+  // If the design already routes task-complete tokens back to a uC, it was
+  // wired manually (e.g. the *_placed.py examples) -- leave it be.
+  //
+  // Test for the TCT route itself rather than for the presence of a
+  // `controller_id` attribute. `controller_id` is a poor proxy: it is also set
+  // on core and mem tiles, and the check runs before the shim-tile filter, so
+  // keying off it skips the wiring for any design that carries a controller_id
+  // but has no TCT route at all (test/unit_tests/aie4_cert/10_iron_Nshim_1uc is
+  // one such design).
+  //
+  // Note this cannot be reached from the standard aiecc pipeline by a
+  // control-packet design: aie-place-tiles runs in getPlacementPipeline,
+  // strictly before AIEAssignTileCtrlIDs / AIEGenerateColumnControlOverlay
+  // stamp any controller_id. It only matters for input MLIR that already
+  // carries one.
+  for (auto pktFlow : device.getOps<PacketFlowOp>())
+    for (auto dest : pktFlow.getOps<PacketDestOp>())
+      if (dest.getBundle() == WireBundle::Controller32)
+        return;
+
   // Collect the unique shim NOC/PL tiles used by the design, one per column and
-  // in deterministic column order. If any tile already carries a controller_id
-  // the design was wired manually (e.g. the *_placed.py examples); leave it be.
+  // in deterministic column order.
   std::map<int, TileOp> shimByCol;
   for (auto tile : device.getOps<TileOp>()) {
-    if (tile->hasAttr("controller_id"))
-      return;
     if (!tile.isShimNOCorPLTile())
       continue;
     int col = tile.colIndex();
@@ -108,14 +127,34 @@ static void emitAIE4ControlWiring(DeviceOp device) {
 
   MLIRContext *ctx = device.getContext();
 
-  // Assign controller_id [pkt_type=0, pkt_id=idx] per shim column.
+  // Assign controller_id [pkt_type=0, pkt_id=idx] per shim column, preserving
+  // any id a previous pass already chose (the column control overlay routes
+  // control packets by those ids, so they must not be renumbered here).
+  llvm::SmallSet<int, 8> usedIds;
+  for (auto &[col, tile] : shimByCol)
+    if (auto info = tile->getAttrOfType<PacketInfoAttr>("controller_id"))
+      usedIds.insert(static_cast<int>(info.getPktId()));
+  int nextId = 0;
+  auto allocPktId = [&]() {
+    while (usedIds.count(nextId))
+      ++nextId;
+    usedIds.insert(nextId);
+    return nextId;
+  };
+
   SmallVector<TileOp> shims;
-  int idx = 0;
+  SmallVector<int> shimPktIds;
   for (auto &[col, tile] : shimByCol) {
-    tile->setAttr("controller_id",
-                  PacketInfoAttr::get(ctx, /*pkt_type=*/0, /*pkt_id=*/idx));
+    int pktId;
+    if (auto info = tile->getAttrOfType<PacketInfoAttr>("controller_id"))
+      pktId = static_cast<int>(info.getPktId());
+    else {
+      pktId = allocPktId();
+      tile->setAttr("controller_id",
+                    PacketInfoAttr::get(ctx, /*pkt_type=*/0, /*pkt_id=*/pktId));
+    }
     shims.push_back(tile);
-    ++idx;
+    shimPktIds.push_back(pktId);
   }
 
   TileOp controller = shims.front();
@@ -124,8 +163,10 @@ static void emitAIE4ControlWiring(DeviceOp device) {
     TileOp shim = shims[i];
     for (int ctrlCh : {0, 1}) {
       builder.setInsertionPoint(device.getBody()->getTerminator());
+      // The flow ID must be the shim's controller_id pkt_id: the destination
+      // matches on the packet id carried by the source tile.
       auto pktFlow =
-          PacketFlowOp::create(builder, shim.getLoc(), /*ID=*/i,
+          PacketFlowOp::create(builder, shim.getLoc(), /*ID=*/shimPktIds[i],
                                /*keep_pkt_header=*/nullptr,
                                /*ctrl_pkt_flow=*/nullptr);
       Block *body = builder.createBlock(&pktFlow.getPorts());

@@ -445,6 +445,13 @@ public:
   /// Return the number of buffer descriptors for a given tile type.
   virtual uint32_t getNumBDs(AIETileType tileType) const = 0;
 
+  /// Return the total number of physical buffer descriptors across all shared
+  /// and private pools in a tile. This differs from getNumBDs() on targets
+  /// where the latter describes a shared or per-channel BD namespace.
+  virtual uint32_t getTotalNumBDs(AIETileType tileType) const {
+    return getNumBDs(tileType);
+  }
+
   /// Return the maximum number of addressing dimensions (wraps/strides) a
   /// single buffer descriptor supports for a given tile type. This is the
   /// hardware ND access-pattern limit; it does not count the separate shim
@@ -623,6 +630,19 @@ public:
   /// memtile row expands to 5 address rows) override this.
   virtual uint32_t getTileAddress(int col, int row) const {
     return ((col & 0xff) << getColumnShift()) | ((row & 0xff) << getRowShift());
+  }
+
+  /// Mask covering the row field of a tile address, i.e. the bits between
+  /// getRowShift() and getColumnShift().
+  uint32_t getRowFieldMask() const {
+    uint32_t width = getColumnShift() - getRowShift();
+    return width >= 32 ? 0xffffffffu : ((1u << width) - 1u);
+  }
+
+  /// Return the (logical MLIR) row encoded in a tile address. Inverse of
+  /// getTileAddress()'s row encoding.
+  virtual uint32_t getRowFromAddress(uint32_t addr) const {
+    return (addr >> getRowShift()) & getRowFieldMask();
   }
 
   /// Return the size (in bytes) of a MemTile.
@@ -1389,6 +1409,13 @@ class AIE4TargetModel : public AIETargetModel {
 protected:
   std::unique_ptr<RegisterDatabase> loadRegisterDatabase() const override;
 
+  // Compiler-internal namespaces for private BD-pool bookkeeping. These are
+  // map keys only; they are never emitted as hardware BD IDs.
+  static constexpr uint32_t S2MMPoolBase = 100;
+  static constexpr uint32_t ControlMM2SPoolBase = 200;
+  static constexpr uint32_t TraceS2MMPoolBase = 300;
+  static constexpr uint32_t PrivatePoolNamespaceSize = 100;
+
   static constexpr Properties properties =
       AIETargetModel::UsesSemaphoreLocks |
       AIETargetModel::UsesMultiDimensionalBDs;
@@ -1397,15 +1424,38 @@ public:
   AIE4TargetModel(TargetModelKind k, Properties p = None)
       : AIETargetModel(k, p | properties) {}
 
-  /// AIE4 core tiles use a non-trivial address encoding: each memtile row
-  /// expands to 5 rows in the address space, so core tile (col, row) encodes
-  /// as (col << 25) | ((row + 5*numMemTileRows - 1) << 20).
+  /// AIE4 uses a non-trivial address encoding: a MEM tile owns 5MiB of address
+  /// space rather than the 1MiB every other tile gets, so Address[24:20] is no
+  /// longer the row index (AIE4 ArchSpec v1.5 Table 3-51/3-52, Section 3.9.1).
+  /// Logical MEM row `m` (1-based) covers address rows 5m-4 .. 5m, and each MEM
+  /// row therefore pushes the core rows up by 4, not by 5:
+  ///
+  ///   1 MEM row : shim 0 | MEM 1-5      | core rows 6, 7, 8, 9
+  ///   2 MEM rows: shim 0 | MEM 1-5, 6-10 | core rows 11, 12, ...
+  ///
+  /// so MEM row `m` encodes to address row 5m-4 and core tile (col, row)
+  /// encodes as (col << 25) | ((row + 4*numMemTileRows) << 20).
   uint32_t getTileAddress(int col, int row) const override {
     uint32_t addrRow = static_cast<uint32_t>(row);
     if (isCoreTile(col, row))
-      addrRow += 5 * getNumMemTileRows() - 1;
+      addrRow += 4 * getNumMemTileRows();
+    else if (isMemTile(col, row))
+      addrRow = 5 * addrRow - 4; // first address row of MEM row `row`
     return ((col & 0xff) << getColumnShift()) |
            ((addrRow & 0xff) << getRowShift());
+  }
+
+  /// Inverse of getTileAddress(). Note this is a many-to-one map on MEM tiles:
+  /// all 5 address rows of a MEM tile resolve to its single logical row, so
+  /// e.g. 0x0220_0000 is an offset into the col-1 MEM tile, not a core tile.
+  uint32_t getRowFromAddress(uint32_t addr) const override {
+    uint32_t addrRow = (addr >> getRowShift()) & getRowFieldMask();
+    uint32_t memTileRows = getNumMemTileRows();
+    if (addrRow == 0)
+      return 0; // shim
+    if (addrRow <= 5 * memTileRows)
+      return 1 + (addrRow - 1) / 5; // MEM row m spans address rows 5m-4 .. 5m
+    return addrRow - 4 * memTileRows;
   }
 
   AIEArch getTargetArch() const override;
@@ -1513,6 +1563,14 @@ public:
     return 16;
   }
 
+  uint32_t getTotalNumBDs(AIETileType tileType) const override {
+    if (tileType == AIETileType::ShimNOCTile)
+      // In addition to the data-channel pools, the shim has two private
+      // 8-BD control-MM2S pools and one private 4-BD trace-S2MM pool.
+      return getNumBDs(tileType) + 2 * 8 + 4;
+    return getNumBDs(tileType);
+  }
+
   uint32_t getBDMaxDims(AIETileType tileType) const override {
     // AIE4 supports D3 (4 ND dimensions) on MemTile and Shim BDs; core BDs
     // support 3.
@@ -1557,20 +1615,24 @@ public:
     if (isMemTile(col, row)) {
       // Private per-channel BDs: unique pool per (channel, dir)
       uint32_t id = channel;
-      if (dir == DMAChannelDir::S2MM)
-        id += 100;
+      if (isS2MM(dir))
+        id += S2MMPoolBase;
       return id;
     }
     if (isShimNOCTile(col, row)) {
+      if (dir == DMAChannelDir::ControlMM2S)
+        return ControlMM2SPoolBase + channel;
+      if (dir == DMAChannelDir::TraceS2MM)
+        return TraceS2MMPoolBase + channel;
       if (getTargetArch() == AIEArch::AIE4z) {
         // AIE4z: private per-channel BDs
         uint32_t id = channel;
-        if (dir == DMAChannelDir::S2MM)
-          id += 100;
+        if (isS2MM(dir))
+          id += S2MMPoolBase;
         return id;
       }
       // AIE4b shim: two shared pools split at BD 16
-      if (dir == DMAChannelDir::MM2S)
+      if (isMM2S(dir))
         return channel < 2 ? 0 : 1;
       return channel < 1 ? 0 : 1;
     }
@@ -1580,6 +1642,12 @@ public:
 
   uint32_t getNumBDsInPool(int col, int row,
                            uint32_t poolId) const override {
+    if (isShimNOCTile(col, row) && poolId >= ControlMM2SPoolBase &&
+        poolId < ControlMM2SPoolBase + PrivatePoolNamespaceSize)
+      return 8; // AIE4 shim control-MM2S has 8 private BDs per channel.
+    if (isShimNOCTile(col, row) && poolId >= TraceS2MMPoolBase &&
+        poolId < TraceS2MMPoolBase + PrivatePoolNamespaceSize)
+      return 4; // AIE4 shim trace-S2MM has 4 private BDs per channel.
     return 16; // All AIE4 BD pools contain 16 BDs.
   }
 

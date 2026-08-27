@@ -1582,8 +1582,8 @@ def AIE_DMAStartOp
     }]>];
 
   let extraClassDeclaration = [{
-    bool isSend() { return getChannelDir() == DMAChannelDir::MM2S; }
-    bool isRecv() { return getChannelDir() == DMAChannelDir::S2MM; }
+    bool isSend() { return isMM2S(getChannelDir()); }
+    bool isRecv() { return isS2MM(getChannelDir()); }
     /// The hardware channel index. A start naming a route endpoint has none
     /// until `--aie-objectfifo-allocate` resolves it.
     int getChannelIndex() {

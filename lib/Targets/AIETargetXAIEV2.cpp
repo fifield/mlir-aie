@@ -103,6 +103,23 @@ static std::string wireBundleToPortType(WireBundle bundle) {
   }
 }
 
+static std::string wireBundleToPortType(WireBundle bundle,
+                                        const AIETargetModel &targetModel,
+                                        int col, int row,
+                                        bool isSourcePort) {
+  if (isSourcePort && bundle == WireBundle::TileControl &&
+      isa<AIE4TargetModel>(targetModel) && targetModel.isShimNOCTile(col, row))
+    return "DMA_CTRL";
+
+  return wireBundleToPortType(bundle);
+}
+
+static bool hasTileControlMasterSet(Block &block) {
+  return llvm::any_of(block.getOps<MasterSetOp>(), [](auto masterSetOp) {
+    return masterSetOp.getDestBundle() == WireBundle::TileControl;
+  });
+}
+
 // FIXME: this is a template pending a common DMA-like interface across the op
 // types.
 // blockMap: A map that gives a unique bd ID assignment for every block.
@@ -811,10 +828,14 @@ xilinx::AIE::AIETranslateToXAIEV2(ModuleOp module, raw_ostream &output,
                    b.getOps<MasterSetOp>().empty() &&
                    b.getOps<PacketRulesOp>().empty();
     bool isParam = false;
+    int switchCol = -1;
+    int switchRow = -1;
 
     if (isa<TileOp>(switchboxOp.getTile().getDefiningOp())) {
       int col = switchboxOp.colIndex();
       int row = switchboxOp.rowIndex();
+      switchCol = col;
+      switchRow = row;
       if (!isEmpty) {
         output << "// Core Stream Switch column " << col << " row " << row
                << "\n";
@@ -823,12 +844,37 @@ xilinx::AIE::AIETranslateToXAIEV2(ModuleOp module, raw_ostream &output,
       }
     }
 
+    // switchCol/switchRow are only resolved for switchboxes on a TileOp; for
+    // anything else they stay -1 and must not be fed to isCoreTile(), which
+    // answers `true` for (-1, -1) on NPU3 and would emit a write at a garbage
+    // address.
+    // TODO: `isParam` is dead here (never reassigned before use) -- a leftover
+    // from the herd/param-switchbox support this legacy XAIEV2 path used to
+    // have. Left as-is rather than changing legacy behaviour.
+    if (!isParam && switchCol >= 0 && switchRow >= 0 &&
+        isa<AIE4TargetModel>(targetModel) &&
+        targetModel.isCoreTile(switchCol, switchRow) &&
+        hasTileControlMasterSet(b)) {
+      constexpr uint32_t coreProcessorBusOffset = 0x000A3060;
+      output << "__mlir_aie_try(XAie_Write32(" << deviceInstRef << ", "
+             << targetModel.getTileAddress(switchCol, switchRow) +
+                    coreProcessorBusOffset
+             << ", "
+             << "/* Enable */ 1));\n";
+    }
+
     for (auto connectOp : b.getOps<ConnectOp>())
       output << "__mlir_aie_try(XAie_StrmConnCctEnable(" << deviceInstRef
              << ", " << tileLocStr("x", "y") << ", "
-             << wireBundleToPortType(connectOp.getSourceBundle()) << ", "
+             << wireBundleToPortType(connectOp.getSourceBundle(), targetModel,
+                                     switchCol, switchRow,
+                                     /*isSourcePort=*/true)
+             << ", "
              << connectOp.sourceIndex() << ", "
-             << wireBundleToPortType(connectOp.getDestBundle()) << ", "
+             << wireBundleToPortType(connectOp.getDestBundle(), targetModel,
+                                     switchCol, switchRow,
+                                     /*isSourcePort=*/false)
+             << ", "
              << connectOp.destIndex() << "));\n";
 
     for (auto connectOp : b.getOps<MasterSetOp>()) {

@@ -90,6 +90,34 @@ module @already_wired {
 
 // -----
 
+// A design that carries a controller_id but has NO Controller32 destination is
+// not actually wired, so the wiring must still be emitted -- and it must reuse
+// the controller_id that is already there rather than renumbering it, because
+// the column control overlay routes control packets by those ids.
+//
+// This is the case the "is it already wired?" check gets wrong when it keys off
+// the presence of a controller_id attribute instead of an existing TCT route.
+// test/unit_tests/aie4_cert/10_iron_Nshim_1uc is a real design of this shape.
+// CHECK-LABEL: @controller_id_but_no_tct_route
+module @controller_id_but_no_tct_route {
+  aie.device(npu3) {
+    // CHECK: %[[SHIM:.*]] = aie.tile(0, 0) {controller_id = #aie.packet_info<pkt_type = 0, pkt_id = 7>}
+    %shim = aie.tile(0, 0) {controller_id = #aie.packet_info<pkt_type = 0, pkt_id = 7>}
+    %mem = aie.tile(0, 1)
+    aie.objectfifo @in(%shim, {%mem}, 2 : i32) : !aie.objectfifo<memref<16xi32>>
+    aie.objectfifo @out(%mem, {%shim}, 2 : i32) : !aie.objectfifo<memref<16xi32>>
+    // The existing pkt_id 7 is preserved and used as the flow ID.
+    // CHECK: aie.packet_flow(7) {
+    // CHECK-NEXT: aie.packet_source<%[[SHIM]], Control32 : 0>
+    // CHECK-NEXT: aie.packet_dest<%[[SHIM]], Controller32 : 0>
+    // CHECK: aie.packet_flow(7) {
+    // CHECK-NEXT: aie.packet_source<%[[SHIM]], Control32 : 1>
+    // CHECK-NEXT: aie.packet_dest<%[[SHIM]], Controller32 : 0>
+  }
+}
+
+// -----
+
 // Non-AIE4 targets (npu1) must not get any control wiring.
 // CHECK-LABEL: @npu1_no_wiring
 module @npu1_no_wiring {
