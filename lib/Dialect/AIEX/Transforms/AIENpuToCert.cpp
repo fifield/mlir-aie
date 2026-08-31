@@ -358,19 +358,15 @@ struct NpuSyncToCertWaitTCTS : OpConversionPattern<AIEX::NpuSyncOp> {
 
     const std::vector<int> chan2actor_shim_s2mm = {0, 2, 3, 4};
     const std::vector<int> chan2actor_shim_mm2s = {6, 7, 8, 9, 10, 11, 12, 13};
-    // FIXME: this looks off by one against AIE4 arch spec v1.5 Table 3-23,
-    // whose MEM column starts at S2MM0 = actor 0, i.e. {0, 1, ..., 7}. Nothing
-    // in tree currently issues an aiex.npu.sync against a mem tile, so the
-    // entry is unexercised and unverified on hardware; left as found rather
-    // than changed blind.
-    const std::vector<int> chan2actor_mem_s2mm = {1, 2, 3, 4, 5, 6, 7};
+    // AIE4 MEM S2MM0 through S2MM7 are TCT actors 0 through 7.
+    const std::vector<int> chan2actor_mem_s2mm = {0, 1, 2, 3, 4, 5, 6, 7};
     const std::vector<int> chan2actor_mem_mm2s = {16, 17, 18, 19, 20,
                                                   22, 23, 24, 25, 26};
     const std::vector<int> chan2actor_tile_s2mm = {0, 1};
     const std::vector<int> chan2actor_tile_mm2s = {6};
-    // AIE4 arch spec v1.5 Table 3-23 ("Actor IDs"): the shim control-MM2S and
-    // trace-S2MM channels are *not* part of the regular MM2S/S2MM actor ranges.
-    // Ctrl_MM2S0/1 are actors 16/17 and Trace_S2MM is actor 1.
+    // AIE4 shim control-MM2S and trace-S2MM channels are *not* part of the
+    // regular MM2S/S2MM actor ranges. Ctrl_MM2S0/1 are actors 16/17 and
+    // Trace_S2MM is actor 1.
     const std::vector<int> chan2actor_shim_ctrl_mm2s = {16, 17};
     const std::vector<int> chan2actor_shim_trace_s2mm = {1};
 

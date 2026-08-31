@@ -1976,7 +1976,9 @@ AIE4TargetModel::getDmaControlAddress(int col, int row, int channel,
     }
   } else if (isMemTile(col, row)) {
     if (isS2MM(direction)) {
-      offset = 0x00009E00 + (channel * 0x8);
+      // MEM S2MM channels are split into two four-channel application banks.
+      // The upper bank restarts its local channel index at zero.
+      offset = 0x00009E00 + ((channel % 4) * 0x8);
     } else {
       offset = 0x00009E60 + (channel * 0x8);
     }
