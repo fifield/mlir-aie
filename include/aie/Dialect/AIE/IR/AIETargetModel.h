@@ -1521,6 +1521,7 @@ public:
   uint32_t getMemNorthBaseAddress() const override { return 0xC0000; }
   uint32_t getMemEastBaseAddress() const override { return 0xE0000; }
   uint32_t getLocalMemorySize() const override { return 0x00020000; }
+  uint32_t getProgramMemorySize() const override { return 0x00008000; }
   uint32_t getComputeTileLoadStoreBusWidth() const override { return 1024; }
   uint32_t getAccumulatorCascadeSize() const override { return 512; }
 

@@ -5,7 +5,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// RUN: not aie-opt --aie-objectFifo-stateful-transform %s 2>&1 | FileCheck %s
+// RUN: not aie-opt --aie-objectFifo-stateful-transform="skip-verify=true" %s 2>&1 | FileCheck %s
 
 // An npu3 (AIE4) core tile has 2 S2MM but only 1 MM2S DMA channel, so MM2S
 // channel 1 does not exist and must be rejected.
@@ -20,7 +20,7 @@
 // The positive counterpart (S2MM channel 1, which is legal) lives in
 // pin_asymmetric_channels_AIE4.mlir.
 
-// CHECK: error: 'aie.objectfifo' op pinned MM2S DMA channel 1 is out of range or already in use on this tile
+// CHECK: error: 'aie.objectfifo.dma_endpoint' op pinned MM2S DMA channel 1 is out of range or already in use on this tile
 
 module @bad_pin_mm2s_out_of_range_AIE4 {
   aie.device(npu3) {

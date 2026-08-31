@@ -73,8 +73,7 @@ module {
       %c2_lock = arith.constant 2 : i32
       aie.use_lock(%lock_0_3_5, AcquireGreaterEqual, %c2_lock)
       // Produce output data: values 0..31
-      %subview = aie.objectfifo.acquire @outC0 (Produce, 1) : !aie.objectfifosubview<memref<32xi32>>
-      %elem = aie.objectfifo.subview.access %subview [0] : !aie.objectfifosubview<memref<32xi32>> -> memref<32xi32>
+      %elem = aie.objectfifo.acquire @outC0 (Produce, 1) : memref<32xi32>
       %c0 = arith.constant 0 : index
       %c1 = arith.constant 1 : index
       %c32 = arith.constant 32 : index
@@ -91,8 +90,7 @@ module {
       %c2_lock = arith.constant 2 : i32
       aie.use_lock(%lock_1_2_5, AcquireGreaterEqual, %c2_lock)
       // Produce output data: values 100..131
-      %subview = aie.objectfifo.acquire @outC1 (Produce, 1) : !aie.objectfifosubview<memref<32xi32>>
-      %elem = aie.objectfifo.subview.access %subview [0] : !aie.objectfifosubview<memref<32xi32>> -> memref<32xi32>
+      %elem = aie.objectfifo.acquire @outC1 (Produce, 1) : memref<32xi32>
       %c0 = arith.constant 0 : index
       %c1 = arith.constant 1 : index
       %c32 = arith.constant 32 : index
