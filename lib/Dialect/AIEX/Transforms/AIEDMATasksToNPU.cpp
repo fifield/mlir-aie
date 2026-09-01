@@ -318,7 +318,7 @@ struct AIEDMATasksToNPUPass
     Value runtimeRegisterAddr;
     if (bdId && !getConstantIntValue(bdId)) {
       Value base = getBdRegisterBase(builder, bd_op.getLoc(), target_model, col,
-                                     row, bdId);
+                                     row, bdId, channel, channelDir);
       runtimeRegisterAddr = arith::AddIOp::create(
           builder, bd_op.getLoc(), base,
           createConstantI32(builder, bd_op.getLoc(),
@@ -762,8 +762,8 @@ struct AIEDMATasksToNPUPass
     }
 
     // One blockwrite carries the whole register block for BD configuration.
-    Value bdBase =
-        getBdRegisterBase(builder, loc, target_model, col, row, bdIdOfr);
+    Value bdBase = getBdRegisterBase(builder, loc, target_model, col, row,
+                                     bdIdOfr, channel, channelDir);
     NpuBlockWriteValuesOp::create(builder, loc, bdBase, bdWords);
     return setAddressForSingleBD(builder, bd_op, tile, channel, channelDir,
                                  bdIdOfr);

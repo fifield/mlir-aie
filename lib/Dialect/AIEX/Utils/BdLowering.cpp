@@ -328,17 +328,20 @@ Value buildBdWord(OpBuilder &builder, Location loc,
 
 Value getBdRegisterBase(OpBuilder &builder, Location loc,
                         const AIE::AIETargetModel &targetModel, int tileCol,
-                        int tileRow, OpFoldResult bdId) {
+                        int tileRow, OpFoldResult bdId, int channel,
+                        AIE::DMAChannelDir direction) {
   auto i32ty = builder.getIntegerType(32);
   if (auto c = getConstantIntValue(bdId))
     return createConstantI32(builder, loc,
                              static_cast<uint32_t>(targetModel.getDmaBdAddress(
-                                 tileCol, tileRow, *c)));
+                                 tileCol, tileRow, *c, channel, direction)));
   // Runtime bd_id: base + bd_id * bdStride, with base/stride from the (linear)
   // target-model address function.
-  uint64_t addrForId0 = targetModel.getDmaBdAddress(tileCol, tileRow, 0);
+  uint64_t addrForId0 =
+      targetModel.getDmaBdAddress(tileCol, tileRow, 0, channel, direction);
   uint64_t bdStride =
-      targetModel.getDmaBdAddress(tileCol, tileRow, 1) - addrForId0;
+      targetModel.getDmaBdAddress(tileCol, tileRow, 1, channel, direction) -
+      addrForId0;
   Value bdIdVal = getAsValue(builder, loc, bdId, i32ty);
   return arith::AddIOp::create(
       builder, loc, createConstantI32(builder, loc, addrForId0),

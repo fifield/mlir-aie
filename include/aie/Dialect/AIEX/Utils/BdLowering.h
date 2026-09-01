@@ -24,6 +24,8 @@
 #ifndef AIE_DIALECT_AIEX_UTILS_BDLOWERING_H
 #define AIE_DIALECT_AIEX_UTILS_BDLOWERING_H
 
+#include "aie/Dialect/AIE/IR/AIEEnums.h"
+
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -284,10 +286,16 @@ buildBdWord(mlir::OpBuilder &builder, mlir::Location loc,
 // runtime bdId (dynamic free-list pool) is emitted as arith. Shared by the
 // BD-word encoder and the descriptor / address-patch lowering so every register
 // touched for one BD is computed from the same base.
+//
+// `channel`/`direction` must describe the BD's own channel and are not
+// optional: shim ControlMM2S and TraceS2MM own private BD banks based
+// elsewhere than the ordinary MM2S bank, so getting them wrong aims the BD
+// register writes at another channel's registers.
 mlir::Value getBdRegisterBase(mlir::OpBuilder &builder, mlir::Location loc,
                               const xilinx::AIE::AIETargetModel &targetModel,
-                              int tileCol, int tileRow,
-                              mlir::OpFoldResult bdId);
+                              int tileCol, int tileRow, mlir::OpFoldResult bdId,
+                              int channel,
+                              xilinx::AIE::DMAChannelDir direction);
 
 // Lock, packet and next_bd fields, gathered by the caller from the DMA
 // structure and baked into the template words. Only next_bd and the lock values
