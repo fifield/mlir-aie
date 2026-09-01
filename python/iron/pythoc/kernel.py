@@ -136,11 +136,15 @@ class PythocKernel(Kernel):
                     "For inline kernels, llvm_ir_path_or_types must be a list of types"
                 )
 
-            # Call parent Kernel constructor with compiled object file
+            # Call parent Kernel constructor with compiled object file.
+            # aiecc routes merge-mode artifacts on the `link_with_mode`
+            # attribute, never on the file suffix, so an inline kernel has to
+            # declare "merge" or its .ll would be handed to the object linker.
             super().__init__(
                 name=kernel_fn_or_name.__aie_name__,
                 object_file_name=str(obj_file),
                 arg_types=llvm_ir_path_or_types,
+                link_with_mode="merge" if inline else None,
             )
 
             self._target_arch = target_arch
