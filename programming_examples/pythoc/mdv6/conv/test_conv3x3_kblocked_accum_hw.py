@@ -140,13 +140,16 @@ def build_module(tile_h=8, tile_w=8, k_block=16, oc=16, stride=1, padding=0, sta
         c.release(1)
 
     worker = Worker(core_fn, [of_in.cons(), of_wt.cons(), of_out.prod(), kernel], stack_size=stack_size)
-    rt = Runtime()
-    with rt.sequence(input_ty, weight_ty, output_ty) as (I, W, O):
-        rt.start(worker)
-        rt.fill(of_in.prod(), I, TensorAccessPattern((input_size,), offset=0, sizes=[1, input_size], strides=[0, 1]))
-        rt.fill(of_wt.prod(), W, TensorAccessPattern((weight_size,), offset=0, sizes=[1, weight_size], strides=[0, 1]))
-        rt.drain(of_out.cons(), O, TensorAccessPattern((output_size,), offset=0, sizes=[1, output_size], strides=[0, 1]), wait=True)
-    return Program(NPU2Col1(), rt).resolve_program()
+    def sequence(I, W, O, of_in_prod, of_wt_prod, of_out_cons):
+        of_in_prod.fill(I, TensorAccessPattern((input_size,), offset=0, sizes=[1, input_size], strides=[0, 1]))
+        of_wt_prod.fill(W, TensorAccessPattern((weight_size,), offset=0, sizes=[1, weight_size], strides=[0, 1]))
+        of_out_cons.drain(O, TensorAccessPattern((output_size,), offset=0, sizes=[1, output_size], strides=[0, 1]), wait=True)
+
+    rt = Runtime(
+        sequence,
+        [input_ty, weight_ty, output_ty, of_in.prod(), of_wt.prod(), of_out.cons()],
+    )
+    return Program(NPU2Col1(), rt, workers=[worker]).resolve_program()
 
 
 def compile_module(module, workdir: Path):
@@ -227,18 +230,21 @@ def build_module_two_chunks(tile_h=8, tile_w=8, k_block=16, oc=16, stride=1, pad
         c.release(1)
 
     worker = Worker(core_fn, [in_fifo.cons(), wt_fifo.cons(), out.prod(), kernel], stack_size=stack_size)
-    rt = Runtime()
-    with rt.sequence(input_ty, input_ty, weight_ty, weight_ty, output_ty) as (I0, I1, W0, W1, O):
-        rt.start(worker)
+    def sequence(I0, I1, W0, W1, O, in_fifo_prod, wt_fifo_prod, out_cons):
         tap_i = TensorAccessPattern((input_size,), offset=0, sizes=[1, input_size], strides=[0, 1])
         tap_w = TensorAccessPattern((weight_size,), offset=0, sizes=[1, weight_size], strides=[0, 1])
         tap_o = TensorAccessPattern((output_size,), offset=0, sizes=[1, output_size], strides=[0, 1])
-        rt.fill(in_fifo.prod(), I0, tap_i)
-        rt.fill(wt_fifo.prod(), W0, tap_w)
-        rt.fill(in_fifo.prod(), I1, tap_i)
-        rt.fill(wt_fifo.prod(), W1, tap_w)
-        rt.drain(out.cons(), O, tap_o, wait=True)
-    return Program(NPU2Col1(), rt).resolve_program()
+        in_fifo_prod.fill(I0, tap_i)
+        wt_fifo_prod.fill(W0, tap_w)
+        in_fifo_prod.fill(I1, tap_i)
+        wt_fifo_prod.fill(W1, tap_w)
+        out_cons.drain(O, tap_o, wait=True)
+
+    rt = Runtime(
+        sequence,
+        [input_ty, input_ty, weight_ty, weight_ty, output_ty, in_fifo.prod(), wt_fifo.prod(), out.cons()],
+    )
+    return Program(NPU2Col1(), rt, workers=[worker]).resolve_program()
 
 
 def run_kernel_two_chunks(xclbin: Path, insts: Path, tile_h=8, tile_w=8, k_block=16, oc=16, stride=1):

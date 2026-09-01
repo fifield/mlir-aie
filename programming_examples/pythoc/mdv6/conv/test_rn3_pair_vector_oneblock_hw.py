@@ -156,14 +156,17 @@ def build_module(ic=48, mid=16, oc=16, stack_size=4096):
         c.release(1)
 
     worker = Worker(core_fn, [in_fifo.cons(), wt_fifo.cons(), scratch_buf, out_fifo.prod(), kernel], stack_size=stack_size)
-    rt = Runtime()
-    with rt.sequence(slot_ty, weight_ty, weight_ty, slot_ty) as (I, W1, W2, O):
-        rt.start(worker)
-        rt.fill(in_fifo.prod(), I, TensorAccessPattern((slot_size,), offset=0, sizes=[1, slot_size], strides=[0, 1]))
-        rt.fill(wt_fifo.prod(), W1, TensorAccessPattern((weight_slot_size,), offset=0, sizes=[1, weight_slot_size], strides=[0, 1]))
-        rt.fill(wt_fifo.prod(), W2, TensorAccessPattern((weight_slot_size,), offset=0, sizes=[1, weight_slot_size], strides=[0, 1]))
-        rt.drain(out_fifo.cons(), O, TensorAccessPattern((slot_size,), offset=0, sizes=[1, slot_size], strides=[0, 1]), wait=True)
-    return Program(NPU2Col1(), rt).resolve_program(), weight_slot_size, w1_size, w2_size
+    def sequence(I, W1, W2, O, in_fifo_prod, wt_fifo_prod, out_fifo_cons):
+        in_fifo_prod.fill(I, TensorAccessPattern((slot_size,), offset=0, sizes=[1, slot_size], strides=[0, 1]))
+        wt_fifo_prod.fill(W1, TensorAccessPattern((weight_slot_size,), offset=0, sizes=[1, weight_slot_size], strides=[0, 1]))
+        wt_fifo_prod.fill(W2, TensorAccessPattern((weight_slot_size,), offset=0, sizes=[1, weight_slot_size], strides=[0, 1]))
+        out_fifo_cons.drain(O, TensorAccessPattern((slot_size,), offset=0, sizes=[1, slot_size], strides=[0, 1]), wait=True)
+
+    rt = Runtime(
+        sequence,
+        [slot_ty, weight_ty, weight_ty, slot_ty, in_fifo.prod(), wt_fifo.prod(), out_fifo.cons()],
+    )
+    return Program(NPU2Col1(), rt, workers=[worker]).resolve_program(), weight_slot_size, w1_size, w2_size
 
 
 def compile_module(module, workdir: Path):
@@ -273,21 +276,20 @@ def build_module_three_midblocks(ic=48, mid_block=16, oc=16, stack_size=4096):
         c.release(1)
 
     worker = Worker(core_fn, [in_fifo.cons(), wt_fifo.cons(), scratch_buf, out_fifo.prod(), kernel], stack_size=stack_size)
-    rt = Runtime()
     weight_all_size = weight_slot_size * 6
     weight_all_ty = np.ndarray[(weight_all_size,), np.dtype[np.uint16]]
-    with rt.sequence(slot_ty, weight_all_ty, slot_ty) as (I, WALL, O):
-        rt.start(worker)
+    def sequence(I, WALL, O, in_fifo_prod, wt_fifo_prod, out_fifo_cons):
         tap_s = TensorAccessPattern((slot_size,), offset=0, sizes=[1, slot_size], strides=[0, 1])
-        rt.fill(in_fifo.prod(), I, tap_s)
+        in_fifo_prod.fill(I, tap_s)
         for wi in range(6):
-            rt.fill(
-                wt_fifo.prod(),
-                WALL,
-                TensorAccessPattern((weight_all_size,), offset=wi * weight_slot_size, sizes=[1, weight_slot_size], strides=[0, 1]),
-            )
-        rt.drain(out_fifo.cons(), O, tap_s, wait=True)
-    return Program(NPU2Col1(), rt).resolve_program(), weight_slot_size, w1_size, w2_size
+            wt_fifo_prod.fill(WALL, TensorAccessPattern((weight_all_size,), offset=wi * weight_slot_size, sizes=[1, weight_slot_size], strides=[0, 1]))
+        out_fifo_cons.drain(O, tap_s, wait=True)
+
+    rt = Runtime(
+        sequence,
+        [slot_ty, weight_all_ty, slot_ty, in_fifo.prod(), wt_fifo.prod(), out_fifo.cons()],
+    )
+    return Program(NPU2Col1(), rt, workers=[worker]).resolve_program(), weight_slot_size, w1_size, w2_size
 
 
 def run_kernel_three_midblocks(xclbin: Path, insts: Path, weight_slot_size: int, w1_size: int, w2_size: int, ic=48, mid_block=16, oc=16):
@@ -391,32 +393,26 @@ def build_module_three_ocblocks(ic=48, mid_block=16, oc_block=16, n_ocblocks=3, 
         a.release(1)
 
     worker = Worker(core_fn, [in_fifo.cons(), wt_fifo.cons(), scratch_buf, out_fifo.prod(), kernel], stack_size=stack_size)
-    rt = Runtime()
     n_weight_slots = n_ocblocks * 6
     weight_all_size = weight_slot_size * n_weight_slots
     out_all_size = slot_size * n_ocblocks
     weight_all_ty = np.ndarray[(weight_all_size,), np.dtype[np.uint16]]
     out_all_ty = np.ndarray[(out_all_size,), np.dtype[np.uint16]]
-    with rt.sequence(slot_ty, weight_all_ty, out_all_ty) as (I, WALL, OALL):
-        rt.start(worker)
+    def sequence(I, WALL, OALL, in_fifo_prod, wt_fifo_prod, out_fifo_cons):
         tap_s = TensorAccessPattern((slot_size,), offset=0, sizes=[1, slot_size], strides=[0, 1])
-        rt.fill(in_fifo.prod(), I, tap_s)
+        in_fifo_prod.fill(I, tap_s)
         # One repeated input-side DMA task feeds all sequential weight slots.
         # Repeated output drains are unsafe in this tree, but repeated input-side
         # fills have been validated by the repeat-DMA microtest.
-        rt.fill(
-            wt_fifo.prod(),
-            WALL,
-            TensorAccessPattern((weight_all_size,), offset=0, sizes=[n_weight_slots, weight_slot_size], strides=[weight_slot_size, 1]),
-        )
+        wt_fifo_prod.fill(WALL, TensorAccessPattern((weight_all_size,), offset=0, sizes=[n_weight_slots, weight_slot_size], strides=[weight_slot_size, 1]))
         for ob in range(n_ocblocks):
-            rt.drain(
-                out_fifo.cons(),
-                OALL,
-                TensorAccessPattern((out_all_size,), offset=ob * slot_size, sizes=[1, slot_size], strides=[0, 1]),
-                wait=(ob == n_ocblocks - 1),
-            )
-    return Program(NPU2Col1(), rt).resolve_program(), weight_slot_size, w1_size, w2_size
+            out_fifo_cons.drain(OALL, TensorAccessPattern((out_all_size,), offset=ob * slot_size, sizes=[1, slot_size], strides=[0, 1]), wait=ob == n_ocblocks - 1)
+
+    rt = Runtime(
+        sequence,
+        [slot_ty, weight_all_ty, out_all_ty, in_fifo.prod(), wt_fifo.prod(), out_fifo.cons()],
+    )
+    return Program(NPU2Col1(), rt, workers=[worker]).resolve_program(), weight_slot_size, w1_size, w2_size
 
 
 def run_kernel_three_ocblocks(xclbin: Path, insts: Path, weight_slot_size: int, w1_size: int, w2_size: int, ic=48, mid_block=16, oc_block=16, n_ocblocks=3):
@@ -547,19 +543,18 @@ def build_module_shared_conv1(stack_size=4096):
         c.release(1)
 
     worker = Worker(core_fn, [in_fifo.cons(), wt_fifo.cons(), out_fifo.prod(), kernel], stack_size=stack_size)
-    rt = Runtime()
     weight_all_size = weight_slot_size * n_weight_slots
     weight_all_ty = np.ndarray[(weight_all_size,), np.dtype[np.uint16]]
-    with rt.sequence(arena_ty, weight_all_ty, arena_ty) as (I, WALL, O):
-        rt.start(worker)
-        rt.fill(in_fifo.prod(), I, TensorAccessPattern((arena_size,), offset=0, sizes=[1, arena_size], strides=[0, 1]))
-        rt.fill(
-            wt_fifo.prod(),
-            WALL,
-            TensorAccessPattern((weight_all_size,), offset=0, sizes=[n_weight_slots, weight_slot_size], strides=[weight_slot_size, 1]),
-        )
-        rt.drain(out_fifo.cons(), O, TensorAccessPattern((arena_size,), offset=0, sizes=[1, arena_size], strides=[0, 1]), wait=True)
-    return Program(NPU2Col1(), rt).resolve_program(), weight_slot_size, w1_size, w2_size
+    def sequence(I, WALL, O, in_fifo_prod, wt_fifo_prod, out_fifo_cons):
+        in_fifo_prod.fill(I, TensorAccessPattern((arena_size,), offset=0, sizes=[1, arena_size], strides=[0, 1]))
+        wt_fifo_prod.fill(WALL, TensorAccessPattern((weight_all_size,), offset=0, sizes=[n_weight_slots, weight_slot_size], strides=[weight_slot_size, 1]))
+        out_fifo_cons.drain(O, TensorAccessPattern((arena_size,), offset=0, sizes=[1, arena_size], strides=[0, 1]), wait=True)
+
+    rt = Runtime(
+        sequence,
+        [arena_ty, weight_all_ty, arena_ty, in_fifo.prod(), wt_fifo.prod(), out_fifo.cons()],
+    )
+    return Program(NPU2Col1(), rt, workers=[worker]).resolve_program(), weight_slot_size, w1_size, w2_size
 
 
 def run_kernel_shared_conv1(xclbin: Path, insts: Path, weight_slot_size: int, w1_size: int, w2_size: int):

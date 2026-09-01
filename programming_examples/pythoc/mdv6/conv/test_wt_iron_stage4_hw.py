@@ -20,7 +20,7 @@ sys.path.insert(0, str(HERE.parents[0]))
 
 import memtile_program_cost as mpc  # noqa: E402
 
-from aie.iron import ObjectFifo, Program, Runtime, Worker  # noqa: E402
+from aie.iron import ObjectFifo, Program, Runtime, TaskGroup, Worker  # noqa: E402
 from aie.iron.controlflow import range_  # noqa: E402
 from aie.iron.device import NPU2, Tile  # noqa: E402
 from aie.iron.pythoc import aie_kernel, PythocKernel  # noqa: E402
@@ -78,20 +78,23 @@ def main():
 
     w = Worker(core_fn, [fin.cons(), fout.prod(), krnd], tile=Tile(0, 2), stack_size=4096)
 
-    rt = Runtime()
-    with rt.sequence(host_in, host_out) as (IN, OUT):
-        rt.start(w)
+    def sequence(IN, OUT, fin_prod, fout_cons):
         for r in range(ROUNDS):
-            tg = rt.task_group()
-            rt.fill(fin.prod(), IN, TensorAccessPattern(
+            tg = TaskGroup()
+            fin_prod.fill(IN, TensorAccessPattern(
                 (ROUNDS * PATCH_W,), offset=r * PATCH_W,
-                sizes=[1, PATCH_W], strides=[0, 1]), task_group=tg)
-            rt.drain(fout.cons(), OUT, TensorAccessPattern(
+                sizes=[1, PATCH_W], strides=[0, 1]), group=tg)
+            fout_cons.drain(OUT, TensorAccessPattern(
                 (ROUNDS * 64,), offset=r * 64,
-                sizes=[1, 1, 1, 64], strides=[0, 0, 0, 1]), task_group=tg, wait=True)
-            rt.finish_task_group(tg)
+                sizes=[1, 1, 1, 64], strides=[0, 0, 0, 1]), group=tg, wait=True)
+            tg.finish()
 
-    module = Program(NPU2(), rt).resolve_program()
+    rt = Runtime(
+        sequence,
+        [host_in, host_out, fin.prod(), fout.cons()],
+    )
+
+    module = Program(NPU2(), rt, workers=[w]).resolve_program()
 
     # lower placement + FIFOs, then patch raw wt path
     from aie.passmanager import PassManager

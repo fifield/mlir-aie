@@ -39,7 +39,7 @@ from pathlib import Path
 import numpy as np
 from ml_dtypes import bfloat16
 
-from aie.iron import ObjectFifo, Program, Runtime, Worker
+from aie.iron import ObjectFifo, Program, Runtime, TaskGroup, Worker
 import aie.iron as iron
 from aie.iron.controlflow import range_
 from aie.iron.device import NPU2, Tile
@@ -511,17 +511,17 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols, trace_size=0):
     )
     c_index = 0
 
-    rt = Runtime()
-    with rt.sequence(A_ty, B_ty, C_ty) as (A, B, C):
-        if trace_size > 0:
-            # Trace the top-row, last-column worker (row=n_aie_rows-1 in worker list).
-            # Use -aie-insert-trace-flows lateral-routing options to force
-            # trace collection through a neighbouring shim column if needed.
-            trace_worker = workers[n_aie_rows * n_aie_cols - 1]
-            rt.enable_trace(trace_size, workers=[trace_worker])
-        rt.start(*workers)
+    # The shim tile each transfer runs on is picked when the handle is taken
+    # now (`prod(tile=)` / `cons(tile=)`), not per fill/drain (#3387).
+    C_conses = [f.cons(tile=Tile(col, 0)) for col, f in enumerate(C_l2l3_fifos)]
+    B_prods = [f.prod(tile=Tile(col, 0)) for col, f in enumerate(B_l3l2_fifos)]
+    A_prods = [
+        f.prod(tile=Tile(2 * col if n_aie_cols == 8 else col, 0))
+        for col, f in enumerate(A_l3l2_fifos)
+    ]
 
-        tg = rt.task_group()
+    def sequence(A, B, C, C_l2l3_fifos_conss, B_l3l2_fifos_prods, A_l3l2_fifos_prods):
+        tg = TaskGroup()
         for tb in range(ceildiv(M // m // n_aie_rows, tb_max_n_rows)):
             for pingpong in [0, 1]:
                 if c_index >= len(C_tiles):
@@ -533,13 +533,8 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols, trace_size=0):
                 )
 
                 for col in range(n_aie_cols):
-                    rt.drain(
-                        C_l2l3_fifos[col].cons(),
-                        C,
-                        tap=C_tiles[c_index],
-                        wait=True,
-                        task_group=tg,
-                        tile=Tile(col, 0),
+                    C_l2l3_fifos_conss[col].drain(
+                        C, tap=C_tiles[c_index], wait=True, group=tg
                     )
                     c_index += 1
 
@@ -549,29 +544,30 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols, trace_size=0):
                         ) % len(A_tiles)
 
                         if col < n_aie_rows:
-                            rt.fill(
-                                A_l3l2_fifos[col].prod(),
-                                A,
-                                tap=A_tiles[tile_offset],
-                                task_group=tg,
-                                tile=Tile(2 * col if n_aie_cols == 8 else col, 0),
+                            A_l3l2_fifos_prods[col].fill(
+                                A, tap=A_tiles[tile_offset], group=tg
                             )
 
-                        rt.fill(
-                            B_l3l2_fifos[col].prod(),
-                            B,
-                            tap=B_tiles[col],
-                            task_group=tg,
-                            tile=Tile(col, 0),
-                        )
+                        B_l3l2_fifos_prods[col].fill(B, tap=B_tiles[col], group=tg)
 
                 if tb > 0 or (tb == 0 and pingpong > 0):
-                    rt.finish_task_group(tg)
-                    tg = rt.task_group()
-        rt.finish_task_group(tg)
+                    tg.finish()
+                    tg = TaskGroup()
+        tg.finish()
+
+    rt = Runtime(
+        sequence,
+        [A_ty, B_ty, C_ty, C_conses, B_prods, A_prods],
+    )
 
     # ── Build and verify ─────────────────────────────────────────────────
-    my_program = Program(dev_ty, rt)
+    my_program = Program(dev_ty, rt, workers=[*workers])
+    if trace_size > 0:
+        # Trace the top-row, last-column worker (row=n_aie_rows-1 in worker list).
+        # Use -aie-insert-trace-flows lateral-routing options to force
+        # trace collection through a neighbouring shim column if needed.
+        trace_worker = workers[n_aie_rows * n_aie_cols - 1]
+        my_program.enable_trace(trace_size, workers=[trace_worker])
     module = my_program.resolve_program()
     assert module.operation.verify(), "Generated MLIR failed verification"
     return module

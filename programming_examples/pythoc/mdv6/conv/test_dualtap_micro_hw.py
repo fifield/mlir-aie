@@ -21,7 +21,7 @@ PYE = Path(__file__).resolve().parents[2]
 if str(PYE) not in sys.path:
     sys.path.insert(0, str(PYE))
 
-from aie.iron import ObjectFifo, Program, Runtime, Worker
+from aie.iron import ObjectFifo, Program, Runtime, TaskGroup, Worker
 from aie.iron.device import NPU2
 from aie.helpers.taplib import TensorAccessPattern
 from aie.utils.compile import compile_mlir_module
@@ -56,23 +56,26 @@ def build(fill_linear: bool, drain_linear: bool, same_bo: bool):
     drain_tap = (TensorAccessPattern((BO,), 0, [1, OUT_ELEM], [0, 1]) if drain_linear
                  else TensorAccessPattern((BO,), 0, dsz, dst))
 
-    rt = Runtime()
     if same_bo:
-        with rt.sequence(bo_ty) as (A,):
-            rt.start(w)
-            tg = rt.task_group()
-            rt.fill(fin.prod(), A, fill_tap, task_group=tg)
-            rt.drain(fout.cons(), A, drain_tap, task_group=tg, wait=True)
-            rt.finish_task_group(tg)
-    else:
-        with rt.sequence(bo_ty, bo_ty) as (A, B):
-            rt.start(w)
-            tg = rt.task_group()
-            rt.fill(fin.prod(), A, fill_tap, task_group=tg)
-            rt.drain(fout.cons(), B, drain_tap, task_group=tg, wait=True)
-            rt.finish_task_group(tg)
 
-    return Program(NPU2(), rt).resolve_program()
+        def sequence(A, fin_prod, fout_cons):
+            tg = TaskGroup()
+            fin_prod.fill(A, fill_tap, group=tg)
+            fout_cons.drain(A, drain_tap, group=tg, wait=True)
+            tg.finish()
+
+        rt = Runtime(sequence, [bo_ty, fin.prod(), fout.cons()])
+    else:
+
+        def sequence(A, B, fin_prod, fout_cons):
+            tg = TaskGroup()
+            fin_prod.fill(A, fill_tap, group=tg)
+            fout_cons.drain(B, drain_tap, group=tg, wait=True)
+            tg.finish()
+
+        rt = Runtime(sequence, [bo_ty, bo_ty, fin.prod(), fout.cons()])
+
+    return Program(NPU2(), rt, workers=[w]).resolve_program()
 
 
 def main():

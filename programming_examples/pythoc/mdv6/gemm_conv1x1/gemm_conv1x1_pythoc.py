@@ -345,14 +345,17 @@ def build_mlir_module(device):
         stack_size=0xD00,
     )
 
-    runtime = Runtime()
-    with runtime.sequence(in_host_ty, wt_host_ty, out_host_ty) as (a, b, c):
-        runtime.start(worker)
-        runtime.fill(of_in.prod(),  a)
-        runtime.fill(of_wt.prod(),  b)
-        runtime.drain(of_out.cons(), c, wait=True)
+    def sequence(a, b, c, of_in_prod, of_wt_prod, of_out_cons):
+        of_in_prod.fill(a)
+        of_wt_prod.fill(b)
+        of_out_cons.drain(c, wait=True)
 
-    program = Program(device, runtime)
+    runtime = Runtime(
+        sequence,
+        [in_host_ty, wt_host_ty, out_host_ty, of_in.prod(), of_wt.prod(), of_out.cons()],
+    )
+
+    program = Program(device, runtime, workers=[worker])
     module = program.resolve_program()
     assert module.operation.verify(), "Generated MLIR failed verification"
     return module

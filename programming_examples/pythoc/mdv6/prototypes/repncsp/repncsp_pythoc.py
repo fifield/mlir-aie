@@ -626,14 +626,17 @@ def build_mlir_module(device, height, width, in_channels, out_channels, csp_expa
         stack_size=4096,
     )
 
-    rt = Runtime()
-    with rt.sequence(input_ty, weight_ty, output_ty) as (I, W, O):
-        rt.start(worker)
-        rt.fill(of_input.prod(), I)
-        rt.fill(of_weights.prod(), W)
-        rt.drain(of_output.cons(), O, wait=True)
+    def sequence(I, W, O, of_input_prod, of_weights_prod, of_output_cons):
+        of_input_prod.fill(I)
+        of_weights_prod.fill(W)
+        of_output_cons.drain(O, wait=True)
 
-    program = Program(device, rt)
+    rt = Runtime(
+        sequence,
+        [input_ty, weight_ty, output_ty, of_input.prod(), of_weights.prod(), of_output.cons()],
+    )
+
+    program = Program(device, rt, workers=[worker])
     module = program.resolve_program()
     assert module.operation.verify(), "Generated MLIR failed verification"
     return module, sz
