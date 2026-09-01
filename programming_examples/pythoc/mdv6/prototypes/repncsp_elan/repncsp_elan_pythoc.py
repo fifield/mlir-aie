@@ -922,14 +922,17 @@ def build_mlir_module(device, height, width, in_c, out_c, part_c, proc_c):
         stack_size=4096,
     )
 
-    runtime = Runtime()
-    with runtime.sequence(input_ty, weight_ty, output_ty) as (I, W, O):
-        runtime.start(worker)
-        runtime.fill(of_in.prod(), I)
-        runtime.fill(of_wts.prod(), W)
-        runtime.drain(of_out.cons(), O, wait=True)
+    def sequence(I, W, O, of_in_prod, of_wts_prod, of_out_cons):
+        of_in_prod.fill(I)
+        of_wts_prod.fill(W)
+        of_out_cons.drain(O, wait=True)
 
-    program = Program(device, runtime)
+    runtime = Runtime(
+        sequence,
+        [input_ty, weight_ty, output_ty, of_in.prod(), of_wts.prod(), of_out.cons()],
+    )
+
+    program = Program(device, runtime, workers=[worker])
     module = program.resolve_program()
     assert module.operation.verify(), "Generated MLIR failed verification"
     return module

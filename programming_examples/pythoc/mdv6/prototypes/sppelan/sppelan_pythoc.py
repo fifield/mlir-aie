@@ -443,14 +443,17 @@ def build_mlir_module(device, height, width, in_channels, out_channels,
         stack_size=4096,
     )
 
-    rt = Runtime()
-    with rt.sequence(input_ty, weight_ty, output_ty) as (I, W, O):
-        rt.start(worker)
-        rt.fill(of_in.prod(), I)
-        rt.fill(of_wts.prod(), W)
-        rt.drain(of_out.cons(), O, wait=True)
+    def sequence(I, W, O, of_in_prod, of_wts_prod, of_out_cons):
+        of_in_prod.fill(I)
+        of_wts_prod.fill(W)
+        of_out_cons.drain(O, wait=True)
 
-    module = Program(device, rt).resolve_program()
+    rt = Runtime(
+        sequence,
+        [input_ty, weight_ty, output_ty, of_in.prod(), of_wts.prod(), of_out.cons()],
+    )
+
+    module = Program(device, rt, workers=[worker]).resolve_program()
     assert module.operation.verify(), "Generated MLIR failed verification"
     return module
 

@@ -205,28 +205,30 @@ def halo_conv(ic=64, oc=64, gbound=20, n_iters=1, stack_size=4096, shift=0,
     def tile_rc(t):
         return (t // GRID), (t % GRID)
 
-    def fill_windows(col, ct):
-        # ---- KEYSTONE: per-tile overlapping-window source gather ----
-        # One fill per core-tile in the column: the TAP origin is the tile's
-        # window top-left (tr*8, tc*8) in PADDED coords; it reads a WIN x WIN x
-        # IC block. Adjacent tiles' origins are 8 apart but each window is 10
-        # wide => overlapping SOURCE rows. No host im2col: the source is the
-        # contiguous padded HWC image.
-        for i in range(ct):
-            t = col * cores_per_col + i
-            tr, tc = tile_rc(t)
-            # SEAM origin offset (plumbing #2): shift window origin by `shift`
-            # px in row and col so the conv reads the producer's PAD(2) buffer
-            # at the pad-1 phase with no host shift. shift=0 = standalone.
-            off = ((tr * TILE + shift) * IMG_W + (tc * TILE + shift)) * ic
-            rt.fill(col_in[col].prod(), IMG, TensorAccessPattern(
-                (IMG_ELEMS,), offset=off,
-                sizes=[1, WIN, WIN, ic],
-                strides=[0, IMG_W * ic, ic, 1]))
+    def sequence(IMG, WT, OUT, col_in_prods, col_wt_prods, col_out_conss):
+        # fill_windows lives inside the sequence body: it reads IMG and the
+        # hoisted input handles, both of which are now sequence parameters
+        # rather than names bound by an enclosing `with rt.sequence(...)`.
+        def fill_windows(col, ct):
+            # ---- KEYSTONE: per-tile overlapping-window source gather ----
+            # One fill per core-tile in the column: the TAP origin is the tile's
+            # window top-left (tr*8, tc*8) in PADDED coords; it reads a WIN x WIN
+            # x IC block. Adjacent tiles' origins are 8 apart but each window is
+            # 10 wide => overlapping SOURCE rows. No host im2col: the source is
+            # the contiguous padded HWC image.
+            for i in range(ct):
+                t = col * cores_per_col + i
+                tr, tc = tile_rc(t)
+                # SEAM origin offset (plumbing #2): shift window origin by
+                # `shift` px in row and col so the conv reads the producer's
+                # PAD(2) buffer at the pad-1 phase with no host shift.
+                # shift=0 = standalone.
+                off = ((tr * TILE + shift) * IMG_W + (tc * TILE + shift)) * ic
+                col_in_prods[col].fill(IMG, TensorAccessPattern(
+                    (IMG_ELEMS,), offset=off,
+                    sizes=[1, WIN, WIN, ic],
+                    strides=[0, IMG_W * ic, ic, 1]))
 
-    rt = Runtime()
-    with rt.sequence(img_ty, wt_ty, host_out_ty) as (IMG, WT, OUT):
-        rt.start(*workers)
         for _ in range(n_iters):
             for col in range(n_cols):
                 ct = min(cores_per_col, N_TILES - col * cores_per_col)
@@ -241,7 +243,7 @@ def halo_conv(ic=64, oc=64, gbound=20, n_iters=1, stack_size=4096, shift=0,
                     fill_windows(col, ct)
                     # weights: one DMA, outer dim N_PAIRS units of WSLOT_PAIR
                     # (unit p = WT[p*WSLOT_PAIR:]). Broadcast to the column.
-                    rt.fill(col_wt[col].prod(), WT, TensorAccessPattern(
+                    col_wt_prods[col].fill(WT, TensorAccessPattern(
                         (WSLOT,), offset=0,
                         sizes=[N_PAIRS, 1, WSLOT_PAIR],
                         strides=[WSLOT_PAIR, 0, 1]))
@@ -258,16 +260,28 @@ def halo_conv(ic=64, oc=64, gbound=20, n_iters=1, stack_size=4096, shift=0,
                         (N_TILES * C_ELEMS,),
                         offset=col_base,
                         sizes=[1, N_PAIRS * ct * PAIR_C], strides=[0, 1])
-                    rt.drain(col_out[col].cons(), OUT, tap_out, wait=True)
+                    col_out_conss[col].drain(OUT, tap_out, wait=True)
                 else:
                     # single-slot path: full per-tile C, one drain per column.
-                    rt.fill(col_wt[col].prod(), WT)
+                    col_wt_prods[col].fill(WT)
                     fill_windows(col, ct)
                     tap_out = TensorAccessPattern(
                         (N_TILES * C_ELEMS,),
                         offset=col * cores_per_col * C_ELEMS,
                         sizes=[1, ct * C_ELEMS], strides=[0, 1])
-                    rt.drain(col_out[col].cons(), OUT, tap_out, wait=True)
+                    col_out_conss[col].drain(OUT, tap_out, wait=True)
+
+    rt = Runtime(
+        sequence,
+        [
+            img_ty,
+            wt_ty,
+            host_out_ty,
+            [__f.prod() for __f in col_in],
+            [__f.prod() for __f in col_wt],
+            [__f.cons() for __f in col_out],
+        ],
+    )
 
     meta = dict(GRID=GRID, N_TILES=N_TILES, IMG_W=IMG_W, IMG_H=IMG_H,
                 IMG_ELEMS=IMG_ELEMS, WIN=WIN, WIN_ELEMS=WIN_ELEMS,
@@ -275,7 +289,7 @@ def halo_conv(ic=64, oc=64, gbound=20, n_iters=1, stack_size=4096, shift=0,
                 N_BLK_OC=N_BLK_OC, TILE=TILE, PAD=PAD, ic=ic, oc=oc, gbound=gbound,
                 stream_oc=bool(stream_oc), BLK_UNIT=BLK_UNIT, PAIR_C=PAIR_C,
                 WSLOT_PAIR=WSLOT_PAIR, N_UNITS=N_PAIRS, cores_per_col=cores_per_col)
-    return Program(dev, rt).resolve_program(), meta
+    return Program(dev, rt, workers=[*workers]).resolve_program(), meta
 
 
 def deinterleave_stream_out(flat, meta):

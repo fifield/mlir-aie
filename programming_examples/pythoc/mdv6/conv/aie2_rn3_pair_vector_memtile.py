@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from aie.iron import ObjectFifo, Program, Runtime, Worker
+from aie.iron import ObjectFifo, Program, Runtime, TaskGroup, Worker
 from aie.iron.device import NPU2
 from aie.iron.pythoc import PythocKernel
 from aie.helpers.taplib import TensorAccessPattern
@@ -150,51 +150,38 @@ def rn3_pair_vector_memtile(
                 )
             )
 
-    rt = Runtime()
-    with rt.sequence(host_input_ty, host_weight_ty, host_output_ty) as (I, W, O):
-        rt.start(*workers)
-        tg = rt.task_group()
+    def sequence(I, W, O, col_in_fifos_prods, wt_fifos_prods, col_out_fifos_conss):
+        tg = TaskGroup()
         for col in range(n_cols):
             cores_this_col = min(cores_per_col, n_cores - col * cores_per_col)
             col_size = cores_this_col * ARENA_SIZE
             col_offset = col * cores_per_col * ARENA_SIZE
-            rt.fill(
-                col_in_fifos[col].prod(),
-                I,
-                TensorAccessPattern(
+            col_in_fifos_prods[col].fill(I, TensorAccessPattern(
                     (n_cores * ARENA_SIZE,),
                     offset=col_offset,
                     sizes=[1, col_size],
                     strides=[0, 1],
-                ),
-                task_group=tg,
-            )
-            rt.fill(
-                wt_fifos[col].prod(),
-                W,
-                TensorAccessPattern(
+                ), group=tg)
+            wt_fifos_prods[col].fill(W, TensorAccessPattern(
                     (N_WEIGHT_SLOTS * WEIGHT_SLOT_SIZE,),
                     offset=0,
                     sizes=[N_WEIGHT_SLOTS, WEIGHT_SLOT_SIZE],
                     strides=[WEIGHT_SLOT_SIZE, 1],
-                ),
-                task_group=tg,
-            )
-            rt.drain(
-                col_out_fifos[col].cons(),
-                O,
-                TensorAccessPattern(
+                ), group=tg)
+            col_out_fifos_conss[col].drain(O, TensorAccessPattern(
                     (n_cores * ARENA_SIZE,),
                     offset=col_offset,
                     sizes=[1, col_size],
                     strides=[0, 1],
-                ),
-                task_group=tg,
-                wait=True,
-            )
-        rt.finish_task_group(tg)
+                ), group=tg, wait=True)
+        tg.finish()
 
-    return Program(dev, rt).resolve_program()
+    rt = Runtime(
+        sequence,
+        [host_input_ty, host_weight_ty, host_output_ty, [__f.prod() for __f in col_in_fifos], [__f.prod() for __f in wt_fifos], [__f.cons() for __f in col_out_fifos]],
+    )
+
+    return Program(dev, rt, workers=[*workers]).resolve_program()
 
 
 def main(argv=None):

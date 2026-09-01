@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from aie.iron import ObjectFifo, Program, Runtime, Worker
+from aie.iron import ObjectFifo, Program, Runtime, TaskGroup, Worker
 from aie.iron.device import NPU2Col1
 from aie.iron.pythoc import PythocKernel
 from aie.helpers.taplib import TensorAccessPattern
@@ -117,52 +117,39 @@ def rn3_pair_vector(dev=None, n_patches: int = 1, stack_size: int = 4096, finish
 
     worker = Worker(core_fn, [in_fifo.cons(), wt_fifo.cons(), out_fifo.prod(), kernel], stack_size=stack_size)
 
-    rt = Runtime()
-    with rt.sequence(input_batch_ty, weight_all_ty, output_batch_ty) as (I, W, O):
-        rt.start(worker)
+    def sequence(I, W, O, in_fifo_prod, wt_fifo_prod, out_fifo_cons):
         for p in range(n_patches):
-            tg = rt.task_group() if finish_per_patch else None
-            rt.fill(
-                in_fifo.prod(),
-                I,
-                TensorAccessPattern(
+            tg = TaskGroup() if finish_per_patch else None
+            in_fifo_prod.fill(I, TensorAccessPattern(
                     (n_patches * ARENA_SIZE,),
                     offset=p * ARENA_SIZE,
                     sizes=[1, ARENA_SIZE],
                     strides=[0, 1],
-                ),
-                task_group=tg,
-            )
+                ), group=tg)
             # Feed the fixed 12-slot weight pack as one repeated input-side TAP.
             # This matches the validated one-tile smoke path. Do not replace it
             # with 12 separate fills: that built but timed out on hardware.
-            rt.fill(
-                wt_fifo.prod(),
-                W,
-                TensorAccessPattern(
+            wt_fifo_prod.fill(W, TensorAccessPattern(
                     (N_WEIGHT_SLOTS * WEIGHT_SLOT_SIZE,),
                     offset=0,
                     sizes=[N_WEIGHT_SLOTS, WEIGHT_SLOT_SIZE],
                     strides=[WEIGHT_SLOT_SIZE, 1],
-                ),
-                task_group=tg,
-            )
-            rt.drain(
-                out_fifo.cons(),
-                O,
-                TensorAccessPattern(
+                ), group=tg)
+            out_fifo_cons.drain(O, TensorAccessPattern(
                     (n_patches * ARENA_SIZE,),
                     offset=p * ARENA_SIZE,
                     sizes=[1, ARENA_SIZE],
                     strides=[0, 1],
-                ),
-                task_group=tg,
-                wait=True,
-            )
+                ), group=tg, wait=True)
             if tg is not None:
-                rt.finish_task_group(tg)
+                tg.finish()
 
-    return Program(dev, rt).resolve_program()
+    rt = Runtime(
+        sequence,
+        [input_batch_ty, weight_all_ty, output_batch_ty, in_fifo.prod(), wt_fifo.prod(), out_fifo.cons()],
+    )
+
+    return Program(dev, rt, workers=[worker]).resolve_program()
 
 
 def main(argv=None):

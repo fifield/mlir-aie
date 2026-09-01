@@ -194,20 +194,18 @@ def depad_concat_gemm(ic2=64, oc=128, gbound=20, stack_size=8192, chain_img_h=No
                 in_splits[i].cons(), wt_fifo.cons(), out_joins[i].prod(),
                 kernel, rtps[gci], barriers[gci]], stack_size=stack_size))
 
-    rt = Runtime()
-    with rt.sequence(host_in_ty, host_wt_ty, seam_ty) as (I, W, OUT):
-        rt.start(*workers)
+    def sequence(I, W, OUT, wt_fifos_prods, col_in_fifos_prods, col_out_fifos_conss):
         _rtp_vals = [int(v) for v in init_rtp]
         def set_rtps(*rtp_bufs):
             for rb in rtp_bufs:
                 for k in range(RTP_LEN):
                     rb[k] = _rtp_vals[k]
-        rt.inline_ops(set_rtps, rtps)
+        set_rtps(*rtps)
         for b in barriers:
-            rt.set_barrier(b, 1)
+            b.set(1)
 
-        for wf in wt_fifos:
-            rt.fill(wf.prod(), W)
+        for wf_i, wf in enumerate(wt_fifos):
+            wt_fifos_prods[wf_i].fill(W)
 
         # rows per streamed sub-tile (m_split sub-tiles per core; default 1 row).
         rows_per_chunk = rpc // m_split
@@ -255,9 +253,13 @@ def depad_concat_gemm(ic2=64, oc=128, gbound=20, stack_size=8192, chain_img_h=No
                         offset=((PAD + r0) * IMG + PAD) * oc,
                         sizes=[cc, rows_per_chunk, gbound, oc],
                         strides=[rpc * IMG * oc, IMG * oc, oc, 1])
-                rt.fill(col_in_fifos[col].prod(), I, tap_in)
-                rt.drain(col_out_fifos[col].cons(), OUT, tap_out,
-                         wait=(col == last_col and cr == m_split - 1))
+                col_in_fifos_prods[col].fill(I, tap_in)
+                col_out_fifos_conss[col].drain(OUT, tap_out, wait=col == last_col and cr == m_split - 1)
+
+    rt = Runtime(
+        sequence,
+        [host_in_ty, host_wt_ty, seam_ty, [__f.prod() for __f in wt_fifos], [__f.prod() for __f in col_in_fifos], [__f.cons() for __f in col_out_fifos]],
+    )
 
     meta = dict(GRID=GRID, IMG=IMG, IMG_H=img_h, IMG_ELEMS=IMG_ELEMS, HALF_ELEMS=HALF_ELEMS,
                 IN_ELEMS=IN_ELEMS, PAD=PAD, TILE=TILE, ic2=ic2, ic=ic, oc=oc,
@@ -265,7 +267,7 @@ def depad_concat_gemm(ic2=64, oc=128, gbound=20, stack_size=8192, chain_img_h=No
                 m_split=m_split, chunk_m=chunk_m, rows_per_chunk=rpc // m_split,
                 input_tile_size=input_tile_size, output_tile_size=output_tile_size,
                 weight_size=weight_size, n_cols=n_cols, cores_per_col=cores_per_col)
-    return Program(dev, rt).resolve_program(), meta
+    return Program(dev, rt, workers=[*workers]).resolve_program(), meta
 
 
 if __name__ == "__main__":
