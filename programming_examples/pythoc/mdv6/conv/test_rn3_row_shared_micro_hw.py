@@ -204,14 +204,17 @@ def build_module(ic=48, mid=48, stack_size=4096):
         c.release(1)
 
     worker = Worker(core_fn, [in_fifo.cons(), wt_fifo.cons(), out_fifo.prod(), kernel], stack_size=stack_size)
-    rt = Runtime()
     wt_len = mid * ic * 9 + 2 * mid + 4 * mid * 9 + 8
-    with rt.sequence(input_ty, weight_ty, output_ty) as (A, W, C):
-        rt.start(worker)
-        rt.fill(in_fifo.prod(), A, TensorAccessPattern((12 * 12 * ic,), offset=0, sizes=[1, 12 * 12 * ic], strides=[0, 1]))
-        rt.fill(wt_fifo.prod(), W, TensorAccessPattern((wt_len,), offset=0, sizes=[1, wt_len], strides=[0, 1]))
-        rt.drain(out_fifo.cons(), C, TensorAccessPattern((256,), offset=0, sizes=[1, 256], strides=[0, 1]), wait=True)
-    return Program(NPU2Col1(), rt).resolve_program()
+    def sequence(A, W, C, in_fifo_prod, wt_fifo_prod, out_fifo_cons):
+        in_fifo_prod.fill(A, TensorAccessPattern((12 * 12 * ic,), offset=0, sizes=[1, 12 * 12 * ic], strides=[0, 1]))
+        wt_fifo_prod.fill(W, TensorAccessPattern((wt_len,), offset=0, sizes=[1, wt_len], strides=[0, 1]))
+        out_fifo_cons.drain(C, TensorAccessPattern((256,), offset=0, sizes=[1, 256], strides=[0, 1]), wait=True)
+
+    rt = Runtime(
+        sequence,
+        [input_ty, weight_ty, output_ty, in_fifo.prod(), wt_fifo.prod(), out_fifo.cons()],
+    )
+    return Program(NPU2Col1(), rt, workers=[worker]).resolve_program()
 
 
 def compile_module(module, workdir: Path):

@@ -28,7 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from aie.iron import Buffer, ObjectFifo, Program, Runtime, Worker
+from aie.iron import Buffer, ObjectFifo, Program, Runtime, TaskGroup, Worker
 from aie.iron.controlflow import range_
 from aie.iron.device import NPU2
 from aie.iron.pythoc import PythocKernel
@@ -158,24 +158,22 @@ def rn3_pair_vector_chain(dev=None, n_iters: int = 2, stack_size: int = 4096, n_
                 stack_size=stack_size,
             ))
 
-    rt = Runtime()
-    with rt.sequence(img_ty, wt_host_ty, img_ty) as (IMGB, WT, OUTB):
-        rt.start(*workers)
+    def sequence(IMGB, WT, OUTB, col_in_prods, col_wt_prods, col_out_conss):
         for it in range(n_iters):
             drain_buf = OUTB if (sep_out and it == n_iters - 1) else IMGB
-            tg = rt.task_group()
+            tg = TaskGroup()
             for c in range(n_cols):
                 in_tap = (TensorAccessPattern((IMG_ELEMS,), offset=0,
                           sizes=[1, N_WORKERS * 20 * 12 * IC], strides=[0, 1]) if linear else
                           TensorAccessPattern((IMG_ELEMS,), offset=8 * c * IC,
                           sizes=[TILES_PER_COL // 2, 20, 12, IC],
                           strides=[16 * IMG * IC, IMG * IC, IC, 1]))
-                rt.fill(col_in[c].prod(), IMGB, in_tap, task_group=tg)
+                col_in_prods[c].fill(IMGB, in_tap, group=tg)
                 # weights: 6 slots streamed twice (both worker tile passes)
                 # linear one-shot (no iteration/repeat lowering): 12 slots per iter
-                rt.fill(col_wt[c].prod(), WT, TensorAccessPattern(
+                col_wt_prods[c].fill(WT, TensorAccessPattern(
                     (n_iters * 2 * N_WSLOTS * WSLOT,), offset=it * 2 * N_WSLOTS * WSLOT,
-                    sizes=[1, 2 * N_WSLOTS * WSLOT], strides=[0, 1]), task_group=tg)
+                    sizes=[1, 2 * N_WSLOTS * WSLOT], strides=[0, 1]), group=tg)
                 out_tap = (TensorAccessPattern((IMG_ELEMS,), offset=0,
                            sizes=[1, TILES_PER_COL * TILE * TILE * IC], strides=[0, 1]) if linear else
                            TensorAccessPattern((IMG_ELEMS,), offset=(PAD * IMG + PAD + 8 * c) * IC,
@@ -183,10 +181,15 @@ def rn3_pair_vector_chain(dev=None, n_iters: int = 2, stack_size: int = 4096, n_
                            # (see test_dualtap_micro_hw.py)
                            sizes=[1, TILES_PER_COL, TILE, TILE * IC],
                            strides=[0, 8 * IMG * IC, IMG * IC, 1]))
-                rt.drain(col_out[c].cons(), drain_buf, out_tap, task_group=tg, wait=True)
-            rt.finish_task_group(tg)
+                col_out_conss[c].drain(drain_buf, out_tap, group=tg, wait=True)
+            tg.finish()
 
-    return Program(dev, rt).resolve_program()
+    rt = Runtime(
+        sequence,
+        [img_ty, wt_host_ty, img_ty, [__f.prod() for __f in col_in], [__f.prod() for __f in col_wt], [__f.cons() for __f in col_out]],
+    )
+
+    return Program(dev, rt, workers=[*workers]).resolve_program()
 
 
 if __name__ == "__main__":

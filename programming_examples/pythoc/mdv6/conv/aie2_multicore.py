@@ -223,26 +223,7 @@ def multicore_conv(dev, tile_h=8, tile_w=8, ic=16, oc=16,
             workers.append(w)
 
     # Runtime
-    rt = Runtime()
-    if trace_size > 0:
-        # Trace one compute tile (the worker at index trace_worker) and append
-        # trace bytes to the *last* runtime_sequence arg (the output). The host
-        # extends the out BO by trace_size bytes and reads them back after
-        # dispatch. ddr_id=-1 == "append after last tensor arg".
-        #
-        # Skip Runtime.enable_trace(): the installed IRON library has a bug
-        # (refs undefined `shim_col` at line 280). Set the fields directly —
-        # `_trace_shim_col` stays None which is the no-override default.
-        rt._trace_size = trace_size
-        rt._trace_workers = [workers[trace_worker]]
-        rt._ddr_id = -1
-        rt._coretile_events = None
-        rt._coremem_events = None
-        rt._memtile_events = None
-        rt._shimtile_events = None
-    with rt.sequence(host_input_ty, weight_ty, host_output_ty) as (I, W, O):
-        rt.start(*workers)
-
+    def sequence(I, W, O, wt_fifos_prods, col_in_fifos_prods, col_out_fifos_conss):
         # Runtime parameter write. Values may differ across dispatches
         # (per-layer tile/ic/oc) while the ELF / ObjectFifo envelope remains
         # shared across the regime.
@@ -253,12 +234,12 @@ def multicore_conv(dev, tile_h=8, tile_w=8, ic=16, oc=16,
                 rb[0] = t_h; rb[1] = t_w
                 rb[2] = ic_c; rb[3] = oc_c
                 rb[4] = s_c;  rb[5] = p_c
-        rt.inline_ops(set_rtps, rtps)
+        set_rtps(*rtps)
         for b in barriers:
-            rt.set_barrier(b, 1)
+            b.set(1)
 
-        for wf in wt_fifos:
-            rt.fill(wf.prod(), W)
+        for wf_i, wf in enumerate(wt_fifos):
+            wt_fifos_prods[wf_i].fill(W)
 
         for col in range(n_cols):
             cores_this_col = min(cores_per_col, n_cores - col * cores_per_col)
@@ -277,13 +258,38 @@ def multicore_conv(dev, tile_h=8, tile_w=8, ic=16, oc=16,
                 sizes=[1, col_out_size],
                 strides=[0, 1],
             )
-            rt.fill(col_in_fifos[col].prod(), I, tap_in)
+            col_in_fifos_prods[col].fill(I, tap_in)
             # Full 8-column runs are not reliably synchronized by waiting only
             # on the final drain. Require a completion token from every column
             # output DMA before the runtime sequence frees/reuses tasks.
-            rt.drain(col_out_fifos[col].cons(), O, tap_out, wait=True)
+            col_out_fifos_conss[col].drain(O, tap_out, wait=True)
 
-    return Program(dev, rt).resolve_program()
+    rt = Runtime(
+        sequence,
+        [
+            host_input_ty,
+            weight_ty,
+            host_output_ty,
+            [__f.prod() for __f in wt_fifos],
+            [__f.prod() for __f in col_in_fifos],
+            [__f.cons() for __f in col_out_fifos],
+        ],
+    )
+
+    prog = Program(dev, rt, workers=[*workers])
+    if trace_size > 0:
+        # Trace one compute tile (the worker at index trace_worker) and append
+        # trace bytes to the *last* runtime_sequence arg (the output). The host
+        # extends the out BO by trace_size bytes and reads them back after
+        # dispatch -- that is what reuse_output_buffer=True does, and it is what
+        # the old `_ddr_id = -1` field poke was standing in for while
+        # Runtime.enable_trace was broken. Trace now lives on Program (#3387).
+        prog.enable_trace(
+            trace_size,
+            workers=[workers[trace_worker]],
+            reuse_output_buffer=True,
+        )
+    return prog.resolve_program()
 
 
 def _parse_args(argv):

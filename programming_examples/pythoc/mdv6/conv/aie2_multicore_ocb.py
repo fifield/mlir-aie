@@ -209,9 +209,7 @@ def multicore_conv_ocb(dev, tile_h=8, tile_w=8, ic=16, oc_block=16,
             ], stack_size=4096)
             workers.append(w)
 
-    rt = Runtime()
-    with rt.sequence(host_input_ty, big_weight_ty, big_output_ty) as (I, W, O):
-        rt.start(*workers)
+    def sequence(I, W, O, wt_fifos_prods, col_in_fifos_prods, col_out_fifos_conss):
 
         t_h, t_w = active_tile_h, active_tile_w
         ic_c, oc_c, s_c, p_c = active_ic, active_oc, stride, padding
@@ -220,9 +218,9 @@ def multicore_conv_ocb(dev, tile_h=8, tile_w=8, ic=16, oc_block=16,
                 rb[0] = t_h; rb[1] = t_w
                 rb[2] = ic_c; rb[3] = oc_c
                 rb[4] = s_c;  rb[5] = p_c
-        rt.inline_ops(set_rtps, rtps)
+        set_rtps(*rtps)
         for b in barriers:
-            rt.set_barrier(b, 1)
+            b.set(1)
 
         # OCB loop collapsed into single 4D-strided BD descriptors per fifo.
         # Each fill/drain uses sizes=[n_ocb, 1, 1, slot_size] with the outer
@@ -244,8 +242,8 @@ def multicore_conv_ocb(dev, tile_h=8, tile_w=8, ic=16, oc_block=16,
             sizes=[n_ocb, 1, 1, weight_block_size],
             strides=[weight_block_size, 0, 0, 1],
         )
-        for wf in wt_fifos:
-            rt.fill(wf.prod(), W, tap_wt)
+        for wf_i, wf in enumerate(wt_fifos):
+            wt_fifos_prods[wf_i].fill(W, tap_wt)
 
         for col in range(n_cols):
             cores_this_col = min(cores_per_col, n_cores - col * cores_per_col)
@@ -267,10 +265,15 @@ def multicore_conv_ocb(dev, tile_h=8, tile_w=8, ic=16, oc_block=16,
                 sizes=[n_ocb, 1, 1, col_out_size],
                 strides=[host_output_size, 0, 0, 1],
             )
-            rt.fill(col_in_fifos[col].prod(), I, tap_in)
-            rt.drain(col_out_fifos[col].cons(), O, tap_out, wait=True)
+            col_in_fifos_prods[col].fill(I, tap_in)
+            col_out_fifos_conss[col].drain(O, tap_out, wait=True)
 
-    return Program(dev, rt).resolve_program()
+    rt = Runtime(
+        sequence,
+        [host_input_ty, big_weight_ty, big_output_ty, [__f.prod() for __f in wt_fifos], [__f.prod() for __f in col_in_fifos], [__f.cons() for __f in col_out_fifos]],
+    )
+
+    return Program(dev, rt, workers=[*workers]).resolve_program()
 
 
 def _parse_args(argv):

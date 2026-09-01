@@ -97,13 +97,11 @@ def rn3_pair_mc(dev, n_cores=4, tile_h=8, tile_w=8, ic=48, mid=48, ocb=4):
                 stack_size=4096,
             ))
 
-    rt = Runtime()
-    with rt.sequence(host_input_ty, weight_ty, host_output_ty) as (I, W, O):
-        rt.start(*workers)
+    def sequence(I, W, O, wt_fifos_prods, col_in_fifos_prods, col_out_fifos_conss):
         for b in barriers:
-            rt.set_barrier(b, 1)
-        for wf in wt_fifos:
-            rt.fill(wf.prod(), W)
+            b.set(1)
+        for wf_i, wf in enumerate(wt_fifos):
+            wt_fifos_prods[wf_i].fill(W)
         for col in range(n_cols):
             cores_this_col = min(cores_per_col, n_cores - col * cores_per_col)
             col_in_size = cores_this_col * input_size
@@ -120,10 +118,15 @@ def rn3_pair_mc(dev, n_cores=4, tile_h=8, tile_w=8, ic=48, mid=48, ocb=4):
                 sizes=[1, col_out_size],
                 strides=[0, 1],
             )
-            rt.fill(col_in_fifos[col].prod(), I, tap_in)
-            rt.drain(col_out_fifos[col].cons(), O, tap_out, wait=True)
+            col_in_fifos_prods[col].fill(I, tap_in)
+            col_out_fifos_conss[col].drain(O, tap_out, wait=True)
 
-    return Program(dev, rt).resolve_program()
+    rt = Runtime(
+        sequence,
+        [host_input_ty, weight_ty, host_output_ty, [__f.prod() for __f in wt_fifos], [__f.prod() for __f in col_in_fifos], [__f.cons() for __f in col_out_fifos]],
+    )
+
+    return Program(dev, rt, workers=[*workers]).resolve_program()
 
 
 def main(argv=None):

@@ -220,9 +220,7 @@ def build_conv3x3_module(
             )
             workers.append(w)
 
-    rt = Runtime()
-    with rt.sequence(host_input_ty, weight_ty, host_output_ty) as (I, W, O):
-        rt.start(*workers)
+    def sequence(I, W, O, wt_fifos_prods, col_in_fifos_prods, col_out_fifos_conss):
 
         t_h, t_w = tile_h, tile_w
         ic_c, oc_c, s_c, p_c = ic, oc, stride_val, padding_val
@@ -236,12 +234,12 @@ def build_conv3x3_module(
                 rb[4] = s_c
                 rb[5] = p_c
 
-        rt.inline_ops(set_rtps, rtps)
+        set_rtps(*rtps)
         for b in barriers:
-            rt.set_barrier(b, 1)
+            b.set(1)
 
-        for wf in wt_fifos:
-            rt.fill(wf.prod(), W)
+        for wf_i, wf in enumerate(wt_fifos):
+            wt_fifos_prods[wf_i].fill(W)
 
         for col in range(n_cols):
             cores_this_col = min(cores_per_col, n_cores - col * cores_per_col)
@@ -260,10 +258,15 @@ def build_conv3x3_module(
                 sizes=[1, col_out_size],
                 strides=[0, 1],
             )
-            rt.fill(col_in_fifos[col].prod(), I, tap_in)
-            rt.drain(col_out_fifos[col].cons(), O, tap_out, wait=True)
+            col_in_fifos_prods[col].fill(I, tap_in)
+            col_out_fifos_conss[col].drain(O, tap_out, wait=True)
 
-    return Program(dev, rt).resolve_program()
+    rt = Runtime(
+        sequence,
+        [host_input_ty, weight_ty, host_output_ty, [__f.prod() for __f in wt_fifos], [__f.prod() for __f in col_in_fifos], [__f.cons() for __f in col_out_fifos]],
+    )
+
+    return Program(dev, rt, workers=[*workers]).resolve_program()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -547,10 +550,8 @@ def build_gemm_kblocked_module(
     worker = Worker(core_fn, [of_in.cons(), of_wt.cons(), of_out.prod(), kernel],
                     stack_size=4096)
 
-    rt = Runtime()
-    with rt.sequence(host_in_ty, host_wt_ty, host_out_ty) as (I, W, O):
-        rt.start(worker)
-        rt.fill(of_in.prod(), I)
+    def sequence(I, W, O, of_in_prod, of_wt_prod, of_out_cons):
+        of_in_prod.fill(I)
         # The weight TAP streams n_k_blocks consecutive chunks of size wt_chunk_size.
         tap_w = TensorAccessPattern(
             (n_k_blocks * wt_chunk_size,),
@@ -558,10 +559,15 @@ def build_gemm_kblocked_module(
             sizes=[n_k_blocks, wt_chunk_size],
             strides=[wt_chunk_size, 1],
         )
-        rt.fill(of_wt.prod(), W, tap_w)
-        rt.drain(of_out.cons(), O, wait=True)
+        of_wt_prod.fill(W, tap_w)
+        of_out_cons.drain(O, wait=True)
 
-    return Program(dev, rt).resolve_program()
+    rt = Runtime(
+        sequence,
+        [host_in_ty, host_wt_ty, host_out_ty, of_in.prod(), of_wt.prod(), of_out.cons()],
+    )
+
+    return Program(dev, rt, workers=[worker]).resolve_program()
 
 
 def _pack_gemm_kb_weight_chunk(
@@ -755,14 +761,17 @@ def build_gemm_fused_module(
         stack_size=4096,
     )
 
-    rt = Runtime()
-    with rt.sequence(in_ty, wt_ty, out_ty) as (I, W, O):
-        rt.start(worker)
-        rt.fill(of_in.prod(), I)
-        rt.fill(of_wt.prod(), W)
-        rt.drain(of_out.cons(), O, wait=True)
+    def sequence(I, W, O, of_in_prod, of_wt_prod, of_out_cons):
+        of_in_prod.fill(I)
+        of_wt_prod.fill(W)
+        of_out_cons.drain(O, wait=True)
 
-    return Program(dev, rt).resolve_program()
+    rt = Runtime(
+        sequence,
+        [in_ty, wt_ty, out_ty, of_in.prod(), of_wt.prod(), of_out.cons()],
+    )
+
+    return Program(dev, rt, workers=[worker]).resolve_program()
 
 
 def _pack_gemm_fused_weights(

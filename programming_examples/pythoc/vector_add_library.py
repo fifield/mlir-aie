@@ -124,14 +124,17 @@ def build_mlir_module(device, tensor_size: int):
 
     worker = Worker(core_fn, [of_a.cons(), of_b.cons(), of_c.prod(), kernel])
 
-    runtime = Runtime()
-    with runtime.sequence(tensor_ty, tensor_ty, tensor_ty) as (a_in, b_in, c_out):
-        runtime.start(worker)
-        runtime.fill(of_a.prod(), a_in)
-        runtime.fill(of_b.prod(), b_in)
-        runtime.drain(of_c.cons(), c_out, wait=True)
+    def sequence(a_in, b_in, c_out, of_a_prod, of_b_prod, of_c_cons):
+        of_a_prod.fill(a_in)
+        of_b_prod.fill(b_in)
+        of_c_cons.drain(c_out, wait=True)
 
-    program = Program(device, runtime)
+    runtime = Runtime(
+        sequence,
+        [tensor_ty, tensor_ty, tensor_ty, of_a.prod(), of_b.prod(), of_c.cons()],
+    )
+
+    program = Program(device, runtime, workers=[worker])
     module = program.resolve_program()
     assert module.operation.verify(), "Generated MLIR failed verification"
     return module

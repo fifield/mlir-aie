@@ -105,13 +105,16 @@ def build_module(kind="i32", n=16, stack_size=4096):
         c.release(1)
 
     worker = Worker(core_fn, [in_fifo.cons(), out_fifo.prod(), kernel], stack_size=stack_size)
-    rt = Runtime()
-    with rt.sequence(tensor_ty, tensor_ty) as (A, C):
-        rt.start(worker)
+    def sequence(A, C, in_fifo_prod, out_fifo_cons):
         tap = TensorAccessPattern((n,), offset=0, sizes=[1, n], strides=[0, 1])
-        rt.fill(in_fifo.prod(), A, tap)
-        rt.drain(out_fifo.cons(), C, tap, wait=True)
-    return Program(NPU2Col1(), rt).resolve_program()
+        in_fifo_prod.fill(A, tap)
+        out_fifo_cons.drain(C, tap, wait=True)
+
+    rt = Runtime(
+        sequence,
+        [tensor_ty, tensor_ty, in_fifo.prod(), out_fifo.cons()],
+    )
+    return Program(NPU2Col1(), rt, workers=[worker]).resolve_program()
 
 
 def compile_module(module, workdir: Path):

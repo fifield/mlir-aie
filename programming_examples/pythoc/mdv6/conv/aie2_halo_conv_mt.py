@@ -42,7 +42,7 @@ for _p in (str(HERE), str(MDV6)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from aie.iron import ObjectFifo, Program, Runtime, Worker
+from aie.iron import ObjectFifo, Program, Runtime, TaskGroup, Worker
 from aie.iron.controlflow import range_
 from aie.iron.device import NPU2, Tile
 from aie.iron.pythoc import PythocKernel
@@ -241,30 +241,28 @@ def halo_conv_mt(ic=64, oc=64, gbound=20, tpc=4, n_cols=None, n_iters=1,
                 [in_sp[i].cons(), fwt.cons(), out_j[i].prod(), kern, n_iters],
                 **wkw))
 
-    rt = Runtime()
-    with rt.sequence(img_ty, wt_ty, host_out_ty) as (IMG, WT, OUT):
-        rt.start(*workers)
+    def sequence(IMG, WT, OUT, col_in_prods, col_wt_prods, col_out_conss):
         for _ in range(n_iters):
             for r in range(tpc):
-                tg = rt.task_group()
+                tg = TaskGroup()
                 for col in range(COLS):
                     # one window per worker this round
                     for w in range(NW):
                         _, grow, gcol, _idx = tile_of(col, w, r)
                         off = (grow * IMG_W + gcol) * ic
-                        rt.fill(col_in[col].prod(), IMG, TensorAccessPattern(
+                        col_in_prods[col].fill(IMG, TensorAccessPattern(
                             (IMG_ELEMS,), offset=off,
                             sizes=[1, WIN, WIN, ic],
-                            strides=[0, IMG_W * ic, ic, 1]), task_group=tg)
+                            strides=[0, IMG_W * ic, ic, 1]), group=tg)
                     if single_block:
                         # weights: one DMA, outer dim N_BLK_OC units of WSLOT_BLK
                         # (block b = WT[b*WSLOT_BLK:]). Broadcast to the column;
                         # the depth-1 wt FIFO lock-paces the N_BLK_OC pushes over a
                         # single BD chain (same as the one-tile stream path).
-                        rt.fill(col_wt[col].prod(), WT, TensorAccessPattern(
+                        col_wt_prods[col].fill(WT, TensorAccessPattern(
                             (WSLOT,), offset=0,
                             sizes=[N_BLK_OC, 1, WSLOT_BLK],
-                            strides=[WSLOT_BLK, 0, 1]), task_group=tg)
+                            strides=[WSLOT_BLK, 0, 1]), group=tg)
                         # output: ONE CONTIGUOUS DMA per column-round (a per-(b,w)
                         # scatter blows past the shim BD pool — same lesson the
                         # one-tile stream path documents). The join emits BLOCK-major
@@ -274,23 +272,26 @@ def halo_conv_mt(ic=64, oc=64, gbound=20, tpc=4, n_cols=None, n_iters=1,
                         # block) — same bytes, free permutation. Per-round column
                         # base: each round contributes NW*N_BLK_OC*BLK_C f32.
                         col_round_base = ((col * tpc + r) * NW * N_BLK_OC) * BLK_C
-                        rt.drain(col_out[col].cons(), OUT, TensorAccessPattern(
+                        col_out_conss[col].drain(OUT, TensorAccessPattern(
                             (n_slots * C_ELEMS,), offset=col_round_base,
-                            sizes=[1, NW * N_BLK_OC * BLK_C], strides=[0, 1]),
-                            task_group=tg, wait=(col == COLS - 1))
+                            sizes=[1, NW * N_BLK_OC * BLK_C], strides=[0, 1]), group=tg, wait=col == COLS - 1)
                     else:
                         # weights: whole-buffer broadcast to the column (the FIFO's
                         # NW consumers fan it out, same as the one-tile path).
-                        rt.fill(col_wt[col].prod(), WT, task_group=tg)
+                        col_wt_prods[col].fill(WT, group=tg)
                         # drain NW C's this round, round-major into OUT slot layout:
                         # slot(col,w,r) = ((col*NW + w)*tpc + r) -> contiguous C_ELEMS
                         for w in range(NW):
                             slot = (col * NW + w) * tpc + r
-                            rt.drain(col_out[col].cons(), OUT, TensorAccessPattern(
+                            col_out_conss[col].drain(OUT, TensorAccessPattern(
                                 (n_slots * C_ELEMS,), offset=slot * C_ELEMS,
-                                sizes=[1, C_ELEMS], strides=[0, 1]), task_group=tg,
-                                wait=(col == COLS - 1 and w == NW - 1))
-                rt.finish_task_group(tg)
+                                sizes=[1, C_ELEMS], strides=[0, 1]), group=tg, wait=col == COLS - 1 and w == NW - 1)
+                tg.finish()
+
+    rt = Runtime(
+        sequence,
+        [img_ty, wt_ty, host_out_ty, [__f.prod() for __f in col_in], [__f.prod() for __f in col_wt], [__f.cons() for __f in col_out]],
+    )
 
     meta = dict(GRID=GRID, N_TILES=N_TILES, IMG_W=IMG_W, IMG_H=IMG_H,
                 IMG_ELEMS=IMG_ELEMS, WIN=WIN, WIN_ELEMS=WIN_ELEMS,
@@ -299,7 +300,7 @@ def halo_conv_mt(ic=64, oc=64, gbound=20, tpc=4, n_cols=None, n_iters=1,
                 tpc=tpc, NWORK=NW, COLS=COLS, n_workers=COLS * NW,
                 n_slots=n_slots, JUNK_ROW0=JUNK_ROW0, shift=shift,
                 stream_oc=bool(single_block), WSLOT_BLK=WSLOT_BLK, BLK_C=BLK_C)
-    return Program(dev, rt).resolve_program(), meta
+    return Program(dev, rt, workers=[*workers]).resolve_program(), meta
 
 
 def slot_to_tile(slot, meta):
