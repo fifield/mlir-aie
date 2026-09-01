@@ -509,7 +509,6 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols, trace_size=0):
         tile_group_steps=(1, n_aie_cols),
         prune_step=False,
     )
-    c_index = 0
 
     # The shim tile each transfer runs on is picked when the handle is taken
     # now (`prod(tile=)` / `cons(tile=)`), not per fill/drain (#3387).
@@ -521,6 +520,9 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols, trace_size=0):
     ]
 
     def sequence(A, B, C, C_l2l3_fifos_conss, B_l3l2_fifos_prods, A_l3l2_fifos_prods):
+        # The body runs once at resolve time, so its own cursor lives here (a
+        # closure augassign would be an UnboundLocalError).
+        c_index = 0
         tg = TaskGroup()
         for tb in range(ceildiv(M // m // n_aie_rows, tb_max_n_rows)):
             for pingpong in [0, 1]:
