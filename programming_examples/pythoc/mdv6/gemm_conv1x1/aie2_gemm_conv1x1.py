@@ -292,9 +292,7 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
             workers.append(w)
 
     # Runtime sequence
-    rt = Runtime()
-    with rt.sequence(host_in_ty, host_wt_ty, host_out_ty) as (I, W, O):
-        rt.start(*workers)
+    def sequence(I, W, O, wt_fifos_prods, col_in_fifos_prods, col_out_fifos_conss):
 
         # Runtime parameter write. Values may differ by generated .bin while the
         # xclbin/ObjectFifo envelope remains shared across a regime.
@@ -304,9 +302,9 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
                 rb[0] = _rtp_vals[0]; rb[1] = _rtp_vals[1]
                 rb[2] = _rtp_vals[2]; rb[3] = _rtp_vals[3]
                 rb[4] = _rtp_vals[4]; rb[5] = _rtp_vals[5]
-        rt.inline_ops(set_rtps, rtps)
+        set_rtps(*rtps)
         for b in barriers:
-            rt.set_barrier(b, 1)
+            b.set(1)
 
         if use_kblocking:
             # K-blocked: send weight chunks repeatedly for each patch.
@@ -325,18 +323,18 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
             print(f"  Weight TAP: [{total_patch_cycles}, {n_k_blocks}, {wt_d1}, {wt_d0}]",
                   file=sys.stderr)
 
-            for wf in wt_fifos:
+            for wf_i, wf in enumerate(wt_fifos):
                 tap_wt = TensorAccessPattern(
                     (host_wt_size,),
                     offset=0,
                     sizes=[total_patch_cycles, n_k_blocks, wt_d1, wt_d0],
                     strides=[0, wt_chunk_size, wt_d0, 1],
                 )
-                rt.fill(wf.prod(), W, tap_wt)
+                wt_fifos_prods[wf_i].fill(W, tap_wt)
         else:
             # Original: broadcast full weights once
-            for wf in wt_fifos:
-                rt.fill(wf.prod(), W)
+            for wf_i_2, wf in enumerate(wt_fifos):
+                wt_fifos_prods[wf_i_2].fill(W)
 
         # Distribute input / collect output per column.
         #
@@ -375,14 +373,18 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
                     sizes=[patches_per_core, cores_this_col, out_d1, out_d0],
                     strides=[output_tile_size, core_out_size, out_d0, 1],
                 )
-                rt.fill(col_in_fifos[col].prod(), I, tap_in)
+                col_in_fifos_prods[col].fill(I, tap_in)
                 # Keep x1 behavior unchanged; for packed multi-batch fanout,
                 # require each drain completion before issuing more traffic into
                 # the same FIFOs/worker loop.
-                rt.drain(col_out_fifos[col].cons(), O, tap_out,
-                         wait=(spatial_batches > 1 or col == n_cols - 1))
+                col_out_fifos_conss[col].drain(O, tap_out, wait=spatial_batches > 1 or col == n_cols - 1)
 
-    return Program(dev, rt).resolve_program()
+    rt = Runtime(
+        sequence,
+        [host_in_ty, host_wt_ty, host_out_ty, [__f.prod() for __f in wt_fifos], [__f.prod() for __f in col_in_fifos], [__f.cons() for __f in col_out_fifos]],
+    )
+
+    return Program(dev, rt, workers=[*workers]).resolve_program()
 
 
 def _parse_args(argv):

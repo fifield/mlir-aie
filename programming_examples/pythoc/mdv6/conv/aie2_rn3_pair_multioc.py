@@ -17,7 +17,7 @@ import os
 import sys
 import numpy as np
 
-from aie.iron import ObjectFifo, Program, Runtime, Worker, WorkerRuntimeBarrier
+from aie.iron import ObjectFifo, Program, Runtime, TaskGroup, Worker, WorkerRuntimeBarrier
 from aie.iron.pythoc import PythocKernel
 from aie.iron.device import NPU2
 from aie.helpers.taplib import TensorAccessPattern
@@ -139,63 +139,83 @@ def rn3_pair_multioc(dev, tile_h=8, tile_w=8, ic=48, mid=48, ocb=4, n_ocb=12, n_
 
         group_specs.append((first_ocb, group_weight_size, group_output_size, in_fifo, group_w_fifo, group_out_fifo))
 
-    rt = Runtime()
-    with rt.sequence(input_batch_ty, all_weight_ty, full_output_ty) as (I, W, O):
-        rt.start(*workers)
+    # Runtime handles are fn_args now (#3387), so the per-group fifo endpoints
+    # are hoisted into lists parallel to group_specs / output_specs and indexed
+    # inside the sequence body.
+    group_w_prods = [spec[4].prod() for spec in group_specs]
+    group_in_prods = [spec[3].prod() for spec in group_specs]
+    group_out_conss = [
+        spec[5].cons() if spec[5] is not None else None for spec in group_specs
+    ]
+    output_specs_conss = [spec[2].cons() for spec in output_specs]
+    global_out_cons = (
+        global_out_fifo.cons() if global_out_fifo is not None else None
+    )
+
+    def sequence(
+        I,
+        W,
+        O,
+        group_w_prods,
+        group_in_prods,
+        group_out_conss,
+        output_specs_conss,
+        global_out_cons,
+    ):
         for b in barriers:
-            rt.set_barrier(b, 1)
-        weight_tg = rt.task_group() if finish_per_patch else None
-        for (first_ocb, group_weight_size, group_output_size, in_fifo, group_w_fifo, group_out_fifo) in group_specs:
+            b.set(1)
+        weight_tg = TaskGroup() if finish_per_patch else None
+        for gi, (first_ocb, group_weight_size, group_output_size, in_fifo, group_w_fifo, group_out_fifo) in enumerate(group_specs):
             tap_w = TensorAccessPattern(
                 (all_weight_size,),
                 offset=first_ocb * weight_block_size,
                 sizes=[1, group_weight_size],
                 strides=[0, 1],
             )
-            rt.fill(group_w_fifo.prod(), W, tap_w, task_group=weight_tg)
+            group_w_prods[gi].fill(W, tap_w, group=weight_tg)
         if weight_tg is not None:
-            rt.finish_task_group(weight_tg)
+            weight_tg.finish()
         if repeat_output_drain:
             if single_output_join:
-                assert global_out_fifo is not None
+                assert global_out_cons is not None
                 tap_o = TensorAccessPattern(
                     (output_batch_size,),
                     offset=0,
                     sizes=[n_patches, full_output_size],
                     strides=[full_output_size, 1],
                 )
-                rt.drain(global_out_fifo.cons(), O, tap_o, wait=True)
+                global_out_cons.drain(O, tap_o, wait=True)
             elif output_group_ocb is not None:
-                for out_first_ocb, out_group_size, out_fifo in output_specs:
+                for oi, (out_first_ocb, out_group_size, out_fifo) in enumerate(output_specs):
                     tap_o = TensorAccessPattern(
                         (output_batch_size,),
                         offset=out_first_ocb * output_block_size,
                         sizes=[n_patches, out_group_size],
                         strides=[full_output_size, 1],
                     )
-                    rt.drain(out_fifo.cons(), O, tap_o, wait=True)
+                    output_specs_conss[oi].drain(O, tap_o, wait=True)
             else:
-                for first_ocb, _group_weight_size, group_output_size, _in_fifo, _group_w_fifo, group_out_fifo in group_specs:
-                    assert group_out_fifo is not None
+                for gi, (first_ocb, _group_weight_size, group_output_size, _in_fifo, _group_w_fifo, group_out_fifo) in enumerate(group_specs):
+                    assert group_out_conss[gi] is not None
                     tap_o = TensorAccessPattern(
                         (output_batch_size,),
                         offset=first_ocb * output_block_size,
                         sizes=[n_patches, group_output_size],
                         strides=[full_output_size, 1],
                     )
-                    rt.drain(group_out_fifo.cons(), O, tap_o, wait=True)
+                    group_out_conss[gi].drain(O, tap_o, wait=True)
         if repeat_input_fill:
-            for _first_ocb, _group_weight_size, _group_output_size, in_fifo, _group_w_fifo, _group_out_fifo in group_specs:
+            for gi, (_first_ocb, _group_weight_size, _group_output_size, in_fifo, _group_w_fifo, _group_out_fifo) in enumerate(group_specs):
                 tap_i = TensorAccessPattern(
                     (input_batch_size,),
                     offset=0,
                     sizes=[n_patches, input_size],
                     strides=[input_size, 1],
                 )
-                rt.fill(in_fifo.prod(), I, tap_i)
+                group_in_prods[gi].fill(I, tap_i)
         for p in range(n_patches):
-            patch_tg = rt.task_group() if finish_per_patch else None
-            for (first_ocb, _group_weight_size, group_output_size, in_fifo, _group_w_fifo, group_out_fifo) in group_specs:
+            patch_tg = TaskGroup() if finish_per_patch else None
+            for gi, (first_ocb, _group_weight_size, group_output_size, in_fifo, _group_w_fifo, group_out_fifo) in enumerate(group_specs):
                 tap_i = TensorAccessPattern(
                     (input_batch_size,),
                     offset=p * input_size,
@@ -203,38 +223,52 @@ def rn3_pair_multioc(dev, tile_h=8, tile_w=8, ic=48, mid=48, ocb=4, n_ocb=12, n_
                     strides=[0, 1],
                 )
                 if not repeat_input_fill:
-                    rt.fill(in_fifo.prod(), I, tap_i, task_group=patch_tg)
+                    group_in_prods[gi].fill(I, tap_i, group=patch_tg)
                 if not repeat_output_drain and not single_output_join and output_group_ocb is None:
-                    assert group_out_fifo is not None
+                    assert group_out_conss[gi] is not None
                     tap_o = TensorAccessPattern(
                         (output_batch_size,),
                         offset=p * full_output_size + first_ocb * output_block_size,
                         sizes=[1, group_output_size],
                         strides=[0, 1],
                     )
-                    rt.drain(group_out_fifo.cons(), O, tap_o, task_group=patch_tg, wait=True)
+                    group_out_conss[gi].drain(O, tap_o, group=patch_tg, wait=True)
             if not repeat_output_drain and output_group_ocb is not None:
-                for out_first_ocb, out_group_size, out_fifo in output_specs:
+                for oi, (out_first_ocb, out_group_size, out_fifo) in enumerate(output_specs):
                     tap_o = TensorAccessPattern(
                         (output_batch_size,),
                         offset=p * full_output_size + out_first_ocb * output_block_size,
                         sizes=[1, out_group_size],
                         strides=[0, 1],
                     )
-                    rt.drain(out_fifo.cons(), O, tap_o, task_group=patch_tg, wait=True)
+                    output_specs_conss[oi].drain(O, tap_o, group=patch_tg, wait=True)
             if not repeat_output_drain and single_output_join:
-                assert global_out_fifo is not None
+                assert global_out_cons is not None
                 tap_o = TensorAccessPattern(
                     (output_batch_size,),
                     offset=p * full_output_size,
                     sizes=[1, full_output_size],
                     strides=[0, 1],
                 )
-                rt.drain(global_out_fifo.cons(), O, tap_o, task_group=patch_tg, wait=True)
+                global_out_cons.drain(O, tap_o, group=patch_tg, wait=True)
             if patch_tg is not None:
-                rt.finish_task_group(patch_tg)
+                patch_tg.finish()
 
-    return Program(dev, rt).resolve_program()
+    rt = Runtime(
+        sequence,
+        [
+            input_batch_ty,
+            all_weight_ty,
+            full_output_ty,
+            group_w_prods,
+            group_in_prods,
+            group_out_conss,
+            output_specs_conss,
+            global_out_cons,
+        ],
+    )
+
+    return Program(dev, rt, workers=[*workers]).resolve_program()
 
 
 def main(argv=None):

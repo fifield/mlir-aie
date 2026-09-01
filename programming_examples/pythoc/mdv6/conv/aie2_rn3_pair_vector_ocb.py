@@ -37,7 +37,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from aie.iron import ObjectFifo, Program, Runtime, Worker
+from aie.iron import ObjectFifo, Program, Runtime, TaskGroup, Worker
 from aie.iron.device import NPU2
 from aie.iron.pythoc import PythocKernel
 from aie.helpers.taplib import TensorAccessPattern
@@ -144,56 +144,43 @@ def rn3_pair_vector_ocb(
             Worker(core_fn, [inf.cons(), wf.cons(), outf.prod(), kernel], stack_size=stack_size)
         )
 
-    rt = Runtime()
-    with rt.sequence(input_batch_ty, weight_all_ty, output_batch_ty) as (I, W, O):
-        rt.start(*workers)
+    def sequence(I, W, O, in_fifos_prods, wt_fifos_prods, out_fifos_conss):
         for k in range(patches_per_lane):
             # One task group spans all spatial lanes for this patch step. The
             # first draft finished per lane and effectively serialized lanes;
             # this keeps lane fills/drains in the same schedulable group.
-            tg = rt.task_group() if finish_per_patch else None
+            tg = TaskGroup() if finish_per_patch else None
             for lane in range(n_lanes):
                 patch_idx = lane * patches_per_lane + k
-                rt.fill(
-                    in_fifos[lane].prod(),
-                    I,
-                    TensorAccessPattern(
+                in_fifos_prods[lane].fill(I, TensorAccessPattern(
                         (total_patches * ARENA_SIZE,),
                         offset=patch_idx * ARENA_SIZE,
                         sizes=[1, ARENA_SIZE],
                         strides=[0, 1],
-                    ),
-                    task_group=tg,
-                )
+                    ), group=tg)
                 # Keep the validated repeated input-side weight TAP. It is safe
                 # for the vector rn3-pair path; repeated output drains are not.
-                rt.fill(
-                    wt_fifos[lane].prod(),
-                    W,
-                    TensorAccessPattern(
+                wt_fifos_prods[lane].fill(W, TensorAccessPattern(
                         (N_WEIGHT_SLOTS * WEIGHT_SLOT_SIZE,),
                         offset=0,
                         sizes=[N_WEIGHT_SLOTS, WEIGHT_SLOT_SIZE],
                         strides=[WEIGHT_SLOT_SIZE, 1],
-                    ),
-                    task_group=tg,
-                )
-                rt.drain(
-                    out_fifos[lane].cons(),
-                    O,
-                    TensorAccessPattern(
+                    ), group=tg)
+                out_fifos_conss[lane].drain(O, TensorAccessPattern(
                         (total_patches * ARENA_SIZE,),
                         offset=patch_idx * ARENA_SIZE,
                         sizes=[1, ARENA_SIZE],
                         strides=[0, 1],
-                    ),
-                    task_group=tg,
-                    wait=True,
-                )
+                    ), group=tg, wait=True)
             if tg is not None:
-                rt.finish_task_group(tg)
+                tg.finish()
 
-    return Program(dev, rt).resolve_program()
+    rt = Runtime(
+        sequence,
+        [input_batch_ty, weight_all_ty, output_batch_ty, [__f.prod() for __f in in_fifos], [__f.prod() for __f in wt_fifos], [__f.cons() for __f in out_fifos]],
+    )
+
+    return Program(dev, rt, workers=[*workers]).resolve_program()
 
 
 def main(argv=None):

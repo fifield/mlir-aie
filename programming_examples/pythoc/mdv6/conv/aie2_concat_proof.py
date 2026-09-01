@@ -203,9 +203,7 @@ def concat_proof(dev, H=20, W=20, q_ic=128, n_q=4, oc=256,
             ], stack_size=8192)
             workers.append(w)
 
-    rt = Runtime()
-    with rt.sequence(host_in_ty, host_wt_ty, host_out_ty) as (I, W_, O):
-        rt.start(*workers)
+    def sequence(I, W_, O, wt_fifos_prods, col_in_fifos_prods, col_out_fifos_conss):
 
         _rtp_vals = [int(v) for v in init_rtp]
 
@@ -214,9 +212,9 @@ def concat_proof(dev, H=20, W=20, q_ic=128, n_q=4, oc=256,
                 rb[0] = _rtp_vals[0]; rb[1] = _rtp_vals[1]
                 rb[2] = _rtp_vals[2]; rb[3] = _rtp_vals[3]
                 rb[4] = _rtp_vals[4]; rb[5] = _rtp_vals[5]
-        rt.inline_ops(set_rtps, rtps)
+        set_rtps(*rtps)
         for b in barriers:
-            rt.set_barrier(b, 1)
+            b.set(1)
 
         # ---- weight fill (K-blocked, repeated per patch cycle) ----
         def _factor_for_dma(n, max_inner=1023):
@@ -226,14 +224,14 @@ def concat_proof(dev, H=20, W=20, q_ic=128, n_q=4, oc=256,
             return n, 1
 
         wt_d1, wt_d0 = _factor_for_dma(wt_chunk_size)
-        for wf in wt_fifos:
+        for wf_i, wf in enumerate(wt_fifos):
             tap_wt = TensorAccessPattern(
                 (host_wt_size,),
                 offset=0,
                 sizes=[total_patch_cycles, n_k_blocks, wt_d1, wt_d0],
                 strides=[0, wt_chunk_size, wt_d0, 1],
             )
-            rt.fill(wf.prod(), W_, tap_wt)
+            wt_fifos_prods[wf_i].fill(W_, tap_wt)
 
         # ---- ON-DEVICE CONCAT: gather-fill input ----
         # Host BO layout: [q0(n_pix,q_ic) | q1 | q2 | q3], each quarter flat.
@@ -265,7 +263,7 @@ def concat_proof(dev, H=20, W=20, q_ic=128, n_q=4, oc=256,
                     sizes=[ppc, cores_this_col, in_d1, in_d0],
                     strides=[input_tile_size, core_in_size, in_d0, 1],
                 )
-                rt.fill(col_in_fifos[col].prod(), I, tap_in)
+                col_in_fifos_prods[col].fill(I, tap_in)
         else:
             for col in range(n_cols):
                 cores_this_col = min(cores_per_col, n_cores - col * cores_per_col)
@@ -284,7 +282,7 @@ def concat_proof(dev, H=20, W=20, q_ic=128, n_q=4, oc=256,
                         sizes=[cores_this_col, tile_m, n_q, q_ic],
                         strides=[ppc * tile_m * q_ic, q_ic, host_q_size, 1],
                     )
-                    rt.fill(col_in_fifos[col].prod(), I, tap_in)
+                    col_in_fifos_prods[col].fill(I, tap_in)
 
         # ---- drain output (contiguous per-core, [M,OC] HWC) ----
         out_d1, out_d0 = _factor_for_dma(output_tile_size)
@@ -296,10 +294,14 @@ def concat_proof(dev, H=20, W=20, q_ic=128, n_q=4, oc=256,
                 sizes=[ppc, cores_this_col, out_d1, out_d0],
                 strides=[output_tile_size, core_out_size, out_d0, 1],
             )
-            rt.drain(col_out_fifos[col].cons(), O, tap_out,
-                     wait=(col == n_cols - 1))
+            col_out_fifos_conss[col].drain(O, tap_out, wait=col == n_cols - 1)
 
-    return Program(dev, rt).resolve_program()
+    rt = Runtime(
+        sequence,
+        [host_in_ty, host_wt_ty, host_out_ty, [__f.prod() for __f in wt_fifos], [__f.prod() for __f in col_in_fifos], [__f.cons() for __f in col_out_fifos]],
+    )
+
+    return Program(dev, rt, workers=[*workers]).resolve_program()
 
 
 def concat_only(dev, H=20, W=20, q_ic=128, n_q=4, n_cores=32):
@@ -359,9 +361,7 @@ def concat_only(dev, H=20, W=20, q_ic=128, n_q=4, n_cores=32):
         workers.append(Worker(core_fn, [fin.cons(), fout.prod(), copy_kernel],
                               stack_size=2048))
 
-    rt = Runtime()
-    with rt.sequence(host_in_ty, host_out_ty) as (I, O):
-        rt.start(*workers)
+    def sequence(I, O, in_fifos_prods, out_fifos_conss):
         # Per-core concat gather-fill. Core c owns global pixels
         # [c*tile_m : (c+1)*tile_m]. Gather TAP: [pixel, quarter, channel] ->
         # fused linear [tile_m, n_q*q_ic].
@@ -373,7 +373,7 @@ def concat_only(dev, H=20, W=20, q_ic=128, n_q=4, n_cores=32):
                 sizes=[tile_m, n_q, q_ic],
                 strides=[q_ic, host_q_size, 1],
             )
-            rt.fill(in_fifos[c].prod(), I, tap_in)
+            in_fifos_prods[c].fill(I, tap_in)
         # Drain each core's fused tile to its contiguous output slot. Core c at
         # output offset c*tile_size == global-pixel order, so the host reads the
         # output flat as [covered, ic].
@@ -384,9 +384,14 @@ def concat_only(dev, H=20, W=20, q_ic=128, n_q=4, n_cores=32):
                 sizes=[tile_m, ic],
                 strides=[ic, 1],
             )
-            rt.drain(out_fifos[c].cons(), O, tap_out, wait=(c == n_cores - 1))
+            out_fifos_conss[c].drain(O, tap_out, wait=c == n_cores - 1)
 
-    return Program(dev, rt).resolve_program()
+    rt = Runtime(
+        sequence,
+        [host_in_ty, host_out_ty, [__f.prod() for __f in in_fifos], [__f.cons() for __f in out_fifos]],
+    )
+
+    return Program(dev, rt, workers=[*workers]).resolve_program()
 
 
 def _parse_args(argv):

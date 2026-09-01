@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from aie.iron import Buffer, ObjectFifo, Program, Runtime, Worker
+from aie.iron import Buffer, ObjectFifo, Program, Runtime, TaskGroup, Worker
 from aie.iron.controlflow import range_
 from aie.iron.device import NPU2, Tile
 from aie.iron.pythoc import PythocKernel
@@ -264,32 +264,30 @@ def rn3_chain_geo(geo: str, n_iters: int = 2, stack_size: int = 4096, compute: i
                 tile=Tile(c, 2 + i),
                 stack_size=stack_size))
 
-    rt = Runtime()
-    with rt.sequence(img_ty, wt_host_ty, img_ty) as (A, WT, B):
-        rt.start(*workers)
+    def sequence(A, WT, B, col_in_prods, col_wt_prods, col_out_conss):
         for it in range(n_iters):
             src, dst = (A, B) if it % 2 == 0 else (B, A)
             for ps in range(PASSES):
-                tg = rt.task_group()
+                tg = TaskGroup()
                 for c in range(COLS):
                     gx = (c * PASSES + ps) * 8
-                    rt.fill(col_in[c].prod(), src, TensorAccessPattern(
+                    col_in_prods[c].fill(src, TensorAccessPattern(
                         (img_elems,), offset=gx * IC,
                         sizes=[NW, CHUNK_ROWS, 12, IC],
-                        strides=[8 * NT * IMG * IC, IMG * IC, IC, 1]), task_group=tg)
+                        strides=[8 * NT * IMG * IC, IMG * IC, IC, 1]), group=tg)
                     # 2*N_BLK slots per pair, streamed once per tile pass
                     # (broadcast: every worker consumes the same elems)
                     # linear, host duplicates the slot block NT times per iter
-                    rt.fill(col_wt[c].prod(), WT, TensorAccessPattern(
+                    col_wt_prods[c].fill(WT, TensorAccessPattern(
                         (wt_elems,), offset=it * NT * SLOTS_PER_PAIR * WSLOT,
                         sizes=[1, NT * SLOTS_PER_PAIR * WSLOT],
-                        strides=[0, 1]), task_group=tg)
-                    rt.drain(col_out[c].cons(), dst, TensorAccessPattern(
+                        strides=[0, 1]), group=tg)
+                    col_out_conss[c].drain(dst, TensorAccessPattern(
                         (img_elems,), offset=(PAD * IMG + PAD + gx) * IC,
                         # leading size-1 dim: <4-dim shim S2MM BDs hang
                         sizes=[1, TPC, TILE, TILE * IC],
-                        strides=[0, 8 * IMG * IC, IMG * IC, 1]), task_group=tg, wait=True)
-                rt.finish_task_group(tg)
+                        strides=[0, 8 * IMG * IC, IMG * IC, 1]), group=tg, wait=True)
+                tg.finish()
 
         if rnm:
             # Epilogue: rnm 1x1 GEMM on concat(final chain image, x2).
@@ -299,39 +297,43 @@ def rn3_chain_geo(geo: str, n_iters: int = 2, stack_size: int = 4096, compute: i
             srcF = B if n_iters % 2 == 1 else A
             for ps in range(PASSES):
                 for pe in range(EPASS):
-                    tg = rt.task_group()
+                    tg = TaskGroup()
                     for c in range(COLS):
                         gx = (c * PASSES + ps) * 8
                         # per round r: x2 tile r of every worker, then cur tile
                         # r — matches the per-tile park-then-stream consumption.
                         # Full 20-row chunks; rows past 8 are junk never read.
                         for r in range(NT):
-                            rt.fill(col_in[c].prod(), srcF, TensorAccessPattern(
+                            col_in_prods[c].fill(srcF, TensorAccessPattern(
                                 (img_elems,),
                                 offset=((X2_ROW0 + PAD + r * 8) * IMG + PAD + gx - 2) * IC,
                                 sizes=[1, NW, CHUNK_ROWS, 12 * IC],
-                                strides=[0, 8 * NT * IMG * IC, IMG * IC, 1]), task_group=tg)
-                            rt.fill(col_in[c].prod(), srcF, TensorAccessPattern(
+                                strides=[0, 8 * NT * IMG * IC, IMG * IC, 1]), group=tg)
+                            col_in_prods[c].fill(srcF, TensorAccessPattern(
                                 (img_elems,),
                                 offset=((PAD + r * 8) * IMG + PAD + gx - 2) * IC,
                                 sizes=[1, NW, CHUNK_ROWS, 12 * IC],
-                                strides=[0, 8 * NT * IMG * IC, IMG * IC, 1]), task_group=tg)
-                        rt.fill(col_wt[c].prod(), WT, TensorAccessPattern(
+                                strides=[0, 8 * NT * IMG * IC, IMG * IC, 1]), group=tg)
+                        col_wt_prods[c].fill(WT, TensorAccessPattern(
                             (wt_elems,), offset=EPI_W0 + pe * NT * N_BLK * WSLOT,
                             sizes=[1, NT * N_BLK * WSLOT],
-                            strides=[0, 1]), task_group=tg)
+                            strides=[0, 1]), group=tg)
                         # one drain per tile: shim S2MM has 3 real dims (the
                         # 4th must stay leading size-1); pixels land OC2 apart
                         for ti in range(TPC):
-                            rt.drain(col_out[c].cons(), srcF, TensorAccessPattern(
+                            col_out_conss[c].drain(srcF, TensorAccessPattern(
                                 (img_elems,),
                                 offset=OUT_OFF + ((ti * TILE * GBOUND) + gx) * OC2 + pe * IC,
                                 sizes=[1, TILE, TILE, IC],
-                                strides=[0, GBOUND * OC2, OC2, 1]),
-                                task_group=tg, wait=(ti == TPC - 1))
-                    rt.finish_task_group(tg)
+                                strides=[0, GBOUND * OC2, OC2, 1]), group=tg, wait=ti == TPC - 1)
+                    tg.finish()
 
-    return Program(dev, rt).resolve_program()
+    rt = Runtime(
+        sequence,
+        [img_ty, wt_host_ty, img_ty, [__f.prod() for __f in col_in], [__f.prod() for __f in col_wt], [__f.cons() for __f in col_out]],
+    )
+
+    return Program(dev, rt, workers=[*workers]).resolve_program()
 
 
 RASTER_GEOS = {
@@ -457,36 +459,38 @@ def rn3_chain_raster(geo: str, n_iters: int = 2, stack_size: int = 4096, compute
                  scratch, kc1, km, kc2r, n_iters, coords],
                 tile=Tile(c, 2 + i), stack_size=stack_size))
 
-    rt = Runtime()
-    with rt.sequence(img_ty, wt_host_ty, img_ty) as (A, WT, B):
-        rt.start(*workers)
+    def sequence(A, WT, B, col_in_prods, col_wt_prods, col_out_conss):
         for it in range(n_iters):
             src, dst = (A, B) if it % 2 == 0 else (B, A)
             for r in range(TPR):
-                tg = rt.task_group()
+                tg = TaskGroup()
                 for c in range(COLS):
                     for w in range(NWORK):
                         _, gr, gc = tile_of(c, w, r)
-                        rt.fill(col_in[c].prod(), src, TensorAccessPattern(
+                        col_in_prods[c].fill(src, TensorAccessPattern(
                             (IMG_ELEMS,), offset=(gr * IMG + gc) * IC,
                             sizes=[1, 12, 12 * IC],
-                            strides=[0, IMG * IC, 1]), task_group=tg)
+                            strides=[0, IMG * IC, 1]), group=tg)
                     if (not wr2) or r == 0:
                         _tot = (n_iters * WT_GROUP) if wr2 else (n_iters * TPR * WT_GROUP)
                         _off = (it * WT_GROUP) if wr2 else (it * TPR + r) * WT_GROUP
-                        rt.fill(col_wt[c].prod(), WT, TensorAccessPattern(
+                        col_wt_prods[c].fill(WT, TensorAccessPattern(
                             (_tot,), offset=_off,
-                            sizes=[1, WT_GROUP], strides=[0, 1]), task_group=tg)
+                            sizes=[1, WT_GROUP], strides=[0, 1]), group=tg)
                     for w in range(NWORK):
                         _, gr, gc = tile_of(c, w, r)
-                        rt.drain(col_out[c].cons(), dst, TensorAccessPattern(
+                        col_out_conss[c].drain(dst, TensorAccessPattern(
                             (IMG_ELEMS,), offset=((PAD + gr) * IMG + PAD + gc) * IC,
                             sizes=[1, 1, TILE, TILE * IC],
-                            strides=[0, 0, IMG * IC, 1]), task_group=tg,
-                            wait=(c == COLS - 1 and w == NWORK - 1))
-                rt.finish_task_group(tg)
+                            strides=[0, 0, IMG * IC, 1]), group=tg, wait=c == COLS - 1 and w == NWORK - 1)
+                tg.finish()
 
-    module = Program(dev, rt).resolve_program()
+    rt = Runtime(
+        sequence,
+        [img_ty, wt_host_ty, img_ty, [__f.prod() for __f in col_in], [__f.prod() for __f in col_wt], [__f.cons() for __f in col_out]],
+    )
+
+    module = Program(dev, rt, workers=[*workers]).resolve_program()
     # wr2 only does something where TPR>1 (re4w): the memtile ring replays the
     # group TPR times. At TPR=1 (re6w/re8w) there is NOTHING to replay -- weights
     # are already 1 group/iter (host fill is identical to non-wr2), so skip the
@@ -643,30 +647,32 @@ def rn3_chain_raster_wr(geo: str, n_iters: int = 2, stack_size: int = 4096, comp
                  scratch, kc1, km, kc2r, karm, kwait, kstamp, PKT_IDS[i], n_iters, coords],
                 tile=Tile(c, 2 + i), stack_size=stack_size))
 
-    rt = Runtime()
-    with rt.sequence(img_ty, wt_host_ty, img_ty) as (A, WT, B):
-        rt.start(*workers)
+    def sequence(A, WT, B, col_in_prods, col_out_conss):
         for it in range(n_iters):
             src, dst = (A, B) if it % 2 == 0 else (B, A)
             for r in range(TPR):
-                tg = rt.task_group()
+                tg = TaskGroup()
                 for c in range(COLS):
                     for w in range(NWORK):
                         _, gr, gc = tile_of(c, w, r)
-                        rt.fill(col_in[c].prod(), src, TensorAccessPattern(
+                        col_in_prods[c].fill(src, TensorAccessPattern(
                             (IMG_ELEMS,), offset=(gr * IMG + gc) * IC,
                             sizes=[1, 12, 12 * IC],
-                            strides=[0, IMG * IC, 1]), task_group=tg)
+                            strides=[0, IMG * IC, 1]), group=tg)
                     for w in range(NWORK):
                         _, gr, gc = tile_of(c, w, r)
-                        rt.drain(col_out[c].cons(), dst, TensorAccessPattern(
+                        col_out_conss[c].drain(dst, TensorAccessPattern(
                             (IMG_ELEMS,), offset=((PAD + gr) * IMG + PAD + gc) * IC,
                             sizes=[1, 1, TILE, TILE * IC],
-                            strides=[0, 0, IMG * IC, 1]), task_group=tg,
-                            wait=(c == COLS - 1 and w == NWORK - 1))
-                rt.finish_task_group(tg)
+                            strides=[0, 0, IMG * IC, 1]), group=tg, wait=c == COLS - 1 and w == NWORK - 1)
+                tg.finish()
 
-    module = Program(dev, rt).resolve_program()
+    rt = Runtime(
+        sequence,
+        [img_ty, wt_host_ty, img_ty, [__f.prod() for __f in col_in], [__f.cons() for __f in col_out]],
+    )
+
+    module = Program(dev, rt, workers=[*workers]).resolve_program()
     # lower placement + FIFOs first: the join BDs the credit pacing patches
     # only exist after objectFifo-stateful-transform
     from aie.passmanager import PassManager

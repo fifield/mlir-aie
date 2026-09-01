@@ -21,7 +21,7 @@ if str(PYTHOC_EXAMPLES) not in sys.path:
     sys.path.insert(0, str(PYTHOC_EXAMPLES))
 
 import aie.iron as iron
-from aie.iron import ObjectFifo, Program, Runtime, Worker, WorkerRuntimeBarrier
+from aie.iron import ObjectFifo, Program, Runtime, TaskGroup, Worker, WorkerRuntimeBarrier
 from aie.iron.device import NPU2
 from aie.iron.pythoc import PythocKernel
 from aie.helpers.taplib import TensorAccessPattern
@@ -91,31 +91,34 @@ def build_module(tiles=4, chunk_size=64, n_workers=4, finish_per_tile=False, per
         for i in range(n_workers)
     ]
 
-    rt = Runtime()
-    with rt.sequence(tensor_ty, full_ty if persistent_weight else tensor_ty, tensor_ty) as (A, B, C):
-        rt.start(*workers)
+    def sequence(A, B, C, in_b_full_prod, in_a_full_prod, out_full_cons):
         if use_barrier:
             for b in barriers:
-                rt.set_barrier(b, 1)
+                b.set(1)
         if persistent_weight:
-            weight_tg = rt.task_group() if finish_per_tile else None
+            weight_tg = TaskGroup() if finish_per_tile else None
             weight_tap = TensorAccessPattern((full_size,), offset=0, sizes=[1, full_size], strides=[0, 1])
-            rt.fill(in_b_full.prod(), B, weight_tap, task_group=weight_tg)
+            in_b_full_prod.fill(B, weight_tap, group=weight_tg)
             if weight_tg is not None:
-                rt.finish_task_group(weight_tg)
+                weight_tg.finish()
         for t in range(tiles):
-            tg = rt.task_group() if finish_per_tile else None
+            tg = TaskGroup() if finish_per_tile else None
             tap = TensorAccessPattern(
                 (tensor_size,), offset=t * full_size, sizes=[1, full_size], strides=[0, 1]
             )
-            rt.fill(in_a_full.prod(), A, tap, task_group=tg)
+            in_a_full_prod.fill(A, tap, group=tg)
             if not persistent_weight:
-                rt.fill(in_b_full.prod(), B, tap, task_group=tg)
-            rt.drain(out_full.cons(), C, tap, task_group=tg, wait=True)
+                in_b_full_prod.fill(B, tap, group=tg)
+            out_full_cons.drain(C, tap, group=tg, wait=True)
             if tg is not None:
-                rt.finish_task_group(tg)
+                tg.finish()
 
-    return Program(NPU2(), rt).resolve_program()
+    rt = Runtime(
+        sequence,
+        [tensor_ty, full_ty if persistent_weight else tensor_ty, tensor_ty, in_b_full.prod(), in_a_full.prod(), out_full.cons()],
+    )
+
+    return Program(NPU2(), rt, workers=[*workers]).resolve_program()
 
 
 def compile_module(module, workdir):

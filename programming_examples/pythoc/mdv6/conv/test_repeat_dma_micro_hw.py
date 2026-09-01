@@ -24,7 +24,7 @@ if str(PYTHOC_EXAMPLES) not in sys.path:
     sys.path.insert(0, str(PYTHOC_EXAMPLES))
 
 import aie.iron as iron
-from aie.iron import ObjectFifo, Program, Runtime, Worker
+from aie.iron import ObjectFifo, Program, Runtime, TaskGroup, Worker
 from aie.iron.device import NPU2Col1
 from aie.iron.pythoc import PythocKernel
 from aie.helpers.taplib import TensorAccessPattern
@@ -54,32 +54,35 @@ def build_module(tiles=8, tile_size=64, repeat_in=False, repeat_out=False, fifo_
             c.release(1)
 
     worker = Worker(core_fn, [of_a.cons(), of_b.cons(), of_c.prod(), kernel])
-    rt = Runtime()
-    with rt.sequence(tensor_ty, tensor_ty, tensor_ty) as (A, B, C):
-        rt.start(worker)
+    def sequence(A, B, C, of_a_prod, of_c_cons, of_b_prod):
         if repeat_in:
             tap_a = TensorAccessPattern(
                 (tensor_size,), offset=0, sizes=[tiles, tile_size], strides=[tile_size, 1]
             )
-            rt.fill(of_a.prod(), A, tap_a)
+            of_a_prod.fill(A, tap_a)
         if repeat_out:
             tap_c = TensorAccessPattern(
                 (tensor_size,), offset=0, sizes=[tiles, tile_size], strides=[tile_size, 1]
             )
-            rt.drain(of_c.cons(), C, tap_c, wait=True)
+            of_c_cons.drain(C, tap_c, wait=True)
         for t in range(tiles):
-            tg = rt.task_group() if finish_per_tile else None
+            tg = TaskGroup() if finish_per_tile else None
             tap = TensorAccessPattern(
                 (tensor_size,), offset=t * tile_size, sizes=[1, tile_size], strides=[0, 1]
             )
             if not repeat_in:
-                rt.fill(of_a.prod(), A, tap, task_group=tg)
-            rt.fill(of_b.prod(), B, tap, task_group=tg)
+                of_a_prod.fill(A, tap, group=tg)
+            of_b_prod.fill(B, tap, group=tg)
             if not repeat_out:
-                rt.drain(of_c.cons(), C, tap, task_group=tg, wait=True)
+                of_c_cons.drain(C, tap, group=tg, wait=True)
             if tg is not None:
-                rt.finish_task_group(tg)
-    return Program(NPU2Col1(), rt).resolve_program()
+                tg.finish()
+
+    rt = Runtime(
+        sequence,
+        [tensor_ty, tensor_ty, tensor_ty, of_a.prod(), of_c.cons(), of_b.prod()],
+    )
+    return Program(NPU2Col1(), rt, workers=[worker]).resolve_program()
 
 
 def compile_module(module, workdir: Path):

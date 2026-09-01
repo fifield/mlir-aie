@@ -52,18 +52,21 @@ def rn3_pair(dev, tile_h=8, tile_w=8, ic=4, mid=4, ocb=4):
 
     worker = Worker(core_fn, [of_in.cons(), of_wt.cons(), of_out.prod(), kernel, barrier], stack_size=4096)
 
-    rt = Runtime()
-    with rt.sequence(input_ty, weight_ty, output_ty) as (I, W, O):
-        rt.start(worker)
-        rt.set_barrier(barrier, 1)
+    def sequence(I, W, O, of_in_prod, of_wt_prod, of_out_cons):
+        barrier.set(1)
         tap_in = TensorAccessPattern((input_size,), offset=0, sizes=[1, input_size], strides=[0, 1])
         tap_wt = TensorAccessPattern((weight_size,), offset=0, sizes=[1, weight_size], strides=[0, 1])
         tap_out = TensorAccessPattern((output_size,), offset=0, sizes=[1, output_size], strides=[0, 1])
-        rt.fill(of_in.prod(), I, tap_in)
-        rt.fill(of_wt.prod(), W, tap_wt)
-        rt.drain(of_out.cons(), O, tap_out, wait=True)
+        of_in_prod.fill(I, tap_in)
+        of_wt_prod.fill(W, tap_wt)
+        of_out_cons.drain(O, tap_out, wait=True)
 
-    return Program(dev, rt).resolve_program()
+    rt = Runtime(
+        sequence,
+        [input_ty, weight_ty, output_ty, of_in.prod(), of_wt.prod(), of_out.cons()],
+    )
+
+    return Program(dev, rt, workers=[worker]).resolve_program()
 
 
 def main(argv=None):
