@@ -1,0 +1,6 @@
+# AIE4-capable Peano wheel used by the medusa-dev NPU3 workflow.
+#
+# This is deliberately separate from peano-requirements.txt: the public
+# llvm-aie nightly does not ship the internal AIE4 target.  The version is
+# updated by update-aie4-peano.yml after querying the Artifactory repository.
+https://xcoartifactory.xilinx.com/artifactory/scc-peano-wheel/llvm_aie-1.9.0.dev20260611145819+g33c9a5c2-py3-none-manylinux_2_38_x86_64.whl

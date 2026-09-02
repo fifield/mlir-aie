@@ -65,8 +65,8 @@ jobs:
           pip install -r python/requirements_dev.txt
           pip install -r python/requirements_notebook.txt
 
-          # Install peano
-          pip install /scratch/github/llvm_aie-1.9.0.dev20260611145819+g33c9a5c2-py3-none-manylinux_2_38_x86_64.whl
+          # Install the AIE4-capable Peano wheel pinned from Artifactory.
+          pip install -r utils/aie4-peano-requirements.txt
           export PEANO_INSTALL_DIR="$(pip show llvm-aie | grep ^Location: | awk '{print $2}')/lnx64.o/tools/peano/"
 
           VERSION=$(utils/clone-llvm.sh --get-wheel-version)

@@ -23,7 +23,7 @@ python -m pip install --upgrade pip
 source utils/medusa_setup.sh
 
 # Install the AIE4 Peano toolchain available on the Medusa runner.
-python -m pip install /scratch/github/llvm_aie-1.9.0.dev20260611145819+g33c9a5c2-py3-none-manylinux_2_38_x86_64.whl
+python -m pip install -r utils/aie4-peano-requirements.txt
 export PEANO_INSTALL_DIR="$(python -m pip show llvm-aie | awk '/^Location:/{print $2}')/lnx64.o/tools/peano"
 
 source /opt/xilinx/xrt/setup.sh
