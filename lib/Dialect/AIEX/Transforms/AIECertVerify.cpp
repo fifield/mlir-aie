@@ -11,11 +11,13 @@
 
 #include "mlir/Pass/Pass.h"
 
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 
 #include <map>
+#include <optional>
 #include <set>
 #include <tuple>
 #include <utility>
@@ -326,6 +328,100 @@ static LogicalResult checkBarrierLimits(AIE::DeviceOp device) {
   return result;
 }
 
+// G-write32d: cert.write32_d's `address`/`value` are const:32 fields whose
+// meaning depends on a sibling attribute (isa-spec.yaml), so the
+// [0,23] register bound cannot be an ODS ConfinedAttr -- that would wrongly
+// reject the legitimate immediate form (e.g. address 0x4100000). Check it
+// conditionally instead.
+static LogicalResult checkWrite32DRegisters(AIE::DeviceOp device) {
+  LogicalResult result = success();
+  device.walk([&](AIEX::CertWrite32DOp op) {
+    if (op.getAddressIsReg() && op.getAddress() > 23) {
+      op.emitError() << "cert.write32_d has address_is_reg, so address "
+                     << op.getAddress()
+                     << " must be a register index in [0, 23]";
+      result = failure();
+    }
+    if (op.getValueIsReg() && op.getValue() > 23) {
+      op.emitError() << "cert.write32_d has value_is_reg, so value "
+                     << op.getValue() << " must be a register index in [0, 23]";
+      result = failure();
+    }
+  });
+  return result;
+}
+
+// The register index DEFINED by `op`, if any. WRITE_32_D is deliberately
+// absent: when a *_is_reg flag is set the field names a register the op READS
+// ("The write address is in this register", isa-spec.yaml), so it is a
+// use, not a definition, and must not be treated as a clobber.
+static std::optional<unsigned> registerDefinedBy(Operation *op) {
+  if (auto o = dyn_cast<AIEX::CertMovOp>(op))
+    return o.getDest();
+  if (auto o = dyn_cast<AIEX::CertAddOp>(op))
+    return o.getDest();
+  if (auto o = dyn_cast<AIEX::CertRead32Op>(op))
+    return o.getValue();
+  if (auto o = dyn_cast<AIEX::CertRead32DOp>(op))
+    return o.getValue(); // `address` is a use; `value` is the destination
+  if (auto o = dyn_cast<AIEX::CertUcDmaWriteDesOp>(op))
+    return o.getWaitHandle();
+  return std::nullopt;
+}
+
+// G-uchandle: a cert.wait_uc_dma handle must be a job-private local register
+// r0..r7 whose *reaching definition* in the same job is a
+// cert.uc_dma_write_des. This is a reaching-definition check, not a
+// "producer exists somewhere earlier" check: an intervening write clobbers the
+// handle, e.g.
+//     cert.uc_dma_write_des(3, @chain)
+//     cert.mov(3, 0)          // clobbers the handle
+//     cert.wait_uc_dma(3)     // producer exists, handle is gone
+// The ISA also allows a global register r8..r23 to hand a handle across jobs
+// (isa-spec.yaml); this dialect deliberately imposes the stricter same-job
+// rule and rejects globals, which is documented in CertWaitUcDmaOp's
+// description.
+static LogicalResult checkUcDmaWaitHandles(AIE::DeviceOp device) {
+  LogicalResult result = success();
+  device.walk(
+      [&](AIEX::CertJobOp job) {
+        if (job.getBody().empty())
+          return;
+        llvm::SmallDenseMap<unsigned, Operation *> defs;
+        for (Operation &o : job.getBody().front()) {
+          if (auto wait = dyn_cast<AIEX::CertWaitUcDmaOp>(&o)) {
+            unsigned r = wait.getWaitHandle();
+            if (r >= 8) {
+              wait.emitError()
+                  << "cert.wait_uc_dma wait handle $r" << r
+                  << " is a global register; the wait handle must be a "
+                     "job-private local register r0..r7 defined by a "
+                     "cert.uc_dma_write_des in the same job";
+              result = failure();
+            } else {
+              auto it = defs.find(r);
+              if (it == defs.end()) {
+                wait.emitError()
+                    << "cert.wait_uc_dma waits on $r" << r
+                    << ", which has no reaching cert.uc_dma_write_des "
+                       "in this job";
+                result = failure();
+              } else if (!isa<AIEX::CertUcDmaWriteDesOp>(it->second)) {
+                wait.emitError() << "cert.wait_uc_dma waits on $r" << r
+                                 << ", whose reaching definition is a '"
+                                 << it->second->getName().getStringRef()
+                                 << "' that clobbers the uC-DMA wait handle";
+                result = failure();
+              }
+            }
+          }
+          if (auto def = registerDefinedBy(&o))
+            defs[*def] = &o;
+        }
+      });
+  return result;
+}
+
 struct AIECertVerifyPass
     : xilinx::AIEX::impl::AIECertVerifyBase<AIECertVerifyPass> {
   void runOnOperation() override {
@@ -341,6 +437,10 @@ struct AIECertVerifyPass
     if (failed(checkRemoteBarrierParties(device)))
       signalPassFailure();
     if (failed(checkBarrierLimits(device)))
+      signalPassFailure();
+    if (failed(checkWrite32DRegisters(device)))
+      signalPassFailure();
+    if (failed(checkUcDmaWaitHandles(device)))
       signalPassFailure();
   }
 };

@@ -37,6 +37,15 @@ using namespace xilinx::AIEX;
 
 namespace {
 
+// Cert mnemonics are padded so the first operand starts at column 25, matching
+// the hand-written emitters below (e.g. "  WRITE_32               ").
+static std::string mn(llvm::StringRef mnemonic) {
+  std::string s = "  ";
+  s += mnemonic.str();
+  s.resize(25, ' ');
+  return s;
+}
+
 // NOP
 void emitNop(CertNopOp op, std::string &text) { text += "  NOP\n"; }
 
@@ -122,6 +131,119 @@ void emitPreempt(CertPreemptOp op, std::string &text) {
   text += ss.str();
 }
 
+// UC_DMA_WRITE_DES       $r2, @chain0
+void emitUcDmaWriteDes(CertUcDmaWriteDesOp op, std::string &text) {
+  text += mn("UC_DMA_WRITE_DES");
+  text += "$r" + std::to_string(op.getWaitHandle()) + ", ";
+  text += "@" + op.getSymbol().str() + "\n";
+}
+
+// WAIT_UC_DMA            $r2
+void emitWaitUcDma(CertWaitUcDmaOp op, std::string &text) {
+  text += mn("WAIT_UC_DMA");
+  text += "$r" + std::to_string(op.getWaitHandle()) + "\n";
+}
+
+// READ_32                $r1, 0x02100000
+void emitRead32(CertRead32Op op, std::string &text) {
+  std::string s;
+  llvm::raw_string_ostream ss(s);
+  ss << mn("READ_32");
+  ss << "$r" << op.getValue() << ", ";
+  ss << llvm::format("0x%08x\n", op.getAddress());
+  text += ss.str();
+}
+
+// READ_32_D              $r0, $r1
+void emitRead32D(CertRead32DOp op, std::string &text) {
+  text += mn("READ_32_D");
+  text += "$r" + std::to_string(op.getAddress()) + ", ";
+  text += "$r" + std::to_string(op.getValue()) + "\n";
+}
+
+// ADD                    $r0, 0x00000001
+void emitAdd(CertAddOp op, std::string &text) {
+  std::string s;
+  llvm::raw_string_ostream ss(s);
+  ss << mn("ADD");
+  ss << "$r" << op.getDest() << ", ";
+  ss << llvm::format("0x%08x\n", op.getValue());
+  text += ss.str();
+}
+
+// MOV                    $r0, 0x00000010
+void emitMov(CertMovOp op, std::string &text) {
+  std::string s;
+  llvm::raw_string_ostream ss(s);
+  ss << mn("MOV");
+  ss << "$r" << op.getDest() << ", ";
+  ss << llvm::format("0x%08x\n", op.getValue());
+  text += ss.str();
+}
+
+// YIELD
+void emitYield(CertYieldOp op, std::string &text) { text += "  YIELD\n"; }
+
+// WRITE_32_D             3, 0x04100000, 0x00000005
+void emitWrite32D(CertWrite32DOp op, std::string &text) {
+  // Polarity: despite isa-spec.yaml's prose ("1 : address is immediate" /
+  // "1 : value is immediate"), the CERT firmware (dpu_control.c) and the
+  // spec's own worked example (READ_32/WRITE_32_D, isa-spec.yaml) agree the
+  // bits are is-REGISTER, matching the ODS attribute names directly. No
+  // inversion.
+  uint8_t flags = (op.getAddressIsReg() ? 1 : 0) | (op.getValueIsReg() ? 2 : 0);
+  std::string s;
+  llvm::raw_string_ostream ss(s);
+  ss << mn("WRITE_32_D");
+  ss << (unsigned)flags << ", ";
+  ss << llvm::format("0x%08x, ", op.getAddress());
+  ss << llvm::format("0x%08x\n", op.getValue());
+  text += ss.str();
+}
+
+// POLL_32                0x02100000, 0x00000001
+void emitPoll32(CertPoll32Op op, std::string &text) {
+  std::string s;
+  llvm::raw_string_ostream ss(s);
+  ss << mn("POLL_32");
+  ss << llvm::format("0x%08x, ", op.getAddress());
+  ss << llvm::format("0x%08x\n", op.getValue());
+  text += ss.str();
+}
+
+// MASK_POLL_32           0x02100000, 0x0000000f, 0x00000001
+void emitMaskPoll32(CertMaskPoll32Op op, std::string &text) {
+  std::string s;
+  llvm::raw_string_ostream ss(s);
+  ss << mn("MASK_POLL_32");
+  ss << llvm::format("0x%08x, ", op.getAddress());
+  ss << llvm::format("0x%08x, ", op.getMask());
+  ss << llvm::format("0x%08x\n", op.getValue());
+  text += ss.str();
+}
+
+// SLEEP                  100
+void emitSleep(CertSleepOp op, std::string &text) {
+  text += mn("SLEEP");
+  text += std::to_string(op.getTarget()) + "\n";
+}
+
+// SAVE_TIMESTAMPS        7
+void emitSaveTimestamps(CertSaveTimestampsOp op, std::string &text) {
+  text += mn("SAVE_TIMESTAMPS");
+  text += std::to_string(op.getUnqId()) + "\n";
+}
+
+// SAVE_REGISTER          0x02100000, 9
+void emitSaveRegister(CertSaveRegisterOp op, std::string &text) {
+  std::string s;
+  llvm::raw_string_ostream ss(s);
+  ss << mn("SAVE_REGISTER");
+  ss << llvm::format("0x%08x, ", op.getAddress());
+  ss << op.getUnqId() << "\n";
+  text += ss.str();
+}
+
 // START_JOB 0
 //   <body>
 // END_JOB
@@ -146,6 +268,21 @@ LogicalResult emitJob(CertJobOp jobOp, std::string &text, std::string &data) {
             [&](auto op) { emitUcDmaWriteDesSync(op, text); })
         .Case<CertWaitTCTSOp>([&](auto op) { emitWaitTCTS(op, text); })
         .Case<CertWrite32Op>([&](auto op) { emitWrite32(op, text); })
+        .Case<CertUcDmaWriteDesOp>(
+            [&](auto op) { emitUcDmaWriteDes(op, text); })
+        .Case<CertWaitUcDmaOp>([&](auto op) { emitWaitUcDma(op, text); })
+        .Case<CertRead32Op>([&](auto op) { emitRead32(op, text); })
+        .Case<CertRead32DOp>([&](auto op) { emitRead32D(op, text); })
+        .Case<CertAddOp>([&](auto op) { emitAdd(op, text); })
+        .Case<CertMovOp>([&](auto op) { emitMov(op, text); })
+        .Case<CertYieldOp>([&](auto op) { emitYield(op, text); })
+        .Case<CertWrite32DOp>([&](auto op) { emitWrite32D(op, text); })
+        .Case<CertPoll32Op>([&](auto op) { emitPoll32(op, text); })
+        .Case<CertMaskPoll32Op>([&](auto op) { emitMaskPoll32(op, text); })
+        .Case<CertSleepOp>([&](auto op) { emitSleep(op, text); })
+        .Case<CertSaveTimestampsOp>(
+            [&](auto op) { emitSaveTimestamps(op, text); })
+        .Case<CertSaveRegisterOp>([&](auto op) { emitSaveRegister(op, text); })
         .Case<AIE::EndOp>([](auto) { /* implicit region terminator, skip */ })
         .Default([&](Operation *op) {
           op->emitError("Unsupported operation in CertJobOp");

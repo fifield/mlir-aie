@@ -8,6 +8,17 @@
 #ifndef CERT_OPS
 #define CERT_OPS
 
+// A job-runner register index. isa-spec.yaml defines the `register` type
+// as "8-bit unsigned integer 0..23 used to reference job-runner registers
+// r0..r23"; r0..r7 are job-private locals and r8..r23 are globals (also
+// spelled g0..g15 in asm source, which the assembler folds to r8..r23,
+// so there is no separate $gN form in the IR).
+// A plain integer attribute, printed as `$rN` only by the asm emitter.
+// Verified against aiebu-asm: `$r23` assembles rc=0, `$r24` fails with
+// "Register number $r24 out of range".
+def AIEX_CertRegisterAttr :
+    ConfinedAttr<I32Attr, [IntMinValue<0>, IntMaxValue<23>]>;
+
 def AIE_CertUcDmaChainOp: AIEX_Op<"cert.uc_dma_chain", [Symbol,
                                                     SingleBlockImplicitTerminator<"AIE::EndOp">]> {
   let summary = "uC DMA Chain operation";
@@ -320,6 +331,278 @@ def AIE_CertPreemptOp: AIEX_Op<"cert.preempt", [HasParent<"CertJobOp">]> {
   );
   let assemblyFormat = [{
     `(` $id `,` $save_section `,` $restore_section `)` attr-dict
+  }];
+}
+
+def AIE_CertUcDmaWriteDesOp: AIEX_Op<"cert.uc_dma_write_des", [HasParent<"CertJobOp">]> {
+  let summary = "uC DMA Write Descriptor operation";
+  let description = [{
+    Enqueues a DM2MM uC-DMA transfer and returns a wait handle in
+    `wait_handle`, to be consumed by `cert.wait_uc_dma`. The symbol operand
+    refers to a `cert.uc_dma_chain` (isa-spec.yaml).
+
+    Example:
+    ```
+      cert.uc_dma_write_des(2, @dma_chain)
+    ```
+  }];
+  let arguments = (
+    ins AIEX_CertRegisterAttr:$wait_handle,
+        FlatSymbolRefAttr:$symbol
+  );
+  let assemblyFormat = [{
+    `(` $wait_handle `,` $symbol `)` attr-dict
+  }];
+}
+
+def AIE_CertWaitUcDmaOp: AIEX_Op<"cert.wait_uc_dma", [HasParent<"CertJobOp">]> {
+  let summary = "Wait for a uC-DMA wait handle to finish";
+  let description = [{
+    Waits for the specified uC-DMA wait handle to finish.
+
+    The wait handle must be a job-private local register r0..r7 whose reaching
+    definition inside the same job is a `cert.uc_dma_write_des`. The ISA also
+    permits a global register r8..r23 to carry a handle across jobs
+    (isa-spec.yaml), but this dialect deliberately imposes the stricter
+    same-job rule and rejects a global wait handle.
+
+    Example:
+    ```
+      cert.wait_uc_dma(2)
+    ```
+  }];
+  let arguments = (
+    ins AIEX_CertRegisterAttr:$wait_handle
+  );
+  let assemblyFormat = [{
+    `(` $wait_handle `)` attr-dict
+  }];
+}
+
+def AIE_CertRead32Op: AIEX_Op<"cert.read32", [HasParent<"CertJobOp">]> {
+  let summary = "Read a 32-bit value from a constant address into a register";
+  let description = [{
+    Reads the value of a constant AXI-MM address and stores it in a register
+    (isa-spec.yaml).
+
+    Example:
+    ```
+      cert.read32(1, 0x02100000)
+    ```
+  }];
+  let arguments = (
+    ins AIEX_CertRegisterAttr:$value,
+        UI32Attr:$address
+  );
+  let assemblyFormat = [{
+    `(` $value `,` $address `)` attr-dict
+  }];
+}
+
+def AIE_CertRead32DOp: AIEX_Op<"cert.read32_d", [HasParent<"CertJobOp">]> {
+  let summary = "Read a 32-bit value from a register-held address into a register";
+  let description = [{
+    Reads the value of an AXI-MM address stored in register `address` and
+    stores it into destination register `value` (isa-spec.yaml).
+
+    Example:
+    ```
+      cert.read32_d(0, 1)
+    ```
+  }];
+  let arguments = (
+    ins AIEX_CertRegisterAttr:$address,
+        AIEX_CertRegisterAttr:$value
+  );
+  let assemblyFormat = [{
+    `(` $address `,` $value `)` attr-dict
+  }];
+}
+
+def AIE_CertAddOp: AIEX_Op<"cert.add", [HasParent<"CertJobOp">]> {
+  let summary = "Add a constant to a register";
+  let description = [{
+    Adds `value` to the content of register `dest` and stores the result back
+    in `dest`. `value` is UI32Attr, so to add -1 write `4294967295`/`0xffffffff`.
+
+    Example:
+    ```
+      cert.add(0, 1)
+    ```
+  }];
+  let arguments = (
+    ins AIEX_CertRegisterAttr:$dest,
+        UI32Attr:$value
+  );
+  let assemblyFormat = [{
+    `(` $dest `,` $value `)` attr-dict
+  }];
+}
+
+def AIE_CertMovOp: AIEX_Op<"cert.mov", [HasParent<"CertJobOp">]> {
+  let summary = "Move a constant into a register";
+  let description = [{
+    Stores the constant `value` in register `dest`.
+
+    Example:
+    ```
+      cert.mov(0, 16)
+    ```
+  }];
+  let arguments = (
+    ins AIEX_CertRegisterAttr:$dest,
+        UI32Attr:$value
+  );
+  let assemblyFormat = [{
+    `(` $dest `,` $value `)` attr-dict
+  }];
+}
+
+def AIE_CertYieldOp: AIEX_Op<"cert.yield", [HasParent<"CertJobOp">]> {
+  let summary = "Yield to another job";
+  let description = [{
+    Tells the scheduler to perform a context switch to the next available job.
+    The current job will be re-scheduled in the next scheduling cycle.
+
+    Example:
+    ```
+      cert.yield
+    ```
+  }];
+  let assemblyFormat = [{ attr-dict }];
+}
+
+def AIE_CertWrite32DOp: AIEX_Op<"cert.write32_d", [HasParent<"CertJobOp">]> {
+  let summary = "Dynamic write of a 32-bit value to an address";
+  let description = [{
+    Dynamic version of `cert.write32`: `address`/`value` may each be an
+    immediate or come from a register.
+
+    The ISA `flags` byte encodes is-REGISTER: bit0 `1 = address is a register
+    number`, bit1 `1 = value is a register number` (confirmed against the
+    CERT firmware, which contradicts isa-spec.yaml's prose but matches the
+    spec's own worked example). These attributes map directly: present means
+    the field is a register NUMBER, absent means it is an immediate.
+
+    When `address_is_reg` is present, `$address` must be in [0,23]; same for
+    `value_is_reg`/`$value`.
+
+    Examples:
+    ```
+      cert.write32_d(68157440, 5)
+      cert.write32_d(3, 5) {address_is_reg}
+    ```
+  }];
+  let arguments = (
+    ins UI32Attr:$address,
+        UI32Attr:$value,
+        UnitAttr:$address_is_reg,
+        UnitAttr:$value_is_reg
+  );
+  let assemblyFormat = [{
+    `(` $address `,` $value `)` attr-dict
+  }];
+}
+
+def AIE_CertPoll32Op: AIEX_Op<"cert.poll32", [HasParent<"CertJobOp">]> {
+  let summary = "Poll a constant address until it equals a value";
+  let description = [{
+    This poll is a busy poll: it blocks the current job (other jobs continue to
+    execute) until the value read at `address` equals `value`.
+
+    Example:
+    ```
+      cert.poll32(0x02100000, 1)
+    ```
+  }];
+  let arguments = (
+    ins UI32Attr:$address,
+        UI32Attr:$value
+  );
+  let assemblyFormat = [{
+    `(` $address `,` $value `)` attr-dict
+  }];
+}
+
+def AIE_CertMaskPoll32Op: AIEX_Op<"cert.maskpoll32", [HasParent<"CertJobOp">]> {
+  let summary = "Poll a constant address, masked, until it equals a value";
+  let description = [{
+    This poll is a busy poll: it blocks the current job until the value read at
+    `address`, after `mask` is applied, equals `value`.
+
+    Example:
+    ```
+      cert.maskpoll32(0x02100000, 0xf, 1)
+    ```
+  }];
+  let arguments = (
+    ins UI32Attr:$address,
+        UI32Attr:$mask,
+        UI32Attr:$value
+  );
+  let assemblyFormat = [{
+    `(` $address `,` $mask `,` $value `)` attr-dict
+  }];
+}
+
+def AIE_CertSleepOp: AIEX_Op<"cert.sleep", [HasParent<"CertJobOp">]> {
+  let summary = "Busy-sleep for a number of microseconds";
+  let description = [{
+    Makes the current job busy-wait `target` microseconds without yielding to
+    another job. Per the spec this opcode is for test purposes only
+    (isa-spec.yaml).
+
+    Example:
+    ```
+      cert.sleep(100)
+    ```
+  }];
+  let arguments = (
+    ins UI32Attr:$target
+  );
+  let assemblyFormat = [{
+    `(` $target `)` attr-dict
+  }];
+}
+
+def AIE_CertSaveTimestampsOp: AIEX_Op<"cert.save_timestamps", [HasParent<"CertJobOp">]> {
+  let summary = "Save a timestamp with a unique id";
+  let description = [{
+    Saves the timestamp whenever control code encounters this opcode, tagged
+    with the compiler-assigned unique identifier `unq_id`. The timestamps are
+    saved in shared data memory.
+
+    Example:
+    ```
+      cert.save_timestamps(7)
+    ```
+  }];
+  let arguments = (
+    ins UI32Attr:$unq_id
+  );
+  let assemblyFormat = [{
+    `(` $unq_id `)` attr-dict
+  }];
+}
+
+def AIE_CertSaveRegisterOp: AIEX_Op<"cert.save_register", [HasParent<"CertJobOp">]> {
+  let summary = "Save a register's value with a unique id";
+  let description = [{
+    Reads the value from the specified register address and saves it, tagged
+    with the compiler-assigned unique identifier `unq_id`, in shared data
+    memory.
+
+    Example:
+    ```
+      cert.save_register(0x02100000, 9)
+    ```
+  }];
+  let arguments = (
+    ins UI32Attr:$address,
+        UI32Attr:$unq_id
+  );
+  let assemblyFormat = [{
+    `(` $address `,` $unq_id `)` attr-dict
   }];
 }
 

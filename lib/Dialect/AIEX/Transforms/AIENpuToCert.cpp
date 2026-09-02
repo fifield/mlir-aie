@@ -9,6 +9,8 @@
 #include "aie/Dialect/AIEX/IR/AIEXDialect.h"
 #include "aie/Dialect/AIEX/Transforms/AIEXPasses.h"
 
+#include "llvm/ADT/DenseSet.h"
+
 #include "mlir/IR/IRMapping.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
@@ -1121,6 +1123,56 @@ struct AIENpuToCertPass
 
 } // namespace
 
+// Symbols already charged to the page currently being measured. The emitter
+// writes one labelled block per chain and per payload global no matter how
+// many instructions name it, and the assembler sizes the page from those
+// labels -- so a symbol must be counted exactly once per page. Chains and
+// payloads are tracked separately because two distinct chains may point at one
+// shared global: their BDs are distinct labels and each costs 16 bytes, while
+// the global they share is laid down once.
+// Keyed on the resolved definitions rather than the reference strings, so the
+// identity is the label the emitter will actually write.
+struct ChainDataCostState {
+  DenseSet<Operation *> countedChains;
+  DenseSet<Operation *> countedPayloads;
+};
+
+// The page's data section carries the uC-DMA BDs of any chain referenced by
+// UC_DMA_WRITE_DES or UC_DMA_WRITE_DES_SYNC, plus the globals those BDs point
+// at. Both opcodes charge identical data; only their text size differs
+// (ISA_OPSIZE_UC_DMA_WRITE_DES = 0x08 vs _SYNC = 0x04).
+//
+// Re-referencing a chain costs only the instruction, never the data again.
+// Charging it twice inflated the estimate enough to reject pages the assembler
+// accepts: two `uc_dma_write_des(@c)` over a 1200-word payload estimated 9700
+// bytes against a real 4880.
+static void addChainDataCost(StringRef sym_name, AIE::DeviceOp deviceOp,
+                             uint32_t &data_cost, ChainDataCostState &seen) {
+  auto chain = dyn_cast_if_present<AIEX::CertUcDmaChainOp>(
+      deviceOp.lookupSymbol(sym_name));
+  if (!chain)
+    return;
+  if (!seen.countedChains.insert(chain.getOperation()).second)
+    return;
+  for (auto bdOp : chain.getBody().front().getOps<AIEX::CertUcDmaBdOp>()) {
+    data_cost += 16; // bd op
+    StringRef data_sym_name = bdOp.getRemoteAddress();
+    auto global = dyn_cast_if_present<memref::GlobalOp>(
+        deviceOp.lookupSymbol(data_sym_name));
+    if (!global)
+      continue;
+    if (!seen.countedPayloads.insert(global.getOperation()).second)
+      continue;
+    auto initVal = global.getInitialValue();
+    if (!initVal)
+      continue;
+    auto data = dyn_cast<DenseIntElementsAttr>(*initVal);
+    if (!data)
+      continue;
+    data_cost += data.getNumElements() * 4; // 4 bytes per element
+  }
+}
+
 // Instruction sizes are the authoritative ISA_OPSIZE_* values from
 // third_party/aiebu/specification/aie2ps/isa_stubs.h -- the same table the
 // assembler encodes against -- so the running total here matches the bytes
@@ -1128,7 +1180,8 @@ struct AIENpuToCertPass
 // an op the emitter can emit but this function ignores is counted as free,
 // which makes the page look smaller than it is.
 static void updateCostForOp(Operation &o, AIE::DeviceOp deviceOp,
-                            uint32_t &text_cost, uint32_t &data_cost) {
+                            uint32_t &text_cost, uint32_t &data_cost,
+                            ChainDataCostState &seen) {
   // Several distinct op kinds share an encoded instruction size below --
   // an instruction-size table, not a copy-paste clone.
   // NOLINTBEGIN(bugprone-branch-clone)
@@ -1153,28 +1206,130 @@ static void updateCostForOp(Operation &o, AIE::DeviceOp deviceOp,
     // NOLINTEND(bugprone-branch-clone)
   } else if (auto syncOp = dyn_cast<AIEX::CertUcDmaWriteDesSyncOp>(o)) {
     text_cost += 4; // ISA_OPSIZE_UC_DMA_WRITE_DES_SYNC
-    // find the uc_dma_chain
-    StringRef sym_name = syncOp.getSymbol();
-    auto chain = dyn_cast_if_present<AIEX::CertUcDmaChainOp>(
-        deviceOp.lookupSymbol(sym_name));
-    if (!chain)
-      return;
-    for (auto bdOp : chain.getBody().front().getOps<AIEX::CertUcDmaBdOp>()) {
-      data_cost += 16; // bd op
-      StringRef data_sym_name = bdOp.getRemoteAddress();
-      auto global = dyn_cast_if_present<memref::GlobalOp>(
-          deviceOp.lookupSymbol(data_sym_name));
-      if (!global)
-        continue;
-      auto initVal = global.getInitialValue();
-      if (!initVal)
-        continue;
-      auto data = dyn_cast<DenseIntElementsAttr>(*initVal);
-      if (!data)
-        continue;
-      data_cost += data.getNumElements() * 4; // 4 bytes per element
-    }
+    addChainDataCost(syncOp.getSymbol(), deviceOp, data_cost, seen);
+  } else if (auto desOp = dyn_cast<AIEX::CertUcDmaWriteDesOp>(o)) {
+    text_cost += 8; // ISA_OPSIZE_UC_DMA_WRITE_DES
+    addChainDataCost(desOp.getSymbol(), deviceOp, data_cost, seen);
+  } else if (isa<AIEX::CertWaitUcDmaOp>(o)) {
+    text_cost += 4; // ISA_OPSIZE_WAIT_UC_DMA
+  } else if (isa<AIEX::CertRead32Op>(o)) {
+    text_cost += 8; // ISA_OPSIZE_READ_32
+  } else if (isa<AIEX::CertRead32DOp>(o)) {
+    text_cost += 4; // ISA_OPSIZE_READ_32_D
+  } else if (isa<AIEX::CertAddOp>(o)) {
+    text_cost += 8; // ISA_OPSIZE_ADD
+  } else if (isa<AIEX::CertMovOp>(o)) {
+    text_cost += 8; // ISA_OPSIZE_MOV
+  } else if (isa<AIEX::CertYieldOp>(o)) {
+    text_cost += 4; // ISA_OPSIZE_YIELD
+  } else if (isa<AIEX::CertWrite32DOp>(o)) {
+    text_cost += 12; // ISA_OPSIZE_WRITE_32_D
+  } else if (isa<AIEX::CertPoll32Op>(o)) {
+    text_cost += 12; // ISA_OPSIZE_POLL_32
+  } else if (isa<AIEX::CertMaskPoll32Op>(o)) {
+    text_cost += 16; // ISA_OPSIZE_MASK_POLL_32
+  } else if (isa<AIEX::CertSleepOp>(o)) {
+    text_cost += 8; // ISA_OPSIZE_SLEEP
+  } else if (isa<AIEX::CertSaveTimestampsOp>(o)) {
+    text_cost += 8; // ISA_OPSIZE_SAVE_TIMESTAMPS
+  } else if (isa<AIEX::CertSaveRegisterOp>(o)) {
+    text_cost += 12; // ISA_OPSIZE_SAVE_REGISTER
   }
+}
+
+// True if `o` reads or writes any job-private local register r0..r7.
+static bool opUsesLocalRegister(Operation &o) {
+  auto isLocal = [](uint32_t r) { return r < 8; };
+  if (auto op = dyn_cast<AIEX::CertMovOp>(&o))
+    return isLocal(op.getDest());
+  if (auto op = dyn_cast<AIEX::CertAddOp>(&o))
+    return isLocal(op.getDest());
+  if (auto op = dyn_cast<AIEX::CertRead32Op>(&o))
+    return isLocal(op.getValue());
+  if (auto op = dyn_cast<AIEX::CertRead32DOp>(&o))
+    return isLocal(op.getAddress()) || isLocal(op.getValue());
+  if (auto op = dyn_cast<AIEX::CertUcDmaWriteDesOp>(&o))
+    return isLocal(op.getWaitHandle());
+  if (auto op = dyn_cast<AIEX::CertWaitUcDmaOp>(&o))
+    return isLocal(op.getWaitHandle());
+  if (auto op = dyn_cast<AIEX::CertWrite32DOp>(&o))
+    return (op.getAddressIsReg() && isLocal(op.getAddress())) ||
+           (op.getValueIsReg() && isLocal(op.getValue()));
+  return false;
+}
+
+// isa-spec.yaml -- "Register r0..r7 are local registers which are private
+// to each job." SplitCertPageOpPattern rebuilds the two halves as two DISTINCT
+// CertJobOps via cloneJobRange, so a local-register value produced on one side
+// is not merely deferred across the .eop -- it is destroyed. That is different
+// from the backward-dependency argument documented below in this file's split
+// logic, which is sound for TCTs and memory: those survive because they live
+// outside the job-private register file.
+// Globals r8..r23 are "shared among all the jobs" (isa-spec.yaml) and
+// survive a split, so the rule is register-class dependent. This takes the
+// conservative form: a job that touches ANY local register is not a split
+// candidate at all.
+static bool jobUsesLocalRegister(AIEX::CertJobOp job) {
+  if (job.getBody().empty())
+    return false;
+  for (Operation &o : job.getBody().front())
+    if (opUsesLocalRegister(o))
+      return true;
+  return false;
+}
+
+// The job-private local registers r0..r7 that `o` reads, and those it writes.
+// A register that is both read and written (cert.add accumulates into $dest)
+// appears in both. Globals r8..r23 are deliberately excluded: they survive a
+// job boundary, so they never constrain a rewrite that splits a job.
+static void collectLocalRegisterDefsUses(Operation &o,
+                                         SmallVectorImpl<uint32_t> &uses,
+                                         SmallVectorImpl<uint32_t> &defs) {
+  auto addLocal = [](SmallVectorImpl<uint32_t> &v, uint32_t r) {
+    if (r < 8)
+      v.push_back(r);
+  };
+  if (auto op = dyn_cast<AIEX::CertMovOp>(&o))
+    addLocal(defs, op.getDest());
+  else if (auto op = dyn_cast<AIEX::CertAddOp>(&o)) {
+    addLocal(uses, op.getDest()); // $dest += $value
+    addLocal(defs, op.getDest());
+  } else if (auto op = dyn_cast<AIEX::CertRead32Op>(&o))
+    addLocal(defs, op.getValue());
+  else if (auto op = dyn_cast<AIEX::CertRead32DOp>(&o)) {
+    addLocal(uses, op.getAddress());
+    addLocal(defs, op.getValue());
+  } else if (auto op = dyn_cast<AIEX::CertUcDmaWriteDesOp>(&o))
+    addLocal(defs, op.getWaitHandle());
+  else if (auto op = dyn_cast<AIEX::CertWaitUcDmaOp>(&o))
+    addLocal(uses, op.getWaitHandle());
+  else if (auto op = dyn_cast<AIEX::CertWrite32DOp>(&o)) {
+    if (op.getAddressIsReg())
+      addLocal(uses, op.getAddress());
+    if (op.getValueIsReg())
+      addLocal(uses, op.getValue());
+  }
+}
+
+// The first local register in `ops` that is read before anything in `ops`
+// writes it -- i.e. one whose reaching definition lies earlier in the job,
+// ahead of wherever `ops` was cut from. Because r0..r7 are private to a job,
+// moving `ops` into a NEW job destroys that value, so such a register makes
+// the cut illegal. Returns nullopt when `ops` is self-contained.
+static std::optional<uint32_t>
+findLocalRegisterCrossingIn(ArrayRef<Operation *> ops) {
+  llvm::SmallDenseSet<uint32_t> definedHere;
+  SmallVector<uint32_t> uses, defs;
+  for (Operation *o : ops) {
+    uses.clear();
+    defs.clear();
+    collectLocalRegisterDefsUses(*o, uses, defs);
+    for (uint32_t r : uses)
+      if (!definedHere.contains(r))
+        return r;
+    definedHere.insert(defs.begin(), defs.end());
+  }
+  return std::nullopt;
 }
 
 static uint32_t estimateCost(AIEX::CertPageOp op, uint32_t split_target,
@@ -1185,14 +1340,21 @@ static uint32_t estimateCost(AIEX::CertPageOp op, uint32_t split_target,
   uint32_t data_cost = 0;
   found_split_point = false;
   AIE::DeviceOp deviceOp = op->getParentOfType<AIE::DeviceOp>();
+  // Per-page: the assembler emits each chain/payload label once per page.
+  ChainDataCostState seen;
 
   for (auto job : op.getBody().front().getOps<AIEX::CertJobOp>()) {
+    // A job using job-private local registers cannot be split (its
+    // local-register state does not survive across the new .eop), so it is
+    // never a split candidate below. Cost accumulation still runs
+    // unconditionally so the returned total remains accurate.
+    bool splittable = !jobUsesLocalRegister(job);
     // START_JOB precedes the body, so it is already spent at every candidate
     // split point inside this job; END_JOB is charged after the body below.
     text_cost += cert_job_start_cost;
     for (auto &o : job.getBody().front().getOperations()) {
       Block::iterator current(&o);
-      if (!found_split_point && !isa<AIE::EndOp>(o) &&
+      if (splittable && !found_split_point && !isa<AIE::EndOp>(o) &&
           current != job.getBody().front().begin() &&
           (text_cost + data_cost) >= split_target) {
         split_job = job;
@@ -1200,9 +1362,10 @@ static uint32_t estimateCost(AIEX::CertPageOp op, uint32_t split_target,
         found_split_point = true;
       }
 
-      updateCostForOp(o, deviceOp, text_cost, data_cost);
+      updateCostForOp(o, deviceOp, text_cost, data_cost, seen);
 
-      if (!found_split_point && (text_cost + data_cost) >= split_target) {
+      if (splittable && !found_split_point &&
+          (text_cost + data_cost) >= split_target) {
         Block::iterator next = current;
         ++next;
         if (next != job.getBody().front().end() && !isa<AIE::EndOp>(*next)) {
@@ -1297,12 +1460,14 @@ static bool findLegalSplitPoint(AIEX::CertPageOp page, uint32_t split_target,
   AIE::DeviceOp deviceOp = page->getParentOfType<AIE::DeviceOp>();
   uint32_t text_cost = 32; // page header, mirrors estimateCost
   uint32_t data_cost = 0;
+  ChainDataCostState seen; // mirrors estimateCost
   bool found = false;
   uint32_t best_delta = 0;
   // Whether some job already visited holds a real op, i.e. whether cutting at
   // the current job's first op would leave content on the earlier page.
   bool sawOpInEarlierJob = false;
   for (auto job : page.getBody().front().getOps<AIEX::CertJobOp>()) {
+    bool splittable = !jobUsesLocalRegister(job);
     text_cost += cert_job_start_cost; // mirrors estimateCost
     bool sawOpInJob = false;
     for (auto &o : job.getBody().front().getOperations()) {
@@ -1314,7 +1479,12 @@ static bool findLegalSplitPoint(AIEX::CertPageOp page, uint32_t split_target,
       // Admitting the latter matters for a page built of small jobs whose sizes
       // only sum over the limit: no job has an interior point worth cutting at,
       // yet a cut between two whole jobs splits it perfectly well.
-      if (sawOpInJob || sawOpInEarlierJob) {
+      //
+      // The local-register constraint gates the interior case only: an
+      // interior cut partitions this job, and its local-register state does not
+      // survive the new .eop. A boundary cut moves the job whole to the later
+      // page, so an unsplittable job is still a legal place to cut *ahead of*.
+      if (sawOpInJob ? splittable : sawOpInEarlierJob) {
         auto fi = flatIndex.find(&o);
         int p = fi == flatIndex.end() ? 0 : fi->second;
         if (!cutSeparatesBarrier(spans, p)) {
@@ -1329,7 +1499,7 @@ static bool findLegalSplitPoint(AIEX::CertPageOp page, uint32_t split_target,
           }
         }
       }
-      updateCostForOp(o, deviceOp, text_cost, data_cost);
+      updateCostForOp(o, deviceOp, text_cost, data_cost, seen);
       sawOpInJob = true;
     }
     text_cost += cert_job_end_cost; // mirrors estimateCost
@@ -1344,7 +1514,10 @@ namespace {
 // page According to CERT spec: "load_pdi and preempt should take one whole job
 // which in turn should take one whole page"
 struct IsolateFullPageOpsPattern : OpRewritePattern<AIEX::CertJobOp> {
-  using OpRewritePattern::OpRewritePattern;
+  // See SplitCertPageOpPattern for why an error needs an out-param: a pattern
+  // returning failure() is ordinary control flow and does not fail the pass.
+  IsolateFullPageOpsPattern(MLIRContext *context, bool *hadError)
+      : OpRewritePattern(context), hadError(hadError) {}
 
   // Create an empty, terminated cert.page directly after `after`, in the same
   // block. Staying in `after`'s block is what keeps a page that was moved into
@@ -1441,6 +1614,36 @@ struct IsolateFullPageOpsPattern : OpRewritePattern<AIEX::CertJobOp> {
         if (!isa<AIE::EndOp>(*it))
           afterOps.push_back(&*it);
 
+      // Isolation rebuilds this job as up to three DISTINCT jobs, so -- exactly
+      // as for a page split -- a job-private local register r0..r7 written
+      // before the full-page op is destroyed before the trailing ops can read
+      // it. The size-driven splitter avoids this by declining to cut; isolation
+      // is mandatory ("load_pdi and preempt should take one whole job"), so
+      // there is nothing to decline and the only sound answer is to reject.
+      //
+      // The test is on values that actually cross the boundary rather than on
+      // any local-register use at all: a local whose live range is wholly
+      // inside one of the halves is unaffected, and the blunt form would reject
+      // working designs that the splitter merely leaves unsplit.
+      if (auto crossing = findLocalRegisterCrossingIn(afterOps)) {
+        if (hadError)
+          *hadError = true;
+        jobOp.emitError()
+            << "job " << jobOp.getJobId() << " mixes "
+            << (isa<AIEX::CertLoadPdiOp>(fullPageOp) ? "cert.load_pdi"
+                                                     : "cert.preempt")
+            << " with other operations and must be broken into separate jobs, "
+               "but register r"
+            << *crossing
+            << " is written before it and read after it. Registers r0..r7 are "
+               "job-private, so that value does not survive; move the "
+               "local-register sequence to one side of the "
+            << (isa<AIEX::CertLoadPdiOp>(fullPageOp) ? "cert.load_pdi"
+                                                     : "cert.preempt")
+            << ", or use a global register r8..r23";
+        return failure();
+      }
+
       auto emitJobPage = [&](uint32_t jobId, ArrayRef<Operation *> ops) {
         auto page = makePageAfter(rewriter, anchor, loc);
         rewriter.setInsertionPoint(page.getBody().front().getTerminator());
@@ -1475,6 +1678,9 @@ struct IsolateFullPageOpsPattern : OpRewritePattern<AIEX::CertJobOp> {
 
     return success();
   }
+
+private:
+  bool *hadError;
 };
 
 struct SplitCertPageOpPattern : OpRewritePattern<AIEX::CertPageOp> {
@@ -1529,12 +1735,33 @@ struct SplitCertPageOpPattern : OpRewritePattern<AIEX::CertPageOp> {
     // firmware will reject.
     if (!found_split_point) {
       if (cost > cert_page_limit) {
-        op.emitError() << "cert.page is an estimated " << cost
-                       << " bytes, over the " << cert_page_limit
-                       << "-byte microcontroller page limit, and offers no "
-                          "split point (a split must leave at least one op on "
-                          "each page); break the oversized job into smaller "
-                          "jobs";
+        // Name the local-register constraint explicitly when that is what
+        // ruled out every candidate cut; otherwise the page
+        // genuinely offers no interior split point.
+        AIEX::CertJobOp blocker;
+        for (auto job : op.getBody().front().getOps<AIEX::CertJobOp>())
+          if (jobUsesLocalRegister(job)) {
+            blocker = job;
+            break;
+          }
+        if (blocker)
+          op.emitError()
+              << "cert.page is an estimated " << cost << " bytes, over the "
+              << cert_page_limit
+              << "-byte microcontroller page limit, and cannot be split: job "
+              << blocker.getJobId()
+              << " uses job-private local registers r0..r7, whose values do "
+                 "not survive a page split (the two halves become distinct "
+                 "jobs); move the local-register sequence into a smaller job, "
+                 "or use global registers r8..r23";
+        else
+          op.emitError()
+              << "cert.page is an estimated " << cost << " bytes, over the "
+              << cert_page_limit
+              << "-byte microcontroller page limit, and offers no "
+                 "split point (a split must leave at least one op on "
+                 "each page); break the oversized job into smaller "
+                 "jobs";
         *hadError = true;
       }
       return failure();
@@ -1944,11 +2171,18 @@ struct AIECertPagesPass
     // split/isolated pages, emitting them on group 0.)
     lowerPagePlacementToGroups(getOperation());
 
-    // First, isolate load_pdi and preempt operations into their own job/page
+    // First, isolate load_pdi and preempt operations into their own job/page.
+    // `isolateError` mirrors `splitError` below: the pattern declines to
+    // rewrite a job whose local-register values would not survive isolation,
+    // and that diagnostic has to fail the pass rather than just print.
+    bool isolateError = false;
     RewritePatternSet isolatePatterns(&getContext());
-    isolatePatterns.insert<IsolateFullPageOpsPattern>(&getContext());
+    isolatePatterns.insert<IsolateFullPageOpsPattern>(&getContext(),
+                                                      &isolateError);
     if (failed(
             applyPatternsGreedily(getOperation(), std::move(isolatePatterns))))
+      signalPassFailure();
+    if (isolateError)
       signalPassFailure();
 
     // Then apply the page splitting pattern. `splitError` catches diagnostics

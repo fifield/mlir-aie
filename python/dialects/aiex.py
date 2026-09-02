@@ -33,6 +33,7 @@ from ..helpers.util import v8bfp16ebs8, v16bfp16ebs16
 from ..ir import (
     DictAttr,
     IntegerAttr,
+    IntegerType,
     UnitAttr,
     Type,
     InsertionPoint,
@@ -490,3 +491,133 @@ def read_scratchpad_parameter(
         val = aiex.read_scratchpad_parameter("foo", T.bf16())
     """
     return _orig_read_scratchpad_parameter(result_type, name)
+
+
+# CERT control-code region ops
+#
+# The generated builders create the op but leave its region empty, and every
+# cert region op carries an implicit `aie.end` terminator the caller would
+# otherwise have to append by hand. These decorators do both, in the style of
+# `runtime_sequence` above: the decorated function *is* the region body, so
+# Python nesting mirrors the nesting in the emitted MLIR.
+#
+#     @cert_attach_to_group(2)
+#     def _():
+#         @cert_page()
+#         def _():
+#             @cert_job(0)
+#             def _():
+#                 cert_write32(0x600400, 0xA5A5A5A5)
+#
+# The raw builders remain available under their `Cert*Op` class names for
+# callers that want to populate the region themselves.
+
+
+def _cert_region(op):
+    """Return a decorator that runs `f` inside `op`'s (single) region block."""
+
+    def decorator(f):
+        with InsertionPoint(op.body.blocks.append()):
+            f()
+            EndOp()
+        return op
+
+    return decorator
+
+
+def cert_page(placement=None):
+    """A page of cert control code.
+
+    Args:
+        placement: microcontroller (CERT group) id that runs this page, as
+            returned by the target model's `getUcGroupId(col, half)`. When
+            omitted the page defaults to group 0.
+    """
+    return _cert_region(CertPageOp(placement=placement))
+
+
+def cert_job(job_id):
+    """A cert job. `job_id` is a label unique within the enclosing page, not a
+    priority: execution order follows textual order."""
+    return _cert_region(CertJobOp(job_id=job_id))
+
+
+def cert_section(sym_name):
+    """A named section of control code, referenced by `cert_load_pdi` or
+    `cert_preempt`."""
+    return _cert_region(CertSectionOp(sym_name=sym_name))
+
+
+def cert_attach_to_group(group_id):
+    """Attach the enclosed pages and jobs to microcontroller `group_id`."""
+    return _cert_region(CertAttachToGroupOp(group_id=group_id))
+
+
+def cert_uc_dma_chain(sym_name):
+    """A named chain of `cert_uc_dma_bd` descriptors."""
+    return _cert_region(CertUcDmaChainOp(sym_name=sym_name))
+
+
+# CERT register operands
+#
+# `aiex.cert_reg` is a ConfinedAttr<I32Attr, [0, 23]>. ODS types such a
+# constrained attribute as `Any` rather than `int`, so the generated builders
+# reject a plain Python int with `std::bad_cast`. These wrappers accept an int
+# (or an already-built attribute) and do the conversion, so a register operand
+# reads as the register number it is: `cert_mov(3, 99)` targets `$r3`.
+
+
+def _cert_reg(value):
+    if isinstance(value, int):
+        return IntegerAttr.get(IntegerType.get_signless(32), value)
+    return value
+
+
+_orig_cert_read32 = cert_read32
+
+
+def cert_read32(value, address, **kwargs):
+    """Read the constant address `address` into register `value`."""
+    return _orig_cert_read32(_cert_reg(value), address, **kwargs)
+
+
+_orig_cert_read32_d = cert_read32_d
+
+
+def cert_read32_d(address, value, **kwargs):
+    """Read the address held in register `address` into register `value`."""
+    return _orig_cert_read32_d(_cert_reg(address), _cert_reg(value), **kwargs)
+
+
+_orig_cert_add = cert_add
+
+
+def cert_add(dest, value, **kwargs):
+    """Add the constant `value` to register `dest`."""
+    return _orig_cert_add(_cert_reg(dest), value, **kwargs)
+
+
+_orig_cert_mov = cert_mov
+
+
+def cert_mov(dest, value, **kwargs):
+    """Move the constant `value` into register `dest`."""
+    return _orig_cert_mov(_cert_reg(dest), value, **kwargs)
+
+
+_orig_cert_uc_dma_write_des = cert_uc_dma_write_des
+
+
+def cert_uc_dma_write_des(wait_handle, symbol, **kwargs):
+    """Enqueue a uC-DMA chain asynchronously, returning a handle in
+    `wait_handle`. Pair with `cert_wait_uc_dma`."""
+    return _orig_cert_uc_dma_write_des(_cert_reg(wait_handle), symbol, **kwargs)
+
+
+_orig_cert_wait_uc_dma = cert_wait_uc_dma
+
+
+def cert_wait_uc_dma(wait_handle, **kwargs):
+    """Wait for the uC-DMA transfer identified by `wait_handle`. Yields to
+    another job rather than spinning."""
+    return _orig_cert_wait_uc_dma(_cert_reg(wait_handle), **kwargs)
