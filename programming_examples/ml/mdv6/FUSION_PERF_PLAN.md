@@ -47,8 +47,17 @@ the full model still performs 453 submissions and host-materializes activations.
 
 Milestone 0 is **partial**, not closed wholesale: named/prebound full-island
 buffers, graph-wide layouts/lifetimes and full device-traffic observation remain.
-Milestones 1–4 are not implemented. Next: `mlir-aie-2vb.2` (first full-island
-contracts/schedule) and `mlir-aie-2vb.3` (whole-operator command sequencing).
+At that checkpoint, Milestones 1–4 were not implemented. The next tasks were
+`mlir-aie-2vb.2` (first full-island contracts/schedule) and `mlir-aie-2vb.3`
+(whole-operator command sequencing).
+
+Subsequent implementation: the opt-in whole-convolution route batches the four
+OC blocks of `mc_re8_rn3` into one coherent submission, preserving the original
+tiling. See [FUSION_M1_VALIDATION.md](FUSION_M1_VALIDATION.md) for gates and
+results; this is the first Milestone 1 operator, not a general fused graph.
+The full-shape [SPP9 schedule](sppelan/FUSION_SCHEDULE.md) now has checked
+storage/lifetime estimates and exact gather mappings. Physical phase-buffer
+aliasing and cross-column gather routing are still unproven.
 
 ## What is already established
 

@@ -33,14 +33,23 @@ def multicore_conv(dev, tile_h=8, tile_w=8, ic=16, oc=16,
                    n_cores=32, patches_per_core=1, input_depth=1,
                    active_tile_h=None, active_tile_w=None,
                    active_ic=None, active_oc=None,
-                   active_stride=None, active_padding=None):
+                   active_stride=None, active_padding=None,
+                   output_blocks=1):
     """N-core tiled fused Conv+BN+SiLU.
 
     input_depth: L1 sub-FIFO depth for the input patch (1 = single-buffered;
     2 = ping-pong — memtile pre-fetches patch N+1 while core computes patch N,
     hides per-patch DMA under compute for compute-bound layers. Doubles the
     input portion of per-core L1 footprint.
+
+    output_blocks: experimental coherent sequence over consecutive OC weight
+    blocks. The input arena is replayed for each block; weights and outputs
+    are block-major arenas. Each block's DMA group is drained before reuse.
+    The default single-block program retains its original generated schedule.
     """
+
+    if not isinstance(output_blocks, int) or output_blocks < 1:
+        raise ValueError("output_blocks must be a positive integer")
 
     if kernel_size == 1:
         padding_val = 0
@@ -93,9 +102,11 @@ def multicore_conv(dev, tile_h=8, tile_w=8, ic=16, oc=16,
 
     # Host buffer types
     host_input_size = n_cores * core_input_size
-    host_output_size = n_cores * core_output_size
+    output_block_size = n_cores * core_output_size
+    host_output_size = output_blocks * output_block_size
     host_input_ty = np.ndarray[(host_input_size,), np.dtype[np.uint16]]
     host_output_ty = np.ndarray[(host_output_size,), np.dtype[np.uint16]]
+    host_weight_ty = np.ndarray[(output_blocks * weight_block_size,), np.dtype[np.uint16]]
 
     # Kernel
     kern_name = "conv1x1_fused_packed_bf16" if kernel_size == 1 else "conv3x3_fused_packed_bf16"
@@ -130,15 +141,18 @@ def multicore_conv(dev, tile_h=8, tile_w=8, ic=16, oc=16,
         oc_v = my_rtp[3]
         str_v = my_rtp[4]
         pad_v = my_rtp[5]
-        elem_wt = of_wt.acquire(1)
-        for _ in range_(patches_per_core):
-            elem_in = of_in.acquire(1)
-            elem_out = of_out.acquire(1)
-            kern(elem_in, elem_wt, elem_out,
-                 t_h, t_w, ic_v, oc_v, str_v, pad_v)
-            of_in.release(1)
-            of_out.release(1)
-        of_wt.release(1)
+        # Python range(1) preserves the legacy IR; the experimental program
+        # uses a compact device loop rather than cloning a kernel per block.
+        for _ in range_(output_blocks) if output_blocks > 1 else range(1):
+            elem_wt = of_wt.acquire(1)
+            for _ in range_(patches_per_core):
+                elem_in = of_in.acquire(1)
+                elem_out = of_out.acquire(1)
+                kern(elem_in, elem_wt, elem_out,
+                     t_h, t_w, ic_v, oc_v, str_v, pad_v)
+                of_in.release(1)
+                of_out.release(1)
+            of_wt.release(1)
         barrier.release_with_value(1)
 
     # Build per-column infrastructure
@@ -191,7 +205,7 @@ def multicore_conv(dev, tile_h=8, tile_w=8, ic=16, oc=16,
 
     # Runtime
     rt = Runtime()
-    with rt.sequence(host_input_ty, weight_ty, host_output_ty) as (I, W, O):
+    with rt.sequence(host_input_ty, host_weight_ty, host_output_ty) as (I, W, O):
         rt.start(*workers)
 
         # Runtime parameter write. Values may differ by generated .bin while the
@@ -207,31 +221,40 @@ def multicore_conv(dev, tile_h=8, tile_w=8, ic=16, oc=16,
         for b in barriers:
             rt.set_barrier(b, 1)
 
-        for wf in wt_fifos:
-            rt.fill(wf.prod(), W)
+        for block in range(output_blocks):
+            group = rt.task_group() if output_blocks > 1 else None
+            tap_wt = TensorAccessPattern(
+                (output_blocks * weight_block_size,),
+                offset=block * weight_block_size,
+                sizes=[1, weight_block_size], strides=[0, 1],
+            ) if output_blocks > 1 else None
+            for wf in wt_fifos:
+                rt.fill(wf.prod(), W, tap_wt, task_group=group)
 
-        for col in range(n_cols):
-            cores_this_col = min(cores_per_col, n_cores - col * cores_per_col)
-            col_in_size = cores_this_col * core_input_size
-            col_out_size = cores_this_col * core_output_size
+            for col in range(n_cols):
+                cores_this_col = min(cores_per_col, n_cores - col * cores_per_col)
+                col_in_size = cores_this_col * core_input_size
+                col_out_size = cores_this_col * core_output_size
 
-            tap_in = TensorAccessPattern(
-                (host_input_size,),
-                offset=col * cores_per_col * core_input_size,
-                sizes=[1, col_in_size],
-                strides=[0, 1],
-            )
-            tap_out = TensorAccessPattern(
-                (host_output_size,),
-                offset=col * cores_per_col * core_output_size,
-                sizes=[1, col_out_size],
-                strides=[0, 1],
-            )
-            rt.fill(col_in_fifos[col].prod(), I, tap_in)
-            # Full 8-column runs are not reliably synchronized by waiting only
-            # on the final drain. Require a completion token from every column
-            # output DMA before the runtime sequence frees/reuses tasks.
-            rt.drain(col_out_fifos[col].cons(), O, tap_out, wait=True)
+                tap_in = TensorAccessPattern(
+                    (host_input_size,),
+                    offset=col * cores_per_col * core_input_size,
+                    sizes=[1, col_in_size],
+                    strides=[0, 1],
+                )
+                tap_out = TensorAccessPattern(
+                    (host_output_size,),
+                    offset=block * output_block_size + col * cores_per_col * core_output_size,
+                    sizes=[1, col_out_size],
+                    strides=[0, 1],
+                )
+                rt.fill(col_in_fifos[col].prod(), I, tap_in, task_group=group)
+                # Every column must finish, not merely the final column. All
+                # waits precede frees, bounding descriptors to one OC block.
+                rt.drain(col_out_fifos[col].cons(), O, tap_out,
+                         wait=True, task_group=group)
+            if group is not None:
+                rt.finish_task_group(group)
 
     return Program(dev, rt).resolve_program()
 

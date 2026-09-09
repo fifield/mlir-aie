@@ -31,6 +31,8 @@ if _MDV6_BUILD_ROOT:
 else:
     _bd = os.path.join(_base, "conv", "build")
 _mc_cache = {}
+_whole_conv = None
+_whole_conv_dir = os.environ.get("MDV6_WHOLE_CONV_DIR")
 USE_REGIME_XCLBINS = os.environ.get("USE_REGIME_XCLBINS", "0") == "1"
 USE_REGIME_KBLOCKED = os.environ.get("USE_REGIME_KBLOCKED", "0") == "1"
 # Explicit R1-R3 selection includes its K-blocked members. Unset/legacy keeps
@@ -223,6 +225,9 @@ def cached_kernel_inventory():
         rows.append(dict(family=family,
                          xclbin=os.path.join(directory, f"{name}.xclbin"),
                          instructions=os.path.join(directory, f"{insts_name}.bin")))
+    if _whole_conv is not None:
+        rows.append(dict(family="whole-conv", xclbin=str(_whole_conv.xclbin),
+                         instructions=str(_whole_conv.insts)))
     return sorted(rows, key=lambda row: (row["xclbin"], row["instructions"]))
 
 
@@ -322,6 +327,22 @@ def run_tiled_fused_conv_mc(mc_name, sc_name, input_hwc, weights_uint16,
         mc_name: multicore xclbin name (e.g., 'mc_re4_c1')
         sc_name: unused in current flow; retained for signature compatibility.
     """
+    if _whole_conv_dir and mc_name == "mc_re8_rn3":
+        # Opt-in before variant probing: no unused baseline context, no retry
+        # after an experimental failure. The ABI is deliberately shape-specific.
+        if (tuple(input_hwc.shape), out_h, out_w, out_ch, tile_h, tile_w,
+                oc_block, stride, kernel_size, padding) != (
+                (20, 20, 64), 20, 20, 64, 8, 8, 16, 1, 3, 1):
+            raise ValueError("whole-conv route requires exact re8_rn3 contract")
+        global _whole_conv
+        if _whole_conv is None:
+            from types import SimpleNamespace
+            from whole_conv import WholeConv
+            backend = SimpleNamespace(torch=torch, iron=iron, NPUKernel=NPUKernel,
+                                      DefaultNPURuntime=DefaultNPURuntime,
+                                      _fill_and_sync=_fill_and_sync)
+            _whole_conv = WholeConv(_whole_conv_dir, backend)
+        return _whole_conv.run(input_hwc, weights_uint16)
     actual_name, ppc = _get_mc_variant(mc_name)
     regime = _regime_conv_artifact(mc_name, actual_name, ppc)
     if regime is not None:

@@ -15,6 +15,10 @@ The first implemented foundation and reproducible commands are in
 matched inference-only timing, and a three-route small-chain residency proof.
 Full-model device-resident fusion is still in progress; the default is unchanged.
 
+The next implemented step is [whole-convolution sequencing](FUSION_M1_VALIDATION.md):
+an opt-in route removes 36 full-frame submissions by batching output-channel
+blocks. The document records its build/run commands and validation limits.
+
 ## Run with existing artifacts
 
 These paths describe this checkout's development environment. Adjust them
