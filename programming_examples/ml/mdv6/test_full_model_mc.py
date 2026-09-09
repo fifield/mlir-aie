@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 from mdv6.model import MDV6MITYOLOv9c
 from aie.utils import NPUKernel, DefaultNPURuntime
+from detection_validation import compare_detection_outputs
 
 # Import helpers
 _base = os.path.dirname(__file__)
@@ -130,7 +131,7 @@ def run_re_mc(layer, inp, H, W, ic, oc, part, proc,
               fuse_bn(layer.conv4), H, W, oc, tc4, tc4, oc4, 1, 1, 0)
 
 
-def main():
+def main(seed=42, class_tolerance=5.0, vector_tolerance=5.0, metrics=None):
     print("=" * 70)
     print("MDV6 Full Model — 32-Core Multicore")
     print("=" * 70)
@@ -145,6 +146,8 @@ def main():
             _sd = {k.replace('model.', '', 1): v for k, v in _jit.state_dict().items()}
             model.load_state_dict(_sd, strict=False)
             print("  (loaded trained weights from TorchScript)")
+        else:
+            raise FileNotFoundError("Trained MDV6 weights are required: stage mdv6_bf16_weights.pt next to this test")
     elif os.path.exists(_weights_path):
         model.load_state_dict(torch.load(_weights_path, map_location='cpu', weights_only=True))
         print("  (loaded trained bf16 weights)")
@@ -161,7 +164,7 @@ def main():
             _n_fused += 1
     print(f"{_n_fused} layers in {time.time()-_tpw:.2f}s")
 
-    torch.manual_seed(42)
+    torch.manual_seed(seed)
     x = torch.randn(1, 3, 640, 640, dtype=torch.bfloat16)
 
     print("\nPyTorch reference...", end=" ", flush=True)
@@ -503,6 +506,9 @@ def main():
     t_total = time.time() - t_start
 
     # Compare
+    result = compare_detection_outputs(ref, det, class_tolerance, vector_tolerance)
+    if metrics is not None:
+        metrics.update(result)
     print(f"\n{'='*70}")
     print(f"Total forward pass: {t_total:.1f}s")
     print(f"{'='*70}")
@@ -515,7 +521,7 @@ def main():
     max_cls = max(torch.abs(cr.float()-ca.float()).max().item() for (cr,_,_),(ca,_,_) in zip(ref, det))
     max_vec = max(torch.abs(vr.float()-va.float()).max().item() for (_,_,vr),(_,_,va) in zip(ref, det))
     print(f"\n  Overall: max_class_diff={max_cls:.4f}, max_vector_diff={max_vec:.4f}")
-    ok = max_cls < 5.0 and max_vec < 5.0
+    ok = result['ok']
     print(f"\n  {'PASS' if ok else 'FAIL'}")
     return ok
 

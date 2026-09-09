@@ -15,12 +15,20 @@ Implement the full MDV6-mit-yolov9-c (MegaDetector V6) wildlife detection model 
 - **Working ML example**: `mlir-aie/programming_examples/ml/bottleneck/` (int8, uses DefaultNPURuntime)
 
 ## Build & Test Commands
+See [README.md](README.md) for prerequisites and artifact provenance.
+
 ```bash
 # Source environment (required before all builds)
 source ~/npu-dev-mdv6/env.sh
+export PYTHONPATH="$HOME/npu-dev-mdv6/install/mlir-aie/python${PYTHONPATH:+:$PYTHONPATH}"
+export MDV6_BUILD_DIR="$HOME/npu-dev-mdv6/build/mlir-aie/programming_examples/ml/mdv6/test_stx"
+export MDV6_REGIME_ROUTE=legacy
+export USE_REGIME_XCLBINS=0
+export USE_REGIME_KBLOCKED=0
+cd ~/npu-dev-mdv6/mlir-aie/programming_examples/ml/mdv6
 
 # Build a single layer
-cd programming_examples/ml/mdv6/conv
+cd conv
 make clean && make all    # Compile kernel + generate xclbin
 
 # Run CPU-only reference test
@@ -30,6 +38,7 @@ make test
 make run
 
 # Run all layers
+cd ~/npu-dev-mdv6/mlir-aie/programming_examples/ml/mdv6
 for dir in */; do (cd "$dir" && make clean && make run 2>&1); done
 
 # Full model NPU test (single forward pass)
@@ -37,7 +46,7 @@ python3 test_full_model_mc.py
 
 # Performance profile (1 cold warmup + N-1 measured warm frames)
 python3 test_full_model_mc.py --profile 3
-python3 test_full_model_mc.py --profile 3 --save-baseline profile_baseline.json
+python3 test_full_model_mc.py --profile 3 --save-baseline /tmp/mdv6-profile.json
 python3 test_full_model_mc.py --profile 3 --baseline profile_baseline.json   # exits 1 on >10% regression
 ```
 
@@ -155,7 +164,20 @@ Detect([P3,P4,P5])
 - N3 (256ch, 20×20) → concat with downsampled P4
 - N4 (192ch, 40×40) → concat with downsampled P3
 
-## Current Status (2026-03-28)
+## Current Status
+
+The default 32-core path is a working hybrid CPU/NPU full-model port. The
+committed warm-frame baseline is 1869 ms with 453 launches. Conv+BN+SiLU runs
+on NPU; RepConv, pooling, upsampling, and detection retain CPU work. The March
+multicore NaN/zero-output bugs were resolved in April. See [README.md](README.md)
+for reproducible commands and fresh validation, and [PERF_PLAN.md](PERF_PLAN.md)
+for optimization history. Regime routing is experimental and defaults off.
+`MDV6_REGIME_ROUTE=per-regime-r1-r3` explicitly selects the R1–R3 subset,
+including K-blocked GEMM; it overrides the two older regime flags. README
+documents its targeted builds and the offline `regime_planner.py` screening
+tool. See [VALIDATION.md](VALIDATION.md) for current hardware evidence.
+
+The layer results below are historical (2026-03-28).
 
 ### NPU hardware test results (8×8 test dimensions)
 | Layer | Build | NPU Run | Notes |
@@ -184,8 +206,11 @@ Detect([P3,P4,P5])
 - `mlir-aie-985` (closed): test.py setup_aie/execute stubs replaced with NPUKernel+DefaultNPURuntime
 - `mlir-aie-lie` (closed): NaN output from Buffer layers — root cause was stack overflow
 
-### Open bugs
-None — all 10/10 layers pass on NPU.
+### Known limitations
+All 10 layer tests passed historically, but this does not establish sustained
+full-model stability. Kernel timeouts can leave the device requiring a driver
+reload. Full-model numerical tolerances do not measure real-image detection
+accuracy.
 
 ### Tiled fused conv (key building block)
 `aie2_tiled_fused.py` — generates tiled Conv+BN+SiLU xclbins for any dimension/stride:
@@ -211,18 +236,23 @@ with [conv_weights, fused_bn_weight, fused_bn_bias]. The fused BN params are pre
 - All conv sub-layers on NPU (scalar kernels, ~30 xclbin configs)
 - RepConv, detection, AvgPool, Upsample on CPU
 
-### 32-core multicore (2026-03-28)
+### 32-core multicore (2026-03-28, historical)
 - **6.0s** total (24× speedup), all 14 layers complete
 - 28 unique multicore xclbins (deduplicated to fit 32-slot XRT cache)
-- Output has NaN — correctness bug in `_run_tiled_mc_inner` weight/patch packing
-  (SC path produces correct non-zero output for same layer; MC path returns zeros)
+- The NaN/zero-output issues observed at this stage were fixed by 2026-04-17:
+  GEMM ObjectFifo splitting, recycled-id fusion-cache collisions, and excessive
+  L1 usage were addressed. Subsequent host work established the 1.87 s warm
+  baseline with max class/vector differences around 0.226/0.031.
 - Key files:
   - `conv/aie2_multicore.py` — generalized N-core IRON program (1-32 cores)
   - `conv/build_multicore.py` — batch build script for all model layer configs
   - `run_tiled_mc.py` — multicore `run_tiled_fused_conv` with lazy SC fallback
   - `test_full_model_mc.py` — 32-core full model test
 
-## Performance Optimization Plan (`mlir-aie-mi7`)
+## Historical Performance Optimization Plan (`mlir-aie-mi7`)
+
+These estimates describe the original roadmap, not current predictions.
+Use `PERF_PLAN.md` and measured profiles when choosing further work.
 | Phase | Optimization | Expected speedup | Target |
 |-------|-------------|-----------------|--------|
 | A (`mlir-aie-326`) | Vectorized bf16 kernels (aie::mmul) | 10-30× | 3-10s |

@@ -1,0 +1,7 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// CPU-only checks for numerical gates, stream failure handling, routing,
+// and the offline cost model. No xclbins or NPU access are needed.
+// REQUIRES: torch
+// RUN: env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=%S python3 -m unittest test_detection_validation test_validate_stream test_regime_routes test_regime_planner

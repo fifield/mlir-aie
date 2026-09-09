@@ -4,7 +4,7 @@ Sizes are in bf16/uint16 elements, not bytes. The contract separates the
 regime envelope used by MLIR ObjectFifo/BD sizing from the active layer shape
 written into RTP constants.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 
 @dataclass(frozen=True)
@@ -381,15 +381,78 @@ GEMM_REGIME_ARTIFACTS = {
 }
 
 
-def conv_regime_for_layer(layer_name: str):
-    for artifact in CONV_REGIME_ARTIFACTS.values():
+REGIME_ROUTES = ("legacy", "per-regime-r1-r3")
+
+
+def regime_artifacts(route="legacy"):
+    """Return conv/GEMM contracts in runtime selection order, without NPU imports.
+
+    R1-R3 restores contracts before R5 and cross-regime sharing (6a1adf4f1).
+    Legacy order preserves the existing environment flags.
+    """
+    if route not in REGIME_ROUTES:
+        raise ValueError(f"Unknown MDV6_REGIME_ROUTE={route!r}; expected {REGIME_ROUTES}")
+    if route == "legacy":
+        return tuple(CONV_REGIME_ARTIFACTS.values()), tuple(GEMM_REGIME_ARTIFACTS.values())
+    conv = tuple(CONV_REGIME_ARTIFACTS[f"regime_r{i}_conv3x3"] for i in (1, 2, 3))
+    gemm = []
+    for i in (1, 2, 3):
+        for kind in ("non_k", "kblocked"):
+            artifact = GEMM_REGIME_ARTIFACTS[f"regime_r{i}_gemm_{kind}"]
+            if i == 1 and kind == "non_k":
+                # Collapse appended R2/R3 members to the original R1 envelope.
+                artifact = replace(artifact, members=tuple(
+                    member for member in artifact.members
+                    if member.runtime_name in {
+                        "gemm_elan_c1", "gemm_elan_c4", "gemm_re4_c1", "gemm_re4_rn1"
+                    }
+                ))
+            gemm.append(artifact)
+    return conv, tuple(gemm)
+
+
+def regime_route_inventory(route="legacy", include_kblocked=True):
+    """List selected regime members and xclbin/instruction cache keys.
+
+    This describes contracts, not contexts measured in a model run. Unmatched
+    operations use standalone artifacts. Resolve duplicate legacy members in
+    runtime order.
+    """
+    conv, gemm = regime_artifacts(route)
+    rows, seen = [], set()
+    for artifact in conv:
+        for name in artifact.members:
+            key = ("conv", name)
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(dict(family="conv", runtime_name=name,
+                             xclbin_name=artifact.xclbin_name,
+                             insts_name=f"{artifact.xclbin_name}_{name}"))
+    for artifact in gemm:
+        if artifact.k_block and not include_kblocked:
+            continue
+        for member in artifact.members:
+            key = ("gemm", member.runtime_name, member.ic, member.oc, member.k_block)
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(dict(family="gemm", runtime_name=member.runtime_name,
+                             ic=member.ic, oc=member.oc, k_block=member.k_block,
+                             xclbin_name=artifact.xclbin_name,
+                             insts_name=f"{artifact.xclbin_name}_{member.runtime_name}_ic{member.ic}_oc{member.oc}"))
+    return rows
+
+
+def conv_regime_for_layer(layer_name: str, route="legacy"):
+    for artifact in regime_artifacts(route)[0]:
         if layer_name in artifact.members:
             return artifact
     return None
 
 
-def gemm_regime_for_layer(layer_name: str, ic=None, oc=None, k_block=None):
-    for artifact in GEMM_REGIME_ARTIFACTS.values():
+def gemm_regime_for_layer(layer_name: str, ic=None, oc=None, k_block=None, route="legacy"):
+    for artifact in regime_artifacts(route)[1]:
         for member in artifact.members:
             if member.runtime_name != layer_name:
                 continue

@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../python"))
 import torch
 import aie.iron as iron
 from aie.utils import NPUKernel, DefaultNPURuntime
-from regime_config import conv_regime_for_layer, gemm_regime_for_layer
+from regime_config import conv_regime_for_layer, gemm_regime_for_layer, regime_artifacts
 
 # Import single-core helpers
 import importlib.util
@@ -33,6 +33,13 @@ else:
 _mc_cache = {}
 USE_REGIME_XCLBINS = os.environ.get("USE_REGIME_XCLBINS", "0") == "1"
 USE_REGIME_KBLOCKED = os.environ.get("USE_REGIME_KBLOCKED", "0") == "1"
+# Explicit R1-R3 selection includes its K-blocked members. Unset/legacy keeps
+# the old two-flag behavior. The new selector excludes R5 and cross-regime sharing.
+REGIME_ROUTE = os.environ.get("MDV6_REGIME_ROUTE", "legacy")
+regime_artifacts(REGIME_ROUTE)  # Fail early on a misspelled experiment selector.
+if REGIME_ROUTE == "per-regime-r1-r3":
+    USE_REGIME_XCLBINS = True
+    USE_REGIME_KBLOCKED = True
 
 # Per-layer ppc bumps from mlir-aie-0pf-B1 (2026-04-18).
 #
@@ -186,10 +193,43 @@ def _get_mc_handle(name, insts_name=None):
     return _mc_cache[key]
 
 
+def cached_kernel_inventory():
+    """Report successfully loaded cache entries, including standalone kernels.
+
+    Each row identifies one runtime handle by its xclbin and instruction file.
+    Runtime/driver eviction can change physical residency, so this is not an
+    assertion that all these contexts are simultaneously resident on device.
+    """
+    rows = []
+    for key, handle in _mc_cache.items():
+        if handle is None:
+            continue
+        if isinstance(key, tuple):
+            if len(key) == 3:
+                _, name, insts_name = key
+                family, directory = "gemm", _gemm_bd
+            else:
+                name, insts_name = key
+                family, directory = "conv", _bd
+        elif key.startswith("gemm_"):
+            name = insts_name = key[len("gemm_"):]
+            family, directory = "gemm", _gemm_bd
+        elif key.startswith("sc_"):
+            name = insts_name = key[len("sc_"):]
+            family, directory = "single-core", _bd
+        else:
+            name = insts_name = key
+            family, directory = "conv", _bd
+        rows.append(dict(family=family,
+                         xclbin=os.path.join(directory, f"{name}.xclbin"),
+                         instructions=os.path.join(directory, f"{insts_name}.bin")))
+    return sorted(rows, key=lambda row: (row["xclbin"], row["instructions"]))
+
+
 def _regime_conv_artifact(mc_name, actual_name, ppc):
     if not USE_REGIME_XCLBINS:
         return None
-    artifact = conv_regime_for_layer(mc_name)
+    artifact = conv_regime_for_layer(mc_name, route=REGIME_ROUTE)
     if artifact is None:
         return None
     active = artifact.members[mc_name]
@@ -595,7 +635,7 @@ def _get_gemm_handle(name, insts_name=None):
 def _regime_gemm_artifact(gemm_name, tile_m, ic, oc_block, ppc):
     if not USE_REGIME_XCLBINS:
         return None
-    artifact, member = gemm_regime_for_layer(gemm_name, ic, oc_block, 0)
+    artifact, member = gemm_regime_for_layer(gemm_name, ic, oc_block, 0, route=REGIME_ROUTE)
     if artifact is None or artifact.k_block > 0:
         return None
     active_tile_m = member.tile_m
@@ -637,7 +677,7 @@ def _regime_gemm_artifact(gemm_name, tile_m, ic, oc_block, ppc):
 def _regime_gemm_kblocked_artifact(gemm_name, tile_m, ic, oc, k_block, ppc):
     if not USE_REGIME_XCLBINS or not USE_REGIME_KBLOCKED:
         return None
-    artifact, member = gemm_regime_for_layer(gemm_name, ic, oc, k_block)
+    artifact, member = gemm_regime_for_layer(gemm_name, ic, oc, k_block, route=REGIME_ROUTE)
     if artifact is None or artifact.k_block <= 0:
         return None
     if artifact.patches_per_core < ppc:
