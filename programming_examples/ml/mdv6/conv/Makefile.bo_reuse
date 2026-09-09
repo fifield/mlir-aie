@@ -5,7 +5,7 @@ include ${srcdir}/../../../makefile-common
 .PHONY: all
 all: single.xclbin chain.xclbin
 
-rep_elan_bf16.o: ${srcdir}/../kernels/rep_elan_bf16.cc
+rep_elan_bf16.o: ${srcdir}/../kernels/rep_elan_bf16.cc ${srcdir}/../kernels/mmul_bf16_rows.h
 	${PEANO_INSTALL_DIR}/bin/clang ${PEANOWRAP2P_FLAGS} -c $< -o $@
 
 single.mlir: ${srcdir}/aie2_bo_reuse.py

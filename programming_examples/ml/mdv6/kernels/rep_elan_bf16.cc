@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <aie_api/aie.hpp>
+#include "mmul_bf16_rows.h"
 
 #define REL_WRITE 0
 #define REL_READ 1
@@ -91,7 +92,7 @@ void conv3x3_fused_packed_bf16(bfloat16 *__restrict input,
       }
 
       aie::vector<bfloat16, MMUL::size_C> result = acc.template to_vector<bfloat16>();
-      for (int p = 0; p < 4; p++) {
+      mdv6::for_each_mmul_row([&]<int p>() {
         int pidx = sp + p;
         if (pidx < spatial_out) {
           aie::vector<bfloat16, 8> row = result.extract<8>(p);
@@ -104,7 +105,7 @@ void conv3x3_fused_packed_bf16(bfloat16 *__restrict input,
             out_ptr[j] = (bfloat16)(x * (0.5f + x / (2.0f + 2.0f * ax)));
           }
         }
-      }
+      });
     }
   }
 
@@ -191,7 +192,7 @@ void gemm_conv1x1_fused_packed_bf16(bfloat16 *input, bfloat16 *packed_weights,
       aie::vector<bfloat16, MMUL::size_C> result = acc.template to_vector<bfloat16>();
 
       // BN + SiLU
-      for (int p = 0; p < 4; p++) {
+      mdv6::for_each_mmul_row([&]<int p>() {
         int pidx = sp + p;
         if (pidx < tile_m) {
           aie::vector<bfloat16, 8> row = result.extract<8>(p);
@@ -204,7 +205,7 @@ void gemm_conv1x1_fused_packed_bf16(bfloat16 *input, bfloat16 *packed_weights,
             out_ptr[j] = (bfloat16)(x * (0.5f + x / (2.0f + 2.0f * ax)));
           }
         }
-      }
+      });
     }
   }
 
@@ -283,7 +284,7 @@ void gemm_conv1x1_kblocked_bf16(bfloat16 *input, bfloat16 *wt_chunk,
         aie::vector<bfloat16, 8> bn_b_vec = aie::load_v<8>(bn_b_ptr + oc_blk * 8);
 
         aie::vector<bfloat16, MMUL::size_C> result = acc.template to_vector<bfloat16>();
-        for (int p = 0; p < 4; p++) {
+        mdv6::for_each_mmul_row([&]<int p>() {
           int pidx = sp + p;
           if (pidx < tile_m) {
             aie::vector<bfloat16, 8> row = result.extract<8>(p);
@@ -296,17 +297,17 @@ void gemm_conv1x1_kblocked_bf16(bfloat16 *input, bfloat16 *wt_chunk,
               out_ptr[j] = (bfloat16)(x * (0.5f + x / (2.0f + 2.0f * ax)));
             }
           }
-        }
+        });
       } else {
         // Not last: write partial sums (bf16) back to output buffer
         aie::vector<bfloat16, MMUL::size_C> result = acc.template to_vector<bfloat16>();
-        for (int p = 0; p < 4; p++) {
+        mdv6::for_each_mmul_row([&]<int p>() {
           int pidx = sp + p;
           if (pidx < tile_m) {
             aie::vector<bfloat16, 8> row = result.extract<8>(p);
             aie::store_v(output + pidx * oc + oc_blk * 8, row);
           }
-        }
+        });
       }
     }
   }

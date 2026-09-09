@@ -1,0 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+// Generated-IR checks only; no xclbin build or device access.
+// REQUIRES: peano
+// RUN: python3 %S/test_gemm_completion.py

@@ -25,8 +25,10 @@ It composes with convolution batching; neither route changes the default.
 
 [K-blocked batching](FUSION_KBLOCKED_VALIDATION.md) implements another opt-in
 3-to-1 submission step (449/frame, or 410 combined). Its boundary tests exposed
-legacy completion and shared sparse-input defects; acceptance is blocked pending
-their resolution. The document contains exact reproductions and next actions.
+legacy completion and shared sparse-input defects. The subsequent
+[correctness fix and validation](FUSION_KBLOCKED_FIX_VALIDATION.md) identifies
+runtime-index row extraction as the arithmetic failure and makes all-column
+completion mandatory. Rebuild affected artifacts; batching remains opt-in.
 
 ## Run with existing artifacts
 
@@ -34,6 +36,13 @@ These paths describe this checkout's development environment. Adjust them
 together for another installation. Prerequisites are the Strix Halo NPU2 device
 and working XRT driver, installed mlir-aie Python package, PyTorch, trained
 weights, and compiled multicore/GEMM artifacts.
+
+Artifacts predating the constant-index extraction fix are stale even if their
+old full-model tolerance test passes. The freshly corrected build for this
+session is `/tmp/mdv6-full-fixed.jGu5Ua`; use it as `MDV6_BUILD_DIR` instead of
+the historical build path below, or follow the fresh-build commands in
+[the fix validation document](FUSION_KBLOCKED_FIX_VALIDATION.md). Temporary
+artifacts may disappear and must then be rebuilt.
 
 ```bash
 source /home/jfifield/npu-dev-mdv6/env.sh

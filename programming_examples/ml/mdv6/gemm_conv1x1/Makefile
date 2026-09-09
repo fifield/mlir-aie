@@ -24,7 +24,7 @@ vpath %.cc ${srcdir}
 all: build/gemm_conv1x1_bf16.o build/final.xclbin
 
 # Compile kernel with Peano
-build/gemm_conv1x1_bf16.o: gemm_conv1x1_bf16.cc
+build/gemm_conv1x1_bf16.o: gemm_conv1x1_bf16.cc ${srcdir}/../kernels/mmul_bf16_rows.h
 	mkdir -p ${@D}
 	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang ${PEANOWRAP2P_FLAGS} -c $< -o ${@F}
 

@@ -4,8 +4,8 @@
 Includes zero, negative, cancellation, random and spatial-batch boundary inputs.
 Explicit checks survive python -O. Initialization excluded; packing, uploads,
 launch and output materialization included. Any failure stops without retries.
-Default PASS means bitwise legacy-equivalence, NOT mathematical correctness.
-Use --check-zero-rows to enforce the independent zero-input/zero-bias invariant.
+PASS requires bitwise equivalence and the independent zero-input/zero-bias
+invariant. It does not prove general mathematical correctness for all inputs.
 """
 import argparse
 import contextlib
@@ -50,8 +50,8 @@ def main():
     parser.add_argument('--frames', type=int, default=30)
     parser.add_argument('--failure-dir', type=Path,
                         help='save input, raw weights and both outputs on mismatch; never overwrite')
-    parser.add_argument('--check-zero-rows', action='store_true',
-                        help='fail boundary cases if zero-input rows leak with zero BN bias')
+    parser.add_argument('--check-zero-rows', action='store_true', default=True,
+                        help='compatibility option: zero-row invariant is always enforced')
     args = parser.parse_args()
     if args.frames < 10:
         parser.error('use at least ten frames for two trained weights and five input cases')
@@ -159,7 +159,7 @@ def main():
         require(not semantic_failure, f'zero-input rows leak with zero BN bias frame={frame}: {zero_diagnostics}')
         print(json.dumps(dict(frame=frame, max_abs_diff=error, ok=True)), flush=True)
     print(json.dumps(dict(status='PASS', frames=args.frames, comparison='bitwise exact',
-                          scope='legacy-equivalence, not mathematical correctness',
+                          scope='bitwise equivalence and exact zero-input invariant',
                           zero_row_gate_enabled=args.check_zero_rows)))
 
 

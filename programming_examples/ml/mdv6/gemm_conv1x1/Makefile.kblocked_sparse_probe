@@ -1,0 +1,15 @@
+# Isolated diagnostic; no production artifacts are overwritten.
+srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
+include ${srcdir}/../../../makefile-common
+
+.PHONY: all
+all: kblocked_sparse_probe.xclbin
+
+kblocked_sparse_probe.o: ${srcdir}/kblocked_sparse_probe.cc ${srcdir}/../kernels/rep_elan_bf16.cc ${srcdir}/../kernels/mmul_bf16_rows.h
+	${PEANO_INSTALL_DIR}/bin/clang ${PEANOWRAP2P_FLAGS} -c $< -o $@
+
+kblocked_sparse_probe.mlir: ${srcdir}/aie2_kblocked_sparse_probe.py
+	python3 $< > $@
+
+kblocked_sparse_probe.xclbin: kblocked_sparse_probe.mlir kblocked_sparse_probe.o
+	aiecc.py --aie-generate-xclbin --aie-generate-npu-insts --no-compile-host --no-xchesscc --no-xbridge --xclbin-name=$@ --npu-insts-name=kblocked_sparse_probe.bin $<

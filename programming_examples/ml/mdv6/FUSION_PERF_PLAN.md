@@ -64,10 +64,12 @@ execute in one submission with weights retained across all eight patches/core.
 See [FUSION_GEMM_VALIDATION.md](FUSION_GEMM_VALIDATION.md). GEMM-only uses 450
 full-frame submissions; with the previous convolution batching it uses 414.
 Both remain opt-in. [K-blocked spatial batching](FUSION_KBLOCKED_VALIDATION.md)
-now implements a 3-to-1 step for re4/re15 Conv4 (449/frame, 410 combined), but
-acceptance is blocked by newly exposed legacy completion and shared sparse-input
-defects. See `mlir-aie-2vb.6` and that document's strict zero-row reproduction;
-fix correctness before sustained performance acceptance or promotion.
+now implements a 3-to-1 step for re4/re15 Conv4 (449/frame, 410 combined).
+Its newly exposed completion and sparse-input defects are addressed by
+[constant-index extraction and mandatory completion](FUSION_KBLOCKED_FIX_VALIDATION.md).
+The fix preserves MAC order and device rounding; its independent sparse oracle
+and trained-weight zero-row gate are required regression checks. Use freshly
+rebuilt artifacts and consult that document for sustained validation and limits.
 Inter-operator fusion remains unimplemented at full-model scale.
 
 ## What is already established
@@ -429,6 +431,8 @@ particular memtile route.
 2. Source `/home/jfifield/npu-dev-mdv6/env.sh`, add installed mlir-aie Python
    to `PYTHONPATH`, and set `MDV6_BUILD_DIR` as shown in README. Confirm trained
    weights and the exact build root; missing source-tree xclbins are expected.
+   Artifacts predating the extraction/completion fix must be rebuilt; see
+   FUSION_KBLOCKED_FIX_VALIDATION.md for current verified artifacts and commands.
 3. Select the baseline explicitly: `MDV6_REGIME_ROUTE=legacy`,
    `USE_REGIME_XCLBINS=0`, `USE_REGIME_KBLOCKED=0`. Unset
    `MDV6_WHOLE_CONV_DIR` / `MDV6_WHOLE_GEMM_DIR` / `MDV6_WHOLE_KBLOCKED_DIR`

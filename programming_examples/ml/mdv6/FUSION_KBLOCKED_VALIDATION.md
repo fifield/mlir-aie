@@ -1,5 +1,12 @@
 # K-blocked spatial batching — 2026-09-09
 
+This document preserves the initial `3b6b48266` checkpoint and its failed gates.
+The subsequent fix, updated reproduction commands and current acceptance state
+are in [FUSION_KBLOCKED_FIX_VALIDATION.md](FUSION_KBLOCKED_FIX_VALIDATION.md).
+Current generation always awaits every output column; the historical unsafe
+reference below requires the old generator, not merely omitting an environment
+variable. The zero-row invariant is now mandatory in the trained-weight test.
+
 ## Status and acceptance boundary
 
 Implemented, built and opt-in; **not accepted for promotion**. The selected

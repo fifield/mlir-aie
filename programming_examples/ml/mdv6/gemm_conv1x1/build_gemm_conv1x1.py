@@ -7,6 +7,10 @@ Generates MLIR via aie2_gemm_conv1x1.py and compiles for each unique
 With K-blocking (mi7.4): weights are split into k_block-sized IC chunks.
 Full OC is processed in one call, eliminating OC blocking at the host level.
 Weight layout per chunk: [k_block/8, oc/8, 8, 8] + [bn_w(oc), bn_b(oc)].
+
+All generated programs await every output column. The historical diagnostic
+MDV6_GEMM_WAIT_ALL_COLUMNS environment variable is no longer needed (any value
+leaves the safe completion policy enabled). Existing artifacts must be rebuilt.
 """
 import math
 import os
@@ -230,25 +234,38 @@ def build_kernel(build_dir):
     return True
 
 
+def _artifacts_current(outputs, inputs):
+    """Require every artifact/dependency and reject any stale output.
+
+    main() intentionally rebuilds the kernel object, so a normal build invocation
+    regenerates its selected xclbins/instructions even in a reused build tree.
+    This helper also keeps direct build_one callers safe when files are missing.
+    """
+    if not all(os.path.isfile(path) for path in (*outputs, *inputs)):
+        return False
+    return min(os.path.getmtime(path) for path in outputs) >= max(
+        os.path.getmtime(path) for path in inputs)
+
+
 def build_one(name, n_cores, tile_m, ic, oc, k_block, ppc, build_dir):
     """Generate MLIR and compile one GEMM conv1x1 xclbin."""
     xclbin_path = os.path.join(build_dir, f"{name}.xclbin")
-    if os.path.exists(xclbin_path):
-        obj_path = os.path.join(build_dir, "rep_elan_bf16.o")
-        if not os.path.exists(obj_path) or os.path.getmtime(xclbin_path) > os.path.getmtime(obj_path):
-            print(f"  {name}: already built, skipping")
-            return True
-
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "aie2_gemm_conv1x1.py")
     mlir_path = os.path.join(build_dir, f"{name}.mlir")
+    kernel_dir = os.path.join(os.path.dirname(script), "..", "kernels")
+    dependencies = [os.path.join(build_dir, "rep_elan_bf16.o"), script,
+                    os.path.join(kernel_dir, "rep_elan_bf16.cc")]
+    # Include local kernel headers as well as the entry-point source.
+    dependencies.extend(os.path.join(kernel_dir, item)
+                        for item in os.listdir(kernel_dir) if item.endswith(".h"))
+    if _artifacts_current([xclbin_path, os.path.join(build_dir, f"{name}.bin"),
+                           mlir_path], dependencies):
+        print(f"  {name}: already built, skipping")
+        return True
 
     # Generate MLIR
     kb_arg = f" {k_block}" if k_block > 0 else " 0"
     cmd = f"python3 {script} {n_cores} {tile_m} {ic} {oc} {ppc}{kb_arg}"
-    # Diagnostic reference build: use an isolated MDV6_BUILD_DIR to avoid
-    # confusing these completion-fenced artifacts with the default baseline.
-    if os.environ.get("MDV6_GEMM_WAIT_ALL_COLUMNS") == "1":
-        cmd += " --wait-all-columns"
     print(f"  {name}: MLIR...", end=" ", flush=True)
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     if result.returncode != 0:
@@ -283,8 +300,6 @@ def _generate_gemm_mlir(build_dir, name, n_cores, tile_m, ic, oc, k_block, ppc,
         "python3", script, str(n_cores), str(tile_m), str(ic), str(oc),
         str(ppc), str(k_block),
     ]
-    if os.environ.get("MDV6_GEMM_WAIT_ALL_COLUMNS") == "1":
-        cmd.append("--wait-all-columns")
     if active is not None:
         active_tile_m, active_ic, active_oc, active_ppc = active
         if active_ppc != ppc:

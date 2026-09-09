@@ -46,7 +46,7 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
                  patches_per_core=1, k_block=0, fused=True,
                  active_tile_m=None, active_ic=None, active_oc=None,
                  active_k_block=None, spatial_batches=1,
-                 wait_all_columns=False):
+                 wait_all_columns=True):
     """N-core GEMM-based Conv1x1 [+ BN + SiLU] with optional K-blocking.
 
     Args:
@@ -60,11 +60,14 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
         spatial_batches: experimental batch-major spatial command groups.
             Non-K-blocked weights stay acquired across groups. K-blocked
             weights replay all chunks per patch, preserving accumulation.
-        wait_all_columns: diagnostic completion fence for the unbatched
-            baseline. Batched sequences always await every column.
+        wait_all_columns: compatibility argument; must remain True. Every
+            output column must complete before readback or descriptor reuse.
+            Waiting only for the final independent column is unsafe.
     """
     if type(spatial_batches) is not int or spatial_batches < 1:
         raise ValueError("spatial_batches must be a positive integer")
+    if wait_all_columns is not True:
+        raise ValueError("All output columns must be awaited; partial completion is unsafe")
     assert tile_m % 4 == 0, f"tile_m={tile_m} must be divisible by 4 (mmul<4,8,8>)"
     assert ic % 8 == 0, f"ic={ic} must be divisible by 8"
     assert oc % 8 == 0, f"oc={oc} must be divisible by 8"
@@ -385,8 +388,7 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
                 )
                 rt.fill(col_in_fifos[col].prod(), I, tap_in, task_group=group)
                 rt.drain(col_out_fifos[col].cons(), O, tap_out,
-                         wait=(wait_all_columns or spatial_batches > 1
-                               or col == n_cols - 1),
+                         wait=True,
                          task_group=group)
             if group is not None:
                 rt.finish_task_group(group)
@@ -409,7 +411,8 @@ def _parse_args(argv):
     parser.add_argument("--active-oc", type=int)
     parser.add_argument("--active-k-block", type=int)
     parser.add_argument("--no-fuse", action="store_true")
-    parser.add_argument("--wait-all-columns", action="store_true")
+    parser.add_argument("--wait-all-columns", action="store_true", default=True,
+                        help="Compatibility option: all columns are always awaited")
     return parser.parse_args(argv)
 
 
