@@ -120,11 +120,21 @@ terminating core descriptors, six ownership locks, and explicit core DMA
 completion tokens before descriptor reuse. This establishes one-core physical
 overlap and finite rearm, not the sixteen-worker L2 barrier or numerical phase B.
 
-Next is [numerical phase A to resident gather](sppelan/PHASE_A_GATHER_PLAN.md),
-tracked as `mlir-aie-2vb.2.4`: replace diagnostic producers with the validated
-two-KB128 projection and three pools across sixteen workers, retaining rounding
-metadata and gathering real features in one submission. Compile bounded activation
-iteration and all completion routes first. Full-island phase aliasing/barriers,
+The [numerical phase A to resident gather prototype](sppelan/PHASE_A_GATHER_VALIDATION.md)
+is implemented but **compile-blocked**, tracked as `mlir-aie-2vb.2.4`.
+It replaces diagnostic producers with the validated two-KB128 projection and
+three pools across sixteen workers. Its addressed memory map fits, and bounded
+activation iteration lowers correctly, but the router rejects the combined
+completion-token/data paths. No numerical integrated NPU run has occurred.
+`mlir-aie-8cu` tracks unresolved routing feasibility, not a proven compiler
+cause: illegal emitted routes do not establish that a legal full route exists.
+Compile-only reductions show placement-sensitive failures, including two
+completion sources failing while a different three-source set compiles.
+`mlir-aie-96e` separately tracks a
+confirmed six-bit memtile queue-ID bug with an example-local workaround.
+The immediate next gate is a legal routed build plus actual instruction-binary
+review, then exact smoke/stability tests. The new hardware lit entry is explicitly
+feature-disabled until that prerequisite is met. Full-island phase aliasing/barriers,
 final projection, and production integration remain unproven. These diagnostic
 milestones do not change full-model latency.
 

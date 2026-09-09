@@ -1,0 +1,19 @@
+srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
+include ${srcdir}/../../../makefile-common
+.PHONY: all
+all: spp_phase_a_gather.xclbin spp_phase_a_gather.bin spp_phase_a_gather_runtime.mlir
+
+phase_a_gather.o: ${srcdir}/phase_a_gather.cc ${srcdir}/phase_a_shard.cc ${srcdir}/../kernels/rep_elan_bf16.cc ${srcdir}/../kernels/mmul_bf16_rows.h
+	${PEANO_INSTALL_DIR}/bin/clang ${PEANOWRAP2P_FLAGS} -c $< -o $@
+
+spp_phase_a_gather.mlir: ${srcdir}/aie2_phase_a_gather.py
+	python3 $< > $@
+
+spp_phase_a_gather.xclbin spp_phase_a_gather.bin &: spp_phase_a_gather.mlir phase_a_gather.o
+	aiecc.py --aie-generate-xclbin --aie-generate-npu-insts --no-compile-host --no-xchesscc --no-xbridge --xclbin-name=spp_phase_a_gather.xclbin --npu-insts-name=spp_phase_a_gather.bin $<
+
+spp_phase_a_gather_tasks.mlir: spp_phase_a_gather.xclbin spp_phase_a_gather.bin
+	aie-opt spp_phase_a_gather.mlir.prj/input_with_addresses.mlir --aie-assign-runtime-sequence-bd-ids --aie-dma-tasks-to-npu -o $@
+
+spp_phase_a_gather_runtime.mlir: spp_phase_a_gather_tasks.mlir
+	aie-opt $< --aie-dma-to-npu -o $@

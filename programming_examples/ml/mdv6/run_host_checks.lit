@@ -9,4 +9,6 @@
 // RUN: sppelan.test_fusion_schedule sppelan.test_gather_layout sppelan.test_gather_ir sppelan.test_phase_a_host sppelan.test_phase_a_ir \
 // RUN: sppelan.test_packet_aggregate_host sppelan.test_packet_aggregate_ir sppelan.test_packet_stripe_join_host sppelan.test_packet_stripe_join_ir \
 // RUN: sppelan.test_packet_gather_host sppelan.test_packet_gather_ir sppelan.test_phase_alias_host sppelan.test_phase_alias_ir \
+// RUN: sppelan.test_phase_a_gather_host sppelan.test_phase_a_gather_ir \
 // RUN: test_whole_gemm test_whole_gemm_route test_whole_kblocked test_whole_kblocked_route
+// RUN: python3 -O %S/sppelan/reduce_phase_a_gather_routes.py --self-test
