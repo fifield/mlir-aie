@@ -1,0 +1,15 @@
+# Resident four-column packet aggregation to gather, standalone diagnostic.
+srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
+include ${srcdir}/../../../makefile-common
+
+.PHONY: all
+all: packet_gather.xclbin packet_gather.bin
+
+packet_gather.o: ${srcdir}/packet_gather.cc
+	${PEANO_INSTALL_DIR}/bin/clang ${PEANOWRAP2P_FLAGS} -c $< -o $@
+
+packet_gather.mlir: ${srcdir}/aie2_packet_gather.py
+	python3 $< > $@
+
+packet_gather.xclbin packet_gather.bin &: packet_gather.mlir packet_gather.o
+	aiecc.py --aie-generate-xclbin --aie-generate-npu-insts --no-compile-host --no-xchesscc --no-xbridge --xclbin-name=packet_gather.xclbin --npu-insts-name=packet_gather.bin $<

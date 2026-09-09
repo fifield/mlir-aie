@@ -200,14 +200,17 @@ tests all passed (3/3). The complete CPU suite also passes 127 tests under
 
 Update: the first one-column packet-aggregation sentinel below is now
 [implemented and hardware validated](PACKET_AGGREGATE_VALIDATION.md).
-Phase-B strided joins, finite phase transitions, L1 aliasing, and four-column
-coexistence remain. The proposed full-island channel table is not yet validated
-as a combined schedule.
+[Phase-B-shaped strided joins](PACKET_STRIPE_JOIN_VALIDATION.md) and
+[four-column packet/gather coexistence](PACKET_GATHER_VALIDATION.md) now also
+pass exact sustained hardware gates. Finite phase transitions and L1 aliasing
+remain; the [next sentinel plan](PHASE_ALIAS_PLAN.md) isolates those constraints.
+The proposed full-island channel table below is still not validated with
+arithmetic, weights, activation distribution, and final-output traffic together.
 
 Keep the independent gather and arithmetic proofs as regression targets.
-`mlir-aie-2vb.2.3` next needs a **one-column, four-worker packet-aggregation
-sentinel proof** before sixteen-worker expansion, followed by explicit L1
-phase-alias ownership. A candidate combined memtile budget is:
+`mlir-aie-2vb.2.3` has progressed through the one-column packet sentinel and
+sixteen-worker transport expansion; explicit L1 phase-alias ownership is next.
+A candidate full-island memtile budget remains:
 
 | Channels | Proposed use |
 | --- | --- |

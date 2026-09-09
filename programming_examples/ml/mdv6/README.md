@@ -39,7 +39,7 @@ and physical phase-buffer reuse remain necessary for a production route.
 The [full-spatial projection/pooling shard](sppelan/PHASE_A_VALIDATION.md) runs
 one eight-channel slice through conv1 and all three pools in one submission,
 retaining intermediate planes in L1. Exact 80-case and 100/300-frame NPU gates
-pass across trained channel slices. Connecting sixteen workers to gather and
+pass across trained channel slices. Connecting sixteen arithmetic shards to gather and
 final projection is still pending; neither proof changes the default route.
 
 [Four-worker packet aggregation](sppelan/PACKET_AGGREGATE_VALIDATION.md) now
@@ -47,8 +47,11 @@ passes exact 30/100/300-frame NPU gates using one memtile receive channel and
 device-only output grants. [Bounded stripe joins](sppelan/PACKET_STRIPE_JOIN_VALIDATION.md)
 also pass exact 30/100/300-frame gates: all 25 stripes reuse 14 memtile
 descriptors inside one submission. Neither diagnostic executes SPP arithmetic.
-Next are resident four-column aggregation-to-gather handoff, physical
-phase-buffer reuse, and a finite phase controller before arithmetic integration.
+The [resident four-column aggregation-to-gather handoff](sppelan/PACKET_GATHER_VALIDATION.md)
+now also passes exact 30/100/300-frame NPU gates. Sixteen workers feed gather
+directly through memtiles in one submission, without an intermediate host
+transfer. Next is [physical phase-buffer reuse and finite phase rearm](sppelan/PHASE_ALIAS_PLAN.md),
+followed by arithmetic integration; the default full-model route is unchanged.
 
 ## Run with existing artifacts
 

@@ -158,6 +158,10 @@ integration task `mlir-aie-2vb.2.3`. Compose the **full-plane** aggregation
 proof with the gather proof; do not substitute this stripe-shaped source ABI.
 Use separate artifacts and keep all existing proofs as regressions.
 
+Update: this integration now [passes exact 6/30/100/300-frame NPU gates](PACKET_GATHER_VALIDATION.md).
+The recipe below records the implemented transport cut, not a remaining blocker.
+Next is the [finite-phase physical L1 alias sentinel](PHASE_ALIAS_PLAN.md).
+
 1. Replicate full-plane packet workers across four columns (16 cores), with
    column-qualified symbols. Each memtile retains a 100 KiB diagnostic source,
    a 100 KiB tagged aggregate, and a 64-byte grant token.

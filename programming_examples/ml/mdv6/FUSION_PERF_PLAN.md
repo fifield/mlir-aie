@@ -85,8 +85,8 @@ so it does not yet remove the production SPP boundary. The subsequent
 80-case trained-slice matrix and 100/300-frame exact NPU gates, preserving the
 existing KB128 rounding. One worker keeps all four full-spatial feature planes
 in L1 and runs projection plus three pools in one submission. It is not connected
-to gather or the final projection yet. Physical phase-A/B L1 aliasing and a
-worker-traffic channel/route proof are next.
+to gather or the final projection yet. Physical phase-A/B L1 aliasing remains
+required; the transport increments below establish the worker-traffic routes.
 See [the detailed handoff](sppelan/GATHER_VALIDATION.md#next-bounded-implementation).
 The transport sequence is a one-column, four-worker packet-output
 aggregation sentinel with explicit sequential grants, followed by strided
@@ -105,12 +105,20 @@ also passes exact 30/100/300-frame NPU gates. All 25 stripes reuse 14 memtile
 descriptors and 2 KiB input/output slots inside one host submission; four
 worker packets scatter directly into each HWC output stripe. This proves a
 repeating phase-B-shaped transport, not the finite phase-A/B controller.
-Next, connect four full-plane packet aggregates directly to the existing
-gather without host readback/re-upload. The proposed per-memtile budget is
-19 BDs/locks, six S2MM and three MM2S channels, and 221,248 buffer bytes;
-four-column packet/circuit coexistence must still compile and pass changing-frame
-hardware gates. See the stripe validation handoff for exact ownership and ABI.
-Physical L1 phase aliasing, finite phase switching, and numerical integration
+The subsequent [resident packet-to-gather connection](sppelan/PACKET_GATHER_VALIDATION.md)
+now passes exact 6/30/100/300-frame NPU gates. Sixteen workers aggregate tagged
+features into four memtiles, and gather reads those aggregates directly without
+host readback/re-upload. The actual per-memtile budget is 19 BDs/locks, six
+S2MM and three MM2S channels, and 221,248 buffer bytes. Four-column packet/circuit
+coexistence is now exercised on hardware, with all four destination outputs
+checked and awaited in one submission.
+
+Next is the [one-core finite-phase L1 alias sentinel](sppelan/PHASE_ALIAS_PLAN.md),
+tracked as `mlir-aie-2vb.2.3.4`: explicitly reuse one arena for one phase-A-sized
+transfer and 25 phase-B stripes, then safely rearm across frames. Compile and
+inspect terminating runtime DMA tasks and ownership before hardware. This will
+not by itself prove the sixteen-worker L2 barrier or numerical integration.
+Physical L1 phase aliasing, finite phase switching, and SPP arithmetic composition
 remain unproven. These diagnostic milestones do not change full-model latency.
 
 ## What is already established

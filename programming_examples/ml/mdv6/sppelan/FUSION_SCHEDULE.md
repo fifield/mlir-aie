@@ -8,8 +8,11 @@ and passes exact 30/100/300-frame NPU tests with zero compute workers. That
 proves the bounded gather's routing/layout, not the complete schedule below.
 The subsequent [phase-A shard](PHASE_A_VALIDATION.md) validates one worker's
 full-spatial projection and three pools, with all sixteen trained channel
-slices tested sequentially. Sixteen-worker transport, physical phase aliasing,
-and the final projection remain unimplemented.
+slices tested sequentially. The [resident packet-to-gather proof](PACKET_GATHER_VALIDATION.md)
+now validates sixteen-worker opaque-bit transport and four-column gather together
+in one submission. Physical phase aliasing, the finite phase controller, and
+numerical composition with the final projection remain unimplemented.
+The next bounded step is the [one-core alias/rearm sentinel](PHASE_ALIAS_PLAN.md).
 
 The dependency-free [model](fusion_schedule.py) checks storage accounting and
 the exact gather ordering. Run from the MDV6 directory:
@@ -189,11 +192,17 @@ residency capability, but no latency benefit is predicted by this model.
 
 ## Next implementation sequence and gates
 
+Progress update: step 1's standalone gather, step 2's arithmetic shard, and
+the sixteen-worker packet-to-gather transport are validated separately.
+Step 2's physical aliasing is still open; use [PHASE_ALIAS_PLAN.md](PHASE_ALIAS_PLAN.md)
+as the next executable cut. Step 3's complete numerical composition is not done.
+The sequence below preserves the full-island acceptance requirements.
+
 1. Inspect current IRON memtile placement, DMA/lock limits, and cross-column
    transfer mechanisms. Choose bounded gather/relay wiring and prove a
    **synthetic full-size gather-only** program routes with exact sentinels.
-   Record descriptor counts and actual buffer maps per tile. This is the next
-   concrete blocker, not an invitation to compile a single giant scalar kernel.
+   Record descriptor counts and actual buffer maps per tile. This gate is now
+   established by the separate gather and packet-to-gather proofs.
 2. Implement explicit phase-L1 aliasing and one first-projection/pool shard,
    with full 20×20 spatial shape and eight channels. Test borders, negative
    features, and distinct weights. Verify resource usage from compiler output.
