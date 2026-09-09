@@ -10,7 +10,7 @@
 // running --aie-legalize-control-packet must fail.
 
 // RUN: not aie-translate --aie-ctrlpkt-to-bin %s 2>&1 | FileCheck %s
-// CHECK: control packet payload of 8 32-bit words cannot be encoded; expected 1 to 4
+// CHECK: control packet payload of 8 32-bit words cannot be encoded; expected at most 4
 
 module {
   aie.device(npu2_1col) {

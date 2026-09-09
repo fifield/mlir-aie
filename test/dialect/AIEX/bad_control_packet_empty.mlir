@@ -5,9 +5,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-// A control packet with neither `data` nor `length` set would encode
-// beats = 0 - 1, which underflows and corrupts the address the same way an
-// over-4-word payload does. The op verifier rejects it.
+// A control packet with neither `data` nor `length` set encodes beats = 0 - 1,
+// which underflows and corrupts the address the same way an over-4-word
+// payload does. Rejected by the op verifier before translation ever runs.
 
 // RUN: aie-opt --verify-diagnostics %s
 

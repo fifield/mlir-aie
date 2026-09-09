@@ -753,15 +753,16 @@ LogicalResult xilinx::AIE::AIETranslateControlPacketsToUI32Vec(
     }
     // The beats field is only 4 bits wide on AIE4 (2 on earlier targets), so a
     // word count outside the supported range cannot be encoded. The op
-    // verifier rejects out-of-range read lengths and aie-legalize-ctrl-packet
-    // splits oversized write payloads; catch anything that slipped past both
-    // rather than masking it into a different, silently wrong length.
+    // verifier already rejects empty payloads and out-of-range read lengths;
+    // aie-legalize-ctrl-packet splits oversized write payloads, so catch
+    // anything that slipped past it rather than masking it into a different,
+    // silently wrong length.
     uint32_t maxWords = AIEX::getCtrlPktMaxPayloadWords(tm);
-    if (size < 1 || size > maxWords)
+    if (size > maxWords)
       return packetOp.emitError()
              << "control packet payload of " << size
-             << " 32-bit words cannot be encoded; expected 1 to " << maxWords
-             << " (run aie-legalize-ctrl-packet to split large writes)";
+             << " 32-bit words cannot be encoded; expected at most "
+             << maxWords << " (run aie-legalize-ctrl-packet to split large writes)";
 
     uint32_t beats = size - 1;
     uint32_t opc = packetOp.getOpcode();

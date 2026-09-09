@@ -5,8 +5,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-// A read control packet (no `data`) with `length = 0` would encode
-// beats = 0 - 1. The op verifier rejects it.
+// A read control packet (no `data`) with `length = 0` still encodes
+// beats = 0 - 1. Rejected by the op verifier before translation ever runs.
 
 // RUN: aie-opt --verify-diagnostics %s
 
