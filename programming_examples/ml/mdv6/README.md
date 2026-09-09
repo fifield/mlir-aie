@@ -6,6 +6,10 @@ and SiLU use up to 32 AIE2P compute tiles. RepConv, pooling, upsampling, and
 detection retain CPU work. It is a numerical comparison and profiling example;
 it does not evaluate detection quality on a labeled image dataset.
 
+The forward performance roadmap is [FUSION_PERF_PLAN.md](FUSION_PERF_PLAN.md):
+persistent execution, fewer dispatches, and device-resident fused islands,
+with implementation milestones and fresh-session instructions.
+
 ## Run with existing artifacts
 
 These paths describe this checkout's development environment. Adjust them

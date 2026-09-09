@@ -1,5 +1,10 @@
 # MDV6 AIE2P Performance Optimization Plan
 
+The current forward implementation plan is
+[FUSION_PERF_PLAN.md](FUSION_PERF_PLAN.md). It puts device-resident fusion on
+the critical path and allows measured enabling steps whose performance payoff
+requires subsequent work. The roadmap below is retained as historical context.
+
 For the 2026-09-09 hardware validation and current routing decision, see
 [VALIDATION.md](VALIDATION.md). Default 30/100/300-frame validation passes;
 the restored R1–R3 route uses 466 launches and fails the saved launch-gap

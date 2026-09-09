@@ -1,5 +1,9 @@
 # CLAUDE.md — MDV6 IRON for AIE2P
 
+For current performance work, start with
+[FUSION_PERF_PLAN.md](FUSION_PERF_PLAN.md). Its device-resident fusion milestones
+and validation policy supersede the historical phase ordering below.
+
 ## Goal
 Implement the full MDV6-mit-yolov9-c (MegaDetector V6) wildlife detection model using IRON for AMD AIE2P (Strix Halo NPU). BFloat16 throughout.
 
