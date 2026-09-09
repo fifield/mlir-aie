@@ -1,0 +1,16 @@
+# Direct DMA-only proof: deliberately no compute kernel object.
+srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
+include ${srcdir}/../../../makefile-common
+
+.PHONY: all remote
+all: gather_probe.xclbin gather_probe.bin
+remote: gather_remote.xclbin gather_remote.bin
+
+gather_probe.mlir: ${srcdir}/aie2_gather_probe.py
+	python3 $< > $@
+
+gather_remote.mlir: ${srcdir}/aie2_gather_probe.py
+	python3 $< --remote-only > $@
+
+%.xclbin %.bin &: %.mlir
+	aiecc.py --aie-generate-xclbin --aie-generate-npu-insts --no-compile-host --no-xchesscc --no-xbridge --xclbin-name=$*.xclbin --npu-insts-name=$*.bin $<

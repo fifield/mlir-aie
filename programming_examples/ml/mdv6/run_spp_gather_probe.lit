@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+// Full-shape, DMA-only SPP9 gather: exact opaque bits at all four destinations.
+// This is a routing/lifetime proof, not SPP arithmetic or a production route.
+// REQUIRES: ryzen_ai_npu2, peano, torch
+// RUN: mkdir -p %t.dir
+// RUN: make -C %t.dir -f %S/sppelan/Makefile.gather_probe
+// RUN: python3 -O %S/sppelan/check_gather_ir.py --build-dir %t.dir
+// RUN: %run_on_npu2% python3 -O %S/sppelan/test_gather_probe.py --build-dir %t.dir --frames 30 --failure-dir %t.dir/failures

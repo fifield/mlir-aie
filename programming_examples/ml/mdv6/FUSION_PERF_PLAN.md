@@ -56,8 +56,10 @@ OC blocks of `mc_re8_rn3` into one coherent submission, preserving the original
 tiling. See [FUSION_M1_VALIDATION.md](FUSION_M1_VALIDATION.md) for gates and
 results; this is the first Milestone 1 operator, not a general fused graph.
 The full-shape [SPP9 schedule](sppelan/FUSION_SCHEDULE.md) now has checked
-storage/lifetime estimates and exact gather mappings. Physical phase-buffer
-aliasing and cross-column gather routing are still unproven.
+storage/lifetime estimates and exact gather mappings. The subsequent
+[full-shape gather proof](sppelan/GATHER_VALIDATION.md) validates cross-column
+routing without compute workers; physical phase-buffer aliasing and arithmetic
+integration remain unproven.
 
 GEMM batching now also covers ELAN2's final projection: four spatial batches
 execute in one submission with weights retained across all eight patches/core.
@@ -71,6 +73,17 @@ The fix preserves MAC order and device rounding; its independent sparse oracle
 and trained-weight zero-row gate are required regression checks. Use freshly
 rebuilt artifacts and consult that document for sustained validation and limits.
 Inter-operator fusion remains unimplemented at full-model scale.
+
+The SPP9 gather-only increment now passes exact opaque-bit checks at all four
+destinations for 30/100/300 frames. It retains native worker-major features in
+L2 and builds 25 bounded concat stripes using static DMA, one host submission,
+and no intermediate host sync. Its compiled footprint is 116 KiB, seven BDs,
+seven locks, five S2MM and two MM2S channels per memtile; no compute workers.
+The diagnostic still uploads synthetic features and exports all concat copies,
+so it does not yet remove the production SPP boundary. Next: one full-spatial
+eight-channel conv1/pooling shard preserving the existing KB128 rounding,
+then physical phase-A/B L1 aliasing and a worker-traffic channel/route proof.
+See [the detailed handoff](sppelan/GATHER_VALIDATION.md#next-bounded-implementation).
 
 ## What is already established
 

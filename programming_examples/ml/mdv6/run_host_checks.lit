@@ -4,4 +4,4 @@
 // CPU-only checks for numerical gates, stream failure handling, routing,
 // and the offline cost model. No xclbins or NPU access are needed.
 // REQUIRES: torch
-// RUN: env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=%S python3 -m unittest test_detection_validation test_validate_stream test_regime_routes test_regime_planner test_runtime_metrics test_device_buffers test_mdv6_executor test_whole_conv sppelan.test_fusion_schedule test_whole_gemm test_whole_gemm_route test_whole_kblocked test_whole_kblocked_route
+// RUN: env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=%S python3 -m unittest test_detection_validation test_validate_stream test_regime_routes test_regime_planner test_runtime_metrics test_device_buffers test_mdv6_executor test_whole_conv sppelan.test_fusion_schedule sppelan.test_gather_layout sppelan.test_gather_ir test_whole_gemm test_whole_gemm_route test_whole_kblocked test_whole_kblocked_route

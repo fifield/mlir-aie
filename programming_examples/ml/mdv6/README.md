@@ -30,6 +30,12 @@ legacy completion and shared sparse-input defects. The subsequent
 runtime-index row extraction as the arithmetic failure and makes all-column
 completion mandatory. Rebuild affected artifacts; batching remains opt-in.
 
+The [SPP9 gather proof](sppelan/GATHER_VALIDATION.md) now keeps full-shape
+worker-major features in memtiles and gathers/replicates 25 concat stripes
+without compute kernels or intermediate host traffic. Exact 30/100/300-frame
+NPU gates pass. This establishes device routing; convolution/pooling integration
+and physical phase-buffer reuse are the next steps, not yet a production route.
+
 ## Run with existing artifacts
 
 These paths describe this checkout's development environment. Adjust them

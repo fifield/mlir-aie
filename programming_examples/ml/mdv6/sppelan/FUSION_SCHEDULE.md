@@ -2,7 +2,10 @@
 
 Date: 2026-09-09. Tracking: `mlir-aie-2vb.2`. This is the concrete schedule
 design for [fusion milestone 2](../FUSION_PERF_PLAN.md), not an implemented
-kernel, compiled placement, or performance result. Default execution is unchanged.
+kernel, compiled full-island placement, or performance result. Default execution
+is unchanged. The subsequent [gather-only proof](GATHER_VALIDATION.md) compiles
+and passes exact 30/100/300-frame NPU tests with zero compute workers. That
+proves the bounded gather's routing/layout, not the complete schedule below.
 
 The dependency-free [model](fusion_schedule.py) checks storage accounting and
 the exact gather ordering. Run from the MDV6 directory:
@@ -87,10 +90,14 @@ Do **not** allocate 64 simultaneous DMA descriptors per destination merely
 because the model emits 64 logical segments. Use a bounded reusable descriptor
 schedule or a gather worker and explicitly size its scratch/queue resources.
 One candidate is serial source-column rounds (four source columns, 16 segments
-each) with completion before reprogramming descriptors. The concrete routing
-and synchronization for remote memtile-to-memtile gathers is the next design
-proof. If direct transfers are unavailable, a compute-tile relay may be needed;
-its memory, core allocation, and routes must be added to the model first.
+each) with completion before reprogramming descriptors. The implemented
+[gather proof](GATHER_VALIDATION.md) instead uses four-dimensional source/scatter
+descriptors and a per-destination RX0→RX1→RX2→RX3→egress lock ring, with one
+stripe slot and seven static BDs per memtile. No compute-tile relay is needed.
+The full-island input/weight/worker-store/output routes still need a combined
+resource proof: this gather already uses five of six memtile S2MM channels.
+Do not add independent worker FIFOs without budgeting how their traffic is
+aggregated or phase-reconfigured.
 
 ## Storage and lifetime budget
 
