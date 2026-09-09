@@ -10,6 +10,11 @@ The forward performance roadmap is [FUSION_PERF_PLAN.md](FUSION_PERF_PLAN.md):
 persistent execution, fewer dispatches, and device-resident fused islands,
 with implementation milestones and fresh-session instructions.
 
+The first implemented foundation and reproducible commands are in
+[FUSION_M0_VALIDATION.md](FUSION_M0_VALIDATION.md): persistent hybrid execution,
+matched inference-only timing, and a three-route small-chain residency proof.
+Full-model device-resident fusion is still in progress; the default is unchanged.
+
 ## Run with existing artifacts
 
 These paths describe this checkout's development environment. Adjust them

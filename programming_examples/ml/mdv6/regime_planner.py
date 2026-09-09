@@ -79,7 +79,8 @@ def model_layers():
     """
     configs = {c[0]: c for c in literal_table(ROOT / "conv/build_multicore.py", "CONFIGS")}
     tree = ast.parse((ROOT / "test_full_model_mc.py").read_text())
-    main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
+    functions = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+    main = functions.get("run_hybrid_forward", functions["main"])
     layers = []
 
     def add(name, runtime, h, w, ic, oc, kind, th=0, tw=1, ob=0, stride=1, count=1):

@@ -131,11 +131,8 @@ def run_re_mc(layer, inp, H, W, ic, oc, part, proc,
               fuse_bn(layer.conv4), H, W, oc, tc4, tc4, oc4, 1, 1, 0)
 
 
-def main(seed=42, class_tolerance=5.0, vector_tolerance=5.0, metrics=None):
-    print("=" * 70)
-    print("MDV6 Full Model — 32-Core Multicore")
-    print("=" * 70)
-
+def load_model():
+    """Load immutable evaluation weights and pre-fuse Conv+BN once."""
     model = MDV6MITYOLOv9c(num_classes=3).eval()
     # Load trained weights if available (random weights cause signal attenuation → NaN)
     _weights_path = os.path.join(os.path.dirname(__file__), 'mdv6_bf16_weights.pt')
@@ -163,6 +160,24 @@ def main(seed=42, class_tolerance=5.0, vector_tolerance=5.0, metrics=None):
             fuse_bn(_m)
             _n_fused += 1
     print(f"{_n_fused} layers in {time.time()-_tpw:.2f}s")
+    return model
+
+
+def pad_conv0_weights(model):
+    """Persistent packed stem weights; physical IC=8, logical IC=3."""
+    weights = fuse_bn(model.conv0)
+    count = 32 * 3 * 3 * 3
+    original = torch.from_numpy(weights[:count].copy()).view(torch.bfloat16).reshape(32, 3, 3, 3)
+    padded = torch.zeros(32, 8, 3, 3, dtype=torch.bfloat16)
+    padded[:, :3] = original
+    return np.concatenate([padded.flatten().view(torch.uint16).numpy(), weights[count:]])
+
+
+def main(seed=42, class_tolerance=5.0, vector_tolerance=5.0, metrics=None):
+    print("=" * 70)
+    print("MDV6 Full Model — 32-Core Multicore")
+    print("=" * 70)
+    model = load_model()
 
     torch.manual_seed(seed)
     x = torch.randn(1, 3, 640, 640, dtype=torch.bfloat16)
@@ -305,6 +320,17 @@ def main(seed=42, class_tolerance=5.0, vector_tolerance=5.0, metrics=None):
             all_pass = all_pass and ok
         return all_pass
 
+    det, t_total = run_hybrid_forward(model, x)
+    return report_comparison(ref, det, t_total, class_tolerance, vector_tolerance, metrics)
+
+
+def run_hybrid_forward(model, x, conv0_weights=None):
+    """Shared host-materialized graph; no model loading or CPU reference.
+
+    CPU RepConv/pooling/layout conversions and detection remain inside this
+    boundary. Runtime buffers/contexts are initialized lazily by run_tiled_mc.
+    Optional diagnostic modes retain their legacy behavior.
+    """
     print("\n--- Forward pass (32-core) ---")
     t_start = time.time()
 
@@ -345,19 +371,7 @@ def main(seed=42, class_tolerance=5.0, vector_tolerance=5.0, metrics=None):
     print("  conv0...", end=" ", flush=True); t = time.time()
     inp_padded = torch.zeros(640, 640, 8, dtype=torch.bfloat16)
     inp_padded[:, :, :3] = inp
-    conv0_wt = fuse_bn(model.conv0)
-    # Pad weights: [OC*IC*K*K + BN] with IC=3→8
-    oc0, ic0, ks0 = 32, 3, 3
-    ic0_pad = 8
-    wt_conv = conv0_wt[:oc0*ic0*ks0*ks0]
-    wt_bn = conv0_wt[oc0*ic0*ks0*ks0:]
-    w_orig = torch.from_numpy(wt_conv.copy()).view(torch.bfloat16).reshape(oc0, ic0, ks0, ks0)
-    w_pad = torch.zeros(oc0, ic0_pad, ks0, ks0, dtype=torch.bfloat16)
-    w_pad[:, :ic0, :, :] = w_orig
-    conv0_wt_padded = np.concatenate([
-        w_pad.flatten().view(torch.uint16).numpy(),
-        wt_bn,
-    ])
+    conv0_wt_padded = pad_conv0_weights(model) if conv0_weights is None else conv0_weights
     conv0_hwc = rt('mc_ftconv0', 'ftconv0', inp_padded, conv0_wt_padded,
                     320, 320, 32, 20, 20, 32, 2, 3, 1)
     print(f"{time.time()-t:.3f}s"); _chk("conv0", conv0_hwc)
@@ -504,7 +518,10 @@ def main(seed=42, class_tolerance=5.0, vector_tolerance=5.0, metrics=None):
     print("CPU")
 
     t_total = time.time() - t_start
+    return det, t_total
 
+
+def report_comparison(ref, det, t_total, class_tolerance=5.0, vector_tolerance=5.0, metrics=None):
     # Compare
     result = compare_detection_outputs(ref, det, class_tolerance, vector_tolerance)
     if metrics is not None:

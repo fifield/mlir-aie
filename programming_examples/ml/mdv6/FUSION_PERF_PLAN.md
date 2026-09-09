@@ -1,7 +1,7 @@
 # MDV6 device-resident fusion implementation plan
 
 Written 2026-09-09. Planning baseline: `ca0787a4d` on branch `mdv6`.
-Implementation milestones below are proposed, not completed. Existing evidence
+Implementation milestones below are proposed unless marked otherwise. Existing evidence
 is recorded in [VALIDATION.md](VALIDATION.md); environment setup is in
 [README.md](README.md). This document sets the forward performance direction.
 [PERF_PLAN.md](PERF_PLAN.md) retains historical measurements and design notes.
@@ -33,6 +33,22 @@ persistent executor + explicit tensor layouts
 
 No particular FPS or 100–1000x speedup is established. Targets below concern
 capabilities and graph structure; latency must be measured at each stage.
+
+### Execution update — 2026-09-09
+
+The first implementation increment is in
+[FUSION_M0_VALIDATION.md](FUSION_M0_VALIDATION.md): a persistent hybrid executor,
+matched-scope legacy/persistent benchmark, actual runtime/sync counters, guarded
+external-buffer contracts, and distinct-weight three-tile host/BO/ObjectFifo
+comparison. Persistent full-model execution passes 30 changing-input frames;
+the isolated three-route proof passes 10, including under Python optimization.
+The connected chain removes one submission and its intermediate external DMA;
+the full model still performs 453 submissions and host-materializes activations.
+
+Milestone 0 is **partial**, not closed wholesale: named/prebound full-island
+buffers, graph-wide layouts/lifetimes and full device-traffic observation remain.
+Milestones 1–4 are not implemented. Next: `mlir-aie-2vb.2` (first full-island
+contracts/schedule) and `mlir-aie-2vb.3` (whole-operator command sequencing).
 
 ## What is already established
 
@@ -94,7 +110,8 @@ is a means of supporting execution regions, not the sole optimization target.
 
 ## Milestone 0 — persistent executor, layouts and measurement
 
-Suggested new module: `mdv6_executor.py` (not present at planning time).
+Initial module: `mdv6_executor.py` (implemented as a persistent hybrid baseline;
+see the execution update for remaining gaps).
 Separate construction from `run_frame(input)`:
 
 1. Load the trained model and fuse/pack weights once.
@@ -409,8 +426,9 @@ python3 -m unittest test_detection_validation test_validate_stream \
 python3 regime_planner.py --cores 4 8 16 24 32 --output-dir /tmp/mdv6-planner
 ```
 
-Existing baseline and streaming commands are in README. New executor/island
-commands do not exist yet and must be documented as they are implemented.
+Existing baseline and streaming commands are in README. Executor and small-chain
+commands are now in FUSION_M0_VALIDATION.md. Full-shape island commands do not
+exist yet and must be documented as they are implemented.
 Use unique evidence directories and separate experimental artifacts. Record
 commit, dirty changes, imported runtime location, weights hash, build provenance,
 flags, schedule, correctness metrics, dispatch/context counts, sync/DMA bytes,
