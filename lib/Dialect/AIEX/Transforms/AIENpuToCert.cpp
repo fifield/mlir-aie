@@ -20,6 +20,7 @@
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
 #include <bitset>
+#include <limits>
 #include <map>
 #include <set>
 #include <type_traits>
@@ -763,15 +764,24 @@ struct NpuAddressPatchToCertApplyOffset57
                   ConversionPatternRewriter &rewriter) const override {
     AIEX::NpuBlockWriteOp blockWriteOp = findPatchedBlockWrite(op);
     std::optional<uint32_t> argIdx = op.getArgIdx();
-    if (!blockWriteOp || !argIdx)
+    if (!blockWriteOp)
       return failure();
     auto getGlobalOp =
         dyn_cast<memref::GetGlobalOp>(blockWriteOp.getData().getDefiningOp());
     if (!getGlobalOp)
       return failure();
+    if (!argIdx)
+      return op.emitOpError(
+          "requires a resolved 'arg_idx' for CERT lowering; run "
+          "-aie-resolve-address-patch-buffers first");
+    if (*argIdx > std::numeric_limits<uint16_t>::max())
+      return op.emitOpError("arg_idx exceeds the CERT 16-bit offset range");
+
+    // replace the address with the new address
     rewriter.setInsertionPoint(blockWriteOp);
     rewriter.replaceOpWithNewOp<AIEX::CertApplyOffset57Op>(
-        op, getGlobalOp.getName(), 1, *argIdx);
+        op, getGlobalOp.getName(), 1,
+        static_cast<uint16_t>(*argIdx));
     return success();
   }
 };

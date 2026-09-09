@@ -143,36 +143,40 @@ struct AIEAssignRuntimeSequenceBDIDsPass
     if (inserted) {
       for (AIE::DmaBody program : device.getOps<AIE::DmaBody>()) {
         auto &reservations = cached->second[program.getTileID()];
-        DenseMap<Block *, std::pair<uint32_t, AIE::DMAChannelDir>> channels;
-        Region &body = program.getDmaBody();
-        for (Block &block : body)
+        auto seedBd = [&](AIE::DMABDOp bd, uint32_t channel,
+                          AIE::DMAChannelDir dir) {
+          if (auto id = bd.getBdId())
+            reservations.push_back({channel, dir, *id});
+        };
+        Region &region = program.getDmaBody();
+
+        // Block-form DMA programs associate a BD chain with each dma_start.
+        // Walk every successor so a shared chain is seeded in every pool from
+        // which it is reachable. Repeated insertions into one pool are
+        // harmless.
+        for (Block &block : region) {
           for (AIE::DMAStartOp start : block.getOps<AIE::DMAStartOp>()) {
-            Block *next = start.getDest();
-            while (next && !channels.contains(next)) {
-              channels[next] = {start.getChannelIndex(), start.getChannelDir()};
-              next =
-                  next->hasNoSuccessors() ? nullptr : next->getSuccessors()[0];
+            llvm::SmallPtrSet<Block *, 16> visited;
+            SmallVector<Block *, 16> worklist;
+            if (Block *dest = start.getDest(); visited.insert(dest).second)
+              worklist.push_back(dest);
+            while (!worklist.empty()) {
+              Block *bdBlock = worklist.pop_back_val();
+              for (AIE::DMABDOp bd : bdBlock->getOps<AIE::DMABDOp>())
+                seedBd(bd, start.getChannelIndex(), start.getChannelDir());
+              for (Block *successor : bdBlock->getSuccessors())
+                if (visited.insert(successor).second)
+                  worklist.push_back(successor);
             }
           }
-        for (AIE::DMAOp dma : body.getOps<AIE::DMAOp>())
+        }
+
+        // Region-form DMA programs carry channel/direction directly.
+        for (AIE::DMAOp dma : region.getOps<AIE::DMAOp>())
           for (Region &bdRegion : dma.getBds())
-            for (Block &block : bdRegion)
-              channels[&block] = {dma.getChannelIndex(), dma.getChannelDir()};
-        body.walk([&](AIE::DMABDOp bd) {
-          if (auto id = bd.getBdId()) {
-            auto it = channels.find(bd->getBlock());
-            if (it != channels.end()) {
-              auto [channel, dir] = it->second;
-              reservations.push_back({channel, dir, *id});
-            } else {
-              // An unclassified static BD must remain reserved in every pool.
-              for (uint32_t channel = 0; channel < 16; ++channel)
-                for (AIE::DMAChannelDir dir :
-                     {AIE::DMAChannelDir::S2MM, AIE::DMAChannelDir::MM2S})
-                  reservations.push_back({channel, dir, *id});
-            }
-          }
-        });
+            bdRegion.walk([&](AIE::DMABDOp bd) {
+              seedBd(bd, dma.getChannelIndex(), dma.getChannelDir());
+            });
       }
     }
     for (const StaticBd &bd : cached->second[tile.getTileID()])
