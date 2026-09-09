@@ -357,13 +357,14 @@ def main():
     ])
     conv0_hwc = rt('mc_ftconv0', 'ftconv0', inp_padded, conv0_wt_padded,
                     320, 320, 32, 20, 20, 32, 2, 3, 1)
-    print(f"{time.time()-t:.1f}s"); _chk("conv0", conv0_hwc)
+    print(f"{time.time()-t:.3f}s"); _chk("conv0", conv0_hwc)
 
     # Conv1 (320→160, 32→64, s=2)
     print("  conv1...", end=" ", flush=True); t = time.time()
     conv1_hwc = rt('mc_ftconv1', 'ftconv1', conv0_hwc, fuse_bn(model.conv1),
                     160, 160, 64, 12, 12, 16, 2, 3, 1)
-    print(f"{time.time()-t:.1f}s"); _chk("conv1", conv1_hwc)
+    t2 = time.time() - t
+    print(f"{t2:.3f}s"); _chk("conv1", conv1_hwc)
     # --- Diagnostic: check conv1 output vs PyTorch reference ---
     if os.environ.get("DEBUG_CONV1"):
         with torch.no_grad():
@@ -384,7 +385,7 @@ def main():
                          'mc_elan_c3', 'tf_elan_conv3x3',
                          'mc_elan_c4', 'tf_elan_conv4',
                          8, 64, 8, 32, 8, 64, 64, 32)
-    print(f"{time.time()-t:.1f}s"); _chk("elan2", elan2)
+    print(f"{time.time()-t:.3f}s"); _chk("elan2", elan2)
     # --- Deep-debug elan2: feed NPU conv1 output into PyTorch elan2 ---
     if os.environ.get("DEBUG_ELAN2"):
         with torch.no_grad():
@@ -399,40 +400,40 @@ def main():
     # AConv3 + rep_elan4 [B3]
     print("  aconv3...", end=" ", flush=True); t = time.time()
     ac3 = run_aconv_mc('mc_aconv3', 'tf_aconv3', model.aconv3, to_nchw(elan2), 80, 80, 128, 8, 16)
-    print(f"{time.time()-t:.1f}s"); _chk("aconv3", ac3)
+    print(f"{time.time()-t:.3f}s"); _chk("aconv3", ac3)
     print("  rep_elan4...", end=" ", flush=True); t = time.time()
     b3 = run_re_mc(model.rep_elan4, ac3, 80, 80, 128, 128, 128, 64,
                     'mc_re4_c1', 're4_conv1', 'mc_re4_c3', 're4_conv3x3', 'mc_re4_c4', 're4_conv4',
                     'mc_re4_rn1', 're4_rn_conv1x1_64_32', 'mc_re4_rn3', 're4_rn_conv3x3_32_32',
                     'mc_elan_c1', 'tf_elan_conv1',
                     10, 64, 12, 16, 8, 32, 16, 32, 8, 32, 8, 64)
-    print(f"{time.time()-t:.1f}s"); _chk("rep_elan4", b3)
+    print(f"{time.time()-t:.3f}s"); _chk("rep_elan4", b3)
 
     # AConv5 + rep_elan6 [B4]
     print("  aconv5...", end=" ", flush=True); t = time.time()
     b3n = to_nchw(b3)
     ac5 = run_aconv_mc('mc_aconv5', 'aconv5', model.aconv5, b3n, 40, 40, 192, 4, 8)
-    print(f"{time.time()-t:.1f}s"); _chk("aconv5", ac5)
+    print(f"{time.time()-t:.3f}s"); _chk("aconv5", ac5)
     print("  rep_elan6...", end=" ", flush=True); t = time.time()
     b4 = run_re_mc(model.rep_elan6, ac5, 40, 40, 192, 192, 192, 96,
                     'mc_re6_c1', 're6_conv1', 'mc_re6_c3', 're6_conv3x3', 'mc_re6_c4', 're6_conv4',
                     'mc_re6_rn1', 're6_rn_c1', 'mc_re6_rn3', 're6_rn_c3',
                     'mc_re6_rnm', 're6_rn_merge',
                     8, 32, 8, 16, 4, 32, 10, 48, 8, 16, 8, 48)
-    print(f"{time.time()-t:.1f}s"); _chk("rep_elan6", b4)
+    print(f"{time.time()-t:.3f}s"); _chk("rep_elan6", b4)
 
     # AConv7 + rep_elan8 [B5]
     print("  aconv7...", end=" ", flush=True); t = time.time()
     b4n = to_nchw(b4)
     ac7 = run_aconv_mc('mc_aconv7', 'aconv7', model.aconv7, b4n, 20, 20, 256, 4, 8)
-    print(f"{time.time()-t:.1f}s"); _chk("aconv7", ac7)
+    print(f"{time.time()-t:.3f}s"); _chk("aconv7", ac7)
     print("  rep_elan8...", end=" ", flush=True); t = time.time()
     b5 = run_re_mc(model.rep_elan8, ac7, 20, 20, 256, 256, 256, 128,
                     'mc_re8_c1', 're8_conv1', 'mc_re8_c3', 're8_conv3x3', 'mc_re8_c4', 're8_conv4',
                     'mc_re8_rn1', 're8_rn_c1', 'mc_re8_rn3', 're8_rn_c3',
                     'mc_re8_c1', 're8_rn_merge',
                     4, 32, 4, 16, 4, 16, 8, 64, 8, 16, 4, 32)
-    print(f"{time.time()-t:.1f}s"); _chk("rep_elan8", b5)
+    print(f"{time.time()-t:.3f}s"); _chk("rep_elan8", b5)
 
     # SPP9
     print("  spp9...", end=" ", flush=True); t = time.time()
@@ -444,7 +445,7 @@ def main():
         feats.append(cur.squeeze(0).permute(1,2,0).contiguous())
     n3 = rt('mc_re8_c4', 're8_conv4', torch.cat(feats, dim=2), fuse_bn(model.spp9.conv5),
             20, 20, 256, 4, 4, 16, 1, 1, 0)
-    print(f"{time.time()-t:.1f}s"); _chk("spp9/n3", n3)
+    print(f"{time.time()-t:.3f}s"); _chk("spp9/n3", n3)
 
     # Neck
     print("  rep_elan12...", end=" ", flush=True); t = time.time()
@@ -456,7 +457,7 @@ def main():
                     'mc_re6_rn1', 're6_rn_c1', 'mc_re6_rn3', 're6_rn_c3',
                     'mc_re6_rnm', 're6_rn_merge',
                     4, 32, 8, 16, 4, 32, 10, 48, 8, 16, 8, 48)
-    print(f"{time.time()-t:.1f}s"); _chk("rep_elan12/n4", n4)
+    print(f"{time.time()-t:.3f}s"); _chk("rep_elan12/n4", n4)
 
     print("  rep_elan15...", end=" ", flush=True); t = time.time()
     n4n = to_nchw(n4)
@@ -467,7 +468,7 @@ def main():
                     'mc_re4_rn1', 're4_rn_conv1x1_64_32', 'mc_re4_rn3', 're4_rn_conv3x3_32_32',
                     'mc_elan_c4', 're15_rn_merge',
                     6, 32, 12, 16, 8, 32, 16, 32, 8, 32, 8, 64)
-    print(f"{time.time()-t:.1f}s"); _chk("rep_elan15/p3", p3)
+    print(f"{time.time()-t:.3f}s"); _chk("rep_elan15/p3", p3)
 
     # Head P4
     print("  head P4...", end=" ", flush=True); t = time.time()
@@ -479,7 +480,7 @@ def main():
                     'mc_re6_rn1', 're6_rn_c1', 'mc_re6_rn3', 're6_rn_c3',
                     'mc_re6_rnm', 're6_rn_merge',
                     4, 32, 8, 16, 4, 32, 10, 48, 8, 16, 8, 48)
-    print(f"{time.time()-t:.1f}s"); _chk("head_p4", p4)
+    print(f"{time.time()-t:.3f}s"); _chk("head_p4", p4)
 
     # Head P5
     print("  head P5...", end=" ", flush=True); t = time.time()
@@ -491,7 +492,7 @@ def main():
                     'mc_re8_rn1', 're8_rn_c1', 'mc_re8_rn3', 're8_rn_c3',
                     'mc_re8_c1', 're8_rn_merge',
                     4, 32, 4, 16, 4, 16, 8, 64, 8, 16, 4, 32)
-    print(f"{time.time()-t:.1f}s"); _chk("head_p5", p5)
+    print(f"{time.time()-t:.3f}s"); _chk("head_p5", p5)
 
     # Detection (CPU)
     print("  detect...", end=" ", flush=True)
