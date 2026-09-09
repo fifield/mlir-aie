@@ -35,6 +35,8 @@ _whole_conv = None
 _whole_conv_dir = os.environ.get("MDV6_WHOLE_CONV_DIR")
 _whole_gemm = None
 _whole_gemm_dir = os.environ.get("MDV6_WHOLE_GEMM_DIR")
+_whole_kblocked = None
+_whole_kblocked_dir = os.environ.get("MDV6_WHOLE_KBLOCKED_DIR")
 USE_REGIME_XCLBINS = os.environ.get("USE_REGIME_XCLBINS", "0") == "1"
 USE_REGIME_KBLOCKED = os.environ.get("USE_REGIME_KBLOCKED", "0") == "1"
 # Explicit R1-R3 selection includes its K-blocked members. Unset/legacy keeps
@@ -233,6 +235,9 @@ def cached_kernel_inventory():
     if _whole_gemm is not None:
         rows.append(dict(family="whole-gemm", xclbin=str(_whole_gemm.xclbin),
                          instructions=str(_whole_gemm.insts)))
+    if _whole_kblocked is not None:
+        rows.append(dict(family="whole-kblocked", xclbin=str(_whole_kblocked.xclbin),
+                         instructions=str(_whole_kblocked.insts)))
     return sorted(rows, key=lambda row: (row["xclbin"], row["instructions"]))
 
 
@@ -906,6 +911,20 @@ def run_gemm_conv1x1_mc(gemm_name, sc_name, input_hwc, weights_uint16,
     Tries K-blocked path first (no OC blocking), falls back to OC-blocked,
     then to scalar MC.
     """
+    if _whole_kblocked_dir and gemm_name == "gemm_re4_c4":
+        # re4 and re15 use the same exact shape, with different trained weights.
+        # Preserve their KB16 partial-sum boundaries, and never silently retry.
+        if (tuple(input_hwc.shape), out_h, out_w, out_ch) != ((80, 80, 256), 80, 80, 128) or oc_block not in (None, 128):
+            raise ValueError("whole-K-blocked route requires exact re4/re15 Conv4 contract")
+        global _whole_kblocked
+        if _whole_kblocked is None:
+            from types import SimpleNamespace
+            from whole_kblocked import WholeKBlocked
+            backend = SimpleNamespace(torch=torch, iron=iron, NPUKernel=NPUKernel,
+                                      DefaultNPURuntime=DefaultNPURuntime,
+                                      _fill_and_sync=_fill_and_sync)
+            _whole_kblocked = WholeKBlocked(_whole_kblocked_dir, backend)
+        return _whole_kblocked.run(input_hwc, weights_uint16)
     if (_whole_gemm_dir and gemm_name == "gemm_elan_c4"
             and (out_h, out_w) == (160, 160)):
         # The same name is an alias for an 80x80 RN merge: leave that on the

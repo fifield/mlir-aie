@@ -11,6 +11,7 @@ class RouteTests(unittest.TestCase):
         tree = ast.parse(Path(__file__).with_name('run_tiled_mc.py').read_text())
         node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'run_gemm_conv1x1_mc')
         ns = dict(_whole_gemm_dir='/experimental' if enabled else None, _whole_gemm=None,
+                  _whole_kblocked_dir=None, _whole_kblocked=None,
                   torch=None, iron=None, NPUKernel=None, DefaultNPURuntime=None, _fill_and_sync=None,
                   _gemm_choose_k_block=Mock(side_effect=RuntimeError('baseline path')))
         exec(compile(ast.Module(body=[node], type_ignores=[]), '<route>', 'exec'), ns)

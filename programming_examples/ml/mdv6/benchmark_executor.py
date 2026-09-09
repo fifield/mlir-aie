@@ -102,7 +102,7 @@ def main(argv=None):
             'runtime_module': getattr(sys.modules.get(type(runtime).__module__), '__file__', None),
             'build_root': os.environ.get('MDV6_BUILD_DIR'),
             'route_flags': {key: os.environ.get(key) for key in
-                            ('MDV6_REGIME_ROUTE', 'USE_REGIME_XCLBINS', 'USE_REGIME_KBLOCKED', 'USE_GEMM_CONV1X1', 'MDV6_WHOLE_CONV_DIR', 'MDV6_WHOLE_GEMM_DIR')},
+                            ('MDV6_REGIME_ROUTE', 'USE_REGIME_XCLBINS', 'USE_REGIME_KBLOCKED', 'USE_GEMM_CONV1X1', 'MDV6_WHOLE_CONV_DIR', 'MDV6_WHOLE_GEMM_DIR', 'MDV6_WHOLE_KBLOCKED_DIR')},
         }
         with RuntimeMetrics(runtime, runtime._tensor_class) as metrics:
             def make_input(seed):

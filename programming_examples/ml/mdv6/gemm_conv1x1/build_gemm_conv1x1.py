@@ -245,6 +245,10 @@ def build_one(name, n_cores, tile_m, ic, oc, k_block, ppc, build_dir):
     # Generate MLIR
     kb_arg = f" {k_block}" if k_block > 0 else " 0"
     cmd = f"python3 {script} {n_cores} {tile_m} {ic} {oc} {ppc}{kb_arg}"
+    # Diagnostic reference build: use an isolated MDV6_BUILD_DIR to avoid
+    # confusing these completion-fenced artifacts with the default baseline.
+    if os.environ.get("MDV6_GEMM_WAIT_ALL_COLUMNS") == "1":
+        cmd += " --wait-all-columns"
     print(f"  {name}: MLIR...", end=" ", flush=True)
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     if result.returncode != 0:
@@ -279,6 +283,8 @@ def _generate_gemm_mlir(build_dir, name, n_cores, tile_m, ic, oc, k_block, ppc,
         "python3", script, str(n_cores), str(tile_m), str(ic), str(oc),
         str(ppc), str(k_block),
     ]
+    if os.environ.get("MDV6_GEMM_WAIT_ALL_COLUMNS") == "1":
+        cmd.append("--wait-all-columns")
     if active is not None:
         active_tile_m, active_ic, active_oc, active_ppc = active
         if active_ppc != ppc:

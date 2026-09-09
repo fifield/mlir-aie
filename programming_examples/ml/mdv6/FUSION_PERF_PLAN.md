@@ -63,7 +63,12 @@ GEMM batching now also covers ELAN2's final projection: four spatial batches
 execute in one submission with weights retained across all eight patches/core.
 See [FUSION_GEMM_VALIDATION.md](FUSION_GEMM_VALIDATION.md). GEMM-only uses 450
 full-frame submissions; with the previous convolution batching it uses 414.
-Both remain opt-in; K-blocked spatial batching and inter-operator fusion remain.
+Both remain opt-in. [K-blocked spatial batching](FUSION_KBLOCKED_VALIDATION.md)
+now implements a 3-to-1 step for re4/re15 Conv4 (449/frame, 410 combined), but
+acceptance is blocked by newly exposed legacy completion and shared sparse-input
+defects. See `mlir-aie-2vb.6` and that document's strict zero-row reproduction;
+fix correctness before sustained performance acceptance or promotion.
+Inter-operator fusion remains unimplemented at full-model scale.
 
 ## What is already established
 
@@ -426,7 +431,8 @@ particular memtile route.
    weights and the exact build root; missing source-tree xclbins are expected.
 3. Select the baseline explicitly: `MDV6_REGIME_ROUTE=legacy`,
    `USE_REGIME_XCLBINS=0`, `USE_REGIME_KBLOCKED=0`. Unset
-   `MDV6_WHOLE_CONV_DIR` / `MDV6_WHOLE_GEMM_DIR` for baseline runs and reject
+   `MDV6_WHOLE_CONV_DIR` / `MDV6_WHOLE_GEMM_DIR` / `MDV6_WHOLE_KBLOCKED_DIR`
+   for baseline runs and reject
    diagnostic modes that return before full-model validation. If the environment/artifacts changed,
    establish a fresh short baseline before interpreting a regression.
 4. Implement Milestone 0's buffer/executor contract and improve the existing

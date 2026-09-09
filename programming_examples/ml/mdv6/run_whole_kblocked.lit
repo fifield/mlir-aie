@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+// Fresh baseline and whole-spatial K-blocked GEMM artifacts; changing inputs
+// and weights, legacy-equivalent outputs and counted 3-to-1 submissions.
+// Reference awaits all columns to avoid legacy early-completion readback.
+// This is not a mathematical-correctness gate: a shared zero-row discrepancy
+// in the unchanged K-blocked kernel remains under investigation.
+// REQUIRES: ryzen_ai_npu2, peano, torch, mdv6_weights
+// RUN: mkdir -p %t.dir
+// RUN: make -C %t.dir -f %S/gemm_conv1x1/Makefile.whole_kblocked
+// RUN: env MDV6_BUILD_DIR=%t.dir MDV6_GEMM_WAIT_ALL_COLUMNS=1 python3 %S/gemm_conv1x1/build_gemm_conv1x1.py gemm_t68_ic256_oc128_kb16_p1
+// RUN: env MDV6_BUILD_DIR=%t.dir %run_on_npu2% python3 -O %S/gemm_conv1x1/test_whole_kblocked.py --build-dir %t.dir --frames 30

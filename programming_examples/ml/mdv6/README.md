@@ -23,6 +23,11 @@ blocks. The document records its build/run commands and validation limits.
 ELAN2 projection with one submission and within-operator weight residency.
 It composes with convolution batching; neither route changes the default.
 
+[K-blocked batching](FUSION_KBLOCKED_VALIDATION.md) implements another opt-in
+3-to-1 submission step (449/frame, or 410 combined). Its boundary tests exposed
+legacy completion and shared sparse-input defects; acceptance is blocked pending
+their resolution. The document contains exact reproductions and next actions.
+
 ## Run with existing artifacts
 
 These paths describe this checkout's development environment. Adjust them
@@ -40,7 +45,7 @@ cd /home/jfifield/npu-dev-mdv6/mlir-aie/programming_examples/ml/mdv6
 export MDV6_REGIME_ROUTE=legacy
 export USE_REGIME_XCLBINS=0
 export USE_REGIME_KBLOCKED=0
-unset MDV6_WHOLE_CONV_DIR MDV6_WHOLE_GEMM_DIR
+unset MDV6_WHOLE_CONV_DIR MDV6_WHOLE_GEMM_DIR MDV6_WHOLE_KBLOCKED_DIR
 
 # Compare one full-model forward pass with the PyTorch reference.
 python3 test_full_model_mc.py
