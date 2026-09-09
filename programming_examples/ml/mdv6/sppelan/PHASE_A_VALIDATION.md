@@ -198,6 +198,12 @@ tests all passed (3/3). The complete CPU suite also passes 127 tests under
 
 ## Next integration cut
 
+Update: the first one-column packet-aggregation sentinel below is now
+[implemented and hardware validated](PACKET_AGGREGATE_VALIDATION.md).
+Phase-B strided joins, finite phase transitions, L1 aliasing, and four-column
+coexistence remain. The proposed full-island channel table is not yet validated
+as a combined schedule.
+
 Keep the independent gather and arithmetic proofs as regression targets.
 `mlir-aie-2vb.2.3` next needs a **one-column, four-worker packet-aggregation
 sentinel proof** before sixteen-worker expansion, followed by explicit L1

@@ -1,0 +1,15 @@
+# One-column packet aggregation proof, isolated from arithmetic/gather artifacts.
+srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
+include ${srcdir}/../../../makefile-common
+
+.PHONY: all
+all: packet_aggregate.xclbin packet_aggregate.bin
+
+packet_aggregate.o: ${srcdir}/packet_aggregate.cc
+	${PEANO_INSTALL_DIR}/bin/clang ${PEANOWRAP2P_FLAGS} -c $< -o $@
+
+packet_aggregate.mlir: ${srcdir}/aie2_packet_aggregate.py
+	python3 $< > $@
+
+packet_aggregate.xclbin packet_aggregate.bin &: packet_aggregate.mlir packet_aggregate.o
+	aiecc.py --aie-generate-xclbin --aie-generate-npu-insts --no-compile-host --no-xchesscc --no-xbridge --xclbin-name=packet_aggregate.xclbin --npu-insts-name=packet_aggregate.bin $<

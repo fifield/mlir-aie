@@ -94,6 +94,14 @@ phase-B joins and four-column gather coexistence. Its proposed channel budget
 and unresolved ownership/routing constraints are in
 [the shard handoff](sppelan/PHASE_A_VALIDATION.md#next-integration-cut).
 
+The [one-column packet-aggregation proof](sppelan/PACKET_AGGREGATE_VALIDATION.md)
+now passes exact 30/100/300-frame NPU gates. Four workers receive diagnostic
+payloads in reverse order and return tagged results in forward, receive-gated
+grant order through one memtile receive channel. This proves bounded sender
+aggregation, not arithmetic integration or phase aliasing. The next cut is
+25 bounded phase-B stripe joins with the same fixed descriptor count; the
+combined finite phase controller and four-column gather coexistence remain.
+
 ## What is already established
 
 | Measurement, 2026-09-09 | Default | Restored R1–R3 |

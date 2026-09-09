@@ -42,6 +42,11 @@ retaining intermediate planes in L1. Exact 80-case and 100/300-frame NPU gates
 pass across trained channel slices. Connecting sixteen workers to gather and
 final projection is still pending; neither proof changes the default route.
 
+[Four-worker packet aggregation](sppelan/PACKET_AGGREGATE_VALIDATION.md) now
+passes exact 30/100/300-frame NPU gates using one memtile receive channel and
+device-only output grants. Bounded stripe joins and phase-buffer reuse are
+the next integration steps; this diagnostic does not execute SPP arithmetic.
+
 ## Run with existing artifacts
 
 These paths describe this checkout's development environment. Adjust them
