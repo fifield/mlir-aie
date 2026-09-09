@@ -165,12 +165,10 @@ packet_aggregate.cc     4255788bbca837cf48cd13a364cb1baa119e28a9952e0db324d28ece
 
 ## Next bounded integration step
 
-Prove a reusable per-stripe join before combining this with phase A/gather.
-This next bounded task is `mlir-aie-2vb.2.3.2`.
-Proposed ABI: input `[25,4,16,16]`, output `[25,16,64]` uint16, preserving the
-same worker-specific diagnostic tags. Use 2 KiB input and output memtile slots
-plus the 64-byte grant token; retain 14 bounded BDs rather than unrolling all
-25 stripes into descriptors. Proposed artifacts are
-`packet_stripe_join.xclbin` / `packet_stripe_join.bin`.
-That schedule still needs independent address/lock/resource checks and exact
-changing-input hardware gates. It is not established by the full-plane proof.
+The subsequent reusable per-stripe join (`mlir-aie-2vb.2.3.2`) now passes its
+own compiled resource and exact 30/100/300-frame hardware gates. Its ABI is
+input `[25,4,16,16]`, output `[25,16,64]` uint16 with the same worker tags.
+It uses 2 KiB input/output slots and a 64-byte grant token, retaining 14 BDs
+across all 25 stripes. See [its independent evidence and next handoff](PACKET_STRIPE_JOIN_VALIDATION.md).
+The next integration cut is four-column full-plane aggregation feeding the
+gather directly; phase-buffer aliasing and finite phase switching remain separate.

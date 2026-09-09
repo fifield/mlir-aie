@@ -88,7 +88,7 @@ in L1 and runs projection plus three pools in one submission. It is not connecte
 to gather or the final projection yet. Physical phase-A/B L1 aliasing and a
 worker-traffic channel/route proof are next.
 See [the detailed handoff](sppelan/GATHER_VALIDATION.md#next-bounded-implementation).
-The concrete next transport cut is a one-column, four-worker packet-output
+The transport sequence is a one-column, four-worker packet-output
 aggregation sentinel with explicit sequential grants, followed by strided
 phase-B joins and four-column gather coexistence. Its proposed channel budget
 and unresolved ownership/routing constraints are in
@@ -98,9 +98,20 @@ The [one-column packet-aggregation proof](sppelan/PACKET_AGGREGATE_VALIDATION.md
 now passes exact 30/100/300-frame NPU gates. Four workers receive diagnostic
 payloads in reverse order and return tagged results in forward, receive-gated
 grant order through one memtile receive channel. This proves bounded sender
-aggregation, not arithmetic integration or phase aliasing. The next cut is
-25 bounded phase-B stripe joins with the same fixed descriptor count; the
-combined finite phase controller and four-column gather coexistence remain.
+aggregation, not arithmetic integration or phase aliasing.
+
+The [bounded packet stripe join](sppelan/PACKET_STRIPE_JOIN_VALIDATION.md) now
+also passes exact 30/100/300-frame NPU gates. All 25 stripes reuse 14 memtile
+descriptors and 2 KiB input/output slots inside one host submission; four
+worker packets scatter directly into each HWC output stripe. This proves a
+repeating phase-B-shaped transport, not the finite phase-A/B controller.
+Next, connect four full-plane packet aggregates directly to the existing
+gather without host readback/re-upload. The proposed per-memtile budget is
+19 BDs/locks, six S2MM and three MM2S channels, and 221,248 buffer bytes;
+four-column packet/circuit coexistence must still compile and pass changing-frame
+hardware gates. See the stripe validation handoff for exact ownership and ABI.
+Physical L1 phase aliasing, finite phase switching, and numerical integration
+remain unproven. These diagnostic milestones do not change full-model latency.
 
 ## What is already established
 

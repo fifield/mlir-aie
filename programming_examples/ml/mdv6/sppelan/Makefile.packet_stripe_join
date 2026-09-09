@@ -1,0 +1,15 @@
+# Separate bounded phase-B-shaped diagnostic; existing proofs are untouched.
+srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
+include ${srcdir}/../../../makefile-common
+
+.PHONY: all
+all: packet_stripe_join.xclbin packet_stripe_join.bin
+
+packet_stripe_join.o: ${srcdir}/packet_stripe_join.cc
+	${PEANO_INSTALL_DIR}/bin/clang ${PEANOWRAP2P_FLAGS} -c $< -o $@
+
+packet_stripe_join.mlir: ${srcdir}/aie2_packet_stripe_join.py
+	python3 $< > $@
+
+packet_stripe_join.xclbin packet_stripe_join.bin &: packet_stripe_join.mlir packet_stripe_join.o
+	aiecc.py --aie-generate-xclbin --aie-generate-npu-insts --no-compile-host --no-xchesscc --no-xbridge --xclbin-name=packet_stripe_join.xclbin --npu-insts-name=packet_stripe_join.bin $<

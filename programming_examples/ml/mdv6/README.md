@@ -44,8 +44,11 @@ final projection is still pending; neither proof changes the default route.
 
 [Four-worker packet aggregation](sppelan/PACKET_AGGREGATE_VALIDATION.md) now
 passes exact 30/100/300-frame NPU gates using one memtile receive channel and
-device-only output grants. Bounded stripe joins and phase-buffer reuse are
-the next integration steps; this diagnostic does not execute SPP arithmetic.
+device-only output grants. [Bounded stripe joins](sppelan/PACKET_STRIPE_JOIN_VALIDATION.md)
+also pass exact 30/100/300-frame gates: all 25 stripes reuse 14 memtile
+descriptors inside one submission. Neither diagnostic executes SPP arithmetic.
+Next are resident four-column aggregation-to-gather handoff, physical
+phase-buffer reuse, and a finite phase controller before arithmetic integration.
 
 ## Run with existing artifacts
 

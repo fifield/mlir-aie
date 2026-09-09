@@ -1,0 +1,131 @@
+"""Bounded phase-B-shaped packet join, separate from phase-A integration.
+
+I uint16 [stripe25,worker4,pixel16,channel16]; O uint16 [stripe25,pixel16,channel64].
+Each worker applies XOR 0x1111*(worker+1). A permanent one-stripe DMA cycle
+consumes one full-frame host stream, with no 25-way descriptor unrolling.
+"""
+import sys
+import numpy as np
+from aie.dialects.aie import (AIEDevice, DMAChannelDir, WireBundle, LockAction,
+    device, tile, buffer, lock, flow, packetflow, memtile_dma, mem, core,
+    dma_start, dma_bd, use_lock, next_bd, EndOp, external_func)
+from aie.dialects.aiex import (runtime_sequence, dma_configure_task, bds,
+    shim_dma_bd, dma_start_task, dma_await_task, dma_free_task)
+from aie.extras.context import mlir_mod_ctx
+from aie.iron.controlflow import range_
+
+
+def dma_chains(block, chains):
+    cursor = 0
+    for channel_index, (direction, channel, records) in enumerate(chains):
+        first, following = cursor + 1, cursor + 1 + len(records)
+        if channel_index == 0:
+            dma_start(direction, channel, dest=block[first], chain=block[following])
+        else:
+            with block[cursor]:
+                dma_start(direction, channel, dest=block[first], chain=block[following])
+        for index, (buf, offset, length, acquire, release, packet, dims) in enumerate(records):
+            with block[first + index]:
+                use_lock(acquire, LockAction.AcquireGreaterEqual, value=1)
+                dma_bd(buf, offset=offset, len=length, packet=packet, dimensions=dims)
+                use_lock(release, LockAction.Release, value=1)
+                next_bd(block[first + ((index + 1) % len(records))])
+        cursor = following
+    with block[cursor]:
+        EndOp()
+
+
+def generate():
+    ty = lambda n: np.ndarray[(n,), np.dtype[np.uint16]]
+    with mlir_mod_ctx() as ctx:
+        @device(AIEDevice.npu2)
+        def body():
+            shim, mt = tile(0, 0), tile(0, 1)
+            workers = [tile(0, row + 2) for row in range(4)]
+            tag = external_func("packet_stripe_join_tag", [ty(256), np.int32],
+                                link_with="packet_stripe_join.o")
+            source = buffer(mt, ty(1024), name="packet_source")
+            aggregate = buffer(mt, ty(1024), name="packet_aggregate")
+            token = buffer(mt, ty(32), name="grant_token",
+                           initial_value=np.zeros(32, np.uint16))
+            stage_empty = lock(mt, lock_id=0, init=1, sym_name="stage_empty")
+            stage_ready = lock(mt, lock_id=1, init=0, sym_name="stage_ready")
+            grants = [lock(mt, lock_id=2 + row, init=0, sym_name=f"grant_ready_{row}") for row in range(4)]
+            receivers = [lock(mt, lock_id=6 + row, init=0, sym_name=f"receive_ready_{row}") for row in range(4)]
+            output_ready = lock(mt, lock_id=10, init=0, sym_name="output_ready")
+            payload_ready = [lock(mt, lock_id=11 + row, init=0,
+                                  sym_name=f"payload_ready_{row}") for row in range(3)]
+            flow(shim, WireBundle.DMA, 0, mt, WireBundle.DMA, 5)
+            flow(mt, WireBundle.DMA, 1, shim, WireBundle.DMA, 0)
+            for row, ct in enumerate(workers):
+                packetflow(1 << row, mt, WireBundle.DMA, 5,
+                           {"dest": ct, "port": WireBundle.DMA, "channel": 1},
+                           keep_pkt_header=False)
+                packetflow(16 + row, ct, WireBundle.DMA, 0,
+                           {"dest": mt, "port": WireBundle.DMA, "channel": 4},
+                           keep_pkt_header=False)
+                planes = buffer(ct, ty(256), name=f"worker_planes_{row}")
+                grant = buffer(ct, ty(32), name=f"worker_grant_{row}")
+                feature_empty = lock(ct, lock_id=0, init=1, sym_name=f"feature_empty_{row}")
+                feature_ready = lock(ct, lock_id=1, init=0, sym_name=f"feature_ready_{row}")
+                grant_empty = lock(ct, lock_id=2, init=1, sym_name=f"grant_empty_{row}")
+                grant_ready = lock(ct, lock_id=3, init=0, sym_name=f"worker_grant_ready_{row}")
+                send_ready = lock(ct, lock_id=4, init=0, sym_name=f"send_ready_{row}")
+                @core(ct, stack_size=4096)
+                def worker():
+                    for _ in range_(sys.maxsize):
+                        use_lock(feature_ready, LockAction.AcquireGreaterEqual, value=1)
+                        tag(planes, row)
+                        use_lock(grant_ready, LockAction.AcquireGreaterEqual, value=1)
+                        use_lock(send_ready, LockAction.Release, value=1)
+                        use_lock(grant_empty, LockAction.Release, value=1)
+                @mem(ct)
+                def worker_dma(block):
+                    dma_chains(block, [
+                        (DMAChannelDir.S2MM, 1, [
+                            (planes, 0, 256, feature_empty, feature_ready, None, None),
+                            (grant, 0, 32, grant_empty, grant_ready, None, None)]),
+                        (DMAChannelDir.MM2S, 0, [
+                            (planes, 0, 256, send_ready, feature_empty, (0, 16 + row), None)])])
+
+            @memtile_dma(mt)
+            def mem_program(block):
+                sends = []
+                for row in reversed(range(4)):
+                    sends.append((source, row * 256, 256,
+                                  stage_ready if row == 3 else payload_ready[row],
+                                  grants[0] if row == 0 else payload_ready[row - 1],
+                                  (0, 1 << row), None))
+                for row in range(4):
+                    sends.append((token, 0, 32, grants[row], receivers[row], (0, 1 << row), None))
+                # Each packet has 16 pixels of this worker's 16 channels.
+                # Four disjoint strided writes cover the complete HWC stripe.
+                receives = [(aggregate, row * 16, 256, receivers[row],
+                             grants[row + 1] if row < 3 else output_ready,
+                             None, [(16, 64), (16, 1)]) for row in range(4)]
+                dma_chains(block, [
+                    (DMAChannelDir.S2MM, 5, [(source, 0, 1024, stage_empty, stage_ready, None, None)]),
+                    (DMAChannelDir.MM2S, 5, sends),
+                    (DMAChannelDir.S2MM, 4, receives),
+                    (DMAChannelDir.MM2S, 1, [(aggregate, 0, 1024, output_ready, stage_empty, None, None)])])
+
+            @runtime_sequence(ty(25600), ty(25600))
+            def sequence(I, O):
+                input_task = dma_configure_task(shim, DMAChannelDir.MM2S, 0)
+                with bds(input_task) as bd:
+                    with bd[0]:
+                        shim_dma_bd(I, sizes=[1, 1, 1, 25600], strides=[0, 0, 0, 1])
+                        EndOp()
+                output_task = dma_configure_task(shim, DMAChannelDir.S2MM, 0, issue_token=True)
+                with bds(output_task) as bd:
+                    with bd[0]:
+                        shim_dma_bd(O, sizes=[1, 1, 1, 25600], strides=[0, 0, 0, 1])
+                        EndOp()
+                dma_start_task(output_task, input_task)
+                dma_await_task(output_task)
+                dma_free_task(input_task)
+    return ctx.module
+
+
+if __name__ == "__main__":
+    print(generate())
