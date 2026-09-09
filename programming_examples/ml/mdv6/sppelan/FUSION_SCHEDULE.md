@@ -10,9 +10,10 @@ The subsequent [phase-A shard](PHASE_A_VALIDATION.md) validates one worker's
 full-spatial projection and three pools, with all sixteen trained channel
 slices tested sequentially. The [resident packet-to-gather proof](PACKET_GATHER_VALIDATION.md)
 now validates sixteen-worker opaque-bit transport and four-column gather together
-in one submission. Physical phase aliasing, the finite phase controller, and
-numerical composition with the final projection remain unimplemented.
-The next bounded step is the [one-core alias/rearm sentinel](PHASE_ALIAS_PLAN.md).
+in one submission. The [one-core alias/rearm sentinel](PHASE_ALIAS_VALIDATION.md)
+now validates physical L1 overlap and finite A/25B sequencing separately.
+Full-island phase aliasing/barriers and numerical composition with the final
+projection remain unimplemented. Next is [numerical phase A to gather](PHASE_A_GATHER_PLAN.md).
 
 The dependency-free [model](fusion_schedule.py) checks storage accounting and
 the exact gather ordering. Run from the MDV6 directory:
@@ -194,8 +195,9 @@ residency capability, but no latency benefit is predicted by this model.
 
 Progress update: step 1's standalone gather, step 2's arithmetic shard, and
 the sixteen-worker packet-to-gather transport are validated separately.
-Step 2's physical aliasing is still open; use [PHASE_ALIAS_PLAN.md](PHASE_ALIAS_PLAN.md)
-as the next executable cut. Step 3's complete numerical composition is not done.
+Step 2's one-core alias sentinel is validated, but not its multi-worker/L2
+barrier composition. Use [PHASE_A_GATHER_PLAN.md](PHASE_A_GATHER_PLAN.md) as the
+next executable numerical cut. Step 3's complete numerical composition is not done.
 The sequence below preserves the full-island acceptance requirements.
 
 1. Inspect current IRON memtile placement, DMA/lock limits, and cross-column

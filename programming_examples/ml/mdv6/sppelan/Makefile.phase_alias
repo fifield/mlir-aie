@@ -1,0 +1,21 @@
+srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
+include ${srcdir}/../../../makefile-common
+
+.PHONY: all
+all: phase_alias.xclbin phase_alias.bin phase_alias_runtime.mlir
+
+phase_alias.o: ${srcdir}/phase_alias.cc
+	${PEANO_INSTALL_DIR}/bin/clang ${PEANOWRAP2P_FLAGS} -c $< -o $@
+
+phase_alias.mlir: ${srcdir}/aie2_phase_alias.py
+	python3 $< > $@
+
+phase_alias.xclbin phase_alias.bin &: phase_alias.mlir phase_alias.o
+	aiecc.py --aie-generate-xclbin --aie-generate-npu-insts --no-compile-host --no-xchesscc --no-xbridge --xclbin-name=phase_alias.xclbin --npu-insts-name=phase_alias.bin $<
+
+# Reviewable descriptor and final queue sidecars from the addressed artifact.
+phase_alias_tasks.mlir: phase_alias.xclbin phase_alias.bin
+	aie-opt phase_alias.mlir.prj/input_with_addresses.mlir --aie-assign-runtime-sequence-bd-ids --aie-dma-tasks-to-npu -o $@
+
+phase_alias_runtime.mlir: phase_alias_tasks.mlir
+	aie-opt $< --aie-dma-to-npu -o $@

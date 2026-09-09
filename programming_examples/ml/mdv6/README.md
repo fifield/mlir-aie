@@ -50,8 +50,11 @@ descriptors inside one submission. Neither diagnostic executes SPP arithmetic.
 The [resident four-column aggregation-to-gather handoff](sppelan/PACKET_GATHER_VALIDATION.md)
 now also passes exact 30/100/300-frame NPU gates. Sixteen workers feed gather
 directly through memtiles in one submission, without an intermediate host
-transfer. Next is [physical phase-buffer reuse and finite phase rearm](sppelan/PHASE_ALIAS_PLAN.md),
-followed by arithmetic integration; the default full-model route is unchanged.
+transfer. [One-core physical phase-buffer reuse and finite rearm](sppelan/PHASE_ALIAS_VALIDATION.md)
+now also pass exact 30/100/300-frame gates, using explicit core completion tokens.
+Next is [numerical projection/pooling to resident gather](sppelan/PHASE_A_GATHER_PLAN.md).
+The full multi-worker phase barrier and final projection remain; the default
+full-model route is unchanged.
 
 ## Run with existing artifacts
 

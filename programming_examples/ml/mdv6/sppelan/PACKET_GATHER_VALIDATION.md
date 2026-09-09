@@ -182,6 +182,8 @@ packet_gather.bin     c0876bca359a89e818b55ff441af4e6072550d8386b14a64acf1cef7a8
 specifies one core with explicit physical L1 overlap: one phase-A transfer,
 exactly 25 phase-B transfers, then rearm. It uses a finite controller and
 distinct phase/stripe sentinel tags, without numerical arithmetic.
-That plan is not yet validated and does not establish a full 16-worker
-phase barrier. The current packet/gather proof does not supply that missing
-controller or authorize aliasing still-live buffers.
+That isolated sentinel now [passes exact sustained hardware gates](PHASE_ALIAS_VALIDATION.md),
+but does not establish a full 16-worker phase barrier. The next integration
+is [numerical phase A to resident gather](PHASE_A_GATHER_PLAN.md).
+The current packet/gather proof does not authorize aliasing still-live buffers
+or supply the missing full-island controller.

@@ -4,7 +4,7 @@ Tracked as `mlir-aie-2vb.2.3.4`, under phase/worker integration `mlir-aie-2vb.2.
 
 ## Purpose and scope
 
-The next bounded proof is one phase-A-sized transfer followed by exactly 25
+The bounded proof is one phase-A-sized transfer followed by exactly 25
 phase-B-sized transfers, then rearm for the next frame. Both phases use the
 same physical core-local allocation. This isolates phase switching and DMA
 ownership from arithmetic and the already separate packet/gather proofs.
@@ -13,7 +13,11 @@ Use new standalone generator, kernel, Makefile, host test, compiled-resource
 checker, and configured lit test. Suggested artifact stem: `phase_alias`.
 Do not modify the existing shard, gather, packet, or stripe-join proofs.
 
-This document is a proposed implementation, not a hardware-validated schedule.
+Update: this one-core proof now [passes exact 6/30/100/300-frame NPU gates](PHASE_ALIAS_VALIDATION.md).
+The final implementation adds explicit B RX/TX task-completion tokens to the
+original candidate below, fencing descriptor reuse independently of arena locks.
+The next numerical integration is [phase A to resident gather](PHASE_A_GATHER_PLAN.md).
+This does not validate a full sixteen-worker phase barrier or numerical phase B.
 
 ## Frozen candidate ABI and physical storage
 
@@ -72,8 +76,10 @@ needed. The descriptor address is the same arena base in all four cases.
 
 Configure and enqueue these tasks in the device runtime instruction sequence
 for each host submission. Configure one full-frame shim input and output task;
-start their streams with all required core tasks available, and await the shim
-output before returning. There is no host synchronization between phases and
+start their streams with all required core tasks available. In the implemented
+proof, B RX and B TX each issue a task-completion token; await both, then the
+shim output before returning. An explicit header-preserving core controller-27
+route carries the tokens to the shim. There is no host synchronization between phases and
 no second dispatch. Do not use an initialization-only queue as per-frame rearm.
 
 ## Ownership and frame rearm
@@ -110,7 +116,11 @@ accepts a tile, channel, direction, and repeat count. The compiler test
 checks lock-bearing core-tile tasks lowering to `npu.writebd`, as well as
 memtile cases. This establishes local lowering support, not NPU2 execution.
 
-Before hardware, resolve queue-depth and repetition behavior on NPU2, explicit
+The implementation's compiled and hardware gates resolve this one-core cut's
+queue repetition and completion behavior. Its checker ties the reviewed
+register-write sequence byte-for-byte to the actual instruction binary. Free
+operations are compiler bookkeeping; B RX/TX device tokens are the reuse fence.
+For any subsequent composition, recheck queue-depth and repetition, explicit
 core BD assignment, channel enable/start lowering, and task lifetime handling.
 Prove descriptor IDs cannot be reused or rewritten while an earlier task is
 active. Inspect what task free/await operations lower to; do not assume that

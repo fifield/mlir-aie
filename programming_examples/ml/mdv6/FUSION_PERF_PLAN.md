@@ -113,13 +113,20 @@ S2MM and three MM2S channels, and 221,248 buffer bytes. Four-column packet/circu
 coexistence is now exercised on hardware, with all four destination outputs
 checked and awaited in one submission.
 
-Next is the [one-core finite-phase L1 alias sentinel](sppelan/PHASE_ALIAS_PLAN.md),
-tracked as `mlir-aie-2vb.2.3.4`: explicitly reuse one arena for one phase-A-sized
-transfer and 25 phase-B stripes, then safely rearm across frames. Compile and
-inspect terminating runtime DMA tasks and ownership before hardware. This will
-not by itself prove the sixteen-worker L2 barrier or numerical integration.
-Physical L1 phase aliasing, finite phase switching, and SPP arithmetic composition
-remain unproven. These diagnostic milestones do not change full-model latency.
+The [one-core finite-phase L1 alias sentinel](sppelan/PHASE_ALIAS_VALIDATION.md)
+now also passes exact 6/30/100/300-frame NPU gates. One explicit 50,240-byte
+arena supports one phase-A-sized transfer and 25 phase-B stripes, with four
+terminating core descriptors, six ownership locks, and explicit core DMA
+completion tokens before descriptor reuse. This establishes one-core physical
+overlap and finite rearm, not the sixteen-worker L2 barrier or numerical phase B.
+
+Next is [numerical phase A to resident gather](sppelan/PHASE_A_GATHER_PLAN.md),
+tracked as `mlir-aie-2vb.2.4`: replace diagnostic producers with the validated
+two-KB128 projection and three pools across sixteen workers, retaining rounding
+metadata and gathering real features in one submission. Compile bounded activation
+iteration and all completion routes first. Full-island phase aliasing/barriers,
+final projection, and production integration remain unproven. These diagnostic
+milestones do not change full-model latency.
 
 ## What is already established
 
