@@ -149,6 +149,25 @@ collisions rather than accepting either allocator's local success alone.
 
 ## Completion and numerical gates
 
+### Compiler prerequisite discovered during implementation
+
+`mlir-aie-96e` tracks a confirmed runtime queue-lowering defect: the generic
+`aie-dma-to-npu` pass masks every start BD ID with `0xf`. NPU2 memtile
+START_BD_ID is six bits, and odd channels require IDs 24–47. The compile-only
+reproducer `repro_memtile_queue_id.mlir` emits value 8 instead of 24 at queue
+register `0x1a065c` with the installed compiler. Do not execute that incomplete
+reproducer on hardware.
+
+The example-local implementation must emit explicit six-bit memtile queue
+writes while retaining ordinary task descriptor lowering and completion waits.
+Core/shim starts continue through their existing lowering. Check controller
+IDs, physical queue addresses, start IDs, repeat counts and token bits against
+the actual instruction binary. Do not remove the workaround until the shared
+compiler is fixed, installed, and this entire numerical gate is rerun. This
+work does not modify the shared compiler or installed toolchain.
+
+### Required execution gates
+
 Await all eight O/M shim tasks before freeing any input allocation. Add explicit
 core/memtile task-completion tokens for finite queues before their BD IDs can be
 reprogrammed. Device TCT waits remain inside the same instruction submission.
