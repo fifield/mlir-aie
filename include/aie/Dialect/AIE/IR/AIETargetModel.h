@@ -1473,23 +1473,6 @@ public:
   /// "Task queue repeat count - 256 (8-bit) -> 4k (12-bit)").
   uint32_t getMaxRepeatCount() const override { return 4095; }
 
-  // AIE4 DMA BD field widths from the register database: core tiles have
-  // 9-bit wrap / 15-bit step fields, mem tiles 12-bit wrap / 23-bit step,
-  // and shim tiles 12-bit wrap / 22-bit step. Iteration_Wrap is 6-bit
-  // everywhere.
-  uint32_t getDmaBdWrapBits(AIETileType tileType) const override {
-    return tileType == AIETileType::CoreTile ? 9 : 12;
-  }
-  uint32_t getDmaBdStepBits(AIETileType tileType) const override {
-    switch (tileType) {
-    case AIETileType::MemTile:
-      return 23;
-    case AIETileType::CoreTile:
-      return 15;
-    default:
-      return 22;
-    }
-  }
   /// Iteration_Wrap is a 6-bit field, as on AIE1/AIE2.
   uint32_t getDmaBdIterBits(AIETileType tileType) const override { return 6; }
 
