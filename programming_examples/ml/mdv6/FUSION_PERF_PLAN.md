@@ -59,6 +59,12 @@ The full-shape [SPP9 schedule](sppelan/FUSION_SCHEDULE.md) now has checked
 storage/lifetime estimates and exact gather mappings. Physical phase-buffer
 aliasing and cross-column gather routing are still unproven.
 
+GEMM batching now also covers ELAN2's final projection: four spatial batches
+execute in one submission with weights retained across all eight patches/core.
+See [FUSION_GEMM_VALIDATION.md](FUSION_GEMM_VALIDATION.md). GEMM-only uses 450
+full-frame submissions; with the previous convolution batching it uses 414.
+Both remain opt-in; K-blocked spatial batching and inter-operator fusion remain.
+
 ## What is already established
 
 | Measurement, 2026-09-09 | Default | Restored R1–R3 |
@@ -419,8 +425,9 @@ particular memtile route.
    to `PYTHONPATH`, and set `MDV6_BUILD_DIR` as shown in README. Confirm trained
    weights and the exact build root; missing source-tree xclbins are expected.
 3. Select the baseline explicitly: `MDV6_REGIME_ROUTE=legacy`,
-   `USE_REGIME_XCLBINS=0`, `USE_REGIME_KBLOCKED=0`. Reject diagnostic modes that
-   return before full-model validation. If the environment/artifacts changed,
+   `USE_REGIME_XCLBINS=0`, `USE_REGIME_KBLOCKED=0`. Unset
+   `MDV6_WHOLE_CONV_DIR` / `MDV6_WHOLE_GEMM_DIR` for baseline runs and reject
+   diagnostic modes that return before full-model validation. If the environment/artifacts changed,
    establish a fresh short baseline before interpreting a regression.
 4. Implement Milestone 0's buffer/executor contract and improve the existing
    two-stage chain proof. Agree on physical layouts before parallel kernel work.

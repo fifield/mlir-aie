@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+// Fresh baseline and whole-spatial GEMM artifacts; changing inputs/weights,
+// exact outputs, all-column completion and counted 4-to-1 submissions.
+// REQUIRES: ryzen_ai_npu2, peano, torch, mdv6_weights
+// RUN: mkdir -p %t.dir
+// RUN: make -C %t.dir -f %S/gemm_conv1x1/Makefile.whole_gemm
+// RUN: env MDV6_BUILD_DIR=%t.dir python3 %S/gemm_conv1x1/build_gemm_conv1x1.py gemm_t104_ic128_oc64_p2
+// RUN: env MDV6_BUILD_DIR=%t.dir %run_on_npu2% python3 -O %S/gemm_conv1x1/test_whole_gemm.py --build-dir %t.dir --frames 16

@@ -138,7 +138,7 @@ make -C "$whole_build" -f "$PWD/conv/Makefile.whole_conv"
 python3 -O conv/test_whole_conv.py --build-dir "$whole_build" --frames 48
 
 # Separate processes; unique report paths preserve previous evidence.
-env -u MDV6_WHOLE_CONV_DIR python3 benchmark_executor.py --frames 7 \
+env -u MDV6_WHOLE_CONV_DIR -u MDV6_WHOLE_GEMM_DIR python3 benchmark_executor.py --frames 7 \
     --report /tmp/mdv6-default-new.jsonl
 MDV6_WHOLE_CONV_DIR="$whole_build" python3 benchmark_executor.py --frames 7 \
     --report /tmp/mdv6-whole-new.jsonl

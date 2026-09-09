@@ -45,7 +45,7 @@ from aie.helpers.taplib import TensorAccessPattern
 def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
                  patches_per_core=1, k_block=0, fused=True,
                  active_tile_m=None, active_ic=None, active_oc=None,
-                 active_k_block=None):
+                 active_k_block=None, spatial_batches=1):
     """N-core GEMM-based Conv1x1 [+ BN + SiLU] with optional K-blocking.
 
     Args:
@@ -56,7 +56,11 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
         patches_per_core: patches each core processes per invocation
         k_block: IC channels per K-block (0 = no K-blocking, use full ic)
         fused: if True, use BN+SiLU fused kernel; else pure GEMM
+        spatial_batches: experimental batch-major spatial command groups;
+            non-K-blocked only. Weights remain acquired across all groups.
     """
+    if type(spatial_batches) is not int or spatial_batches < 1:
+        raise ValueError("spatial_batches must be a positive integer")
     assert tile_m % 4 == 0, f"tile_m={tile_m} must be divisible by 4 (mmul<4,8,8>)"
     assert ic % 8 == 0, f"ic={ic} must be divisible by 8"
     assert oc % 8 == 0, f"oc={oc} must be divisible by 8"
@@ -71,6 +75,8 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
     assert ic % k_block == 0, f"ic={ic} must be divisible by k_block={k_block}"
     n_k_blocks = ic // k_block
     use_kblocking = n_k_blocks > 1
+    if spatial_batches > 1 and use_kblocking:
+        raise ValueError("spatial batching does not yet support K-blocking")
     if active_k_block is None:
         active_k_block = active_ic if not use_kblocking else k_block
     active_n_k_blocks = active_ic // active_k_block if use_kblocking else 1
@@ -121,8 +127,10 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
     core_out_ty = np.ndarray[(core_out_size,), np.dtype[np.uint16]]
 
     # Host buffer types
-    host_in_size = n_cores * core_in_size
-    host_out_size = n_cores * core_out_size
+    batch_in_size = n_cores * core_in_size
+    batch_out_size = n_cores * core_out_size
+    host_in_size = spatial_batches * batch_in_size
+    host_out_size = spatial_batches * batch_out_size
     host_in_ty = np.ndarray[(host_in_size,), np.dtype[np.uint16]]
     host_out_ty = np.ndarray[(host_out_size,), np.dtype[np.uint16]]
 
@@ -208,7 +216,7 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
             s_v = my_rtp[4]
             p_v = my_rtp[5]
             elem_wt = of_wt.acquire(1)
-            for _ in range_(patches_per_core):
+            for _ in range_(spatial_batches * patches_per_core):
                 elem_in = of_in.acquire(1)
                 elem_out = of_out.acquire(1)
                 kern(elem_in, elem_wt, elem_out,
@@ -312,7 +320,7 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
                     strides=[0, wt_chunk_size, wt_d0, 1],
                 )
                 rt.fill(wf.prod(), W, tap_wt)
-        else:
+        elif spatial_batches == 1:
             # Original: broadcast full weights once
             for wf in wt_fifos:
                 rt.fill(wf.prod(), W)
@@ -336,24 +344,35 @@ def gemm_conv1x1(dev, tile_m=64, ic=128, oc=64, n_cores=32,
         in_d1, in_d0 = _factor_for_dma(input_tile_size)
         out_d1, out_d0 = _factor_for_dma(output_tile_size)
 
-        for col in range(n_cols):
-            cores_this_col = min(cores_per_col, n_cores - col * cores_per_col)
+        for batch in range(spatial_batches):
+            group = rt.task_group() if spatial_batches > 1 else None
+            if spatial_batches > 1 and batch == 0:
+                # First-group outputs prove the weights have arrived. DMA
+                # descriptors can then be freed while workers retain their
+                # acquired weight FIFO buffers through the final batch.
+                for wf in wt_fifos:
+                    rt.fill(wf.prod(), W, task_group=group)
+            for col in range(n_cols):
+                cores_this_col = min(cores_per_col, n_cores - col * cores_per_col)
 
-            tap_in = TensorAccessPattern(
-                (host_in_size,),
-                offset=col * cores_per_col * core_in_size,
-                sizes=[patches_per_core, cores_this_col, in_d1, in_d0],
-                strides=[input_tile_size, core_in_size, in_d0, 1],
-            )
-            tap_out = TensorAccessPattern(
-                (host_out_size,),
-                offset=col * cores_per_col * core_out_size,
-                sizes=[patches_per_core, cores_this_col, out_d1, out_d0],
-                strides=[output_tile_size, core_out_size, out_d0, 1],
-            )
-            rt.fill(col_in_fifos[col].prod(), I, tap_in)
-            rt.drain(col_out_fifos[col].cons(), O, tap_out,
-                     wait=(col == n_cols - 1))
+                tap_in = TensorAccessPattern(
+                    (host_in_size,),
+                    offset=batch * batch_in_size + col * cores_per_col * core_in_size,
+                    sizes=[patches_per_core, cores_this_col, in_d1, in_d0],
+                    strides=[input_tile_size, core_in_size, in_d0, 1],
+                )
+                tap_out = TensorAccessPattern(
+                    (host_out_size,),
+                    offset=batch * batch_out_size + col * cores_per_col * core_out_size,
+                    sizes=[patches_per_core, cores_this_col, out_d1, out_d0],
+                    strides=[output_tile_size, core_out_size, out_d0, 1],
+                )
+                rt.fill(col_in_fifos[col].prod(), I, tap_in, task_group=group)
+                rt.drain(col_out_fifos[col].cons(), O, tap_out,
+                         wait=(spatial_batches > 1 or col == n_cols - 1),
+                         task_group=group)
+            if group is not None:
+                rt.finish_task_group(group)
 
     return Program(dev, rt).resolve_program()
 

@@ -33,6 +33,8 @@ else:
 _mc_cache = {}
 _whole_conv = None
 _whole_conv_dir = os.environ.get("MDV6_WHOLE_CONV_DIR")
+_whole_gemm = None
+_whole_gemm_dir = os.environ.get("MDV6_WHOLE_GEMM_DIR")
 USE_REGIME_XCLBINS = os.environ.get("USE_REGIME_XCLBINS", "0") == "1"
 USE_REGIME_KBLOCKED = os.environ.get("USE_REGIME_KBLOCKED", "0") == "1"
 # Explicit R1-R3 selection includes its K-blocked members. Unset/legacy keeps
@@ -228,6 +230,9 @@ def cached_kernel_inventory():
     if _whole_conv is not None:
         rows.append(dict(family="whole-conv", xclbin=str(_whole_conv.xclbin),
                          instructions=str(_whole_conv.insts)))
+    if _whole_gemm is not None:
+        rows.append(dict(family="whole-gemm", xclbin=str(_whole_gemm.xclbin),
+                         instructions=str(_whole_gemm.insts)))
     return sorted(rows, key=lambda row: (row["xclbin"], row["instructions"]))
 
 
@@ -901,6 +906,21 @@ def run_gemm_conv1x1_mc(gemm_name, sc_name, input_hwc, weights_uint16,
     Tries K-blocked path first (no OC blocking), falls back to OC-blocked,
     then to scalar MC.
     """
+    if (_whole_gemm_dir and gemm_name == "gemm_elan_c4"
+            and (out_h, out_w) == (160, 160)):
+        # The same name is an alias for an 80x80 RN merge: leave that on the
+        # normal route. This experimental ABI covers only ELAN2's final GEMM.
+        if tuple(input_hwc.shape) != (160, 160, 128) or out_ch != 64 or oc_block not in (None, 64):
+            raise ValueError("whole-GEMM route requires exact ELAN2 conv4 contract")
+        global _whole_gemm
+        if _whole_gemm is None:
+            from types import SimpleNamespace
+            from whole_gemm import WholeGemm
+            backend = SimpleNamespace(torch=torch, iron=iron, NPUKernel=NPUKernel,
+                                      DefaultNPURuntime=DefaultNPURuntime,
+                                      _fill_and_sync=_fill_and_sync)
+            _whole_gemm = WholeGemm(_whole_gemm_dir, backend)
+        return _whole_gemm.run(input_hwc, weights_uint16)
     H, W, IC = input_hwc.shape
     M = H * W
 

@@ -19,6 +19,10 @@ The next implemented step is [whole-convolution sequencing](FUSION_M1_VALIDATION
 an opt-in route removes 36 full-frame submissions by batching output-channel
 blocks. The document records its build/run commands and validation limits.
 
+[GEMM spatial batching](FUSION_GEMM_VALIDATION.md) adds an opt-in four-batch
+ELAN2 projection with one submission and within-operator weight residency.
+It composes with convolution batching; neither route changes the default.
+
 ## Run with existing artifacts
 
 These paths describe this checkout's development environment. Adjust them
@@ -36,6 +40,7 @@ cd /home/jfifield/npu-dev-mdv6/mlir-aie/programming_examples/ml/mdv6
 export MDV6_REGIME_ROUTE=legacy
 export USE_REGIME_XCLBINS=0
 export USE_REGIME_KBLOCKED=0
+unset MDV6_WHOLE_CONV_DIR MDV6_WHOLE_GEMM_DIR
 
 # Compare one full-model forward pass with the PyTorch reference.
 python3 test_full_model_mc.py
