@@ -1,5 +1,11 @@
 # MDV6 AIE2P Performance Optimization Plan
 
+For the 2026-09-09 hardware validation and current routing decision, see
+[VALIDATION.md](VALIDATION.md). Default 30/100/300-frame validation passes;
+the restored R1–R3 route uses 466 launches and fails the saved launch-gap
+performance gate. The historical results below are retained as experiment
+records, not claims about the current checkout.
+
 ## Current State
 
 Full MDV6-mit-yolov9-c forward pass on Strix Halo NPU.
