@@ -168,6 +168,12 @@ grouped-target rebuild and reproduced identical instructions.
 
 ## Next bounded implementation
 
+Update: the arithmetic cut below is now implemented and validated in
+[PHASE_A_VALIDATION.md](PHASE_A_VALIDATION.md). Its all-slice 80-case matrix
+and sustained 100/300-frame gates pass. The phase-alias and combined-channel
+work remains outstanding; the newer document gives the next packet-aggregation
+sentinel cut. This section retains the original shard contract for traceability.
+
 Keep this pure-data routing proof as a regression target. The next cut is a
 full-spatial, eight-channel phase-A worker: trained conv1 + fused BN/SiLU,
 followed by three local 5x5 pools, exporting all four feature planes for exact

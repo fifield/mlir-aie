@@ -6,6 +6,10 @@ kernel, compiled full-island placement, or performance result. Default execution
 is unchanged. The subsequent [gather-only proof](GATHER_VALIDATION.md) compiles
 and passes exact 30/100/300-frame NPU tests with zero compute workers. That
 proves the bounded gather's routing/layout, not the complete schedule below.
+The subsequent [phase-A shard](PHASE_A_VALIDATION.md) validates one worker's
+full-spatial projection and three pools, with all sixteen trained channel
+slices tested sequentially. Sixteen-worker transport, physical phase aliasing,
+and the final projection remain unimplemented.
 
 The dependency-free [model](fusion_schedule.py) checks storage accounting and
 the exact gather ordering. Run from the MDV6 directory:

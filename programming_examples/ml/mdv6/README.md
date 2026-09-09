@@ -34,7 +34,13 @@ The [SPP9 gather proof](sppelan/GATHER_VALIDATION.md) now keeps full-shape
 worker-major features in memtiles and gathers/replicates 25 concat stripes
 without compute kernels or intermediate host traffic. Exact 30/100/300-frame
 NPU gates pass. This establishes device routing; convolution/pooling integration
-and physical phase-buffer reuse are the next steps, not yet a production route.
+and physical phase-buffer reuse remain necessary for a production route.
+
+The [full-spatial projection/pooling shard](sppelan/PHASE_A_VALIDATION.md) runs
+one eight-channel slice through conv1 and all three pools in one submission,
+retaining intermediate planes in L1. Exact 80-case and 100/300-frame NPU gates
+pass across trained channel slices. Connecting sixteen workers to gather and
+final projection is still pending; neither proof changes the default route.
 
 ## Run with existing artifacts
 

@@ -80,10 +80,19 @@ L2 and builds 25 bounded concat stripes using static DMA, one host submission,
 and no intermediate host sync. Its compiled footprint is 116 KiB, seven BDs,
 seven locks, five S2MM and two MM2S channels per memtile; no compute workers.
 The diagnostic still uploads synthetic features and exports all concat copies,
-so it does not yet remove the production SPP boundary. Next: one full-spatial
-eight-channel conv1/pooling shard preserving the existing KB128 rounding,
-then physical phase-A/B L1 aliasing and a worker-traffic channel/route proof.
+so it does not yet remove the production SPP boundary. The subsequent
+[projection/pooling shard](sppelan/PHASE_A_VALIDATION.md) now also passes the
+80-case trained-slice matrix and 100/300-frame exact NPU gates, preserving the
+existing KB128 rounding. One worker keeps all four full-spatial feature planes
+in L1 and runs projection plus three pools in one submission. It is not connected
+to gather or the final projection yet. Physical phase-A/B L1 aliasing and a
+worker-traffic channel/route proof are next.
 See [the detailed handoff](sppelan/GATHER_VALIDATION.md#next-bounded-implementation).
+The concrete next transport cut is a one-column, four-worker packet-output
+aggregation sentinel with explicit sequential grants, followed by strided
+phase-B joins and four-column gather coexistence. Its proposed channel budget
+and unresolved ownership/routing constraints are in
+[the shard handoff](sppelan/PHASE_A_VALIDATION.md#next-integration-cut).
 
 ## What is already established
 
