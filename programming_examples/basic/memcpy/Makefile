@@ -48,10 +48,11 @@ endif
 $(eval $(call jit_xclbin_elf,${xclbin_target},${insts_target},${elf_target},${aie_py_src},${aieargs}))
 $(eval $(call build_host_exe,${targetname},_build,test.cpp))
 
-# npu3: compute kernel object, compiled for AIE4.
+# npu3: compute kernel object, compiled for AIE4.  BIT_WIDTH must match
+# memcpy.py's xfr_dtype (np.int32); iron.jit passes the same flag itself.
 build/%.cc.o: %.cc
 	mkdir -p ${@D}
-	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP4_FLAGS} -c $< -o ${@F}
+	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP4_FLAGS} -DBIT_WIDTH=32 -c $< -o ${@F}
 
 # npu3: emit the resolved MLIR, then aiecc packs a single full ELF.
 build/aie.mlir: ${srcdir}/${aie_py_src}
