@@ -6,8 +6,7 @@
 set(AIE_REGDB_BUILD_DIR ${AIE_BINARY_DIR}/lib/regdb)
 set(AIE_REGDB_FILES
   aie_registers_aie2.json
-  aie_registers_aie4.json
-  aie_registers_aie4z.json)
+  aie_registers_aie4.json)
 
 set(AIE_REGDB_OUTPUTS)
 foreach(regdb_file ${AIE_REGDB_FILES})

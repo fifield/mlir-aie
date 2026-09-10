@@ -10,7 +10,7 @@
 // CHECK: PASS
 //
 module {
-  aie.device(npu3z) {
+  aie.device(npu3) {
     %tile_0_0 = aie.tile(0, 0)
     %tile_1_0 = aie.tile(1, 0)
 

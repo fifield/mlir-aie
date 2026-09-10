@@ -153,7 +153,7 @@ parser = argparse.ArgumentParser(description="Vector-Vector Multiplication Progr
 parser.add_argument("-o", "--output", type=str, required=True, help="Output filename")
 args = parser.parse_args()
 
-dev = AIEDevice.npu3z
+dev = AIEDevice.npu3
 
 in1_size = 8192
 in2_size = 8192

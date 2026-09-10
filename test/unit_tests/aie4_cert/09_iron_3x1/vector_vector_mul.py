@@ -32,7 +32,7 @@ def my_eltwise_mul(dev, in1_size, in2_size, out_size, dtype=np.int32):
     tile_size = 1024
     tensor_div_tile = tensor_size // tile_size
 
-    n_cores = 4
+    n_cores = 3
     tiles = tensor_div_tile // n_cores
     buffer_depth = 2
 
@@ -154,11 +154,11 @@ parser = argparse.ArgumentParser(description="Vector-Vector Multiplication Progr
 parser.add_argument("-o", "--output", type=str, required=True, help="Output filename")
 args = parser.parse_args()
 
-dev = AIEDevice.npu3z
+dev = AIEDevice.npu3
 
-in1_size = 8192
-in2_size = 8192
-out_size = 8192
+in1_size = 6144
+in2_size = 6144
+out_size = 6144
 
 with mlir_mod_ctx() as ctx:
     my_eltwise_mul(dev, in1_size, in2_size, out_size)

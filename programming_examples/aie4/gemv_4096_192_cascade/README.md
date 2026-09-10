@@ -1,7 +1,7 @@
 # gemv_4096_192_cascade
 
 High-performance GEMV (M=1) example with multi-row cascade reduction,
-ported from `pacifica-apps/kernels/llama2/llama_4096_512` and scaled
+ported from a llama2 `llama_4096_512` kernel example and scaled
 to fit npu3 (3 columns × 4 compute rows = 12 cores).
 
 ## What this demonstrates

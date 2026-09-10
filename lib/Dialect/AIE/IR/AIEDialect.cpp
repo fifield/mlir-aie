@@ -277,7 +277,6 @@ static VirtualizedNPU2TargetModel NPU2model7col(7);
 static NPU3TargetModel NPU3Model;
 static VirtualizedNPU3TargetModel NPU3model1col(1);
 static VirtualizedNPU3TargetModel NPU3model2col(2);
-static NPU3zTargetModel NPU3zModel;
 
 const AIETargetModel &xilinx::AIE::getTargetModel(Operation *op) {
   if (auto t = dyn_cast<AIETarget>(op))
@@ -335,8 +334,6 @@ const AIETargetModel &xilinx::AIE::getTargetModel(AIEDevice device) {
     return NPU3model1col;
   case AIEDevice::npu3_2col:
     return NPU3model2col;
-  case AIEDevice::npu3z:
-    return NPU3zModel;
   }
   // No default: label above, so -Wswitch still reports a newly added device.
   // This handles values that are not enumerators at all, which
@@ -5428,14 +5425,14 @@ uint32_t DMABDOp::getAxcacheOrDefault() {
 
 static LogicalResult FoldDMAStartOp(DMAStartOp op, PatternRewriter &rewriter) {
 
-  // Disable block folding for AIE4/AIE4z shim tiles due to complex
-  // per-channel BD pool allocation. Different channels may share BD pools
-  // or have private pools depending on channel number, making it unsafe
-  // to merge blocks across channels even when content is identical.
+  // Disable block folding for AIE4 shim tiles due to complex per-channel BD
+  // pool allocation. Different channels may share BD pools or have private
+  // pools depending on channel number, making it unsafe to merge blocks
+  // across channels even when content is identical.
   if (auto shimDMA = op->getParentOfType<ShimDMAOp>()) {
     const auto &tm = getTargetModel(shimDMA);
     if (isa<AIE4TargetModel>(tm)) {
-      // Skip folding for AIE4/AIE4z shim tiles
+      // Skip folding for AIE4 shim tiles
       return failure();
     }
   }

@@ -7,7 +7,7 @@
 // Copyright (C) 2026, Advanced Micro Devices, Inc.
 //
 // High-performance GEMV kernel (M=1) with multi-row cascade reduction.
-// Ported from pacifica-apps/kernels/llama2/llama_4096_512/kernel.cc
+// Ported from a llama2 llama_4096_512 kernel example
 // (gemv_reduce_K + cascade_north_south), with FFN/SiLU/quantize stripped
 // and the weight source switched from stream intrinsics to L1 pointers
 // so the design fits the standard aie4 example object_fifo flow.

@@ -12,7 +12,8 @@
 
 // Regression test for the broadcast_twos BD lowering bug (74a661edae).
 //
-// On AIE4/AIE4z, each shim DMA channel has a private BD pool (16 slots).
+// On AIE4, each shim DMA channel pool has 16 slots, shared by a pair of
+// channels (MM2S 0/1 share one pool, MM2S 2/3 share another).
 // FoldDMAStartOp must NOT fold repeating BD chains in shim DMAs because
 // after block merging, two channels can end up sharing the same BD blocks.
 // If those blocks are then folded, the lowering generates fewer hardware
@@ -28,7 +29,7 @@
 // CHECK-COUNT-4: aie.dma_bd
 // CHECK:       aie.end
 module @test_aie4_shim_dma_no_fold {
-  aie.device(npu3z) {
+  aie.device(npu3) {
     %buf0 = aie.external_buffer {address = 2147483648 : i64} : memref<64xi32>
     %buf1 = aie.external_buffer {address = 2147484160 : i64} : memref<64xi32>
     %shim = aie.tile(0, 0)
@@ -68,9 +69,9 @@ module @test_aie4_shim_dma_no_fold {
 
 // Regression test: MLIR's built-in block merging must not combine BD blocks
 // from different channels. When two channels have structurally identical BD
-// chains, block merging collapses them into a single shared chain. On AIE4
-// where channels have private BD pools, this causes both channels to program
-// the same BD slots, leading to data corruption or deadlock.
+// chains, block merging collapses them into a single shared chain, causing
+// both channels to program the same BD slots instead of their own
+// independently-walked chains -- data corruption or deadlock.
 
 // CHECK-LABEL: module @test_aie4_shim_dma_no_block_merge
 // CHECK:       aie.shim_dma
@@ -78,7 +79,7 @@ module @test_aie4_shim_dma_no_fold {
 // CHECK-COUNT-4: aie.dma_bd
 // CHECK-NOT:     aie.dma_bd
 module @test_aie4_shim_dma_no_block_merge {
-  aie.device(npu3z) {
+  aie.device(npu3) {
     %buf0 = aie.external_buffer {address = 2147483648 : i64} : memref<64xi32>
     %buf1 = aie.external_buffer {address = 2147484160 : i64} : memref<64xi32>
     %shim = aie.tile(0, 0)
@@ -88,7 +89,7 @@ module @test_aie4_shim_dma_no_block_merge {
     %shim_dma = aie.shim_dma(%shim) {
       %c1_i32 = arith.constant 1 : i32
       // ---- Channel 0 ----
-      %0 = aie.dma_start(MM2S, 0, ^ch0_bd0, ^ch2_start)
+      %0 = aie.dma_start(MM2S, 0, ^ch0_bd0, ^ch1_start)
     ^ch0_bd0:
       aie.use_lock(%lock0, Acquire, %c1_i32)
       aie.dma_bd(%buf0 : memref<64xi32> offset = 0 len = 64 sizes = [64] strides = [1]) {bd_id = 0 : i32}
@@ -102,20 +103,23 @@ module @test_aie4_shim_dma_no_block_merge {
     ^ch0_end:
       aie.end
 
-      // ---- Channel 2 (identical BD content, must NOT merge with ch0) ----
-    ^ch2_start:
-      %1 = aie.dma_start(MM2S, 2, ^ch2_bd0, ^done)
-    ^ch2_bd0:
+      // ---- Channel 1 (identical BD content, must NOT merge with ch0) ----
+      // Channels 0 and 1 share the same AIE4 shim MM2S BD pool (ids 0-15),
+      // so this is also the realistic case where the bug can bite: pool-
+      // sharing channels must still get independently-programmed BD chains.
+    ^ch1_start:
+      %1 = aie.dma_start(MM2S, 1, ^ch1_bd0, ^done)
+    ^ch1_bd0:
       aie.use_lock(%lock0, Acquire, %c1_i32)
       aie.dma_bd(%buf0 : memref<64xi32> offset = 0 len = 64 sizes = [64] strides = [1]) {bd_id = 0 : i32}
       aie.use_lock(%lock1, Release, %c1_i32)
-      aie.next_bd ^ch2_bd1
-    ^ch2_bd1:
+      aie.next_bd ^ch1_bd1
+    ^ch1_bd1:
       aie.use_lock(%lock0, Acquire, %c1_i32)
       aie.dma_bd(%buf1 : memref<64xi32> offset = 0 len = 64 sizes = [64] strides = [1]) {bd_id = 1 : i32}
       aie.use_lock(%lock1, Release, %c1_i32)
-      aie.next_bd ^ch2_end
-    ^ch2_end:
+      aie.next_bd ^ch1_end
+    ^ch1_end:
       aie.end
     ^done:
       aie.end

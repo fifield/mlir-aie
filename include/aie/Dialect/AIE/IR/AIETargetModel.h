@@ -112,7 +112,6 @@ public:
     TK_AIE4_NPU3_2Col, // whole array must be last because of how we
                        // cast/initialize the VirtualizedNPU3TargetModel class
     TK_AIE4_NPU3_Last,
-    TK_AIE4_NPU3Z,
     TK_AIE4_Last,
   };
 
@@ -513,8 +512,8 @@ public:
   /// Return the BD pool ID for a given channel on tile (`col`, `row`).
   /// Channels that return the same pool ID share physical BD slots; their
   /// combined allocation must not exceed getNumBDsInPool().
-  /// Per-channel-private architectures (AIE4 memtile, AIE4z shim) return
-  /// unique IDs per (channel, dir).
+  /// Per-channel-private architectures (AIE4 memtile) return unique IDs
+  /// per (channel, dir).
   virtual uint32_t getBdPoolId(int col, int row, int channel,
                                DMAChannelDir dir) const = 0;
 
@@ -1528,14 +1527,9 @@ public:
                                                  int memRow) const override;
 
   uint32_t getNumBDs(AIETileType tileType) const override {
-    if (tileType == AIETileType::ShimNOCTile) {
-      if (getTargetArch() == AIEArch::AIE4z)
-        // AIE4z native mode: 16 private BDs per channel, 12 channels
-        // (8 MM2S + 4 S2MM).
-        return 16 * 12;
+    if (tileType == AIETileType::ShimNOCTile)
       // AIE4b (medusa) has 32 in single-app mode, with split connectivity.
       return 32;
-    }
     if (tileType == AIETileType::MemTile)
       return 16 * 10 * 8;
     return 16;
@@ -1558,9 +1552,9 @@ public:
     return 3;
   }
   uint64_t getDmaBdMaxLen(AIETileType tileType) const override {
-    // Buffer_Length field width per the AIE4 register database (identical
-    // on AIE4z): core tile (module "memory") 15 bits, mem tile 23 bits,
-    // shim a full 32-bit register.
+    // Buffer_Length field width per the AIE4 register database: core tile
+    // (module "memory") 15 bits, mem tile 23 bits, shim a full 32-bit
+    // register.
     switch (tileType) {
     case AIETileType::MemTile:
       return (1ull << 23) - 1;
@@ -1602,13 +1596,6 @@ public:
         return ControlMM2SPoolBase + channel;
       if (dir == DMAChannelDir::TraceS2MM)
         return TraceS2MMPoolBase + channel;
-      if (getTargetArch() == AIEArch::AIE4z) {
-        // AIE4z: private per-channel BDs
-        uint32_t id = channel;
-        if (isS2MM(dir))
-          id += S2MMPoolBase;
-        return id;
-      }
       // AIE4b shim: two shared pools split at BD 16
       if (isMM2S(dir))
         return channel < 2 ? 0 : 1;
@@ -1630,8 +1617,7 @@ public:
 
   uint32_t getBdPoolStartId(int col, int row, uint32_t poolId) const override {
     // AIE4b shim: pool 1 starts at BD 16 (global namespace).
-    if (isShimNOCTile(col, row) && getTargetArch() != AIEArch::AIE4z &&
-        poolId == 1)
+    if (isShimNOCTile(col, row) && poolId == 1)
       return 16;
     return 0;
   }
@@ -1744,24 +1730,6 @@ public:
     return model->getKind() >= TK_AIE4_NPU3_1Col &&
            model->getKind() < TK_AIE4_NPU3_Last;
   }
-};
-
-// The pacifica NPU
-class NPU3zTargetModel : public BaseNPU3TargetModel {
-public:
-  uint8_t getTxnDeviceGen() const override { return 43; } // XAIE_DEV_GEN_AIE4Z
-
-  NPU3zTargetModel() : BaseNPU3TargetModel(TK_AIE4_NPU3Z) {}
-
-  int columns() const override { return 9; }
-
-  static bool classof(const AIETargetModel *model) {
-    return model->getKind() == TK_AIE4_NPU3Z;
-  }
-  AIEArch getTargetArch() const override { return AIEArch::AIE4z; }
-
-protected:
-  std::unique_ptr<RegisterDatabase> loadRegisterDatabase() const override;
 };
 
 } // namespace xilinx::AIE

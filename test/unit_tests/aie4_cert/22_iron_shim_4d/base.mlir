@@ -17,7 +17,7 @@
 // MESIM: PASS!
 //
 module {
-  aie.device(npu3z) {
+  aie.device(npu3) {
     %tile_0_0 = aie.tile(0, 0) { elf_file = "cert_medusa.elf" }
     aie.flow(%tile_0_0, Control32 : 0, %tile_0_0, Controller32 : 0)
   }

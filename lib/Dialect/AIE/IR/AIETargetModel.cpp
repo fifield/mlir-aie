@@ -28,8 +28,7 @@ std::string getModuleForTile(const AIETargetModel &model, TileID tile,
     return "memory_tile";
   // In AIE4, core tiles have no separate memory module; Trace1 registers
   // are in the "core" module of the register database.
-  AIEArch arch = model.getTargetArch();
-  if (isMem && (arch == AIEArch::AIE4 || arch == AIEArch::AIE4z))
+  if (isMem && isa<AIE4TargetModel>(model))
     return "core";
   return isMem ? std::string("memory") : std::string("core");
 }
@@ -44,8 +43,7 @@ std::string getModuleForTileEvents(const AIETargetModel &model, TileID tile,
                        // "memory_tile"
   // In AIE4, core tiles have no separate memory module; both trace units
   // (Trace0 and Trace1) use core module events.
-  AIEArch arch = model.getTargetArch();
-  if (isMem && (arch == AIEArch::AIE4 || arch == AIEArch::AIE4z))
+  if (isMem && isa<AIE4TargetModel>(model))
     return "core";
   return isMem ? std::string("memory") : std::string("core");
 }
@@ -1784,11 +1782,6 @@ AIE4TargetModel::loadRegisterDatabase() const {
   return RegisterDatabase::loadAIE4();
 }
 
-std::unique_ptr<RegisterDatabase>
-NPU3zTargetModel::loadRegisterDatabase() const {
-  return RegisterDatabase::loadAIE4Z();
-}
-
 AIEArch AIE4TargetModel::getTargetArch() const { return AIEArch::AIE4; }
 
 // Return the tile ID of the memory to the west of the given tile, if it exists.
@@ -1868,10 +1861,9 @@ uint64_t AIE4TargetModel::getDmaBdAddress(int col, int row, uint32_t bd_id,
   uint64_t offset = 0;
   if (isShimNOCTile(col, row)) {
     uint32_t numBds = 16;
-    // For AIE4 (non-AIE4z), bd_id is a global ID across the two shim BD pools
+    // For AIE4, bd_id is a global ID across the two shim BD pools
     // (lower pool: ids 0..15, upper pool: ids 16..31). Convert to bank-local
     // index by subtracting the pool start when targeting the upper pool.
-    bool isAIE4z = getTargetArch() == AIEArch::AIE4z;
     if (direction == AIE::DMAChannelDir::ControlMM2S) {
       // AIE4 shim control-MM2S has its own pool of 8 private BDs per channel.
       numBds = 8;
@@ -1889,28 +1881,20 @@ uint64_t AIE4TargetModel::getDmaBdAddress(int col, int row, uint32_t bd_id,
         channel -= 1;
       }
     } else if (isMM2S(direction)) {
-      if (isAIE4z) {
-        offset = 0x00018C40;
+      if (channel < 2) {
+        offset = 0x00018000;
       } else {
-        if (channel < 2) {
-          offset = 0x00018000;
-        } else {
-          offset = 0x00058000;
-          bd_id -= numBds;
-        }
-        channel = 0;
+        offset = 0x00058000;
+        bd_id -= numBds;
       }
+      channel = 0;
     } else {
       if (channel == 0) {
         offset = 0x00018000;
       } else if (channel == 1) {
-        if (!isAIE4z)
-          bd_id -= numBds;
+        bd_id -= numBds;
         offset = 0x00058000;
         channel = 0;
-      } else if (isAIE4z) {
-        offset = 0x00018640;
-        channel -= 2;
       } else {
         llvm_unreachable("Unhandled channel and/or direction in "
                          "AIE4TargetModel::getDmaBdAddress");
@@ -2081,15 +2065,9 @@ AIE4TargetModel::getNumDestSwitchboxConnections(int col, int row,
   if (isShimNOCTile(col, row))
     switch (bundle) {
     case WireBundle::DMA:
-      if (getTargetArch() == AIEArch::AIE4z)
-        return 4;
-      else
-        return 2;
+      return 2;
     case WireBundle::North:
-      if (getTargetArch() == AIEArch::AIE4z)
-        return 8;
-      else
-        return 4;
+      return 4;
     case WireBundle::West: {
       if (col == 0)
         return 0;
@@ -2172,10 +2150,7 @@ AIE4TargetModel::getNumSourceSwitchboxConnections(int col, int row,
     case WireBundle::North:
       return 4;
     case WireBundle::South:
-      if (getTargetArch() == AIEArch::AIE4z)
-        return 8;
-      else
-        return 4;
+      return 4;
     case WireBundle::SouthControl:
     case WireBundle::Switch32:
       return 2;
@@ -2195,10 +2170,7 @@ AIE4TargetModel::getNumSourceSwitchboxConnections(int col, int row,
   if (isShimNOCTile(col, row))
     switch (bundle) {
     case WireBundle::DMA:
-      if (getTargetArch() == AIEArch::AIE4z)
-        return 8;
-      else
-        return 4;
+      return 4;
     case WireBundle::North:
       return 4;
     case WireBundle::West: {

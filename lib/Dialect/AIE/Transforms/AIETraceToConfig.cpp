@@ -25,12 +25,6 @@ using namespace xilinx::AIE;
 
 namespace {
 
-/// Returns true if the target is an AIE4 architecture (AIE4 or AIE4z).
-static bool isAIE4(const AIETargetModel &tm) {
-  auto arch = tm.getTargetArch();
-  return arch == AIEArch::AIE4 || arch == AIEArch::AIE4z;
-}
-
 /// Returns the trace register name prefix for the given tile and packet type.
 /// For AIE4:
 ///   - Core tile, isMem=false  -> "Trace0_"  (trace unit 0)
@@ -41,7 +35,7 @@ static bool isAIE4(const AIETargetModel &tm) {
 ///   - All tile types          -> "Trace_"
 static std::string getTraceRegPrefix(const AIETargetModel &tm, TileID tileID,
                                      bool isMem) {
-  if (isAIE4(tm)) {
+  if (isa<AIE4TargetModel>(tm)) {
     if (tm.isShimNOCorPLTile(tileID.col, tileID.row) ||
         tm.isMemTile(tileID.col, tileID.row))
       return "Trace_A_";
@@ -55,7 +49,7 @@ static std::string getTraceRegPrefix(const AIETargetModel &tm, TileID tileID,
 static std::string getPortSelRegName(const AIETargetModel &tm, TileID tileID,
                                      uint32_t slot) {
   bool isShim = tm.isShimNOCorPLTile(tileID.col, tileID.row);
-  if (isAIE4(tm) && isShim)
+  if (isa<AIE4TargetModel>(tm) && isShim)
     return slot < 4 ? "Stream_Switch_Event_Port_Selection_A_0"
                     : "Stream_Switch_Event_Port_Selection_A_1";
   return slot < 4 ? "Stream_Switch_Event_Port_Selection_0"
@@ -66,7 +60,8 @@ static std::string getPortSelRegName(const AIETargetModel &tm, TileID tileID,
 /// AIE4 renames "Master_Slave" to "Manager_Subordinate".
 static std::string getMasterSlaveFieldName(const AIETargetModel &tm,
                                            uint32_t slot) {
-  const char *suffix = isAIE4(tm) ? "_Manager_Subordinate" : "_Master_Slave";
+  const char *suffix =
+      isa<AIE4TargetModel>(tm) ? "_Manager_Subordinate" : "_Master_Slave";
   return "Port_" + std::to_string(slot) + suffix;
 }
 

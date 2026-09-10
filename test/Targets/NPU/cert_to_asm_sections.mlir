@@ -33,7 +33,7 @@
 // CHECK: EOF
 
 module {
-  aie.device(npu3z) {
+  aie.device(npu3) {
     aiex.cert.page {
       aiex.cert.job(1) {
         aiex.cert.load_pdi(1, @config_device)

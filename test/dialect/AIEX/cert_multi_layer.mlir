@@ -11,7 +11,7 @@
 // RUN: aie-opt %s | FileCheck %s
 
 module {
-  aie.device(npu3z) {
+  aie.device(npu3) {
     // Data declarations (uC DMA chains and BD data)
     memref.global "private" constant @shim00_bd0 : memref<9xi32> = dense<[1, 0, 0, 0, 0, 0, 0, 0x02000000, 0]>
     memref.global "private" constant @mem11_bd0 : memref<8xi32> = dense<[1, 0x00020000, 0, 0, 0, 0, 0, 0x80000000]>

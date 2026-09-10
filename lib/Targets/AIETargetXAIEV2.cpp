@@ -495,7 +495,6 @@ xilinx::AIE::AIETranslateToXAIEV2(ModuleOp module, raw_ostream &output,
   std::string AIE2_device("XAIE_DEV_GEN_AIEML");
   std::string AIE2p_device("XAIE_DEV_GEN_AIE2P");
   std::string AIE4_device("XAIE_DEV_GEN_AIE4");
-  std::string AIE4z_device("XAIE_DEV_GEN_AIE4Z");
   std::string device;
   switch (arch) {
   case AIEArch::AIE1:
@@ -509,9 +508,6 @@ xilinx::AIE::AIETranslateToXAIEV2(ModuleOp module, raw_ostream &output,
     break;
   case AIEArch::AIE4:
     device = AIE4_device;
-    break;
-  case AIEArch::AIE4z:
-    device = AIE4z_device;
     break;
   default:
     return module.emitOpError("Unsupported aie.device");

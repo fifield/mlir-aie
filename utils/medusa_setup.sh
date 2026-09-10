@@ -65,12 +65,12 @@ export LD_LIBRARY_PATH=${MLIR_AIE_INSTALL_DIR}/lib:${MLIR_AIE_INSTALL_DIR}/lib/r
 
 # setup environment for simulator
 if [[ $(hostname) == xco* ]]; then
-  export PACIFICA_SIM_ROOT=/proj/rdi/staff/jefff/aie4/pacifica-sim
+  export MEDUSA_SIM_ROOT=/proj/rdi/staff/jefff/aie4/pacifica-sim
 else
-  export PACIFICA_SIM_ROOT=/group/xrlabs/jefff/pacifica-sim
+  export MEDUSA_SIM_ROOT=/group/xrlabs/jefff/pacifica-sim
 fi
-export CERVINO_ROOT=\$PACIFICA_SIM_ROOT/cervino
-export ME_ROOT=\$PACIFICA_SIM_ROOT/cervino/aie4
+export CERVINO_ROOT=\$MEDUSA_SIM_ROOT/cervino
+export ME_ROOT=\$MEDUSA_SIM_ROOT/cervino/aie4
 export me_DIR=\$ME_ROOT/core_model/sipp/lib
 if [[ $(hostname) == xco* ]]; then
   export LD_LIBRARY_PATH=/proj/rdi/staff/jefff/aie4/wrk/hmca/shared/ext/systemc-2.3.3_gcc10_std20/lib64:\$LD_LIBRARY_PATH

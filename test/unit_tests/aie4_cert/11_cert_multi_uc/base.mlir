@@ -20,7 +20,7 @@
 // XFAIL: *
 
 module {
-  aie.device(npu3z) {
+  aie.device(npu3) {
     %tile_0_0 = aie.tile(0, 0) { elf_file = "cert_medusa.elf", controller_id = #aie.packet_info<pkt_type = 0, pkt_id = 1>}
     %tile_1_0 = aie.tile(1, 0) { elf_file = "cert_medusa.elf", controller_id = #aie.packet_info<pkt_type = 0, pkt_id = 2>}
     aie.packet_flow(1) {

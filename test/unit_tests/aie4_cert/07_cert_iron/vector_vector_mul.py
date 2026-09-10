@@ -14,7 +14,7 @@ import numpy as np
 import sys
 
 from aie.iron import ObjectFifo, Program, Runtime, Worker
-from aie.iron.device import NPU3Z
+from aie.iron.device import NPU3
 from aie.iron.controlflow import range_
 
 import argparse
@@ -25,7 +25,7 @@ def my_vector_mul(args):
     n = 16
     N_div_n = N // n
 
-    dev = NPU3Z()
+    dev = NPU3()
 
     # Define tensor types
     tensor_ty = np.ndarray[(N,), np.dtype[np.int32]]

@@ -1,10 +1,10 @@
 # AIE4 MLIR Trace Example
 
-AIE4 (npu3z) port of the `basic/event_trace` example. Demonstrates declarative trace configuration on an AMD NPU4/NPU3z device using a vector-scalar multiply kernel.
+AIE4 (npu3) port of the `basic/event_trace` example. Demonstrates declarative trace configuration on an AMD NPU3 device using a vector-scalar multiply kernel.
 
 ## Contents
 
-- `aie_trace.mlir` - declarative trace configuration for npu3z (`aie.trace`, `aie.trace.event`, `aie.trace.start_config`)
+- `aie_trace.mlir` - declarative trace configuration for npu3 (`aie.trace`, `aie.trace.event`, `aie.trace.start_config`)
 - `aie_trace.py` - Python equivalent of `aie_trace.mlir`
 - `vector_scalar_mul.cc` - AIE4 kernel (compiled with chess `xchesscc_wrapper aie4`)
 - `test.cpp` / `test.py` - host runners (XRT-based, same interface as AIE2)
@@ -12,9 +12,9 @@ AIE4 (npu3z) port of the `basic/event_trace` example. Demonstrates declarative t
 
 ## AIE4 Differences from AIE2
 
-| Feature | AIE2 | AIE4 (npu3z) |
+| Feature | AIE2 | AIE4 (npu3) |
 |---------|------|-------------|
-| Device  | `npu1_1col` | `npu3z` |
+| Device  | `npu1_1col` | `npu3` |
 | Core trace unit 0 | `Trace_Control0/1`, `Trace_Event0/1` | `Trace0_Control0/1`, `Trace0_Event0/1` |
 | Core trace unit 1 | Memory module: `Trace_Control0/1` | Same tile, Trace1: `Trace1_Control0/1`, `Trace1_Event0/1` |
 | Shim trace | `Trace_Control0/1` | `Trace_A_Control0/1`, `Trace_A_Event0/1` |

@@ -99,8 +99,9 @@ static void emitAIE4ControlWiring(DeviceOp device) {
   // `controller_id` attribute. `controller_id` is a poor proxy: it is also set
   // on core and mem tiles, and the check runs before the shim-tile filter, so
   // keying off it skips the wiring for any design that carries a controller_id
-  // but has no TCT route at all (test/unit_tests/aie4_cert/10_iron_Nshim_1uc is
-  // one such design).
+  // but has no TCT route at all (see
+  // test/place-tiles/test_aie4_control_wiring.mlir's
+  // @controller_id_but_no_tct_route case).
   //
   // Note this cannot be reached from the standard aiecc pipeline by a
   // control-packet design: aie-place-tiles runs in getPlacementPipeline,

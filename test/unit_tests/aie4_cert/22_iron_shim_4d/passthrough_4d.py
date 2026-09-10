@@ -98,7 +98,7 @@ parser.add_argument("-o", "--output", type=str, required=True, help="Output file
 args = parser.parse_args()
 
 with mlir_mod_ctx() as ctx:
-    passthrough_4d(AIEDevice.npu3z)
+    passthrough_4d(AIEDevice.npu3)
     res = ctx.module.operation.verify()
     if res != True:
         print(res)

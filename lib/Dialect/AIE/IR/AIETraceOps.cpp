@@ -93,7 +93,6 @@ static bool isValidEventForTile(TileLike tile, Attribute eventAttr,
       case AIEArch::AIE2p:
         return prefix == "CoreEventAIE2P" || prefix == "MemEventAIE2P";
       case AIEArch::AIE4:
-      case AIEArch::AIE4z:
         return prefix == "CoreEventAIE4" || prefix == "MemEventAIE4";
       default:
         return false;
@@ -106,7 +105,6 @@ static bool isValidEventForTile(TileLike tile, Attribute eventAttr,
       case AIEArch::AIE2p:
         return prefix == "MemTileEventAIE2P";
       case AIEArch::AIE4:
-      case AIEArch::AIE4z:
         return prefix == "MemTileEventAIE4";
       default:
         return false;
@@ -121,7 +119,6 @@ static bool isValidEventForTile(TileLike tile, Attribute eventAttr,
       case AIEArch::AIE2p:
         return prefix == "ShimTileEventAIE2P";
       case AIEArch::AIE4:
-      case AIEArch::AIE4z:
         return prefix == "ShimTileEventAIE4";
       default:
         return false;

@@ -428,34 +428,6 @@ void test() {
   if (AIE::getTargetModel(AIE::AIEDevice::npu3).rows() != 6) {
     throw std::runtime_error("Failed npu3 rows");
   }
-
-  // AIEDevice::npu3z
-  if (!AIE::getTargetModel(AIE::AIEDevice::npu3z)
-           .hasProperty(AIE::AIETargetModel::UsesSemaphoreLocks)) {
-    throw std::runtime_error(
-        "Failed npu3z property check for 'UsesSemaphoreLocks' returns false");
-  }
-  if (!AIE::getTargetModel(AIE::AIEDevice::npu3z)
-           .hasProperty(AIE::AIETargetModel::UsesMultiDimensionalBDs)) {
-    throw std::runtime_error("Failed npu3z property check for "
-                             "'UsesMultiDimensionalBDs' returns false");
-  }
-  if (!AIE::getTargetModel(AIE::AIEDevice::npu3z)
-           .hasProperty(AIE::AIETargetModel::IsNPU)) {
-    throw std::runtime_error(
-        "Failed npu3z property check for 'IsNPU' returns false");
-  }
-  if (AIE::getTargetModel(AIE::AIEDevice::npu3z)
-          .hasProperty(AIE::AIETargetModel::IsVirtualized)) {
-    throw std::runtime_error(
-        "Failed npu3z property check for 'IsVirtualized' returns true");
-  }
-  if (AIE::getTargetModel(AIE::AIEDevice::npu3z).columns() != 9) {
-    throw std::runtime_error("Failed npu3z columns");
-  }
-  if (AIE::getTargetModel(AIE::AIEDevice::npu3z).rows() != 6) {
-    throw std::runtime_error("Failed npu3z rows");
-  }
 }
 
 // Program memory is 16 KB on every generation, per aie-rt's XAie_CoreMod

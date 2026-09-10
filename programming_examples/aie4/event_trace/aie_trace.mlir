@@ -8,7 +8,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Ported from basic/event_trace to AIE4 (npu3z target).
+// Ported from basic/event_trace to AIE4 (npu3 target).
 //
 // This example uses:
 // - aie.trace operation for declarative trace configuration

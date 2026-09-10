@@ -69,28 +69,15 @@ class AIEAddressDecoder:
             # 20-bit tile offset (row_shift=20). It is omitted from memory regions
             # since it cannot be represented in the standard addressing scheme.
         },
-        "aie4z": {
-            "core": [
-                ("Program_Memory", 0x80000, 0x8000),  # 32KB program memory
-                ("DataMemory", 0x0, 0x20000),  # 128KB data memory
-            ],
-            "memory": [
-                ("DataMemory", 0x0, 0x20000),  # 128KB data memory for memory module
-            ],
-            # Note: AIE4Z memtile DataMemory starts at 0x100000 which exceeds the
-            # 20-bit tile offset (row_shift=20). It is omitted from memory regions
-            # since it cannot be represented in the standard addressing scheme.
-        },
     }
 
     # Map architecture name to AIEDevice enum name
     _ARCH_DEVICE = {
         "aie2": "npu1",
         "aie4": "npu3",
-        "aie4z": "npu3z",
     }
 
-    _KNOWN_ARCHES = {"aie2", "aie4", "aie4z"}
+    _KNOWN_ARCHES = {"aie2", "aie4"}
 
     def __init__(self, arch="aie2"):
         """Initialize decoder with register database
@@ -137,7 +124,7 @@ class AIEAddressDecoder:
 
         On AIE2 there is no adjustment (1:1 mapping).
         """
-        if self.arch not in ("aie4", "aie4z"):
+        if self.arch != "aie4":
             return addr_row
 
         num_mt = target_model.get_num_mem_tile_rows()  # typically 1
@@ -156,7 +143,7 @@ class AIEAddressDecoder:
 
         Inverse of _addr_row_to_logical.
         """
-        if self.arch not in ("aie4", "aie4z"):
+        if self.arch != "aie4":
             return row
         if target_model.is_core_tile(col, row):
             num_mt = target_model.get_num_mem_tile_rows()
@@ -764,11 +751,9 @@ class MLIRModuleAnnotator:
             device = AIEDevice(int(devices[0].device))
 
         # Detect architecture from the device and update decoder if needed
-        # Map device name (or prefix) to arch; npu1*/npu2* -> aie2, npu3z* -> aie4z, npu3* -> aie4
+        # Map device name (or prefix) to arch; npu1*/npu2* -> aie2, npu3* -> aie4
         device_name = device.name
-        if device_name.startswith("npu3z"):
-            detected_arch = "aie4z"
-        elif device_name.startswith("npu3"):
+        if device_name.startswith("npu3"):
             detected_arch = "aie4"
         else:
             detected_arch = "aie2"
@@ -1078,7 +1063,7 @@ Examples:
     )
     parser.add_argument(
         "--arch",
-        choices=["aie2", "aie4", "aie4z"],
+        choices=["aie2", "aie4"],
         default="aie2",
         help="Target architecture (default: aie2)",
     )

@@ -8,7 +8,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// On AIE4 (npu3/npu3z), --aie-place-tiles emits the control flows after tile
+// On AIE4 (npu3), --aie-place-tiles emits the control flows after tile
 // placement: every shim NOC/PL tile used by the design gets a controller_id
 // PacketInfoAttr and a Control32:0 / Control32:1 -> Controller32:0 packet flow
 // back to the first shim's Controller32 channel 0.
@@ -97,7 +97,6 @@ module @already_wired {
 //
 // This is the case the "is it already wired?" check gets wrong when it keys off
 // the presence of a controller_id attribute instead of an existing TCT route.
-// test/unit_tests/aie4_cert/10_iron_Nshim_1uc is a real design of this shape.
 // CHECK-LABEL: @controller_id_but_no_tct_route
 module @controller_id_but_no_tct_route {
   aie.device(npu3) {

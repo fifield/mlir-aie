@@ -328,9 +328,6 @@ xilinx::AIE::AIERTControl::AIERTControl(const AIE::AIETargetModel &tm)
   case AIEArch::AIE4:
     devGen = XAIE_DEV_GEN_AIE4;
     break;
-  case AIEArch::AIE4z:
-    devGen = XAIE_DEV_GEN_AIE4Z;
-    break;
   }
   aiert->configPtr = XAie_Config{
       /*AieGen*/ devGen,
@@ -645,16 +642,14 @@ configureBdInBlock(const AIE::AIETargetModel &targetModel,
   if (!isa<AIE::AIE4TargetModel>(targetModel))
     TRY_XAIE_API_EMIT_ERROR(bdOp, XAie_DmaEnableBd, &dmaTileBd);
 
-  // If it's AIE4 mem tile, or an AIE4z shim, then it has a private bd pool and
+  // If it's AIE4 mem tile, then it has a private bd pool and
   // XAie_DmaWriteBdPvtBuffPool aie-rt is used instead of XAie_DmaWriteBd
   auto tileLoc = XAie_TileLoc(col, row);
   if (isa<AIE::AIE4TargetModel>(targetModel) &&
       (targetModel.isMemTile(col, row) ||
        (targetModel.isShimNOCTile(col, row) &&
         (dir == AIE::DMAChannelDir::ControlMM2S ||
-         dir == AIE::DMAChannelDir::TraceS2MM)) ||
-       (isa<AIE::NPU3zTargetModel>(targetModel) &&
-        targetModel.isShimNOCTile(col, row)))) {
+         dir == AIE::DMAChannelDir::TraceS2MM)))) {
     XAie_DmaDirection d = toXAieDmaDirection(dir);
     TRY_XAIE_API_EMIT_ERROR(bdOp, XAie_DmaWriteBdPvtBuffPool, devInst,
                             &dmaTileBd, tileLoc, channel, d, bdId);
@@ -1136,18 +1131,6 @@ xilinx::AIE::AIERTControl::addInitConfig(DeviceOp &targetOp,
                               targetModel.getTileAddress(col, row) +
                                   coreProcessorBusOffset,
                               /*Enable=*/1);
-    }
-  }
-  if (isa<NPU3zTargetModel>(targetOp.getTargetModel())) {
-    // set compatability mode
-    uint32_t mode = 0x1; // Native
-    for (TileOp tile : targetOp.getOps<TileOp>()) {
-      if (!tile.isShimNOCTile())
-        continue;
-      uint64_t addr =
-          0x0001A440 |
-          (tile.getCol() << targetOp.getTargetModel().getColumnShift());
-      TRY_XAIE_API_EMIT_ERROR(tile, XAie_Write32, &aiert->devInst, addr, mode);
     }
   }
   if (failed(initLocks(targetOp))) {

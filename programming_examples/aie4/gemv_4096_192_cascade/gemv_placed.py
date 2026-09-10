@@ -6,8 +6,8 @@
 # (c) Copyright 2026 Advanced Micro Devices, Inc.
 #
 # High-performance GEMV (M=1) example with multi-row cascade reduction.
-# Ported (and scaled to npu3 = 3 cols x 4 compute rows) from
-#   pacifica-apps/kernels/llama2/llama_4096_512/iron.py
+# Ported (and scaled to npu3 = 3 cols x 4 compute rows) from a
+# llama2 llama_4096_512 kernel example.
 #
 # This example demonstrates:
 #   - Spatial tiling across a configurable 1..3 cols x 4 rows (--cols)
