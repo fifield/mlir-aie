@@ -20,7 +20,6 @@ sys.path.insert(0, str(HERE.parents[1] / "microbench" / "memtile_program_cost"))
 import memtile_program_cost as mpc  # noqa: E402
 
 import aie.iron as iron  # noqa: E402
-from aie.compiler.aiecc.main import run as aiecc_run  # noqa: F401  (env check)
 from aie.dialects.aie import (  # noqa: E402
     AIEDevice, DMAChannelDir, EndOp, WireBundle, buffer, core, device,
     dma_bd, dma_start, flow, lock, memtile_dma, next_bd, shim_dma_allocation, tile,
