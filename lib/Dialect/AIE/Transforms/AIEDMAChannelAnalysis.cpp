@@ -171,6 +171,21 @@ int DMAChannelAnalysis::getDMAChannelIndex(
     TileLike tile, DMAChannelDir dir, bool requiresAdjacentTileAccessChannels,
     Operation *owner) {
   int limit = getDMAChannelLimit(tile, dir, requiresAdjacentTileAccessChannels);
+  if (isa<AIE4TargetModel>(getTargetModel(tile)) && tile.isMemTile()) {
+    // Prefer four direct South inputs and eight unrestricted North outputs.
+    static constexpr int s2mmOrder[] = {0, 1, 4, 5, 2, 3, 6, 7};
+    static constexpr int mm2sOrder[] = {0, 1, 2, 3, 5, 6, 7, 8, 4, 9};
+    ArrayRef<int> order = dir == DMAChannelDir::MM2S
+                              ? ArrayRef<int>(mm2sOrder)
+                              : ArrayRef<int>(s2mmOrder);
+    for (int channel : order) {
+      if (channel < limit &&
+          reservePinnedChannel(tile, dir, channel, owner) >= 0)
+        return channel;
+    }
+    return -1;
+  }
+
   for (int i = 0; i < limit; i++) {
     if (isChannelFree(tile, dir, i) &&
         reservePinnedChannel(tile, dir, i, owner) >= 0) {

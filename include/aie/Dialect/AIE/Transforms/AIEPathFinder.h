@@ -76,6 +76,14 @@ struct SwitchboxConnect {
   // The connection from srcPorts[i] to dstPorts[j] is cells[i * dstPorts.size()
   // + j].
   std::vector<Cell> cells;
+  // Circuit outputs are exclusive across all input rows. Packet traffic may
+  // share an output, but cannot share it with a circuit connection.
+  std::vector<int> usedDestCapacity, overDestCapacity;
+  llvm::BitVector packetDest;
+  bool destinationOverCapacity(size_t j) const {
+    return usedDestCapacity[j] > 1 ||
+           (usedDestCapacity[j] != 0 && packetDest[j]);
+  }
   // Units of dst ports tied to one arbiter (see planArbiters in
   // AIECreatePathFindFlows.cpp); a unit's leader lists the packet flows
   // (indices into the router's flows) leaving by any of its ports
@@ -99,6 +107,9 @@ struct SwitchboxConnect {
   // Size the cells and the per-port state to srcPorts and dstPorts.
   void resize() {
     cells.assign(srcPorts.size() * dstPorts.size(), Cell());
+    usedDestCapacity.assign(dstPorts.size(), 0);
+    overDestCapacity.assign(dstPorts.size(), 0);
+    packetDest = llvm::BitVector(dstPorts.size());
     packetOnlySrc = llvm::BitVector(srcPorts.size());
     circuitOnlyDst = llvm::BitVector(dstPorts.size());
     unitPacketFlows.resize(dstPorts.size());
@@ -139,7 +150,8 @@ struct SwitchboxConnect {
 
   // Bumps an over-capacity cell's demand, all but ruling it out if a
   // prioritized flow uses it, to keep prioritized flows' routes.
-  static void bumpDemand(Cell &c);
+  void bumpDemand(size_t i, size_t j);
+  void bumpDestDemand(size_t usedSrc, size_t j);
 
 private:
   static int indexIn(llvm::ArrayRef<Port> ports, Port p) {

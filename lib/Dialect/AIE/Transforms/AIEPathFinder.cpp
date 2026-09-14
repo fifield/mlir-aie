@@ -82,15 +82,28 @@ constexpr int stallHistory = 4;
 } // namespace
 
 void SwitchboxConnect::updateDemand() {
-  for (Cell &c : cells)
-    c.demand = (demandBase + overCapacityCoeff * c.overCapacity) *
-                   (demandBase + usedCapacityCoeff * c.usedCapacity) +
-               c.avoidance;
+  for (size_t i = 0; i < srcPorts.size(); ++i)
+    for (size_t j = 0; j < dstPorts.size(); ++j) {
+      Cell &c = at(i, j);
+      c.demand =
+          (demandBase + overCapacityCoeff *
+                            (c.overCapacity + overDestCapacity[j])) *
+          (demandBase + usedCapacityCoeff *
+                            (c.usedCapacity + usedDestCapacity[j])) + c.avoidance;
+    }
 }
 
-void SwitchboxConnect::bumpDemand(Cell &c) {
-  if (c.usedCapacity >= maxCircuitStreamCapacity)
+void SwitchboxConnect::bumpDemand(size_t i, size_t j) {
+  Cell &c = at(i, j);
+  if (c.usedCapacity >= maxCircuitStreamCapacity ||
+      usedDestCapacity[j] >= maxCircuitStreamCapacity)
     c.demand *= c.isPriority ? priorityDemandCoeff : demandCoeff;
+}
+
+void SwitchboxConnect::bumpDestDemand(size_t usedSrc, size_t j) {
+  for (size_t i = 0; i < srcPorts.size(); ++i)
+    if (i != usedSrc && at(i, j).available)
+      bumpDemand(i, j);
 }
 
 char RoutingFailure::ID = 0;
@@ -1309,8 +1322,16 @@ llvm::Error Pathfinder::explainNoRouting(const RouteState &st) const {
         }
       }
   }
-  if (!worst)
+  if (!worst) {
+    for (const auto &[_, sb] : graph)
+      for (size_t j = 0; j < sb.dstPorts.size(); ++j)
+        if (sb.destinationOverCapacity(j))
+          return llvm::make_error<RoutingFailure>(
+              "the router found no routing that avoids multiple streams "
+              "driving circuit destination " +
+              describeTilePort(sb.dstCoords, sb.dstPorts[j]) + ".");
     return llvm::make_error<RoutingFailure>("");
+  }
   bool crossbar = worst->srcCoords == worst->dstCoords;
   std::vector<std::string> users;
   for (const auto &[src, settings] : st.routing.settings) {
@@ -2131,6 +2152,16 @@ void Pathfinder::TreeBuilder::reroute() {
 // Take the channels the tree's hops cross.
 void Pathfinder::TreeBuilder::claim() {
   if (toSelf) {
+    auto &sb = pf.graph.at({part.src.coords, part.src.coords});
+    int j = sb.dstIndex(part.src.port);
+    assert(j >= 0 && "a self connection has an output port");
+    if (part.packetId)
+      sb.packetDest.set(j);
+    else
+      ++sb.usedDestCapacity[j];
+    for (size_t i = 0; i < sb.srcPorts.size(); ++i)
+      if (sb.at(i, j).available)
+        sb.bumpDemand(i, j);
     switchSettings[part.src.coords].srcs.push_back(part.src.port);
     switchSettings[part.src.coords].dsts.push_back(part.src.port);
     if (part.packetId)
@@ -2202,7 +2233,16 @@ void Pathfinder::TreeBuilder::claim() {
     }
     // if at capacity, bump demand to discourage using this Channel
     // this means the order matters!
-    SwitchboxConnect::bumpDemand(cell);
+    // This coordinate test must become sb.isCrossbar with the bridge port.
+    if (sb.srcCoords == sb.dstCoords) {
+      if (packetId)
+        sb.packetDest.set(j);
+      else
+        ++sb.usedDestCapacity[j];
+    }
+    sb.bumpDemand(i, j);
+    if (sb.usedDestCapacity[j] > 0)
+      sb.bumpDestDemand(i, j);
     if (pred.coords == curr.coords) {
       switchSettings[pred.coords].srcs.push_back(pred.port);
       switchSettings[curr.coords].dsts.push_back(curr.port);
@@ -2505,6 +2545,9 @@ llvm::Expected<Routing> Pathfinder::findPaths(const int maxIterations) {
       c.overCapacity = 0;
       c.isPriority = false;
     }
+    llvm::fill(sb.usedDestCapacity, 0);
+    llvm::fill(sb.overDestCapacity, 0);
+    sb.packetDest.reset();
   }
 
   RouteState st(*this);
@@ -2540,13 +2583,18 @@ llvm::Expected<Routing> Pathfinder::findPaths(const int maxIterations) {
       packetsFailed =
           !checkReason.empty() || llvm::any_of(graph, [](const auto &entry) {
             ArrayRef<SwitchboxConnect::Cell> cells = entry.second.cells;
-            return llvm::any_of(cells,
+            const SwitchboxConnect &sb = entry.second;
+            bool mixedDestination = llvm::any_of(
+                llvm::seq<size_t>(0, sb.dstPorts.size()), [&](size_t j) {
+                  return sb.packetDest[j] && sb.destinationOverCapacity(j);
+                });
+            return mixedDestination || (llvm::any_of(cells,
                                 [](const SwitchboxConnect::Cell &c) {
                                   return c.packetGroupId >= 0;
                                 }) &&
                    llvm::any_of(cells, [](const SwitchboxConnect::Cell &c) {
                      return c.usedCapacity > maxCircuitStreamCapacity;
-                   });
+                   }));
           });
       return explainNoRouting(st);
     }
@@ -2569,6 +2617,8 @@ llvm::Expected<Routing> Pathfinder::findPaths(const int maxIterations) {
         c.packetIds.clear();
       }
       sb.resetUnits();
+      llvm::fill(sb.usedDestCapacity, 0);
+      sb.packetDest.reset();
     }
     for (auto &tree : st.treeOf)
       tree.clear();
@@ -2589,14 +2639,16 @@ llvm::Expected<Routing> Pathfinder::findPaths(const int maxIterations) {
         if (llvm::Error err = routePart(st, flow))
           return std::move(err);
       for (auto &[_, sb] : graph) {
-        for (SwitchboxConnect::Cell &c : sb.cells) {
-          // fix used capacity for packet flows
-          if (c.packetFlowCount > 0) {
-            c.packetFlowCount = 0;
-            c.usedCapacity++;
+        for (size_t i = 0; i < sb.srcPorts.size(); ++i)
+          for (size_t j = 0; j < sb.dstPorts.size(); ++j) {
+            SwitchboxConnect::Cell &c = sb.at(i, j);
+            // fix used capacity for packet flows
+            if (c.packetFlowCount > 0) {
+              c.packetFlowCount = 0;
+              c.usedCapacity++;
+            }
+            sb.bumpDemand(i, j);
           }
-          SwitchboxConnect::bumpDemand(c);
-        }
       }
     }
 
@@ -2635,6 +2687,13 @@ llvm::Expected<Routing> Pathfinder::findPaths(const int maxIterations) {
         }
       }
     }
+
+    for (auto &[_, sb] : graph)
+      for (size_t j = 0; j < sb.dstPorts.size(); ++j)
+        if (sb.destinationOverCapacity(j)) {
+          ++sb.overDestCapacity[j];
+          ++illegalEdges;
+        }
 
     // Once the overuse stalls, circuit trees that overuse a circuit-only
     // channel route first, so the same tree stops losing it. Packet-shared
