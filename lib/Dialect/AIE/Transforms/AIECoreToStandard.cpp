@@ -781,6 +781,9 @@ struct AIEEventOpToStdLowering : OpConversionPattern<EventOp> {
       break;
     case AIEArch::AIE2ps:
       return op.emitOpError("has no core lowering for AIE2ps");
+    case AIEArch::AIE4:
+      return op.emitOpError(
+          "aie.event is not yet supported on the AIE4 architecture");
     }
     auto eventFunc = module.lookupSymbol<func::FuncOp>(funcName);
     if (!eventFunc)
