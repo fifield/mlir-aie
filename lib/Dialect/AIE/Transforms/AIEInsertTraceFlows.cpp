@@ -46,7 +46,7 @@ struct TraceInfo {
 /// Per-channel DMA resource allocation.
 struct ChannelDescriptor {
   int channel; // S2MM channel number
-  int bdId;    // Buffer descriptor ID
+  int bdId;    // Global buffer descriptor ID
 };
 
 struct ShimInfo {
@@ -600,9 +600,13 @@ struct AIEInsertTraceFlowsPass
         for (int ch : usedIt->second)
           available.erase(ch);
       }
-      shimInfo.channels =
-          buildChannelDescriptors(shimInfo.traceSources.size(),
-                                  shimInfo.channel, shimInfo.bdId, available);
+      FailureOr<std::vector<ChannelDescriptor>> channels =
+          buildChannelDescriptors(device, shimInfo.traceSources.size(), shimCol,
+                                  shimInfo.channel, shimInfo.bdId, available,
+                                  targetModel);
+      if (failed(channels))
+        return signalPassFailure();
+      shimInfo.channels = std::move(*channels);
       // Round-robin assignment of traces to channels
       for (size_t i = 0; i < shimInfo.traceSources.size(); i++) {
         shimInfo.traceChannelAssignment.push_back(i % shimInfo.channels.size());
@@ -863,7 +867,7 @@ struct AIEInsertTraceFlowsPass
                               // lock_acq_val, lock_acq_id
             0, 0, 0, 0, 0, 0, // d0_zero_before, d1_zero_before, d2_zero_before,
                               // d0_zero_after, d1_zero_after, d2_zero_after
-            0, 0,               // d3_size, d3_stride
+            0, 0,             // d3_size, d3_stride
             clTraceBurstLength, // burst_length
             // axcache left unset: the blockwrite lowering resolves the
             // target default, so baking it here would only duplicate it.
@@ -931,9 +935,13 @@ struct AIEInsertTraceFlowsPass
         if (!tokenField || !bdIdField)
           llvm::report_fatal_error(
               "Failed to lookup Enable_Token_Issue or Start_BD_ID fields");
+        uint32_t bdPool = targetModel.getBdPoolId(shimCol, 0, chanDesc.channel,
+                                                DMAChannelDir::S2MM);
+        uint32_t localBdId =
+            chanDesc.bdId - targetModel.getBdPoolStartId(shimCol, 0, bdPool);
         auto tokenValue = targetModel.encodeFieldValue(*tokenField, 1);
         auto bdIdValue =
-            targetModel.encodeFieldValue(*bdIdField, chanDesc.bdId);
+            targetModel.encodeFieldValue(*bdIdField, localBdId);
         if (!tokenValue)
           llvm::report_fatal_error("Enable_Token_Issue does not fit in the "
                                    "field of " +
@@ -943,6 +951,7 @@ struct AIEInsertTraceFlowsPass
                                    "field of " +
                                    llvm::Twine(taskQueueRegName));
         uint32_t queueValue = *tokenValue | *bdIdValue;
+
         xilinx::AIEX::NpuWrite32Op::create(
             builder, runtimeSeq.getLoc(),
             AIEX::createConstantI32(builder, runtimeSeq.getLoc(),
@@ -1151,20 +1160,57 @@ private:
     return reg->offset;
   }
 
+  /// Translate a channel local BD id to the global BD id used by
+  /// aiex.npu.writebd and getDmaBdAddress. The task queue keeps using the local
+  /// id, recovered by subtracting the pool start when it is encoded.
+  FailureOr<int> globalBdIdFor(DeviceOp device, int col, int channel,
+                               int localBdId, const AIETargetModel &tm) const {
+    uint32_t pool = tm.getBdPoolId(col, 0, channel, DMAChannelDir::S2MM);
+    uint32_t count = tm.getNumBDsInPool(col, 0, pool);
+    if (localBdId < 0 || static_cast<uint32_t>(localBdId) >= count) {
+      device.emitError() << "trace buffer descriptor ID " << localBdId
+                         << " is outside the channel-local range [0, " << count
+                         << ") for S2MM channel " << channel
+                         << " on the shim tile at column " << col;
+      return failure();
+    }
+    return static_cast<int>(tm.getBdPoolStartId(col, 0, pool)) + localBdId;
+  }
+
   /// Build channel descriptors. Always includes the primary channel.
   /// Adds a secondary channel when distribute-channels is enabled and there
   /// are multiple traces. AIE2 shim tiles have exactly 2 S2MM DMA channels.
-  std::vector<ChannelDescriptor>
-  buildChannelDescriptors(size_t numTraces, int primaryChannel, int primaryBdId,
-                          const std::set<int> &availableChannels) {
+  FailureOr<std::vector<ChannelDescriptor>>
+  buildChannelDescriptors(DeviceOp device, size_t numTraces, int col,
+                          int primaryChannel, int primaryLocalBdId,
+                          const std::set<int> &availableChannels,
+                          const AIETargetModel &tm) {
     std::vector<ChannelDescriptor> chans;
-    chans.push_back({primaryChannel, primaryBdId});
-    if (clDistributeChannels && numTraces > 1 && primaryBdId > 0) {
+    FailureOr<int> primary =
+        globalBdIdFor(device, col, primaryChannel, primaryLocalBdId, tm);
+    if (failed(primary))
+      return failure();
+    chans.push_back({primaryChannel, *primary});
+    if (clDistributeChannels && numTraces > 1 && primaryLocalBdId > 0) {
       int ch2 = (primaryChannel == 1) ? 0 : 1;
       // Only add secondary channel if it's available (not claimed by existing
       // flows)
       if (availableChannels.count(ch2)) {
-        chans.push_back({ch2, primaryBdId - 1});
+        // Two channels drawing from one pool (AIE2) step down to keep the ids
+        // distinct. Disjoint per-channel pools (AIE4) can use the same local
+        // id, translated independently into each pool's global namespace.
+        bool sharedPool =
+            tm.getBdPoolId(col, 0, ch2, DMAChannelDir::S2MM) ==
+            tm.getBdPoolId(col, 0, primaryChannel, DMAChannelDir::S2MM);
+        if (sharedPool) {
+          chans.push_back({ch2, *primary - 1});
+        } else {
+          FailureOr<int> secondary =
+              globalBdIdFor(device, col, ch2, primaryLocalBdId, tm);
+          if (failed(secondary))
+            return failure();
+          chans.push_back({ch2, *secondary});
+        }
       }
     }
     return chans;

@@ -992,7 +992,7 @@ def AIEInsertTraceFlows : Pass<"aie-insert-trace-flows", "DeviceOp"> {
       [Option<"clShimChannel", "shim-channel", "int", "1",
               "S2MM DMA channel to use for trace (default: 1)">,
        Option<"clDefaultBdId", "default-bd-id", "int", "15",
-              "Buffer descriptor ID for trace (default: 15)">,
+              "Channel-local buffer descriptor ID for trace (default: 15)">,
        Option<"clPacketIdStart", "packet-id-start", "int", "1",
               "Starting packet ID for trace flows (default: 1)">,
        Option<"clTraceBurstLength", "burst-length", "int", "64",
