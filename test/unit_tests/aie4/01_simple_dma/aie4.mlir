@@ -34,7 +34,7 @@ module @test_dma_to_txn {
   aie.device(npu3) {
     %tile_0_2 = aie.tile(0, 2)
     %buf02_0 = aie.buffer(%tile_0_2) {address = 2048 : i32, mem_bank = 0 : i32, sym_name = "buf02_0"} : memref<256xi32>
-    %buf02_1 = aie.buffer(%tile_0_2) {address = 17408 : i32, mem_bank = 1 : i32, sym_name = "buf02_1"} : memref<256xi32>
+    %buf02_1 = aie.buffer(%tile_0_2) {address = 17408 : i32, mem_bank = 0 : i32, sym_name = "buf02_1"} : memref<256xi32>
     %lock_0_2 = aie.lock(%tile_0_2, 0) { init = 2 : i32 }
     %lock_0_2_0 = aie.lock(%tile_0_2, 1)
 
