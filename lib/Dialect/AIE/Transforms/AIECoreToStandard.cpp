@@ -168,6 +168,7 @@ static auto getAIE4Intrinsics(OpBuilder &builder) {
   // Type accType = VectorType::get({16}, int32Type);
   IntrinsicDecls functions = {
       {"debug_i32", {int32Type}, {}},
+      {"llvm.aie4.event", {int32Type}, {}}, //(%event_id) -> ()
       {"llvm.aie4.acquire",
        {int32Type, int32Type},
        {}}, //(%lock_id, %lock_val) -> ()
@@ -782,8 +783,11 @@ struct AIEEventOpToStdLowering : OpConversionPattern<EventOp> {
     case AIEArch::AIE2ps:
       return op.emitOpError("has no core lowering for AIE2ps");
     case AIEArch::AIE4:
-      return op.emitOpError(
-          "aie.event is not yet supported on the AIE4 architecture");
+      funcName = "llvm.aie4.event";
+      args.push_back(arith::ConstantOp::create(
+          rewriter, op.getLoc(), rewriter.getI32Type(),
+          rewriter.getI32IntegerAttr(op.getVal())));
+      break;
     }
     auto eventFunc = module.lookupSymbol<func::FuncOp>(funcName);
     if (!eventFunc)

@@ -24,8 +24,10 @@ module @test_aie1 {
 // -----
 
 // CHECK-LABEL: test_aie2
-// CHECK: call @llvm.aie2.event(%{{.*}})
-// CHECK: call @llvm.aie2.event(%{{.*}})
+// CHECK: %[[C0:.*]] = arith.constant 0 : i32
+// CHECK: call @llvm.aie2.event(%[[C0]])
+// CHECK: %[[C1:.*]] = arith.constant 1 : i32
+// CHECK: call @llvm.aie2.event(%[[C1]])
 module @test_aie2 {
  aie.device(npu1) {
   %tile02 = aie.tile(0, 2)
@@ -40,8 +42,10 @@ module @test_aie2 {
 // -----
 
 // CHECK-LABEL: test_aie2p
-// CHECK: call @llvm.aie2p.event(%{{.*}})
-// CHECK: call @llvm.aie2p.event(%{{.*}})
+// CHECK: %[[C0:.*]] = arith.constant 0 : i32
+// CHECK: call @llvm.aie2p.event(%[[C0]])
+// CHECK: %[[C1:.*]] = arith.constant 1 : i32
+// CHECK: call @llvm.aie2p.event(%[[C1]])
 module @test_aie2p {
  aie.device(npu2) {
   %tile02 = aie.tile(0, 2)
@@ -71,16 +75,17 @@ module @test_aie2ps {
 
 // -----
 
-// AIE4 event lowering is not yet implemented; this must be a clear
-// named-architecture diagnostic, not a blank "Could not find the intrinsic
-// function " message.
+// CHECK-LABEL: test_aie4
+// CHECK: %[[C0:.*]] = arith.constant 0 : i32
+// CHECK: call @llvm.aie4.event(%[[C0]])
+// CHECK: %[[C1:.*]] = arith.constant 1 : i32
+// CHECK: call @llvm.aie4.event(%[[C1]])
 module @test_aie4 {
  aie.device(npu3) {
   %tile02 = aie.tile(0, 2)
   %core02 = aie.core(%tile02) {
-    // expected-error@+2 {{aie.event is not yet supported on the AIE4 architecture}}
-    // expected-error@+1 {{failed to legalize operation 'aie.event' that was explicitly marked illegal}}
     aie.event(0)
+    aie.event(1)
     aie.end
   }
  }
