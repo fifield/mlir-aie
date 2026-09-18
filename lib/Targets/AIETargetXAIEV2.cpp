@@ -933,63 +933,6 @@ xilinx::AIE::AIETranslateToXAIEV2(ModuleOp module, raw_ostream &output,
     }
   }
 
-  // AIE4: enable 32-bit switch trace ports and bridge master for each
-  // packet flow originating from a Trace32 source.
-  {
-    std::set<std::tuple<int, int, int>> configuredBridgePorts;
-    for (auto pktFlowOp : targetOp.getOps<PacketFlowOp>()) {
-      Region &r = pktFlowOp.getPorts();
-      Block &b = r.front();
-      int flowID = pktFlowOp.IDInt();
-      for (Operation &op : b.getOperations()) {
-        auto pktSource = dyn_cast<PacketSourceOp>(op);
-        if (!pktSource)
-          continue;
-        if (pktSource.getBundle() != WireBundle::Trace32)
-          continue;
-        int srcChannel = pktSource.channelIndex();
-        auto srcTile = dyn_cast<TileOp>(pktSource.getTile().getDefiningOp());
-        int col = srcTile.getCol();
-        int row = srcTile.getRow();
-        output << "// 32-bit trace port config for tile (" << col << ", " << row
-               << ")\n";
-        output << "x = " << col << ";\ny = " << row << ";\n";
-        // Enable the 32-bit switch trace subordinate port
-        output << "__mlir_aie_try(XAie_StrmPktSwSlavePortEnable("
-               << "&(ctx->DevInst), XAie_TileLoc(x,y), "
-               << "_32B_TRACE, " << srcChannel << "));\n";
-        // Enable the slot to forward packets from this trace port
-        output << "__mlir_aie_try(XAie_StrmPktSwSlaveSlotEnable("
-               << "&(ctx->DevInst), XAie_TileLoc(x,y), "
-               << "_32B_TRACE, " << srcChannel << ", 0, "
-               << packetStr(flowID, 0) << ", 0x1f, 0, 0));\n";
-        // Configure the 32-bit Switch512 manager port (bridge to 512-bit
-        // switch). Find which Switch32 channel the pathfinder assigned.
-        // Only configure once per bridge port.
-        int bridgePort = 0;
-        for (auto switchboxOp : targetOp.getOps<SwitchboxOp>()) {
-          if (switchboxOp.colIndex() != col || switchboxOp.rowIndex() != row)
-            continue;
-          Block &sb = switchboxOp.getConnections().front();
-          for (auto pktRulesOp : sb.getOps<PacketRulesOp>()) {
-            if (pktRulesOp.getSourceBundle() == WireBundle::Switch32) {
-              bridgePort = pktRulesOp.sourceIndex();
-              break;
-            }
-          }
-          break;
-        }
-        auto bridgeKey = std::make_tuple(col, row, bridgePort);
-        if (configuredBridgePorts.insert(bridgeKey).second) {
-          output << "__mlir_aie_try(XAie_StrmPktSwMstrPortEnable("
-                 << "&(ctx->DevInst), XAie_TileLoc(x,y), "
-                 << "_32B_SWITCH_512b, " << bridgePort
-                 << ", XAIE_SS_PKT_DONOT_DROP_HEADER, 0, 0x1));\n";
-        }
-      }
-    }
-  }
-
   for (auto op : targetOp.getOps<ShimMuxOp>()) {
     Region &r = op.getConnections();
     Block &b = r.front();

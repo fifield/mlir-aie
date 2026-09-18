@@ -378,6 +378,14 @@ def AIERoutePathfinderFlows : Pass<"aie-create-pathfinder-flows", "DeviceOp"> {
     Each aie.packetflow is replace with the set of aie.amsel, aie.masterset
     and aie.packet_rules operations.
 
+    AIE4 bridge wires have a fixed additive width-change penalty (256,
+    relative to an uncongested edge cost of 1). For endpoints on different
+    switches, one crossing is unavoidable and adds the same constant to every
+    candidate path. Extra crossings are discouraged without banning narrow
+    fallback routes.
+    Historical congestion cost scales with the penalty so repeatedly overused
+    wide links can still yield to narrow fallback within the iteration budget.
+
     An arbiter holds its grant until end of packet, so two slave ports sharing
     one arbiter serialize even on different master ports. A switchbox with
     more packet master ports than arbiters first turns packet hops that alone

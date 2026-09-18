@@ -6113,6 +6113,45 @@ TileOp ShimMuxOp::getTileOp() {
   return cast<TileElement>(this->getOperation()).getTileOp();
 }
 
+std::optional<std::pair<TileID, Port>>
+xilinx::AIE::getLinkedInput(TileID tile, Port output) {
+  switch (output.bundle) {
+  case WireBundle::North:
+    return std::pair{TileID{tile.col, tile.row + 1},
+                     Port{WireBundle::South, output.channel}};
+  case WireBundle::South:
+    return std::pair{TileID{tile.col, tile.row - 1},
+                     Port{WireBundle::North, output.channel}};
+  case WireBundle::East:
+    return std::pair{TileID{tile.col + 1, tile.row},
+                     Port{WireBundle::West, output.channel}};
+  case WireBundle::West:
+    return std::pair{TileID{tile.col - 1, tile.row},
+                     Port{WireBundle::East, output.channel}};
+  case WireBundle::North32:
+    return std::pair{TileID{tile.col, tile.row + 1},
+                     Port{WireBundle::South32, output.channel}};
+  case WireBundle::South32:
+    return std::pair{TileID{tile.col, tile.row - 1},
+                     Port{WireBundle::North32, output.channel}};
+  case WireBundle::East32:
+    return std::pair{TileID{tile.col + 1, tile.row},
+                     Port{WireBundle::West32, output.channel}};
+  case WireBundle::West32:
+    return std::pair{TileID{tile.col - 1, tile.row},
+                     Port{WireBundle::East32, output.channel}};
+  case WireBundle::NorthControl:
+    return std::pair{TileID{tile.col, tile.row + 1},
+                     Port{WireBundle::SouthControl, output.channel}};
+  case WireBundle::Switch32:
+    return std::pair{tile, Port{WireBundle::Switch512, output.channel}};
+  case WireBundle::Switch512:
+    return std::pair{tile, Port{WireBundle::Switch32, output.channel}};
+  default:
+    return std::nullopt;
+  }
+}
+
 WireBundle xilinx::AIE::getConnectingBundle(WireBundle dir) {
   switch (dir) {
   case WireBundle::North:

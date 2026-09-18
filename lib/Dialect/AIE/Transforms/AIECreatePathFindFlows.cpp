@@ -272,44 +272,9 @@ LogicalResult AIEPathfinderPass::runOnFlow(DeviceOp d,
   return success();
 }
 
-/// The switchbox a master port feeds, and the slave port it feeds there.
-static std::optional<std::pair<TileID, Port>> linkedInput(TileID tile,
-                                                          Port out) {
-  switch (out.bundle) {
-  case WireBundle::East:
-    return std::pair{TileID{tile.col + 1, tile.row},
-                     Port{WireBundle::West, out.channel}};
-  case WireBundle::West:
-    return std::pair{TileID{tile.col - 1, tile.row},
-                     Port{WireBundle::East, out.channel}};
-  case WireBundle::North:
-    return std::pair{TileID{tile.col, tile.row + 1},
-                     Port{WireBundle::South, out.channel}};
-  case WireBundle::South:
-    return std::pair{TileID{tile.col, tile.row - 1},
-                     Port{WireBundle::North, out.channel}};
-  case WireBundle::East32:
-    return std::pair{TileID{tile.col + 1, tile.row},
-                     Port{WireBundle::West32, out.channel}};
-  case WireBundle::West32:
-    return std::pair{TileID{tile.col - 1, tile.row},
-                     Port{WireBundle::East32, out.channel}};
-  case WireBundle::North32:
-    return std::pair{TileID{tile.col, tile.row + 1},
-                     Port{WireBundle::South32, out.channel}};
-  case WireBundle::South32:
-    return std::pair{TileID{tile.col, tile.row - 1},
-                     Port{WireBundle::North32, out.channel}};
-  case WireBundle::NorthControl:
-    return std::pair{TileID{tile.col, tile.row + 1},
-                     Port{WireBundle::SouthControl, out.channel}};
-  default:
-    return std::nullopt;
-  }
-}
-
 /// Whether the connection out of `out` at `tile` leads, through `settings`, to
-/// `finalPort` at `finalTile`.
+/// `finalPort` at `finalTile`. Outputs follow physical wires before entering
+/// another crossbar, including the same-tile width bridges.
 static bool findPathToDestImpl(const SwitchSettings &settings, TileID tile,
                                Port out, TileID finalTile, Port finalPort,
                                std::set<std::pair<TileID, Port>> &visited) {
@@ -317,14 +282,7 @@ static bool findPathToDestImpl(const SwitchSettings &settings, TileID tile,
     return true;
   if (!visited.insert({tile, out}).second)
     return false;
-  // Kept from the control-overlay routing; the bridge porting commit replaces
-  // this legacy same-port continuation with explicit output-to-input wires.
-  if (auto current = settings.find(tile); current != settings.end())
-    for (auto [src, dest] : llvm::zip(current->second.srcs, current->second.dsts))
-      if (src == out && findPathToDestImpl(settings, tile, dest, finalTile,
-                                          finalPort, visited))
-        return true;
-  std::optional<std::pair<TileID, Port>> next = linkedInput(tile, out);
+  std::optional<std::pair<TileID, Port>> next = getLinkedInput(tile, out);
   if (!next)
     return false;
   TileID neighbour = next->first;
@@ -1136,12 +1094,15 @@ leavingPinnedTrees(const StreamConflicts &conflicts,
                    const PacketTrees &pinnedTrees,
                    const PrioritizedPackets &prioritized) {
   // Each hop of a pinned tree by the hop before it, unset where two lead to it.
-  std::map<PathEndPoint, std::map<PathEndPoint, std::optional<PathEndPoint>>>
+  std::map<PathEndPoint,
+           std::map<PathEndPoint, std::optional<std::pair<PathEndPoint, bool>>>>
       preds;
   for (const auto &[src, hops] : pinnedTrees)
     for (const TreeHop &hop : hops) {
-      auto [it, first] = preds[src].try_emplace(hop.to, hop.from);
-      if (!first && it->second && !(*it->second == hop.from))
+      auto [it, first] =
+          preds[src].try_emplace(hop.to, std::pair{hop.from, hop.isCrossbar});
+      if (!first && it->second &&
+          !(*it->second == std::pair{hop.from, hop.isCrossbar}))
         it->second.reset();
     }
   std::map<TileID, SmallVector<Leaving, 8>> leaving;
@@ -1159,9 +1120,9 @@ leavingPinnedTrees(const StreamConflicts &conflicts,
       auto pred = tree->second.find(at);
       if (pred == tree->second.end() || !pred->second)
         break;
-      if (pred->second->coords == at.coords)
-        hops.push_back({pred->second->port, at});
-      at = *pred->second;
+      if (pred->second->second)
+        hops.push_back({pred->second->first.port, at});
+      at = pred->second->first;
     }
     if (!(at == src)) {
       leaving[s.dst.tile].push_back({i, std::nullopt, s.dst.port});
@@ -1576,7 +1537,7 @@ void PacketFlowRouting::collectFlows() {
                  llvm::zip(setting->second.srcs, setting->second.dsts))
               if (src == input && !(tile == destCoords && dest == destPort) &&
                   findPathToDest(settings, tile, dest, destCoords, destPort)) {
-                at = linkedInput(tile, dest);
+                at = getLinkedInput(tile, dest);
                 break;
               }
           }
@@ -1792,7 +1753,7 @@ void PacketFlowRouting::findCircuitHops() {
           !claimedSlaves.count({tileId, slave}) &&
           llvm::all_of(reached,
                        [&, tileId = tileId](Port m) {
-                         return isDirectional(m.bundle) &&
+                         return getLinkedInput(tileId, m).has_value() &&
                                 !claimedMasters.count({tileId, m});
                        }) &&
           llvm::all_of(
@@ -3470,6 +3431,8 @@ void AIEPathfinderPass::runOnOperation() {
       if (!tile || !sw)
         continue;
       Location loc = tile.getLoc();
+      if (isa<AIE4TargetModel>(d.getTargetModel()))
+        wire(loc, sw, WireBundle::Switch512, sw, WireBundle::Switch32);
       // connections east-west between stream switches
       if (col > 0)
         if (SwitchboxOp westsw = analyzer.lookupSwitchbox({col - 1, row}))

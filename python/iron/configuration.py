@@ -13,6 +13,7 @@ import numpy as np
 
 from .. import ir  # pyright: ignore[reportMissingImports, reportAttributeAccessIssue]
 from ..dialects.aie import (
+    AIEArch,  # pyright: ignore[reportAttributeAccessIssue]
     AIEDevice,  # pyright: ignore[reportAttributeAccessIssue]
     DeviceOp,  # pyright: ignore[reportAttributeAccessIssue]
     RuntimeSequenceOp,  # pyright: ignore[reportAttributeAccessIssue]
@@ -641,6 +642,11 @@ class DeviceConfiguration(DeviceResources):
                     if worker.trace is not None
                 ]
             if self._trace_size is not None and self._trace_size > 0:
+                trace_broadcasts = (
+                    {"start_broadcast": 3, "stop_broadcast": 4}
+                    if current_device.arch == AIEArch.AIE4
+                    else {}
+                )
                 trace_utils.configure_trace(
                     tiles_to_trace,
                     coretile_events=self._coretile_events,
@@ -648,6 +654,7 @@ class DeviceConfiguration(DeviceResources):
                     memtile_events=self._memtile_events,
                     shimtile_events=self._shimtile_events,
                     core_trace_mode=self._core_trace_mode,
+                    **trace_broadcasts,
                 )
 
             for runtime in self._runtimes:

@@ -7,13 +7,6 @@
 // the default 12-channel/16MiB/8-iteration bandwidth sweep, which is a
 // benchmark, not a correctness check.
 //
-// This example's host is host.py, which needs the XRT Python bindings; the
-// npu3 runner does not have them installed, so `make run` aborts with
-//   Error: pyxrt not found. Please install XRT Python bindings.
-// The build half of the test does pass. Un-XFAIL once pyxrt is available on
-// the runner (or once the example grows a C++ host like its siblings).
-// XFAIL: *
-//
 // RUN: mkdir -p test_npu3
 // RUN: cd test_npu3
 // RUN: make -f %S/Makefile clean CHANNELS=1 BYTES_PER_CHANNEL=1MiB ITERATIONS=1

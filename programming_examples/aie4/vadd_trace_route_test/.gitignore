@@ -1,0 +1,7 @@
+*.elf
+*.exe
+*.bin
+*.json
+*.png
+vadd_trace.mlir
+project*

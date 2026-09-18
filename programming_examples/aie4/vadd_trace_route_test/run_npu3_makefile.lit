@@ -1,0 +1,13 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// REQUIRES: ryzen_ai_npu3
+//
+// Row 3 requires a multi-hop route through the 32-bit switch network before
+// crossing to the shim's 512-bit trace S2MM port.
+//
+// RUN: mkdir -p test_npu3
+// RUN: cd test_npu3
+// RUN: make -f %S/Makefile clean
+// RUN: make -f %S/Makefile all ROW=3 COL=0
+// RUN: %run_on_npu3% make -f %S/Makefile run ROW=3 COL=0

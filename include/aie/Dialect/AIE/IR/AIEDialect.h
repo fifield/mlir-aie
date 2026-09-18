@@ -255,6 +255,13 @@ namespace xilinx::AIE {
 
 WireBundle getConnectingBundle(WireBundle dir);
 
+/// The switchbox input driven by an output's physical wire. The channel is
+/// preserved, including across AIE4's same-tile Switch32/Switch512 bridges.
+/// NorthControl drives SouthControl in the next row; SouthControl is input
+/// only. Endpoint bundles have no wire and return nullopt. This describes
+/// geometry, not device bounds or port availability, which callers validate.
+std::optional<std::pair<TileID, Port>> getLinkedInput(TileID tile, Port output);
+
 #define GENERATE_TO_STRING(TYPE_WITH_INSERTION_OP)                             \
   friend std::string to_string(const TYPE_WITH_INSERTION_OP &s) {              \
     std::ostringstream ss;                                                     \

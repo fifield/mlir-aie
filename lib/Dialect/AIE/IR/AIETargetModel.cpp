@@ -2290,6 +2290,10 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
   if (isBundle32(srcBundle) && isBundle32(dstBundle))
     return true;
 
+  // Crossing between switches requires a bridge wire, never a crossbar hop.
+  if (isBundle32(srcBundle) != isBundle32(dstBundle))
+    return false;
+
   // Memtile
   if (isMemTile(col, row)) {
 
@@ -2427,7 +2431,11 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
 
     // Switch32 Subordinate
     if (srcBundle == WireBundle::Switch32) {
-      if (dstBundle == WireBundle::Switch32)
+      // Switch32 and Switch512 are ports of *different* switches, joined by the
+      // hard-wired bridge; the pathfinder models that as a wire, not a crossbar
+      // hop (see bridgeconnect() in AIEPathFinder.cpp).
+      if (isBundleInList(dstBundle,
+                         {WireBundle::Switch32, WireBundle::Switch512}))
         return false;
       if (isBundleInList(dstBundle,
                          {WireBundle::TileControl, WireBundle::NorthControl}))
@@ -2516,9 +2524,11 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
       if (dstBundle == WireBundle::TileControl)
         return srcChan == dstChan;
     }
-    // Switch512 subordinate (32-bit bridge to 512-bit switch)
-    if (srcBundle == WireBundle::Switch512)
-      return dstBundle == WireBundle::Switch32;
+    // Switch512:k as a subordinate is a port of the *32-bit* switch, so the
+    // only legal destinations are 32-bit ports -- already accepted by the
+    // fully-connected rule above. Reaching the 512-bit switch from here is the
+    // hard-wired bridge, modelled as a wire by the pathfinder, not a crossbar
+    // hop (see bridgeconnect() in AIEPathFinder.cpp).
     return false;
   }
 
@@ -2590,11 +2600,14 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
                          {WireBundle::TileControl, WireBundle::Switch32}))
         return true;
       return false;
-    // Switch512 subordinate (port on 32-bit switch to main switch)
+    // Switch512:k as a subordinate is a port of the 32-bit switch; its only
+    // legal destinations are 32-bit ports, already accepted by the
+    // fully-connected rule above. The crossing into the 512-bit switch is the
+    // hard-wired bridge, modelled as a wire by the pathfinder, not a crossbar
+    // hop (see bridgeconnect() in AIEPathFinder.cpp).
     case (WireBundle::Switch512):
-      return dstBundle == WireBundle::Switch32;
-    // Switch32 subordinate (port on main switch; can route back to 32-bit
-    // switch)
+      return false;
+    // Switch32 subordinate (port on the 512-bit switch fed by the bridge)
     case (WireBundle::Switch32):
       return (isBundleInList(
           dstBundle, {WireBundle::Core, WireBundle::DMA, WireBundle::South,

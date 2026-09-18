@@ -39,8 +39,8 @@ int shimMuxChannelFrom(Port src);
 int shimMuxChannelTo(Port dst);
 
 // The connections from the source ports to the destination ports of a
-// switchbox, if `srcCoords == dstCoords`, or of the wires from one switchbox
-// to its neighbour at `dstCoords`.
+// switch crossbar or a bundle of physical wires. AIE4 width bridges are
+// physical wires within one tile, distinguished by `isCrossbar`.
 struct SwitchboxConnect {
   // A connection from a source port to a destination port.
   struct Cell {
@@ -71,6 +71,8 @@ struct SwitchboxConnect {
       : srcCoords(srcCoords), dstCoords(dstCoords) {}
 
   TileID srcCoords, dstCoords;
+  bool isCrossbar = true;
+  bool changesWidth = false;
   std::vector<Port> srcPorts;
   std::vector<Port> dstPorts;
   // The connection from srcPorts[i] to dstPorts[j] is cells[i * dstPorts.size()
@@ -146,7 +148,7 @@ struct SwitchboxConnect {
   }
 
   // update demand at the beginning of each dijkstraShortestPaths iteration
-  void updateDemand();
+  void updateDemand(double historyScale);
 
   // Bumps an over-capacity cell's demand, all but ruling it out if a
   // prioritized flow uses it, to keep prioritized flows' routes.
@@ -228,13 +230,16 @@ inline llvm::raw_ostream &operator<<(llvm::raw_ostream &os,
 }
 
 // A hop of a packet flow's tree, from one port to the next; `joined` when the
-// flow takes it by joining another flow's tree.
+// flow takes it by joining another flow's tree. `isCrossbar` distinguishes
+// configurable switch hops from physical wires, including same-tile bridges.
 struct TreeHop {
   PathEndPoint from, to;
   bool joined;
+  bool isCrossbar;
 
   bool operator==(const TreeHop &rhs) const {
-    return from == rhs.from && to == rhs.to && joined == rhs.joined;
+    return from == rhs.from && to == rhs.to && joined == rhs.joined &&
+           isCrossbar == rhs.isCrossbar;
   }
 };
 using PacketTrees = std::map<PathEndPoint, std::vector<TreeHop>>;
@@ -490,9 +495,11 @@ private:
   std::map<PathEndPoint, std::map<PathEndPoint, mlir::Location>> flowLocs;
   std::optional<mlir::Location> flowLoc(const PathEndPoint &src,
                                         const PathEndPoint *dst) const;
-  // The routing graph, by the tiles a SwitchboxConnect connects: a tile to
-  // itself for its switchbox, or to a neighbour for the wires between them.
-  std::map<std::pair<TileID, TileID>, SwitchboxConnect> graph;
+  // Crossbars and same-tile bridge wires occupy distinct graph entries.
+  using GraphKey = std::tuple<TileID, TileID, bool>;
+  static GraphKey crossbarKey(TileID tile) { return {tile, tile, true}; }
+  static GraphKey wireKey(TileID src, TileID dst) { return {src, dst, false}; }
+  std::map<GraphKey, SwitchboxConnect> graph;
 
   // Dense routing graph (built once by buildRoutingGraph()).
   bool graphBuilt = false;
