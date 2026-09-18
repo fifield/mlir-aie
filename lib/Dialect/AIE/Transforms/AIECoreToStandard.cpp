@@ -165,7 +165,7 @@ static auto getAIE2pIntrinsics(OpBuilder &builder) {
 
 static auto getAIE4Intrinsics(OpBuilder &builder) {
   Type int32Type = IntegerType::get(builder.getContext(), 32);
-  // Type accType = VectorType::get({16}, int32Type);
+  Type accType = VectorType::get({16}, int32Type);
   IntrinsicDecls functions = {
       {"debug_i32", {int32Type}, {}},
       {"llvm.aie4.event", {int32Type}, {}}, //(%event_id) -> ()
@@ -175,6 +175,17 @@ static auto getAIE4Intrinsics(OpBuilder &builder) {
       {"llvm.aie4.release",
        {int32Type, int32Type},
        {}}, //(%lock_id, %lock_val) -> ()
+      {"llvm.aie4.put.ms", {int32Type, int32Type}, {}}, //(%value, %tlast) -> ()
+      {"llvm.aie4.get.ss", {}, {int32Type, int32Type}}, //() -> (%value, %tlast)
+      {"llvm.aie4.mcd.write.vec",
+       {accType, int32Type},
+       {}}, // (%value, %enable) -> ()
+      {"llvm.aie4.scd.read.vec",
+       {int32Type},
+       {accType}}, // (%enable) -> (%value)
+      {"llvm.aie4.set.ctrl.reg",
+       {int32Type, int32Type},
+       {}}, //(%reg_id, %value) -> ()
   };
   return functions;
 }
@@ -284,6 +295,8 @@ struct AIEPutStreamToStdLowering : OpConversionPattern<PutStreamOp> {
       funcName = "llvm.aie.put.";
     else if (targetModel.getTargetArch() == AIEArch::AIE2)
       funcName = "llvm.aie2.put.";
+    else if (targetModel.getTargetArch() == AIEArch::AIE4)
+      funcName = "llvm.aie4.put.";
     else
       funcName = "llvm.aie2p.put.";
 
@@ -334,6 +347,8 @@ struct AIEGetStreamToStdLowering : OpConversionPattern<GetStreamOp> {
       funcName = "llvm.aie.get.";
     else if (targetModel.getTargetArch() == AIEArch::AIE2)
       funcName = "llvm.aie2.get.";
+    else if (targetModel.getTargetArch() == AIEArch::AIE4)
+      funcName = "llvm.aie4.get.";
     else
       funcName = "llvm.aie2p.get.";
 
@@ -379,6 +394,8 @@ struct AIEPutCascadeToStdLowering : OpConversionPattern<PutCascadeOp> {
       funcName = "llvm.aie.put.mcd";
     else if (targetModel.getTargetArch() == AIEArch::AIE2)
       funcName = "llvm.aie2.mcd.write.vec";
+    else if (targetModel.getTargetArch() == AIEArch::AIE4)
+      funcName = "llvm.aie4.mcd.write.vec";
     else
       funcName = "llvm.aie2p.mcd.write.vec";
     auto putMCDFunc = module.lookupSymbol<func::FuncOp>(funcName);
@@ -400,7 +417,11 @@ struct AIEPutCascadeToStdLowering : OpConversionPattern<PutCascadeOp> {
     }
 
     args.push_back(cascadeValue);
-    if (isa<AIE2TargetModel>(targetModel))
+    // Every generation after AIE1 takes an explicit enable operand. Keyed on
+    // NOT being AIE1, rather than on isa<AIE2TargetModel>, which AIE4's target
+    // model is not derived from -- that left the AIE4 call one operand short
+    // and aborted with "incorrect number of operands for callee".
+    if (!isa<AIE1TargetModel>(targetModel))
       args.push_back(arith::ConstantOp::create(
           rewriter, op.getLoc(), IntegerType::get(rewriter.getContext(), 32),
           rewriter.getI32IntegerAttr(1))); // enable
@@ -431,6 +452,8 @@ struct AIEGetCascadeToStdLowering : OpConversionPattern<GetCascadeOp> {
       funcName = "llvm.aie.get.scd";
     else if (targetModel.getTargetArch() == AIEArch::AIE2)
       funcName = "llvm.aie2.scd.read.vec";
+    else if (targetModel.getTargetArch() == AIEArch::AIE4)
+      funcName = "llvm.aie4.scd.read.vec";
     else
       funcName = "llvm.aie2p.scd.read.vec";
     auto getSCDFunc = module.lookupSymbol<func::FuncOp>(funcName);
@@ -438,7 +461,11 @@ struct AIEGetCascadeToStdLowering : OpConversionPattern<GetCascadeOp> {
       return op.emitOpError("Could not find the intrinsic function ")
              << funcName;
     SmallVector<Value, 2> args;
-    if (isa<AIE2TargetModel>(targetModel))
+    // Every generation after AIE1 takes an explicit enable operand. Keyed on
+    // NOT being AIE1, rather than on isa<AIE2TargetModel>, which AIE4's target
+    // model is not derived from -- that left the AIE4 call one operand short
+    // and aborted with "incorrect number of operands for callee".
+    if (!isa<AIE1TargetModel>(targetModel))
       args.push_back(arith::ConstantOp::create(
           rewriter, op.getLoc(), IntegerType::get(rewriter.getContext(), 32),
           rewriter.getI32IntegerAttr(1))); // enable
