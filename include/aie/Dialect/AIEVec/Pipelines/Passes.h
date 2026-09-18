@@ -26,8 +26,9 @@ struct CanonicalizeVectorForAIEVecOptions
   PassOptions::Option<std::string> aieTarget{
       *this, "aie-target",
       llvm::cl::desc(
-          "Select AIE version: \"aie\", \"aie2\", or \"aie2p\". This will "
-          "determine the vector size and available operations."),
+          "Select AIE version: \"aie\", \"aieml\"/\"aie2\", \"aie2p\", or "
+          "\"aie4b\". This will determine the vector size and available "
+          "operations."),
       llvm::cl::init("aie")};
   PassOptions::Option<bool> enableBF16Emulation{
       *this, "bf16-emulation",
@@ -43,8 +44,9 @@ struct LowerVectorToAIEVecOptions
   PassOptions::Option<std::string> aieTarget{
       *this, "aie-target",
       llvm::cl::desc(
-          "Select AIE version: \"aie\", \"aie2\", or \"aie2p\". This will "
-          "determine the vector size and available operations."),
+          "Select AIE version: \"aie\", \"aieml\"/\"aie2\", \"aie2p\", or "
+          "\"aie4b\". This will determine the vector size and available "
+          "operations."),
       llvm::cl::init("aie")};
 };
 
@@ -54,8 +56,9 @@ struct OptimizeAIEVecOptions
   PassOptions::Option<std::string> aieTarget{
       *this, "aie-target",
       llvm::cl::desc(
-          "Select AIE version: \"aie\", \"aie2\", or \"aie2p\". This will "
-          "determine the vector size and available operations."),
+          "Select AIE version: \"aie\", \"aieml\"/\"aie2\", \"aie2p\", or "
+          "\"aie4b\". This will determine the vector size and available "
+          "operations."),
       llvm::cl::init("aie")};
   PassOptions::Option<unsigned> shiftParam{
       *this, "shift",
@@ -85,8 +88,9 @@ struct ConvertVectorToAIEVecOptions
   PassOptions::Option<std::string> aieTarget{
       *this, "aie-target",
       llvm::cl::desc(
-          "Select AIE version: \"aie\", \"aie2\", or \"aie2p\". This will "
-          "determine the vector size and available operations."),
+          "Select AIE version: \"aie\", \"aieml\"/\"aie2\", \"aie2p\", or "
+          "\"aie4b\". This will determine the vector size and available "
+          "operations."),
       llvm::cl::init("aie")};
   PassOptions::Option<bool> enableBF16Emulation{
       *this, "bf16-emulation",

@@ -6980,8 +6980,9 @@ struct LowerVectorToAIEVec : PassWrapper<LowerVectorToAIEVec, OperationPass<>> {
   Option<std::string> aieTarget{
       *this, "aie-target",
       llvm::cl::desc(
-          "Select AIE version: \"aie\", \"aie2\", or \"aie2p\". This will "
-          "determine the vector size and available operations."),
+          "Select AIE version: \"aie\", \"aieml\"/\"aie2\", \"aie2p\", or "
+          "\"aie4b\". This will determine the vector size and available "
+          "operations."),
       llvm::cl::init("aie")};
 
   void runOnOperation() override {
@@ -6998,20 +6999,27 @@ struct LowerVectorToAIEVec : PassWrapper<LowerVectorToAIEVec, OperationPass<>> {
     target.addLegalOp<xilinx::AIE::RuntimeSequenceOp>();
     target.markOpRecursivelyLegal<xilinx::AIE::RuntimeSequenceOp>();
 
-    std::optional<AIEVecTargetInfo> targetInfo =
-        parseAIEVecLoweringTarget(aieTarget, op);
-    if (!targetInfo)
+    FailureOr<AIEVecTargetInfo> maybeTargetInfo =
+        parseAIEVecTarget(aieTarget, op);
+    if (failed(maybeTargetInfo))
       return signalPassFailure();
+    AIEVecTargetInfo targetInfo = *maybeTargetInfo;
+
+    if (!isVectorLoweringEnabled(targetInfo)) {
+      op->emitError() << "Vector lowering is not enabled for target "
+                      << getCanonicalAIEVecTargetName(targetInfo);
+      return signalPassFailure();
+    }
 
     populateAIEVecCommonConversionPatterns(patterns);
     configureAIEVecCommonLegalizations(target);
-    if (targetInfo->isAIE1()) {
+    if (targetInfo.isAIE1()) {
       populateAIEVecV1ConversionPatterns(patterns);
       configureAIEVecV1Legalizations(target);
-    } else if (targetInfo->isAIE2()) {
+    } else if (targetInfo.isAIE2()) {
       populateAIEVecV2ConversionPatterns(patterns);
       configureAIEVecV2Legalizations(target);
-    } else if (targetInfo->isAIE2P()) {
+    } else if (targetInfo.isAIE2P()) {
       auto planner = std::make_shared<AIE2PShufflePlanner>();
       populateAIEVecV2PConversionPatterns(patterns, planner);
       configureAIEVecV2Legalizations(target);
@@ -7062,8 +7070,8 @@ struct ExtendUPDOpsPass : PassWrapper<ExtendUPDOpsPass, OperationPass<>> {
   }
 };
 
-// This pass replaces wide UPD ops that are only used by a single ext op of the
-// bottom half. This pass undos the work of ExtendUPDOpsPass.
+// This pass replaces wide UPD ops that are only used by a single ext op of
+// the bottom half. This pass undos the work of ExtendUPDOpsPass.
 // TODO: This pass can be extended to work with wide UPD ops that are used by
 // TODO: a single ext op of the top half, which might be a good opportunity to
 // TODO: further optimize wide UPDs.

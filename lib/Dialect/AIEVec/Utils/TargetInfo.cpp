@@ -1,4 +1,4 @@
-//===- TargetInfo.cpp - AIEVec target parsing -----------------------------===//
+//===- TargetInfo.cpp - AIEVec target parsing ------------------*- C++ -*-===//
 //
 // Copyright (C) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
@@ -6,47 +6,49 @@
 //===----------------------------------------------------------------------===//
 
 #include "aie/Dialect/AIEVec/Utils/TargetInfo.h"
-
-#include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/Operation.h"
-#include "llvm/ADT/StringSwitch.h"
-#include "llvm/Support/ErrorHandling.h"
+#include "llvm/ADT/Twine.h"
 
 using namespace mlir;
+using namespace llvm;
 
 namespace xilinx::aievec {
 
-std::optional<AIEVecTargetInfo> parseAIEVecTarget(StringRef spelling) {
-  return StringSwitch<std::optional<AIEVecTargetInfo>>(spelling)
-      .Cases({"", "aie"}, AIEVecTargetInfo{AIEVecArch::AIE1})
-      .Cases({"aieml", "aie2"}, AIEVecTargetInfo{AIEVecArch::AIE2})
-      .Case("aie2p", AIEVecTargetInfo{AIEVecArch::AIE2P})
-      .Case("aie2ps", AIEVecTargetInfo{AIEVecArch::AIE2PS})
-      .Default(std::nullopt);
-}
+bool AIEVecTargetInfo::isAIE1() const { return arch == AIEVecArch::AIE1; }
+bool AIEVecTargetInfo::isAIE2() const { return arch == AIEVecArch::AIE2; }
+bool AIEVecTargetInfo::isAIE2P() const { return arch == AIEVecArch::AIE2P; }
+bool AIEVecTargetInfo::isAIE2PS() const { return arch == AIEVecArch::AIE2PS; }
+bool AIEVecTargetInfo::isAIE4() const { return arch == AIEVecArch::AIE4; }
 
+// Single source of truth for accepted/rejected `aie-target` spellings.
 std::optional<AIEVecTargetInfo> parseAIEVecTarget(StringRef spelling,
-                                                  Operation *op) {
-  std::optional<AIEVecTargetInfo> info = parseAIEVecTarget(spelling);
-  if (!info)
-    op->emitError() << "unknown AIE target '" << spelling << "'";
-  return info;
+                                                  std::string &error) {
+  if (spelling.empty() || spelling == "aie")
+    return AIEVecTargetInfo{AIEVecArch::AIE1};
+  if (spelling == "aieml" || spelling == "aie2")
+    return AIEVecTargetInfo{AIEVecArch::AIE2};
+  if (spelling == "aie2p")
+    return AIEVecTargetInfo{AIEVecArch::AIE2P};
+  if (spelling == "aie4" || spelling == "aie4b")
+    return AIEVecTargetInfo{AIEVecArch::AIE4};
+  if (spelling == "aie2ps")
+    return AIEVecTargetInfo{AIEVecArch::AIE2PS};
+  error = ("unknown AIE target '" + spelling + "'").str();
+  return std::nullopt;
 }
 
-std::optional<AIEVecTargetInfo> parseAIEVecLoweringTarget(StringRef spelling,
-                                                          Operation *op) {
-  std::optional<AIEVecTargetInfo> info = parseAIEVecTarget(spelling, op);
-  if (!info)
-    return std::nullopt;
-  if (!info->hasAIEVecLowering()) {
-    op->emitError() << "AIEVec has no vector lowering for target '"
-                    << getAIEVecTargetName(*info) << "'";
-    return std::nullopt;
+FailureOr<AIEVecTargetInfo> parseAIEVecTarget(StringRef spelling,
+                                              Operation *op) {
+  std::string error;
+  std::optional<AIEVecTargetInfo> info = parseAIEVecTarget(spelling, error);
+  if (!info) {
+    op->emitError() << error;
+    return failure();
   }
-  return info;
+  return *info;
 }
 
-StringRef getAIEVecTargetName(AIEVecTargetInfo info) {
+StringRef getCanonicalAIEVecTargetName(AIEVecTargetInfo info) {
   switch (info.arch) {
   case AIEVecArch::AIE1:
     return "aie";
@@ -56,8 +58,23 @@ StringRef getAIEVecTargetName(AIEVecTargetInfo info) {
     return "aie2p";
   case AIEVecArch::AIE2PS:
     return "aie2ps";
+  case AIEVecArch::AIE4:
+    // canonicalize to the more explicit "aie4b" spelling.
+    return "aie4b";
   }
-  llvm_unreachable("unknown AIEVecArch");
+  llvm_unreachable("unhandled AIEVecArch");
+}
+
+bool isVectorLoweringEnabled(AIEVecTargetInfo info) {
+  return !(info.isAIE4() || info.isAIE2PS());
+}
+
+bool isAIEVecToLLVMLoweringEnabled(AIEVecTargetInfo info) {
+  return !(info.isAIE4() || info.isAIE2PS());
+}
+
+bool isConvolutionFoldingEnabled(AIEVecTargetInfo info) {
+  return info.isAIE2() || info.isAIE2P();
 }
 
 } // namespace xilinx::aievec

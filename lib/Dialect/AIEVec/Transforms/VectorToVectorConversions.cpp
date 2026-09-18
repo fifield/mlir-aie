@@ -1121,8 +1121,9 @@ struct CanonicalizeVectorForAIEVecPass
   Option<std::string> aieTarget{
       *this, "aie-target",
       llvm::cl::desc(
-          "Select AIE version: \"aie\", \"aie2\", or \"aie2p\". This will "
-          "determine the vector size and available operations."),
+          "Select AIE version: \"aie\", \"aieml\"/\"aie2\", \"aie2p\", or "
+          "\"aie4b\". This will determine the vector size and available "
+          "operations."),
       llvm::cl::init("aie")};
 
   void runOnOperation() override {
@@ -1131,16 +1132,23 @@ struct CanonicalizeVectorForAIEVecPass
     RewritePatternSet patterns(context);
     ConversionTarget target(*context);
 
-    std::optional<AIEVecTargetInfo> targetInfo =
-        parseAIEVecLoweringTarget(aieTarget, op);
-    if (!targetInfo) {
+    FailureOr<AIEVecTargetInfo> maybeTargetInfo =
+        parseAIEVecTarget(aieTarget, op);
+    if (failed(maybeTargetInfo)) {
+      signalPassFailure();
+      return;
+    }
+    AIEVecTargetInfo targetInfo = *maybeTargetInfo;
+    if (!isVectorLoweringEnabled(targetInfo)) {
+      op->emitError() << "Vector canonicalization is not enabled for target "
+                      << aieTarget;
       signalPassFailure();
       return;
     }
 
     populateCommonAIECanonicalizeConversionPatterns(patterns);
     configureCommonAIECanonicalizeLegalizations(target);
-    if (targetInfo->isAIE1()) {
+    if (targetInfo.isAIE1()) {
       populateAIEv1CanonicalizeConversionPatterns(patterns);
       configureAIEv1CanonicalizeLegalizations(target);
     } else {
@@ -1212,8 +1220,9 @@ void xilinx::aievec::buildCanonicalizeVectorForAIEVec(
 
   pm.addPass(createReorderOperationsPass());
   pm.addPass(createCopyRemovalPass());
+  std::string parseError;
   std::optional<AIEVecTargetInfo> targetInfo =
-      parseAIEVecTarget(options.aieTarget);
+      parseAIEVecTarget(options.aieTarget, parseError);
   pm.addPass(
       createVectorBroadcastLoweringPass(targetInfo && targetInfo->isAIE2P()));
   pm.addPass(createCanonicalizeVectorForAIEVecPass(options));

@@ -294,8 +294,9 @@ struct AIEVecTransformationPass
   Option<std::string> aieTarget{
       *this, "aie-target",
       llvm::cl::desc(
-          "Select AIE version: \"aie\", \"aie2\", or \"aie2p\". This will "
-          "determine the vector size and available operations."),
+          "Select AIE version: \"aie\", \"aieml\"/\"aie2\", \"aie2p\", or "
+          "\"aie4b\". This will determine the vector size and available "
+          "operations."),
       llvm::cl::init("aie")};
 
   void runOnOperation() override {
@@ -303,22 +304,27 @@ struct AIEVecTransformationPass
     MLIRContext *context = &getContext();
     RewritePatternSet patterns(context);
     ConversionTarget target(*context);
-    std::optional<AIEVecTargetInfo> targetInfo =
-        parseAIEVecLoweringTarget(aieTarget, op);
-    if (!targetInfo) {
+    FailureOr<AIEVecTargetInfo> maybeTargetInfo =
+        parseAIEVecTarget(aieTarget, op);
+    if (failed(maybeTargetInfo)) {
       signalPassFailure();
       return;
     }
+    AIEVecTargetInfo targetInfo = *maybeTargetInfo;
 
-    // AIE2P uses the AIE2 transformations.
-    if (targetInfo->isAIE1()) {
+    if (targetInfo.isAIE1()) {
       populateAIEVecV1TransformationPatterns(patterns);
       configureAIEVecV1TransformationLegalizations(target);
-    } else {
+    } else if (targetInfo.isAIE2() || targetInfo.isAIE2P()) {
       populateAIEVecV2TransformationPatterns(patterns);
       configureAIEVecV2TransformationLegalizations(target);
+    } else {
+      op->emitError() << "Vector optimization is not enabled for target "
+                      << aieTarget;
+      signalPassFailure();
+      return;
     }
-    if (targetInfo->isAIE2P()) {
+    if (targetInfo.isAIE2P()) {
       patterns.add<ExpandBFP16MatMulPattern>(context);
       target.addLegalOp<aievec::ToBFP16Op, aievec::MatMulBFP16Op_AIE2P>();
       target.addDynamicallyLegalOp<aievec::MatMulOp_AIE2P>(
@@ -330,7 +336,7 @@ struct AIEVecTransformationPass
       return;
     }
 
-    if (targetInfo->isAIE2P()) {
+    if (targetInfo.isAIE2P()) {
       // A tile that feeds several matmuls is converted once.
       IRRewriter rewriter(context);
       DominanceInfo domInfo(op);
@@ -395,8 +401,9 @@ struct AIEVecConvOpTransformationPass
   Option<std::string> aieTarget{
       *this, "aie-target",
       llvm::cl::desc(
-          "Select AIE version: \"aie\", \"aie2\", or \"aie2p\". This will "
-          "determine the vector size and available operations."),
+          "Select AIE version: \"aie\", \"aieml\"/\"aie2\", \"aie2p\", or "
+          "\"aie4b\". This will determine the vector size and available "
+          "operations."),
       llvm::cl::init("aie")};
 
   Option<unsigned> shiftParam{
@@ -409,15 +416,16 @@ struct AIEVecConvOpTransformationPass
     MLIRContext *context = &getContext();
     RewritePatternSet patterns(context);
     ConversionTarget target(*context);
-    std::optional<AIEVecTargetInfo> targetInfo =
-        parseAIEVecLoweringTarget(aieTarget, op);
-    if (!targetInfo) {
+    FailureOr<AIEVecTargetInfo> maybeTargetInfo =
+        parseAIEVecTarget(aieTarget, op);
+    if (failed(maybeTargetInfo)) {
       signalPassFailure();
       return;
     }
+    AIEVecTargetInfo targetInfo = *maybeTargetInfo;
 
     AnalysisManager am = getAnalysisManager();
-    if (targetInfo->isAIE2() || targetInfo->isAIE2P()) {
+    if (targetInfo.isAIE2() || targetInfo.isAIE2P()) {
       populateAIEVecConvOpTransformationPatterns(patterns, am, shiftParam);
       configureAIEVecConvOpTransformationLegalizations(target, am);
     }
@@ -445,10 +453,11 @@ void xilinx::aievec::buildOptimizeAIEVec(OpPassManager &pm,
   pm.addPass(createCSEPass());
   pm.addPass(createCanonicalizerPass());
 
-  // Add generating aievec convolution ops pass
+  // Add generating aievec convolution ops pass.
+  std::string parseError;
   std::optional<AIEVecTargetInfo> targetInfo =
-      parseAIEVecTarget(options.aieTarget);
-  if (targetInfo && (targetInfo->isAIE2() || targetInfo->isAIE2P())) {
+      parseAIEVecTarget(options.aieTarget, parseError);
+  if (targetInfo && isConvolutionFoldingEnabled(*targetInfo)) {
     pm.addPass(createAIEVecConvolutionAnalysisPass());
     pm.addPass(createAIEVecConvOpTransformationPass(options));
   }
