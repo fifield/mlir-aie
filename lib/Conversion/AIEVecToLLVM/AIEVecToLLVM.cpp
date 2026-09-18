@@ -5600,31 +5600,32 @@ struct ConvertAIEVecToLLVMPass
   }
 
   void runOnOperation() override {
-    // AIEVec has no AIE4 lowering yet; AIE4 modules never contain AIEVec ops,
-    // so there is nothing for this pass to do.
-    if (aieTarget == "aie4")
-      return;
-
     ModuleOp module = getOperation();
-    FailureOr<AIEVecTargetInfo> targetInfo =
-        parseAIEVecTarget(aieTarget, module);
-    if (failed(targetInfo))
-      return signalPassFailure();
 
-    // Without an AIEVec lowering for the target, the pass leaves the module
-    // unchanged, and fails if the module has an AIEVec op to lower.
-    if (!isAIEVecToLLVMLoweringEnabled(*targetInfo)) {
-      WalkResult result = module.walk([&](Operation *op) {
-        if (isa_and_present<AIEVecDialect, aie1::AIEVecAIE1Dialect>(
-                op->getDialect())) {
-          op->emitOpError() << "has no LLVM lowering for target '"
-                            << getCanonicalAIEVecTargetName(*targetInfo) << "'";
+    FailureOr<AIEVecTargetInfo> maybeTargetInfo =
+        parseAIEVecTarget(aieTarget, module);
+    if (failed(maybeTargetInfo)) {
+      signalPassFailure();
+      return;
+    }
+    AIEVecTargetInfo targetInfo = *maybeTargetInfo;
+
+    if (!isAIEVecToLLVMLoweringEnabled(targetInfo)) {
+      // Only fail if the module actually contains an AIEVec op to lower.
+      bool hasAIEVecOp = false;
+      module.walk([&](Operation *op) {
+        Dialect *dialect = op->getDialect();
+        if (dialect && isa<AIEVecDialect, aie1::AIEVecAIE1Dialect>(dialect)) {
+          hasAIEVecOp = true;
           return WalkResult::interrupt();
         }
         return WalkResult::advance();
       });
-      if (result.wasInterrupted())
+      if (hasAIEVecOp) {
+        module.emitError() << "AIEVec lowering is not enabled for target "
+                           << getCanonicalAIEVecTargetName(targetInfo);
         signalPassFailure();
+      }
       return;
     }
 
@@ -5637,7 +5638,7 @@ struct ConvertAIEVecToLLVMPass
         [&](VectorType type) -> std::optional<Type> { return type; });
 
     populateAIEVecToLLVMConversionPatterns(converter, patterns,
-                                           aie2Fp32Emulation, *targetInfo);
+                                           aie2Fp32Emulation, targetInfo);
 
     LLVMConversionTarget target(getContext());
     target.addIllegalDialect<xilinx::aievec::AIEVecDialect,
