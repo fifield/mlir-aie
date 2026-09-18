@@ -2571,8 +2571,8 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
   // and unused, since fullElfConfig only reads it under moduleHasAie4Device.
   auto &certAsm = npuLowered.map<std::string>(
       "full_elf_cert.mlir.asm",
-      [&context](const Item<ModRef> &item,
-                 Item<std::string> &out) -> mlir::LogicalResult {
+      [&context, workDirStr](const Item<ModRef> &item,
+                             Item<std::string> &out) -> mlir::LogicalResult {
         mlir::ModuleOp mod = item.get().get();
         if (!moduleHasAie4Device(mod)) {
           out.value = std::string{};
@@ -2583,8 +2583,22 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
         if (!pm || mlir::failed(pm->run(*clone)))
           return mlir::failure();
         std::string asmText;
-        if (mlir::failed(
-                xilinx::AIE::AIETranslateToUcDma(clone.get(), asmText)))
+        // A module with more than one device produces one cert.section per
+        // absorbed device, and AIETranslateToUcDma writes each of those to its
+        // own <section>.asm beside the path it is given, referring to it from
+        // the main assembly as `.include <section>.asm`. Given no path it
+        // writes them to the process's current directory -- while this file,
+        // the one holding the includes, is written by the engine into the work
+        // directory. aiebu-asm then resolves the includes next to the main
+        // assembly and fails with "<section>.asm file not found". Single-device
+        // modules never noticed: they emit no sections and so no includes.
+        //
+        // Hand it this file's own destination so the two land together. The
+        // callee takes a file path and uses its parent directory.
+        llvm::SmallString<128> certPath(workDirStr);
+        llvm::sys::path::append(certPath, "full_elf_cert.mlir.asm");
+        if (mlir::failed(xilinx::AIE::AIETranslateToUcDma(clone.get(), asmText,
+                                                          certPath)))
           return mlir::failure();
         out.value = std::move(asmText);
         return mlir::success();

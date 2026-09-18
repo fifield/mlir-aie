@@ -1017,9 +1017,24 @@ struct AIENpuToCertPass
     for (auto dev : devices) {
       if (dev.getSymName() == deviceName) {
         mainDevice = dev;
-        processDevice(dev);
         break;
       }
+    }
+
+    if (mainDevice) {
+      // Absorption below clones each referenced device's cert ops under the
+      // main device and then erases the source device. The data those ops
+      // address lives in per-device memref.globals, which the clone does not
+      // carry: a uc_dma_bd whose remote_address is @config_blockwrite_data_0
+      // resolves that symbol against its new parent, the main device, and
+      // fails with "Global symbol not found". Move the globals up first, so
+      // the clones are made against names that already resolve.
+      //
+      // Names collide by construction -- every device numbers its blockwrite
+      // data from zero -- so rename on collision and rewrite the uses in the
+      // source device before the clone is taken.
+      migrateGlobalsIntoMainDevice(mainDevice, devices);
+      processDevice(mainDevice);
     }
 
     if (!mainDevice) {
@@ -1047,6 +1062,57 @@ struct AIENpuToCertPass
 
     for (auto dev : devicesToRemove) {
       dev.erase();
+    }
+  }
+
+  // Hoist every non-main device's memref.global into the main device, keeping
+  // the symbol names unique and the references inside the source device
+  // pointing at the new names.
+  void migrateGlobalsIntoMainDevice(AIE::DeviceOp mainDevice,
+                                    ArrayRef<AIE::DeviceOp> devices) {
+    Block *mainBody = mainDevice.getBody();
+    if (!mainBody)
+      return;
+    MLIRContext *ctx = mainDevice.getContext();
+
+    for (auto dev : devices) {
+      if (dev == mainDevice)
+        continue;
+      llvm::SmallVector<memref::GlobalOp, 8> globals(
+          dev.getOps<memref::GlobalOp>());
+      for (auto global : globals) {
+        StringRef oldName = global.getSymName();
+        // The replacement has to be free in BOTH devices, not just in the
+        // destination. Checking only the main device lets a name collide with
+        // one already present in the source: renaming @x to @x_0 when the
+        // source also defines @x_0 leaves two symbols of that name there, and
+        // the later rename of the original @x_0 then walks both sets of uses
+        // to the same global. The build still assembles -- it just addresses
+        // the wrong payload.
+        std::string newName = oldName.str();
+        unsigned counter = 0;
+        auto taken = [&](StringRef candidate) {
+          if (mainDevice.lookupSymbol(candidate))
+            return true;
+          return candidate != oldName && dev.lookupSymbol(candidate);
+        };
+        while (taken(newName))
+          newName = oldName.str() + "_" + std::to_string(counter++);
+
+        if (newName != oldName) {
+          // Rewrite the uses while they are still inside the source device;
+          // once it is absorbed the clones carry whatever name is set here.
+          if (failed(SymbolTable::replaceAllSymbolUses(
+                  global, StringAttr::get(ctx, newName), dev))) {
+            dev.emitError("could not rename global \"")
+                << oldName << "\" while absorbing it into the main device";
+            signalPassFailure();
+            return;
+          }
+          global.setSymName(newName);
+        }
+        global->moveBefore(mainBody, mainBody->begin());
+      }
     }
   }
 
