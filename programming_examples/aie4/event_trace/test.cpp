@@ -33,16 +33,16 @@
 #include <xrt/xrt_device.h>
 #include <xrt/xrt_kernel.h>
 
-// Buffer sizes (in elements)
-constexpr int IN_ELEMS = 8192;
+// Buffer sizes -- must match the runtime_sequence arguments in aie_trace.mlir
+constexpr int IN_ELEMS = 4096;
 constexpr int FACT_ELEMS = 1;
-constexpr int OUT_ELEMS = 8192;
-constexpr int TRACE_ELEMS = 8192;
+constexpr int OUT_ELEMS = 4096;
 
 constexpr size_t IN_SIZE = IN_ELEMS * sizeof(int32_t);
 constexpr size_t FACT_SIZE = FACT_ELEMS * sizeof(int32_t);
 constexpr size_t OUT_SIZE = OUT_ELEMS * sizeof(int32_t);
-constexpr size_t TRACE_SIZE = TRACE_ELEMS * sizeof(int32_t);
+// buffer_size on aie.trace.host_config is in bytes, not elements
+constexpr size_t TRACE_SIZE = 8192;
 
 int main(int argc, const char *argv[]) {
   std::string elfFile = (argc > 1) ? argv[1] : "event_trace.elf";
@@ -96,9 +96,14 @@ int main(int argc, const char *argv[]) {
 
     bo_trace.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
 
-    // Write trace buffer to file for offline analysis
-    std::ofstream trace_file("trace.bin", std::ios::binary);
-    trace_file.write(buf_trace, TRACE_SIZE);
+    // Write trace buffer to file for offline analysis.  parse.py expects text:
+    // one zero-padded 8-digit hex word per line (same as
+    // test_utils::write_out_trace), not raw binary.
+    std::ofstream trace_file("trace.bin");
+    const uint32_t *words = bo_trace.map<uint32_t *>();
+    for (size_t i = 0; i < TRACE_SIZE / sizeof(uint32_t); i++)
+      trace_file << std::setfill('0') << std::setw(8) << std::hex << words[i]
+                 << std::endl;
     trace_file.close();
     printf("trace written to trace.bin (%zu bytes)\n", TRACE_SIZE);
   } else {

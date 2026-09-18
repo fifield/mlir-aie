@@ -8,7 +8,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Ported from basic/event_trace to AIE4 (npu3 target).
+// Declarative event tracing for AIE4 (npu3 target).
 //
 // This example uses:
 // - aie.trace operation for declarative trace configuration
@@ -30,7 +30,7 @@
 module {
   aie.device(npu3) {
     // External kernel function declaration
-    func.func private @vector_scalar_mul_aie_scalar(memref<1024xi32>, memref<1024xi32>, memref<1xi32>, i32) attributes {link_with = "project/scale.o"}
+    func.func private @vector_scalar_mul(memref<1024xi32>, memref<1024xi32>, memref<1xi32>, i32) attributes {link_with = "project/scale.o"}
 
     // Tile declarations
     %shim_noc_tile_0_0 = aie.tile(0, 0) {controller_id = #aie.packet_info<pkt_type = 0, pkt_id = 0>}
@@ -52,18 +52,15 @@ module {
       %c9223372036854775807 = arith.constant 9223372036854775807 : index
       %c1 = arith.constant 1 : index
       scf.for %arg0 = %c0 to %c9223372036854775807 step %c1 {
-        %0 = aie.objectfifo.acquire @infactor(Consume, 1) : !aie.objectfifosubview<memref<1xi32>>
-        %1 = aie.objectfifo.subview.access %0[0] : !aie.objectfifosubview<memref<1xi32>> -> memref<1xi32>
+        %1 = aie.objectfifo.acquire @infactor(Consume, 1) : memref<1xi32>
         %c0_0 = arith.constant 0 : index
         %c4 = arith.constant 4 : index
         %c1_1 = arith.constant 1 : index
         scf.for %arg1 = %c0_0 to %c4 step %c1_1 {
-          %2 = aie.objectfifo.acquire @out(Produce, 1) : !aie.objectfifosubview<memref<1024xi32>>
-          %3 = aie.objectfifo.subview.access %2[0] : !aie.objectfifosubview<memref<1024xi32>> -> memref<1024xi32>
-          %4 = aie.objectfifo.acquire @in(Consume, 1) : !aie.objectfifosubview<memref<1024xi32>>
-          %5 = aie.objectfifo.subview.access %4[0] : !aie.objectfifosubview<memref<1024xi32>> -> memref<1024xi32>
+          %3 = aie.objectfifo.acquire @out(Produce, 1) : memref<1024xi32>
+          %5 = aie.objectfifo.acquire @in(Consume, 1) : memref<1024xi32>
           %c1024_i32 = arith.constant 1024 : i32
-          func.call @vector_scalar_mul_aie_scalar(%5, %3, %1, %c1024_i32) : (memref<1024xi32>, memref<1024xi32>, memref<1xi32>, i32) -> ()
+          func.call @vector_scalar_mul(%5, %3, %1, %c1024_i32) : (memref<1024xi32>, memref<1024xi32>, memref<1xi32>, i32) -> ()
           aie.objectfifo.release @in(Consume, 1)
           aie.objectfifo.release @out(Produce, 1)
         }
@@ -97,8 +94,8 @@ module {
       // getStreamSwitchPortIndex support for AIE4, not yet implemented.
 
       // Specify start/stop control (broadcast events)
-      aie.trace.start broadcast=15
-      aie.trace.stop broadcast=14
+      aie.trace.start broadcast=3
+      aie.trace.stop broadcast=4
     }
 
     // Trace configuration for compute tile (0,2) - DMA/memory events (Trace1 unit)
@@ -122,8 +119,8 @@ module {
       aie.trace.event<"DMA_S2MM_1_STREAM_STARVATION">
 
       // Specify start/stop control (broadcast events)
-      aie.trace.start event=<"BROADCAST_15">
-      aie.trace.stop event=<"BROADCAST_14">
+      aie.trace.start broadcast=3
+      aie.trace.stop broadcast=4
     }
 
     // Trace configuration for shim tile (0,0)
@@ -149,16 +146,17 @@ module {
     // RUNTIME SEQUENCE WITH TRACE ACTIVATION
     // ========================================================================
 
-    // Runtime sequence: 3 data args + trace buffer arg
-    aie.runtime_sequence(%arg0: memref<4096xi32>, %arg1: memref<1xi32>, %arg2: memref<4096xi32>, %arg3: memref<8192xi32>) {
+    // Runtime sequence: 3 data args.  The 4th (trace buffer) argument is
+    // appended automatically by aie.trace.host_config lowering, since
+    // reuse_output_buffer defaults to false.
+    aie.runtime_sequence(%arg0: memref<4096xi32>, %arg1: memref<1xi32>, %arg2: memref<4096xi32>) {
 
       // ========================================================================
       // TRACE INITIALIZATION
       // ========================================================================
 
       // Configure trace output buffer (8192 bytes)
-      // arg_idx=3: trace buffer is the 4th XRT kernel argument (after in, factor, out)
-      aie.trace.host_config buffer_size = 8192 arg_idx = 3
+      aie.trace.host_config {buffer_size = 8192 : i32}
 
       // Declarative trace configuration is lowered by passes
       aie.trace.start_config @core_trace
@@ -170,17 +168,17 @@ module {
       // ========================================================================
 
       %0 = aiex.dma_configure_task_for @in {
-        aie.dma_bd(%arg0 : memref<4096xi32>, 0, 4096, [<size = 1, stride = 0>, <size = 1, stride = 0>, <size = 1, stride = 0>, <size = 4096, stride = 1>]) {burst_length = 0 : i32}
+        aie.dma_bd(%arg0 : memref<4096xi32> offset = 0 len = 4096 sizes = [1, 1, 1, 4096] strides = [0, 0, 0, 1])
         aie.end
       } {issue_token = true}
 
       %1 = aiex.dma_configure_task_for @infactor {
-        aie.dma_bd(%arg1 : memref<1xi32>, 0, 1, [<size = 1, stride = 0>, <size = 1, stride = 0>, <size = 1, stride = 0>, <size = 1, stride = 1>]) {burst_length = 0 : i32}
+        aie.dma_bd(%arg1 : memref<1xi32> offset = 0 len = 1 sizes = [1, 1, 1, 1] strides = [0, 0, 0, 1])
         aie.end
       } {issue_token = true}
 
       %2 = aiex.dma_configure_task_for @out {
-        aie.dma_bd(%arg2 : memref<4096xi32>, 0, 4096, [<size = 1, stride = 0>, <size = 1, stride = 0>, <size = 1, stride = 0>, <size = 4096, stride = 1>]) {burst_length = 0 : i32}
+        aie.dma_bd(%arg2 : memref<4096xi32> offset = 0 len = 4096 sizes = [1, 1, 1, 4096] strides = [0, 0, 0, 1])
         aie.end
       } {issue_token = true}
 

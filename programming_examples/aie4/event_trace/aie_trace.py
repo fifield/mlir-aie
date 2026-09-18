@@ -26,9 +26,9 @@ from aie.iron.controlflow import range_
 
 
 def build_aie_trace():
-    tensor_size = 8192
+    tensor_size = 4096
     tile_size = 1024
-    num_sub_vectors = 8
+    num_sub_vectors = 4
 
     @device(AIEDevice.npu3)
     def device_body():
@@ -80,10 +80,10 @@ def build_aie_trace():
             trace_event("MEMORY_STALL")
             trace_event("STREAM_STALL")
             trace_event("LOCK_STALL")
-            trace_event("DMA_S2MM_1_RUNNING")
+            trace_event("DMA_S2MM_0_RUNNING")
             trace_event("DMA_MM2S_0_RUNNING")
-            trace_start(broadcast=0)
-            trace_stop(broadcast=1)
+            trace_start(broadcast=3)
+            trace_stop(broadcast=4)
 
         # Trace configuration for compute tile (0,2) - DMA/memory events (Trace1 unit)
         @trace(tile_0_2, "mem_trace")
@@ -98,65 +98,42 @@ def build_aie_trace():
             trace_event("DMA_MM2S_0_FINISHED_TASK")
             trace_event("DMA_S2MM_0_STREAM_STARVATION")
             trace_event("DMA_S2MM_1_STREAM_STARVATION")
-            trace_start(broadcast=0)
-            trace_stop(broadcast=1)
+            trace_start(broadcast=3)
+            trace_stop(broadcast=4)
 
         # Trace configuration for shim tile (0,0)
         @trace(shim_noc_tile_0_0, "shim_trace")
         def shim_trace_body():
             trace_packet(2, TracePacketType.ShimTile)
             trace_event("DMA_S2MM_0_START_TASK")
+            trace_event("DMA_S2MM_1_START_TASK")
             trace_event("DMA_MM2S_0_START_TASK")
-            trace_event("DMA_MM2S_1_START_TASK")
             trace_event("DMA_S2MM_0_FINISHED_TASK")
+            trace_event("DMA_S2MM_1_FINISHED_TASK")
             trace_event("DMA_MM2S_0_FINISHED_TASK")
-            trace_event("DMA_MM2S_1_FINISHED_TASK")
             trace_event("DMA_S2MM_0_STREAM_STARVATION")
+            trace_event("DMA_S2MM_1_STREAM_STARVATION")
             trace_start(event="TRUE")
             trace_stop(event="NONE")
-
-        # Packet flows to route trace data to shim DMA S2MM channel 1
-        packetflow(
-            1,
-            tile_0_2,
-            WireBundle.Trace32,
-            0,
-            {"dest": shim_noc_tile_0_0, "port": WireBundle.DMA, "channel": 1},
-            keep_pkt_header=True,
-        )
-        packetflow(
-            3,
-            tile_0_2,
-            WireBundle.Trace32,
-            1,
-            {"dest": shim_noc_tile_0_0, "port": WireBundle.DMA, "channel": 1},
-            keep_pkt_header=True,
-        )
-        packetflow(
-            2,
-            shim_noc_tile_0_0,
-            WireBundle.Trace32,
-            0,
-            {"dest": shim_noc_tile_0_0, "port": WireBundle.DMA, "channel": 1},
-            keep_pkt_header=True,
-        )
 
         # ==================================================================
         # RUNTIME SEQUENCE WITH TRACE ACTIVATION
         # ==================================================================
 
-        trace_size = 8192
-        trace_ty = np.ndarray[(trace_size,), np.dtype[np.int32]]
+        trace_size = 8192  # bytes
 
-        @runtime_sequence(tensor_ty, scalar_ty, tensor_ty, trace_ty)
-        def sequence(A, F, C, T):
+        # The trace buffer argument is appended to the runtime sequence by
+        # trace_host_config lowering (reuse_output_buffer defaults to False),
+        # so it is not declared here.
+        @runtime_sequence(tensor_ty, scalar_ty, tensor_ty)
+        def sequence(A, F, C):
+            # Configure trace output buffer
+            trace_host_config(trace_size)
+
             # Declarative trace configuration lowered by passes
             trace_start_config("core_trace")
             trace_start_config("mem_trace")
             trace_start_config("shim_trace")
-
-            # Configure trace output buffer
-            trace_host_config(buffer_size=trace_size, arg_idx=3)
 
             # Data transfer configuration
             in_task = shim_dma_single_bd_task(

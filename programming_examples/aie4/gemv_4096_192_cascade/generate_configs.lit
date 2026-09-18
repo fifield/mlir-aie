@@ -1,0 +1,13 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// Exercise representative geometry combinations without requiring hardware
+// or a kernel compiler. In particular, four weight streams require the active
+// rows to split evenly between the two streams used for each payload kind.
+//
+// RUN: %python %S/gemv_placed.py --ntotal 192 --rows 4 --streams 2 --ktotal 4096 --kchunk 0 | aie-opt -o /dev/null
+// RUN: %python %S/gemv_placed.py --ntotal 100 --rows 4 --streams 2 --ktotal 4096 --kchunk 2 | aie-opt -o /dev/null
+// RUN: %python %S/gemv_placed.py --ntotal 64 --rows 1 --streams 2 --ktotal 256 --kchunk 0 | aie-opt -o /dev/null
+// RUN: %python %S/gemv_placed.py --ntotal 128 --rows 2 --streams 4 --ktotal 2048 --kchunk 2 | aie-opt -o /dev/null
+// RUN: not %python %S/gemv_placed.py --ntotal 64 --rows 1 --streams 4 --ktotal 256 --kchunk 0 2>&1 | FileCheck %s
+// CHECK: --streams 4 requires --rows to be divisible by 2; got --rows 1

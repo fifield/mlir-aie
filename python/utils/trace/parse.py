@@ -608,24 +608,24 @@ def parse_mlir_trace_events(mlir_module_str, colshift=None, device_name=None):
     if is_aie4:
         # AIE4: core and shim have distinct address ranges
         addr_map = {
-            0xA00E0: (0, 0),   # core Trace0_Event0
-            0xA00E4: (0, 1),   # core Trace0_Event1
-            0xA0100: (1, 0),   # mem (core tile) Trace1_Event0
-            0xA0104: (1, 1),   # mem (core tile) Trace1_Event1
-            0x4130:  (2, 0),   # shim Trace_A_Event0
-            0x4134:  (2, 1),   # shim Trace_A_Event1
-            0x120:   (3, 0),   # memtile Trace_A_Event0
-            0x124:   (3, 1),   # memtile Trace_A_Event1
+            0xA00E0: (0, 0),  # core Trace0_Event0
+            0xA00E4: (0, 1),  # core Trace0_Event1
+            0xA0100: (1, 0),  # mem (core tile) Trace1_Event0
+            0xA0104: (1, 1),  # mem (core tile) Trace1_Event1
+            0x4130: (2, 0),  # shim Trace_A_Event0
+            0x4134: (2, 1),  # shim Trace_A_Event1
+            0x120: (3, 0),  # memtile Trace_A_Event0
+            0x124: (3, 1),  # memtile Trace_A_Event1
         }
     else:
         # AIE2/AIE2P: core and shim share the same address, disambiguated by row
         addr_map = {
-            0x340E0: (0, 0),   # core/shim Trace_Event0
-            0x340E4: (0, 1),   # core/shim Trace_Event1
-            0x140E0: (1, 0),   # mem Trace_Event0
-            0x140E4: (1, 1),   # mem Trace_Event1
-            0x940E0: (3, 0),   # memtile Trace_Event0
-            0x940E4: (3, 1),   # memtile Trace_Event1
+            0x340E0: (0, 0),  # core/shim Trace_Event0
+            0x340E4: (0, 1),  # core/shim Trace_Event1
+            0x140E0: (1, 0),  # mem Trace_Event0
+            0x140E4: (1, 1),  # mem Trace_Event1
+            0x940E0: (3, 0),  # memtile Trace_Event0
+            0x940E4: (3, 1),  # memtile Trace_Event1
         }
 
     for write32 in write32s:
@@ -710,13 +710,11 @@ def lookup_event_name_by_type(trace_type, code, events_module):
     else:
         return "Unknown"
 
-    if enum_class is None:
-        return "Unknown"
-
-    try:
-        return enum_class(code).name
-    except ValueError:
-        pass
+    if enum_class is not None:
+        try:
+            return enum_class(code).name
+        except ValueError:
+            pass
     # AIE4 has no separate MemEvent enum; mem trace uses CoreEvent codes
     if trace_type == PacketType.MEM:
         try:

@@ -2,8 +2,9 @@
 *.elf
 *.exe
 project/
+project_base/
 
-# Trace outputs (`make run_base`)
+# Trace outputs (`make run`)
 trace.bin
 trace.json
 trace_timeline.png
