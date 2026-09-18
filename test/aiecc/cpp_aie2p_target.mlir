@@ -12,11 +12,16 @@
 // RUN: aiecc --get-npu-insts --get-core-elfs --verbose %s 2>&1 | FileCheck %s
 
 // Pipeline coverage plus AIE2p target detection, verified via the aie2p
-// code-generation triple.
+// code-generation triple. Also a regression guard: `--mcpu=` is AIE4-only
+// (hard-coded to `aie4b` there); on AIE2/AIE2P the llc invocation must carry
+// no `--mcpu=` at all. A prior bug used a Slot (instead of SlotList) for an
+// empty --mcpu value, which emits a bare `--mcpu=` argv entry on every
+// non-AIE4 llc command line -- guard against that regressing silently.
 // CHECK: ({{[0-9]+}}/{{[0-9]+}}) input.mlir
 // CHECK: ({{[0-9]+}}/{{[0-9]+}}) placed.mlir
 // CHECK: ({{[0-9]+}}/{{[0-9]+}}) input_physical.mlir
 // CHECK: exec:{{.*}}--march=aie2p
+// CHECK-NOT: --mcpu=
 // CHECK: wrote edge 'insts_
 
 module {

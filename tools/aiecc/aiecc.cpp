@@ -223,6 +223,7 @@ buildObjectSubgraph(EdgeWithTypedOutput<ModRef> &lowered,
                     EdgeWithTypedOutput<std::string> &arches,
                     EdgeWithTypedOutput<std::vector<std::string>> &irLinkFiles,
                     EdgeWithTypedOutput<std::string> &stackSpaces,
+                    EdgeWithTypedOutput<std::vector<std::string>> &llcMcpuFlags,
                     const std::string &objName) {
   std::string installDir = getInstallDir();
   std::string aietoolsRoot = discoverAietoolsDir(aietoolsDir.getValue());
@@ -390,6 +391,7 @@ buildObjectSubgraph(EdgeWithTypedOutput<ModRef> &lowered,
   llcCmd.input()
       .arg("-O" + std::to_string(optLevel.getValue()))
       .value("--march=")
+      .inputs("--mcpu=")
       .arg("--function-sections")
       .arg("-stack-size-section")
       .value("-aie-stack-addrspace=", "", /*omitIfEmpty=*/true)
@@ -414,11 +416,12 @@ buildObjectSubgraph(EdgeWithTypedOutput<ModRef> &lowered,
   auto shared = std::make_shared<SharedObjects>();
   bool share = !noShareCoreObjects;
   EdgeWithTypedOutput<Directory> &peanoObject =
-      bundle(peanoLinked.out, arches.out, stackSpaces.out)
+      bundle(peanoLinked.out, arches.out, llcMcpuFlags.out, stackSpaces.out)
           .map<Directory>(
               objName,
               [optCmd, llcCmd, shared, share](
                   const Item<std::string> &ir, const Item<std::string> &arch,
+                  const Item<std::vector<std::string>> &mcpu,
                   const Item<std::string> &stack,
                   Item<Directory> &out) -> mlir::LogicalResult {
                 std::string workDir =
@@ -433,7 +436,7 @@ buildObjectSubgraph(EdgeWithTypedOutput<ModRef> &lowered,
                   if (mlir::failed(optCmd(input, optimized))) {
                     return mlir::failure();
                   }
-                  return llcCmd(optimized, arch, stack, object);
+                  return llcCmd(optimized, arch, mcpu, stack, object);
                 };
                 if (ShellCommand::dryRun || !share) {
                   return compile(ir, out.key, out);
@@ -447,6 +450,10 @@ buildObjectSubgraph(EdgeWithTypedOutput<ModRef> &lowered,
                 }
                 std::string key = canonical->text + '\0' + arch.asString() +
                                   '\0' + stack.asString();
+                for (const auto &flag : mcpu.get()) {
+                  key += '\0';
+                  key += flag;
+                }
                 std::promise<std::string> promise;
                 std::shared_future<std::string> object;
                 std::string stem;
@@ -1233,6 +1240,23 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
             core.op->getParentOfType<DeviceOp>().getSymName());
       });
 
+  // Parallel to perCoreArches, but feeds *only* the llc invocation's
+  // `--mcpu=`. AIE4 hard-codes `--mcpu=aie4b` (never `aie4a`: the two variants
+  // produce byte-identical codegen today, so this is provenance/future-proofing
+  // only, not a functional switch). Every other arch gets an empty list, so
+  // `.inputs("--mcpu=")` (SlotList) emits zero argv entries -- do not use
+  // `.value()`/Slot here, which would emit a bare `--mcpu=` on every non-AIE4
+  // llc invocation. This is deliberately a separate node from perCoreArches:
+  // that string also drives the link `--target=`, `__AIEARCH__`, the
+  // xchesscc/chess-intrinsic-wrapper arch, and the aiesim genwrapper path,
+  // none of which should ever see "aie4b".
+  auto &perCoreLlcMcpuFlags = perCoreArches.map<std::vector<std::string>>(
+      "perCoreLlcMcpu_{0}.txt", [](llvm::StringRef arch) {
+        if (arch == "aie4")
+          return std::vector<std::string>{"aie4b"};
+        return std::vector<std::string>{};
+      });
+
   // Per-core .o node. Two strategies selectable, differing only in how many
   // times the lowering pipeline runs:
   //   * unified: lower once per device, then carve that module into one module
@@ -1280,11 +1304,12 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
       });
   auto perCoreCompilation =
       buildObjectSubgraph(perCoreLowered, perCoreArches, perCoreIRLinkFiles,
-                          perCoreStackSpace, "objects_{0}.o");
+                          perCoreStackSpace, perCoreLlcMcpuFlags,
+                          "objects_{0}.o");
 
   auto unifiedCompilation = buildObjectSubgraph(
       unifiedPerCoreLowered, perCoreArches, perCoreIRLinkFiles,
-      perCoreStackSpace, "objects_{0}.o");
+      perCoreStackSpace, perCoreLlcMcpuFlags, "objects_{0}.o");
 
   auto compilation = doUnified ? unifiedCompilation : perCoreCompilation;
   auto &objects = compilation.object;
