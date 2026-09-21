@@ -78,14 +78,6 @@ class NPUKernel:
                 ScratchpadParameters, which a call's ``parameters`` are
                 written through. Defaults to None.
         """
-        if elf_path is None and (
-            xclbin_path is None or (insts_path is None and not dispatch_params)
-        ):
-            raise ValueError(
-                "NPUKernel requires either elf_path (full-ELF mode) or both "
-                "xclbin_path and insts_path (legacy mode), or xclbin_path and "
-                "dispatch_params (dispatch mode)."
-            )
         self._xclbin_path = xclbin_path
         self._insts_path = insts_path
         self._elf_path = elf_path
@@ -100,17 +92,6 @@ class NPUKernel:
         self._dispatch_bridge = None
         self._init_entry = init_entry
         self._params_path = params_path
-
-    @property
-    def elf_path(self):
-        """
-        Get the path to the full design ELF file (AIE4 / npu3 mode), or None
-        if this kernel uses the legacy xclbin+insts artifact pair.
-
-        Returns:
-            str | Path | None: The ELF path.
-        """
-        return self._elf_path
 
     @property
     def is_full_elf(self) -> bool:
