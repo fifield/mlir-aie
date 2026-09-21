@@ -62,14 +62,26 @@ def AIE4_AMode : I32EnumAttr<"AIE4AMode",
   let cppNamespace = "::xilinx::xllvm";
 }
 
-def AIE4_BMode_8x8   : I32EnumAttrCase<"Mode8x8",   0, "m8x8">;
-def AIE4_BMode_16x8  : I32EnumAttrCase<"Mode16x8",  1, "m16x8">;
-def AIE4_BMode_16x16 : I32EnumAttrCase<"Mode16x16", 2, "m16x16">;
-def AIE4_BMode_32x32 : I32EnumAttrCase<"Mode32x32", 3, "m32x32">;
+// Block mode (conf bits 4:3): 1 selects i16 x i16 -> i32; 3 is used for f32.
+// Modes 0 and 2 have no operand-width interpretation specified here.
+def AIE4_BMode_Mode0  : I32EnumAttrCase<"Mode0",     0, "mode0">;
+def AIE4_BMode_16x16  : I32EnumAttrCase<"Mode16x16", 1, "m16x16">;
+def AIE4_BMode_Mode2  : I32EnumAttrCase<"Mode2",     2, "mode2">;
+def AIE4_BMode_32x32  : I32EnumAttrCase<"Mode32x32", 3, "m32x32">;
 
 def AIE4_BMode : I32EnumAttr<"AIE4BMode",
     "AIE4 vector multiplier block mode (conf bits 4:3)",
-    [AIE4_BMode_8x8, AIE4_BMode_16x8, AIE4_BMode_16x16, AIE4_BMode_32x32]> {
+    [AIE4_BMode_Mode0, AIE4_BMode_16x16, AIE4_BMode_Mode2, AIE4_BMode_32x32]> {
+  let cppNamespace = "::xilinx::xllvm";
+}
+
+// Integer operand signedness: conf bit 8 selects signed RHS, bit 9 signed LHS.
+def AIE4_OperandSign_Unsigned : I32EnumAttrCase<"Unsigned", 0, "unsigned">;
+def AIE4_OperandSign_Signed   : I32EnumAttrCase<"Signed",   1, "signed">;
+
+def AIE4_OperandSign : I32EnumAttr<"AIE4OperandSign",
+    "AIE4 integer multiplier per-operand signedness",
+    [AIE4_OperandSign_Unsigned, AIE4_OperandSign_Signed]> {
   let cppNamespace = "::xilinx::xllvm";
 }
 
@@ -113,6 +125,114 @@ def MulEwiseFpConfAIE4IntrOp :
                       "llvm.aie4.I1024.I1024.ACC1024.fp.mul.ewise.conf",
                       ::xilinx::xllvm::encodeAIE4MulConf(
                           op.getZeroAcc(), op.getAmode(), op.getBmode()));
+    (void) inst;
+    $res = inst;
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// AIE4 control-register side-effect resources
+//===----------------------------------------------------------------------===//
+//
+// Share resource identities with AIEVec through AIE4CtrlRegResources.h.
+def AIE4_CRSatResource     : Resource<"::xilinx::xllvm::AIE4CRSatResource">;
+def AIE4_CRRndResource     : Resource<"::xilinx::xllvm::AIE4CRRndResource">;
+def AIE4_CRSRSModeResource : Resource<"::xilinx::xllvm::AIE4CRSRSModeResource">;
+def AIE4_SRSOverflowResource :
+    Resource<"::xilinx::xllvm::AIE4SRSOverflowResource">;
+def AIE4_CRVecSatResource  : Resource<"::xilinx::xllvm::AIE4CRVecSatResource">;
+
+// Keep these effects consistent with the corresponding AIEVec operations.
+defvar AIE4_SRSEffects = MemoryEffects<[
+    MemRead<AIE4_CRSatResource>,
+    MemRead<AIE4_CRRndResource>,
+    MemRead<AIE4_CRSRSModeResource>,
+    MemWrite<AIE4_SRSOverflowResource>]>;
+
+defvar AIE4_MacEffects = MemoryEffects<[MemRead<AIE4_CRVecSatResource>]>;
+
+//===----------------------------------------------------------------------===//
+// MAC
+//===----------------------------------------------------------------------===//
+
+// llvm.aie4.I512.I512.ACC1024.mac.ewise.conf
+//     <32 x i32> (<32 x i16>, <32 x i16>, <32 x i32>, i32)
+//
+// The multiplier widens i16 products into the i32 accumulator lanes.
+def MacEwiseIntConfAIE4IntrOp :
+    AIEVec4_IntrOp<"I512.I512.ACC1024.mac.ewise.conf",
+        [TypeIs<"res", FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>>, AIE4_MacEffects]>,
+    Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>:$lhs,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>:$rhs,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>:$acc,
+                   UnitAttr:$zeroAcc,
+                   AIE4_AMode:$amode,
+                   AIE4_BMode:$bmode,
+                   AIE4_OperandSign:$lhsSign,
+                   AIE4_OperandSign:$rhsSign)> {
+  let summary = "AIE4 elementwise i16 x i16 -> i32 vector MAC (vmac)";
+  let description = [{
+    Multiplies the input lanes and accumulates into i32 lanes according to
+    the configuration attributes. `lhsSign` and `rhsSign` explicitly select
+    each operand's signedness. The instruction reads `crVecSat`.
+  }];
+
+  // Materialize the configuration attributes as the trailing i32 argument.
+  let llvmBuilder = [{
+    auto *inst = ::xilinx::xllvm::createAIE4ConfIntrinsicCall(builder,
+                      moduleTranslation, &opInst,
+                      "llvm.aie4.I512.I512.ACC1024.mac.ewise.conf",
+                      ::xilinx::xllvm::encodeAIE4MacConf(
+                          op.getZeroAcc(), op.getAmode(), op.getBmode(),
+                          op.getLhsSign(), op.getRhsSign()));
+    (void) inst;
+    $res = inst;
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// SRS
+//===----------------------------------------------------------------------===//
+
+// A separate i32 sign argument selects the srssign0 or srssign1 form.
+def AIE4_SRSSign_Unsigned : I32EnumAttrCase<"Unsigned", 0, "unsigned">;
+def AIE4_SRSSign_Signed   : I32EnumAttrCase<"Signed",   1, "signed">;
+
+def AIE4_SRSSign : I32EnumAttr<"AIE4SRSSign",
+    "AIE4 SRS signedness (selects the srssign0/srssign1 instruction form)",
+    [AIE4_SRSSign_Unsigned, AIE4_SRSSign_Signed]> {
+  let cppNamespace = "::xilinx::xllvm";
+}
+
+// llvm.aie4.I512.v32.acc32.srs
+//     <32 x i16> (<32 x i32>, i32 shift, i32 sign)
+//
+// Narrows i32 accumulator lanes to i16 using the current rounding and
+// saturation modes, and writes SRS overflow status.
+def I512V32Acc32SrsAIE4IntrOp :
+    AIEVec4_IntrOp<"I512.v32.acc32.srs",
+        [TypeIs<"res", FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>>, AIE4_SRSEffects]>,
+    Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>:$acc,
+                   ConfinedAttr<I32Attr, [IntMinValue<0>, IntMaxValue<31>]>:$shift,
+                   AIE4_SRSSign:$sign)> {
+  let summary = "AIE4 shift-round-saturate i32 accumulator -> i16 (vsrs.2x)";
+  let description = [{
+    Narrows the accumulator using SRS. The verified attributes `shift`
+    (0..31) and `sign` (unsigned=0, signed=1) become trailing i32 arguments
+    in that order.
+
+    Rounding and saturation depend on `crRnd` and `crSat`; this op does not
+    establish or restore those modes. It reads the mode registers and writes
+    SRS overflow status.
+  }];
+
+  let llvmBuilder = [{
+    auto *inst = ::xilinx::xllvm::createAIE4ConfIntrinsicCall(builder,
+                      moduleTranslation, &opInst,
+                      "llvm.aie4.I512.v32.acc32.srs",
+                      ::llvm::ArrayRef<uint32_t>{
+                          (uint32_t) op.getShift(),
+                          (uint32_t) op.getSign()});
     (void) inst;
     $res = inst;
   }];

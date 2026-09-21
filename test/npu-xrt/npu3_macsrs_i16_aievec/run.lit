@@ -1,0 +1,29 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// AIE4 MAC accumulation across a loop followed by an explicit SRS operation.
+// Automatic shift/truncate fusion is disabled pending mode-preserving lowering.
+// The test expects floor rounding without saturation from the SRS modes.
+//
+// REQUIRES: ryzen_ai_npu3, peano
+//
+// RUN: %run_on_npu3% python %S/mac_srs_i16.py -o mac_srs_i16.mlir
+// RUN: %aiecc --enable-aie4-vectorization --get-full-elf --full-elf-name=mac_srs_i16.elf mac_srs_i16.mlir
+//
+// RUN: llvm-objdump -dr mac_srs_i16.mlir.prj/elfs_main_core_0_2/elfs_main_core_0_2.elf > dis.txt
+//
+// Require native MAC and SRS instructions.
+// RUN: FileCheck %s --check-prefix=VMAC --input-file=dis.txt
+// VMAC: vmac
+//
+// The backend may fuse SRS into its consuming store.
+// RUN: FileCheck %s --check-prefix=VSRS --input-file=dis.txt
+// VSRS: srs.2x{{.*}}srssign1
+//
+// The backend configures the SRS accumulator lane width.
+// RUN: FileCheck %s --check-prefix=CRMODE --input-file=dis.txt
+// CRMODE: movx{{.*}}crsrsmode
+//
+// Check all outputs against floor-shift and wrapping-narrow reference values.
+// RUN: clang %S/test.cpp -o test.exe -std=c++17 -Wall %xrt_flags -lrt -lstdc++ %test_utils_flags
+// RUN: %run_on_npu3% ./test.exe

@@ -40,6 +40,8 @@
 // accessors return these enum types by value.
 #include "aie/Dialect/XLLVM/IR/XLLVMEnums.h.inc"
 
+#include "aie/Dialect/XLLVM/AIE4CtrlRegResources.h"
+
 #define GET_OP_CLASSES
 #include "aie/Dialect/XLLVM/IR/XLLVMOps.h.inc"
 
@@ -81,6 +83,12 @@ llvm::CallInst *createExternalLLVMIntrinsicCall(
 /// e.g. zeroAcc=true, amode=Float(1), bmode=Mode32x32(3) -> 0b11011 == 27.
 uint32_t encodeAIE4MulConf(bool zeroAcc, AIE4AMode amode, AIE4BMode bmode);
 
+/// Pack an integer MAC configuration using the encodeAIE4MulConf fields,
+/// plus signedness bits 8 (RHS) and 9 (LHS).
+/// zeroAcc=false, amode=Int, bmode=Mode16x16, both signed encodes 0x308.
+uint32_t encodeAIE4MacConf(bool zeroAcc, AIE4AMode amode, AIE4BMode bmode,
+                           AIE4OperandSign lhsSign, AIE4OperandSign rhsSign);
+
 /// Like `createExternalLLVMIntrinsicCall`, but appends `conf` as a trailing
 /// i32 argument. AIE4 config words live in MLIR *attributes* (so their fields
 /// can be range-verified) rather than in operands, so they are not picked up
@@ -90,6 +98,12 @@ createAIE4ConfIntrinsicCall(llvm::IRBuilderBase &builder,
                             mlir::LLVM::ModuleTranslation &moduleTranslation,
                             mlir::Operation *intrOp,
                             llvm::StringRef intrinsicName, uint32_t conf);
+
+/// Append attributes as trailing i32 arguments, e.g. SRS shift then sign.
+llvm::CallInst *createAIE4ConfIntrinsicCall(
+    llvm::IRBuilderBase &builder,
+    mlir::LLVM::ModuleTranslation &moduleTranslation, mlir::Operation *intrOp,
+    llvm::StringRef intrinsicName, llvm::ArrayRef<uint32_t> trailingArgs);
 
 } // namespace xilinx::xllvm
 

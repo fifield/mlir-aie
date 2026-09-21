@@ -66,9 +66,53 @@ struct AIE4MulEwiseF32OpConversion
   }
 };
 
+// aievec.aie4.mac_ewise_i16_i32
+//     -> llvm.aie4.I512.I512.ACC1024.mac.ewise.conf
+//
+// Encode 0x308: integer mode, 16x16 block mode, and signed inputs.
+// Leave zeroAcc clear to preserve the incoming accumulator.
+struct AIE4MacEwiseI16I32OpConversion
+    : mlir::ConvertOpToLLVMPattern<aievec::AIE4MacEwiseI16I32Op> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(aievec::AIE4MacEwiseI16I32Op op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    rewriter.replaceOpWithNewOp<xllvm::MacEwiseIntConfAIE4IntrOp>(
+        op, op.getResult().getType(), adaptor.getLhs(), adaptor.getRhs(),
+        adaptor.getAcc(),
+        /*zeroAcc=*/false,
+        /*amode=*/xllvm::AIE4AMode::Int,
+        /*bmode=*/xllvm::AIE4BMode::Mode16x16,
+        /*lhsSign=*/xllvm::AIE4OperandSign::Signed,
+        /*rhsSign=*/xllvm::AIE4OperandSign::Signed);
+    return success();
+  }
+};
+
+// aievec.aie4.srs_i32_i16 -> llvm.aie4.I512.v32.acc32.srs
+//
+// XLLVM materializes the verified shift and sign attributes as separate
+// trailing i32 arguments.
+struct AIE4SRSI32I16OpConversion
+    : mlir::ConvertOpToLLVMPattern<aievec::AIE4SRSI32I16Op> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(aievec::AIE4SRSI32I16Op op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    rewriter.replaceOpWithNewOp<xllvm::I512V32Acc32SrsAIE4IntrOp>(
+        op, op.getResult().getType(), adaptor.getSource(), op.getShift(),
+        op.getIsSigned() ? xllvm::AIE4SRSSign::Signed
+                         : xllvm::AIE4SRSSign::Unsigned);
+    return success();
+  }
+};
+
 void populateAIEVecToLLVMAIE4ConversionPatterns(
     mlir::LLVMTypeConverter &converter, mlir::RewritePatternSet &patterns) {
-  patterns.add<AIE4MulEwiseF32OpConversion>(converter);
+  patterns.add<AIE4MulEwiseF32OpConversion, AIE4MacEwiseI16I32OpConversion,
+               AIE4SRSI32I16OpConversion>(converter);
 }
 
 } // namespace xilinx::aievec

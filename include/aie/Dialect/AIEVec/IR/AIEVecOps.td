@@ -76,6 +76,86 @@ def AIEVec_AIE4MulEwiseF32Op:
   let hasVerifier = 0;
 }
 
+//===----------------------------------------------------------------------===//
+// AIE4 control-register side-effect resources
+//===----------------------------------------------------------------------===//
+//
+// Share resource identities with XLLVM through AIE4CtrlRegResources.h.
+def AIEVec_AIE4CRSatRes  : Resource<"::xilinx::xllvm::AIE4CRSatResource">;
+def AIEVec_AIE4CRRndRes  : Resource<"::xilinx::xllvm::AIE4CRRndResource">;
+def AIEVec_AIE4CRSRSModeRes :
+    Resource<"::xilinx::xllvm::AIE4CRSRSModeResource">;
+def AIEVec_AIE4SRSOfRes  : Resource<"::xilinx::xllvm::AIE4SRSOverflowResource">;
+def AIEVec_AIE4CRVecSatRes :
+    Resource<"::xilinx::xllvm::AIE4CRVecSatResource">;
+
+//===----------------------------------------------------------------------===//
+// AIE4 integer MAC
+//===----------------------------------------------------------------------===//
+
+def AIEVec_AIE4MacEwiseI16I32Op:
+  AIEVec_Op<"aie4.mac_ewise_i16_i32", [
+    AllTypesMatch<["lhs", "rhs"]>,
+    AllTypesMatch<["acc", "result"]>,
+    MemoryEffects<[MemRead<AIEVec_AIE4CRVecSatRes>]>
+  ]>,
+  Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>:$lhs,
+                 FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>:$rhs,
+                 FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>:$acc)>,
+  Results<(outs FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>:$result)> {
+  let summary = "AIE4 elementwise integer multiply-accumulate";
+  let description = [{
+    Elementwise signed i16 x i16 multiply-accumulate. The multiplier widens
+    each product to i32 and adds it to the corresponding accumulator lane.
+    Inputs are `vector<32xi16>` (512 bits); the accumulator and result are
+    `vector<32xi32>` (1024 bits).
+
+    Lowers to `vmac`, which reads the vector saturation control `crVecSat`.
+  }];
+  let assemblyFormat =
+      "$lhs `,` $rhs `,` $acc attr-dict `:` type($lhs) `,` type($result)";
+  let hasVerifier = 0;
+}
+
+//===----------------------------------------------------------------------===//
+// AIE4 SRS
+//===----------------------------------------------------------------------===//
+
+def AIEVec_AIE4SRSI32I16Op:
+  AIEVec_Op<"aie4.srs_i32_i16", [
+    MemoryEffects<[MemRead<AIEVec_AIE4CRSatRes>,
+                   MemRead<AIEVec_AIE4CRRndRes>,
+                   MemRead<AIEVec_AIE4CRSRSModeRes>,
+                   MemWrite<AIEVec_AIE4SRSOfRes>]>
+  ]>,
+  Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>:$source,
+                 ConfinedAttr<I32Attr, [IntMinValue<0>, IntMaxValue<31>]>:$shift,
+                 DefaultValuedAttr<BoolAttr, "true">:$isSigned)>,
+  Results<(outs FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>:$result)> {
+  let summary = "AIE4 shift-round-saturate: i32 accumulator -> i16 vector";
+  let description = [{
+    Narrows a `vector<32xi32>` accumulator to `vector<32xi16>` using the AIE4
+    SRS instruction. `$shift` is in 0..31; `$isSigned` selects the signed or
+    unsigned instruction form.
+
+    Rounding and saturation depend on the current `crRnd` and `crSat` modes.
+    The backend sets the accumulator lane width and sign, but this op does
+    not establish or restore rounding and saturation modes. Callers must
+    arrange the modes required by their computation.
+
+    Automatic `arith.shrsi`/`arith.trunci` fusion is disabled until a
+    mode-preserving lowering can establish floor rounding and wrapping, then
+    restore the caller's modes. Peano does not support the generic
+    `vector<32xi32>` right shift, so it may fail backend legalization.
+
+    The op reads the mode registers and writes the SRS overflow status flag;
+    it must not be treated as pure.
+  }];
+  let assemblyFormat =
+      "$source attr-dict `:` type($source) `,` type($result)";
+  let hasVerifier = 0;
+}
+
 
 def AIEVec_SubElemOp:
   AIEVec_Op<"sub_elem", [

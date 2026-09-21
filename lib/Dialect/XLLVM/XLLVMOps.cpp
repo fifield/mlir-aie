@@ -69,18 +69,34 @@ uint32_t encodeAIE4MulConf(bool zeroAcc, AIE4AMode amode, AIE4BMode bmode) {
          (static_cast<uint32_t>(bmode) << 3);
 }
 
+uint32_t encodeAIE4MacConf(bool zeroAcc, AIE4AMode amode, AIE4BMode bmode,
+                           AIE4OperandSign lhsSign, AIE4OperandSign rhsSign) {
+  return encodeAIE4MulConf(zeroAcc, amode, bmode) |
+         (static_cast<uint32_t>(rhsSign) << 8) |
+         (static_cast<uint32_t>(lhsSign) << 9);
+}
+
 llvm::CallInst *createAIE4ConfIntrinsicCall(
     llvm::IRBuilderBase &builder, LLVM::ModuleTranslation &moduleTranslation,
     Operation *intrOp, llvm::StringRef intrinsicName, uint32_t conf) {
+  return createAIE4ConfIntrinsicCall(builder, moduleTranslation, intrOp,
+                                     intrinsicName, ArrayRef<uint32_t>{conf});
+}
+
+llvm::CallInst *
+createAIE4ConfIntrinsicCall(llvm::IRBuilderBase &builder,
+                            LLVM::ModuleTranslation &moduleTranslation,
+                            Operation *intrOp, llvm::StringRef intrinsicName,
+                            ArrayRef<uint32_t> trailingArgs) {
   assert(intrOp->getNumResults() == 1 &&
          "AIE4 conf intrinsics have exactly one result");
   llvm::Type *resTy =
       moduleTranslation.convertType(*(intrOp->getResultTypes().begin()));
 
   auto operands = moduleTranslation.lookupValues(intrOp->getOperands());
-  // The config word is an MLIR attribute, not an operand: materialize it as
-  // the trailing i32 argument the intrinsic's signature expects.
-  operands.push_back(builder.getInt32(conf));
+  // Materialize attributes as trailing i32 arguments in intrinsic order.
+  for (uint32_t arg : trailingArgs)
+    operands.push_back(builder.getInt32(arg));
 
   SmallVector<llvm::Type *> types;
   for (auto *op : operands)

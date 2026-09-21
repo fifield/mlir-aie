@@ -21,6 +21,9 @@
 
 #include "AIEVecDialect.h"
 
+// Shared control-register resources for AIE4 operations.
+#include "aie/Dialect/XLLVM/AIE4CtrlRegResources.h"
+
 #define GET_OP_CLASSES
 #include "aie/Dialect/AIEVec/IR/AIEVecOps.h.inc"
 
