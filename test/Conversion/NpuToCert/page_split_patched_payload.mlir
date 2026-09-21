@@ -1,20 +1,21 @@
 //===- page_split_patched_payload.mlir --------------------------*- MLIR -*-===//
 //
-// Copyright (C) 2026 Advanced Micro Devices, Inc.
+// This file is licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
+// Copyright (C) 2026, Advanced Micro Devices, Inc.
+//
 //===----------------------------------------------------------------------===//
-
-// Each page carries its own copy of every payload it pushes, so a page split
-// must keep each cert.apply_offset_57 on the same page as every later uC-DMA
-// push of the payload it patches.
+//
+// Keep payload patches and their uC-DMA pushes on the same page, since each
+// page has a separate payload copy.
 
 // RUN: aie-opt -cert-legalize-pages --split-input-file %s | FileCheck %s
 
-// Interior cut: reject the cut before the second write32, inside the @pB
-// patch/push span, and split before the patch instead.
+// Interior cut: reject the greedy cut before the second write32, inside the
+// @pB patch/push span. Split before the patch at cost 3988 (target 4000).
 //
-// CHECK-LABEL: aie.device(xcve3858) @interior
 // CHECK: aiex.cert.page
 // CHECK: aiex.cert.apply_offset_57(@pA
 // CHECK-NOT: aiex.cert.page
@@ -24,7 +25,7 @@
 // CHECK: aiex.cert.apply_offset_57(@pB
 // CHECK-NOT: aiex.cert.page
 // CHECK: aiex.cert.uc_dma_write_des_sync(@chainB)
-aie.device(xcve3858) @interior {
+aie.device(npu2) {
   memref.global "private" constant @pA : memref<980xi32> = dense<0>
   memref.global "private" constant @pB : memref<1000xi32> = dense<0>
   aiex.cert.uc_dma_chain @chainA {
@@ -48,10 +49,10 @@ aie.device(xcve3858) @interior {
 
 // -----
 
-// Job-boundary cut: reject the boundary before job 3, which separates @qB's
-// patch in job 2 from its push in job 3, and split before job 2 instead.
+// Job-boundary cut with an asynchronous push: r3 prevents splitting job 3.
+// Reject the boundary before job 3 (cost 4000), which separates @qB's patch
+// and push. Split before job 2 (cost 3980).
 //
-// CHECK-LABEL: aie.device(xcve3858) @job_boundary
 // CHECK: aiex.cert.page
 // CHECK: aiex.cert.apply_offset_57(@qA
 // CHECK-NOT: aiex.cert.page
@@ -60,8 +61,8 @@ aie.device(xcve3858) @interior {
 // CHECK: aiex.cert.page
 // CHECK: aiex.cert.apply_offset_57(@qB
 // CHECK-NOT: aiex.cert.page
-// CHECK: aiex.cert.uc_dma_write_des_sync(@chainQB)
-aie.device(xcve3858) @job_boundary {
+// CHECK: aiex.cert.uc_dma_write_des(3, @chainQB)
+aie.device(npu2) {
   memref.global "private" constant @qA : memref<975xi32> = dense<0>
   memref.global "private" constant @qB : memref<1000xi32> = dense<0>
   aiex.cert.uc_dma_chain @chainQA {
@@ -79,17 +80,17 @@ aie.device(xcve3858) @job_boundary {
       aiex.cert.apply_offset_57(@qB, 1, 0)
     }
     aiex.cert.job(3) {
-      aiex.cert.uc_dma_write_des_sync(@chainQB)
+      aiex.cert.uc_dma_write_des(3, @chainQB)
+      aiex.cert.wait_uc_dma(3)
     }
   }
 }
 
 // -----
 
-// Control: the interior case without the @rB patch. An unpatched payload
-// imposes no constraint, so the cut before the second write32 is kept.
+// An unpatched payload imposes no span constraint. Keep the greedy cut
+// between the first and second write32 ops, before the push of @rB.
 //
-// CHECK-LABEL: aie.device(xcve3858) @unpatched
 // CHECK: aiex.cert.page
 // CHECK: aiex.cert.apply_offset_57(@rA
 // CHECK-NOT: aiex.cert.page
@@ -99,7 +100,7 @@ aie.device(xcve3858) @job_boundary {
 // CHECK: aiex.cert.write32(4100, 2)
 // CHECK: aiex.cert.write32(4104, 3)
 // CHECK: aiex.cert.uc_dma_write_des_sync(@chainRB)
-aie.device(xcve3858) @unpatched {
+aie.device(npu2) {
   memref.global "private" constant @rA : memref<980xi32> = dense<0>
   memref.global "private" constant @rB : memref<1000xi32> = dense<0>
   aiex.cert.uc_dma_chain @chainRA {
@@ -122,58 +123,62 @@ aie.device(xcve3858) @unpatched {
 
 // -----
 
-// Repeated pushes need the same patched copy. The greedy cut before the
-// second @sA push is rejected; split after it instead.
+// Repeated pushes need the same patched copy. Keep this page intact: its cost
+// exceeds the 8000-byte split trigger but fits the 8192-byte hardware limit.
 //
-// CHECK-LABEL: aie.device(xcve3858) @repeated_push
+// CHECK-LABEL: aie.device(npu2) @repeated_push
 // CHECK: aiex.cert.page
 // CHECK: aiex.cert.apply_offset_57(@sA
 // CHECK-NOT: aiex.cert.page
 // CHECK: aiex.cert.uc_dma_write_des_sync(@chainSA)
 // CHECK-NOT: aiex.cert.page
-// CHECK: aiex.cert.uc_dma_write_des_sync(@chainSW)
+// CHECK: aiex.cert.uc_dma_write_des_sync(@chainSB)
 // CHECK-NOT: aiex.cert.page
 // CHECK: aiex.cert.uc_dma_write_des_sync(@chainSA)
-// CHECK: aiex.cert.page
-// CHECK: aiex.cert.uc_dma_write_des_sync(@chainSV)
-aie.device(xcve3858) @repeated_push {
-  memref.global "private" constant @sA : memref<700xi32> = dense<0>
-  memref.global "private" constant @sW : memref<400xi32> = dense<0>
-  memref.global "private" constant @sV : memref<900xi32> = dense<0>
+// CHECK-NOT: aiex.cert.page
+aie.device(npu2) @repeated_push {
+  memref.global "private" constant @sA : memref<980xi32> = dense<0>
+  memref.global "private" constant @sB : memref<1000xi32> = dense<0>
   aiex.cert.uc_dma_chain @chainSA {
-    aiex.cert.uc_dma_bd @sA, 0, 700, false
+    aiex.cert.uc_dma_bd @sA, 0, 980, false
   }
-  aiex.cert.uc_dma_chain @chainSW {
-    aiex.cert.uc_dma_bd @sW, 0, 400, false
-  }
-  aiex.cert.uc_dma_chain @chainSV {
-    aiex.cert.uc_dma_bd @sV, 0, 900, false
+  aiex.cert.uc_dma_chain @chainSB {
+    aiex.cert.uc_dma_bd @sB, 0, 1000, false
   }
   aiex.cert.page {
     aiex.cert.job(1) {
       aiex.cert.apply_offset_57(@sA, 1, 0)
       aiex.cert.uc_dma_write_des_sync(@chainSA)
-      aiex.cert.uc_dma_write_des_sync(@chainSW)
+      aiex.cert.write32(0x1000, 1)
+      aiex.cert.write32(0x1004, 2)
+      aiex.cert.write32(0x1008, 3)
+      aiex.cert.uc_dma_write_des_sync(@chainSB)
       aiex.cert.uc_dma_write_des_sync(@chainSA)
-      aiex.cert.uc_dma_write_des_sync(@chainSV)
     }
   }
 }
 
 // -----
 
-// Each page carries one copy of each chain and payload, however many pushes
-// name them. This page repeats @chainTA and shares @tA with @chainTA2; counted
-// once each, it fits the 8192-byte limit, so the indivisible span is kept
-// whole instead of being rejected.
+// Patches accumulate across pushes, including through distinct chains sharing
+// a payload. Keep both patches with the asynchronous push; its global wait
+// handle allows the wait to move to a later page.
 //
-// CHECK-LABEL: aie.device(xcve3858) @shared_payload_fits
+// CHECK-LABEL: aie.device(npu2) @shared_patched_payload
 // CHECK: aiex.cert.page
 // CHECK: aiex.cert.apply_offset_57(@tA, 1, 0)
 // CHECK-NOT: aiex.cert.page
-// CHECK: aiex.cert.uc_dma_write_des_sync(@chainTA2)
+// CHECK: aiex.cert.uc_dma_write_des_sync(@chainTA)
 // CHECK-NOT: aiex.cert.page
-aie.device(xcve3858) @shared_payload_fits {
+// CHECK: aiex.cert.uc_dma_write_des_sync(@chainTB)
+// CHECK-NOT: aiex.cert.page
+// CHECK: aiex.cert.apply_offset_57(@tA, 1, 2)
+// CHECK-NOT: aiex.cert.page
+// CHECK: aiex.cert.uc_dma_write_des(8, @chainTA2)
+// CHECK: aiex.cert.page
+// CHECK: aiex.cert.wait_uc_dma(8)
+// CHECK-NOT: aiex.cert.page
+aie.device(npu2) @shared_patched_payload {
   memref.global "private" constant @tA : memref<980xi32> = dense<0>
   memref.global "private" constant @tB : memref<1000xi32> = dense<0>
   aiex.cert.uc_dma_chain @chainTA {
@@ -190,10 +195,12 @@ aie.device(xcve3858) @shared_payload_fits {
       aiex.cert.apply_offset_57(@tA, 1, 0)
       aiex.cert.uc_dma_write_des_sync(@chainTA)
       aiex.cert.write32(0x1000, 1)
+      aiex.cert.write32(0x1004, 2)
+      aiex.cert.write32(0x1008, 3)
       aiex.cert.uc_dma_write_des_sync(@chainTB)
-      aiex.cert.uc_dma_write_des_sync(@chainTA)
       aiex.cert.apply_offset_57(@tA, 1, 2)
-      aiex.cert.uc_dma_write_des_sync(@chainTA2)
+      aiex.cert.uc_dma_write_des(8, @chainTA2)
+      aiex.cert.wait_uc_dma(8)
     }
   }
 }
