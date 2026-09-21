@@ -26,10 +26,17 @@ from aie_lit_utils import LitConfigHelper, HardwareConfig, SanitizerLogShTest
 config.name = "AIE_TEST"
 
 config.test_format = lit.formats.ShTest()
-config.environment["PYTHONPATH"] = "{}:{}:{}".format(
-    os.path.join(config.aie_obj_root, "python"),
-    os.path.join(config.aie_obj_root, "aiebu", "aiebu", "share"),
-    os.path.join(config.aie_obj_root, "aiebu", "aiebu", "lib", "python3"),
+# Prepend the in-tree Python packages rather than overwriting PYTHONPATH:
+# XRT's setup.sh puts pyxrt on the ambient PYTHONPATH, and discarding it here
+# makes the xrt_python_bindings feature undetectable, silently marking every
+# pyxrt-gated test Unsupported.
+config.environment["PYTHONPATH"] = LitConfigHelper._prepend_env_paths(
+    config.environment.get("PYTHONPATH", os.environ.get("PYTHONPATH", "")),
+    "{}:{}:{}".format(
+        os.path.join(config.aie_obj_root, "python"),
+        os.path.join(config.aie_obj_root, "aiebu", "aiebu", "share"),
+        os.path.join(config.aie_obj_root, "aiebu", "aiebu", "lib", "python3"),
+    ),
 )
 
 

@@ -107,7 +107,11 @@ class LitConfigHelper:
         "npu3": ["npu3", "npu9"],
     }
 
-    PATH_ENV_VARS = {"PATH", "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"}
+    # Search-path variables that must be merged with the ambient environment
+    # rather than replaced. PYTHONPATH belongs here: XRT's setup.sh exports
+    # pyxrt through it, so overwriting it hides the module from feature probes
+    # and from the tests themselves.
+    PATH_ENV_VARS = {"PATH", "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH", "PYTHONPATH"}
 
     @staticmethod
     def _prepend_env_paths(current_value: str, new_value: str) -> str:
@@ -1041,12 +1045,17 @@ class LitConfigHelper:
         current_pythonpath = config_obj.environment.get(
             "PYTHONPATH", os.environ.get("PYTHONPATH", "")
         )
-        # pyxrt ships in the XRT install, which is on PYTHONPATH only after
-        # sourcing XRT's setup.sh. Fall back to the XRT found at configure time,
-        # after the ambient entries so a sourced XRT still wins.
-        xrt_dir = getattr(config_obj, "xrt_dir", "")
-        xrt_python_dir = os.path.join(xrt_dir, "python")
-        if xrt_dir and os.path.isdir(xrt_python_dir):
+
+        # pyxrt ships inside the XRT installation rather than the venv, so it is
+        # only importable when something puts $XILINX_XRT/python on PYTHONPATH --
+        # normally `source $XILINX_XRT/setup.sh`. Fall back to the XRT CMake
+        # configured against, so the suite is not silently degraded when that was
+        # not sourced. It goes *behind* the ambient value, never in front: a
+        # deliberately sourced XRT must still win over the configure-time one.
+        # _prepend_env_paths dedupes, so the usual case of both naming the same
+        # directory collapses to a single entry.
+        xrt_python_dir = getattr(config_obj, "xrt_python_dir", "")
+        if xrt_python_dir:
             current_pythonpath = LitConfigHelper._prepend_env_paths(
                 xrt_python_dir, current_pythonpath
             )

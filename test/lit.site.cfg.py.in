@@ -41,6 +41,7 @@ config.xrt_dir = r"""@XRT_DIR@"""
 config.xrt_bin_dir = r"""@XRT_BIN_DIR@"""
 config.xrt_lib_dir = r"""@XRT_LIB_DIR@"""
 config.xrt_include_dir = r"""@XRT_INCLUDE_DIR@"""
+config.xrt_python_dir = r"""@XRT_PYTHON_DIR@"""
 
 config.aie_src_root = r"""@AIE_SOURCE_DIR@"""
 config.aie_obj_root = r"""@AIE_BINARY_DIR@"""

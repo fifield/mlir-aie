@@ -145,6 +145,14 @@ configure_file(./utils/vitisVariables.config.in
                ${CMAKE_BINARY_DIR}/utils/vitisVariables.config @ONLY)
 find_package(XRT)
 
+# FindXRT lives in the cmake/modulesXilinx submodule and exposes XRT_DIR/BIN/LIB/INCLUDE,
+# but not the directory holding the pyxrt extension module. Derive it here so lit can fall
+# back to the XRT this build was configured against when nothing on PYTHONPATH supplies one
+# (normally `source $XILINX_XRT/setup.sh`). Left empty when XRT was not found.
+if(XRT_FOUND)
+  set(XRT_PYTHON_DIR ${XRT_DIR}/python)
+endif()
+
 # PEANO_INSTALL_DIR (set above) is an unchecked passthrough: if it is set but wrong (missing, not
 # an llvm-aie build, or missing AIE2/AIE2P target support), nothing today says so at configure time
 # -- the first symptom is normally a raw "No such file or directory" from whatever later shells out
