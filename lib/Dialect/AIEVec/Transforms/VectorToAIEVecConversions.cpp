@@ -5675,13 +5675,293 @@ struct ConvertIntMacToAIE4MacPattern : OpConversionPattern<arith::AddIOp> {
   }
 };
 
+//===----------------------------------------------------------------------===//
+// AIE4 integer min/max/compare/select
+//===----------------------------------------------------------------------===//
+//
+// Match the fixed signless integer shapes supported by the native operations.
+// Other types retain generic lowering.
+static bool isAIE4VAddShape(VectorType vecTy) {
+  if (vecTy.isScalable() || vecTy.getRank() != 1 ||
+      !vecTy.getElementType().isSignlessInteger())
+    return false;
+  unsigned elWidth = vecTy.getElementType().getIntOrFloatBitWidth();
+  int64_t lanes = vecTy.getShape()[0];
+  return (elWidth == 8 && lanes == 64) || (elWidth == 16 && lanes == 32) ||
+         (elWidth == 16 && lanes == 64) || (elWidth == 32 && lanes == 16) ||
+         (elWidth == 32 && lanes == 32);
+}
+
+// Match the mask widths enforced by AIE4CmpOp and AIE4SelOp verifiers.
+static Type getAIE4MaskCarrierType(MLIRContext *ctx, VectorType vecTy) {
+  unsigned elWidth = vecTy.getElementType().getIntOrFloatBitWidth();
+  int64_t lanes = vecTy.getShape()[0];
+  unsigned bits =
+      (elWidth == 8 && lanes == 64) || (elWidth == 16 && lanes == 64) ? 64 : 32;
+  return IntegerType::get(ctx, bits, IntegerType::Unsigned);
+}
+
+// Reinterpret the packed mask bits as Boolean lanes. The i32 carrier for
+// vector<16xi32> uses only its low 16 bits.
+static Value unpackAIE4Mask(Location loc, Value mask, VectorType resultType,
+                            ConversionPatternRewriter &rewriter) {
+  unsigned bits = cast<IntegerType>(mask.getType()).getWidth();
+  auto scalarType = rewriter.getIntegerType(bits);
+  Value scalar =
+      UnrealizedConversionCastOp::create(rewriter, loc, scalarType, mask)
+          .getResult(0);
+  auto laneBitsType = rewriter.getIntegerType(resultType.getNumElements());
+  if (laneBitsType != scalarType)
+    scalar = arith::TruncIOp::create(rewriter, loc, laneBitsType, scalar);
+  Value singleton = vector::BroadcastOp::create(
+      rewriter, loc, VectorType::get({1}, laneBitsType), scalar);
+  return vector::BitCastOp::create(rewriter, loc, resultType, singleton);
+}
+
+// Pack lane i into bit i. Sign-extending a scalar condition selects the
+// same operand in every lane; vector masks zero their unused carrier bits.
+static Value packAIE4Mask(Location loc, Value condition, Type carrierType,
+                          int64_t lanes, ConversionPatternRewriter &rewriter) {
+  auto scalarType =
+      rewriter.getIntegerType(cast<IntegerType>(carrierType).getWidth());
+  Value scalar;
+  if (condition.getType().isInteger(1)) {
+    scalar = arith::ExtSIOp::create(rewriter, loc, scalarType, condition);
+  } else {
+    auto laneBitsType = rewriter.getIntegerType(lanes);
+    Value singleton = vector::BitCastOp::create(
+        rewriter, loc, VectorType::get({1}, laneBitsType), condition);
+    scalar = vector::ExtractOp::create(rewriter, loc, singleton,
+                                       ArrayRef<int64_t>{0});
+    if (laneBitsType != scalarType)
+      scalar = arith::ExtUIOp::create(rewriter, loc, scalarType, scalar);
+  }
+  if (scalar.getType() == carrierType)
+    return scalar;
+  // Signedness changes no bits and disappears during LLVM type conversion.
+  return UnrealizedConversionCastOp::create(rewriter, loc, carrierType, scalar)
+      .getResult(0);
+}
+
+static bool isAIE4MaskExtract(vector::ExtractOp op) {
+  VectorType sourceType = op.getSourceVectorType();
+  if (sourceType.isScalable() || sourceType.getRank() != 1 ||
+      !sourceType.getElementType().isInteger(1) || !op.getType().isInteger(1))
+    return false;
+  int64_t lanes = sourceType.getNumElements();
+  return lanes == 16 || lanes == 32 || lanes == 64;
+}
+
+// Read mask bits through a scalar carrier regardless of their producer.
+// Peano cannot extract Boolean lanes from a bitcast vector<2xi32> mask.
+struct LowerAIE4MaskExtractOp : OpConversionPattern<vector::ExtractOp> {
+  using OpConversionPattern::OpConversionPattern;
+
+  // Recursive extraction moves toward the Boolean expression leaves.
+  void initialize() { setHasBoundedRewriteRecursion(); }
+
+  LogicalResult
+  matchAndRewrite(vector::ExtractOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    if (!isAIE4MaskExtract(op))
+      return failure();
+
+    Location loc = op.getLoc();
+    // Apply Boolean logic to the extracted bits. Peano cannot lower bitwise
+    // operations on the vector<2xi32> carrier used by 64-bit masks.
+    Operation *logic = adaptor.getSource().getDefiningOp();
+    if (logic && isa<arith::AndIOp, arith::OrIOp, arith::XOrIOp>(logic)) {
+      Value lhs = vector::ExtractOp::create(rewriter, loc, logic->getOperand(0),
+                                           adaptor.getDynamicPosition(),
+                                           op.getStaticPosition());
+      Value rhs = vector::ExtractOp::create(rewriter, loc, logic->getOperand(1),
+                                           adaptor.getDynamicPosition(),
+                                           op.getStaticPosition());
+      if (isa<arith::AndIOp>(logic))
+        rewriter.replaceOpWithNewOp<arith::AndIOp>(op, lhs, rhs);
+      else if (isa<arith::OrIOp>(logic))
+        rewriter.replaceOpWithNewOp<arith::OrIOp>(op, lhs, rhs);
+      else
+        rewriter.replaceOpWithNewOp<arith::XOrIOp>(op, lhs, rhs);
+      return success();
+    }
+
+    int64_t lanes = op.getSourceVectorType().getNumElements();
+    auto scalarType = rewriter.getI32Type();
+    Value index;
+    if (adaptor.getDynamicPosition().empty())
+      index = arith::ConstantIntOp::create(rewriter, loc, scalarType,
+                                          op.getStaticPosition()[0]);
+    else
+      index = arith::IndexCastUIOp::create(rewriter, loc, scalarType,
+                                         adaptor.getDynamicPosition()[0]);
+
+    Value mask;
+    if (lanes == 64) {
+      // Extract a scalar word before bitwise logic can recombine into an
+      // unsupported operation on the two-word vector carrier.
+      Value words = vector::BitCastOp::create(
+          rewriter, loc, VectorType::get({2}, scalarType), adaptor.getSource());
+      Value low =
+          vector::ExtractOp::create(rewriter, loc, words, ArrayRef<int64_t>{0});
+      Value high =
+          vector::ExtractOp::create(rewriter, loc, words, ArrayRef<int64_t>{1});
+      Value wordBits = arith::ConstantIntOp::create(rewriter, loc, 32, 32);
+      Value useHigh = arith::CmpIOp::create(
+          rewriter, loc, arith::CmpIPredicate::uge, index, wordBits);
+      mask = arith::SelectOp::create(rewriter, loc, useHigh, high, low);
+      Value bitMask = arith::ConstantIntOp::create(rewriter, loc, 31, 32);
+      index = arith::AndIOp::create(rewriter, loc, index, bitMask);
+    } else {
+      mask = packAIE4Mask(loc, adaptor.getSource(), scalarType, lanes, rewriter);
+    }
+    Value shifted = arith::ShRUIOp::create(rewriter, loc, mask, index);
+    rewriter.replaceOpWithNewOp<arith::TruncIOp>(op, rewriter.getI1Type(),
+                                               shifted);
+    return success();
+  }
+};
+
+template <typename SrcOpTy>
+struct LowerAIE4MinMaxOp : OpConversionPattern<SrcOpTy> {
+  using OpConversionPattern<SrcOpTy>::OpConversionPattern;
+  using OpAdaptor = typename SrcOpTy::Adaptor;
+
+  LogicalResult
+  matchAndRewrite(SrcOpTy srcOp, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto resultType = dyn_cast<VectorType>(srcOp.getType());
+    if (!resultType || !isAIE4VAddShape(resultType))
+      return failure();
+
+    constexpr bool isSigned = std::is_same_v<SrcOpTy, arith::MinSIOp> ||
+                              std::is_same_v<SrcOpTy, arith::MaxSIOp>;
+    constexpr bool isMin = std::is_same_v<SrcOpTy, arith::MinSIOp> ||
+                           std::is_same_v<SrcOpTy, arith::MinUIOp>;
+    auto kind =
+        isMin ? aievec::AIE4MinMaxKind::Min : aievec::AIE4MinMaxKind::Max;
+
+    rewriter.replaceOpWithNewOp<aievec::AIE4MinMaxOp>(
+        srcOp, resultType, adaptor.getLhs(), adaptor.getRhs(), kind, isSigned);
+    return success();
+  }
+};
+
+using LowerAIE4MinSIOp = LowerAIE4MinMaxOp<arith::MinSIOp>;
+using LowerAIE4MaxSIOp = LowerAIE4MinMaxOp<arith::MaxSIOp>;
+using LowerAIE4MinUIOp = LowerAIE4MinMaxOp<arith::MinUIOp>;
+using LowerAIE4MaxUIOp = LowerAIE4MinMaxOp<arith::MaxUIOp>;
+
+// Ordered comparisons use native lt/ge predicates, swapping operands for
+// gt/le. Equality predicates retain generic lowering.
+struct LowerAIE4CmpIOp : OpConversionPattern<arith::CmpIOp> {
+  using OpConversionPattern::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(arith::CmpIOp srcOp, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto lhsType = dyn_cast<VectorType>(srcOp.getLhs().getType());
+    if (!lhsType || !isAIE4VAddShape(lhsType))
+      return failure();
+
+    Value lhs = adaptor.getLhs();
+    Value rhs = adaptor.getRhs();
+    bool isSigned;
+    aievec::AIE4CmpPredicate predicate;
+    switch (srcOp.getPredicate()) {
+    case arith::CmpIPredicate::slt:
+      isSigned = true;
+      predicate = aievec::AIE4CmpPredicate::Lt;
+      break;
+    case arith::CmpIPredicate::sge:
+      isSigned = true;
+      predicate = aievec::AIE4CmpPredicate::Ge;
+      break;
+    case arith::CmpIPredicate::sgt:
+      isSigned = true;
+      predicate = aievec::AIE4CmpPredicate::Lt;
+      std::swap(lhs, rhs);
+      break;
+    case arith::CmpIPredicate::sle:
+      isSigned = true;
+      predicate = aievec::AIE4CmpPredicate::Ge;
+      std::swap(lhs, rhs);
+      break;
+    case arith::CmpIPredicate::ult:
+      isSigned = false;
+      predicate = aievec::AIE4CmpPredicate::Lt;
+      break;
+    case arith::CmpIPredicate::uge:
+      isSigned = false;
+      predicate = aievec::AIE4CmpPredicate::Ge;
+      break;
+    case arith::CmpIPredicate::ugt:
+      isSigned = false;
+      predicate = aievec::AIE4CmpPredicate::Lt;
+      std::swap(lhs, rhs);
+      break;
+    case arith::CmpIPredicate::ule:
+      isSigned = false;
+      predicate = aievec::AIE4CmpPredicate::Ge;
+      std::swap(lhs, rhs);
+      break;
+    default:
+      // Equality predicates retain generic lowering.
+      return failure();
+    }
+
+    Location loc = srcOp.getLoc();
+    Type maskTy = getAIE4MaskCarrierType(srcOp.getContext(), lhsType);
+    auto cmpOp = aievec::AIE4CmpOp::create(rewriter, loc, maskTy, lhs, rhs,
+                                           predicate, isSigned);
+
+    VectorType resultType = cast<VectorType>(srcOp.getResult().getType());
+    rewriter.replaceOp(
+        srcOp, unpackAIE4Mask(loc, cmpOp.getResult(), resultType, rewriter));
+    return success();
+  }
+};
+
+// Native select chooses rhs for a set mask bit, so the false value is lhs.
+struct LowerAIE4SelectOp : OpConversionPattern<arith::SelectOp> {
+  using OpConversionPattern::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(arith::SelectOp srcOp, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto resultType = dyn_cast<VectorType>(srcOp.getType());
+    if (!resultType || !isAIE4VAddShape(resultType))
+      return failure();
+
+    Location loc = srcOp.getLoc();
+    Type maskTy = getAIE4MaskCarrierType(srcOp.getContext(), resultType);
+    Value mask = packAIE4Mask(loc, adaptor.getCondition(), maskTy,
+                              resultType.getNumElements(), rewriter);
+
+    rewriter.replaceOpWithNewOp<aievec::AIE4SelOp>(
+        srcOp, resultType, adaptor.getFalseValue(), adaptor.getTrueValue(),
+        mask);
+    return success();
+  }
+};
+
 static void populateAIEVecV4ConversionPatterns(RewritePatternSet &patterns) {
-  patterns.add<ConvertMulFToAIE4MulEwiseF32Pattern, ConvertIntMacToAIE4MacPattern>(
-      patterns.getContext());
+  patterns
+      .add<ConvertMulFToAIE4MulEwiseF32Pattern, ConvertIntMacToAIE4MacPattern,
+           LowerAIE4MinSIOp, LowerAIE4MaxSIOp, LowerAIE4MinUIOp,
+           LowerAIE4MaxUIOp, LowerAIE4CmpIOp, LowerAIE4SelectOp,
+           LowerAIE4MaskExtractOp>(patterns.getContext());
 }
 
 static void configureAIEVecV4Legalizations(ConversionTarget &target) {
   target.addLegalDialect<aievec::AIEVecDialect>();
+
+  // Mask materialization uses generic vector operations. LLVM conversion
+  // erases signedness from the unsigned mask carriers.
+  target.addLegalOp<UnrealizedConversionCastOp, vector::BroadcastOp>();
+  target.addDynamicallyLegalOp<vector::ExtractOp>([](vector::ExtractOp op) {
+    return !isAIE4MaskExtract(op);
+  });
 
   // Unaligned reads introduce slices, but AIE4 has no AIEVec slice pattern.
   // Keep them legal for generic lowering, which may scalarize unaligned slices.
@@ -5692,8 +5972,7 @@ static void configureAIEVecV4Legalizations(ConversionTarget &target) {
   target.addDynamicallyLegalOp<arith::MulFOp>([](arith::MulFOp mulOp) {
     auto vecTy = dyn_cast<VectorType>(mulOp.getType());
     return !vecTy || vecTy.isScalable() || vecTy.getRank() != 1 ||
-           !vecTy.getElementType().isF32() ||
-           vecTy.getShape()[0] != 32;
+           !vecTy.getElementType().isF32() || vecTy.getShape()[0] != 32;
   });
 
   // Use the same predicate as the rewrite so only supported MAC roots are illegal.
@@ -5706,6 +5985,26 @@ static void configureAIEVecV4Legalizations(ConversionTarget &target) {
   // Fusion requires lowering that establishes floor rounding and
   // wrapping, then restores the caller's modes. Explicit SRS ops remain legal.
   target.addLegalOp<arith::ShRSIOp, arith::TruncIOp>();
+
+  // Require native lowering only for supported integer vector shapes.
+  target.addDynamicallyLegalOp<arith::MinSIOp, arith::MaxSIOp, arith::MinUIOp,
+                               arith::MaxUIOp>([](Operation *op) {
+    auto vecTy = dyn_cast<VectorType>(op->getResultTypes()[0]);
+    return !vecTy || !isAIE4VAddShape(vecTy);
+  });
+  target.addDynamicallyLegalOp<arith::SelectOp>([](arith::SelectOp selOp) {
+    auto vecTy = dyn_cast<VectorType>(selOp.getType());
+    return !vecTy || !isAIE4VAddShape(vecTy);
+  });
+
+  // Equality predicates and unsupported shapes retain generic lowering.
+  target.addDynamicallyLegalOp<arith::CmpIOp>([](arith::CmpIOp cmpOp) {
+    auto vecTy = dyn_cast<VectorType>(cmpOp.getLhs().getType());
+    if (!vecTy || !isAIE4VAddShape(vecTy))
+      return true;
+    return cmpOp.getPredicate() == arith::CmpIPredicate::eq ||
+           cmpOp.getPredicate() == arith::CmpIPredicate::ne;
+  });
 }
 
 // The lane counts at which the AIE2P lowering of `op` takes one op, smallest

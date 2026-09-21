@@ -1853,6 +1853,63 @@ ParseResult FMAConvOp::parse(OpAsmParser &parser, OperationState &result) {
   return parseMulFMAConvOp(parser, result, true);
 }
 
+//===----------------------------------------------------------------------===//
+// AIE4 integer min/max/compare/select
+//===----------------------------------------------------------------------===//
+
+// Mask carrier width for supported shapes, or zero for unsupported types.
+// The 16-lane i32 shape uses the low 16 bits of a 32-bit carrier.
+static unsigned getAIE4MaskCarrierBits(VectorType vecTy) {
+  if (vecTy.isScalable() || vecTy.getRank() != 1 ||
+      !vecTy.getElementType().isSignlessInteger())
+    return 0;
+  unsigned elWidth = vecTy.getElementType().getIntOrFloatBitWidth();
+  int64_t lanes = vecTy.getShape()[0];
+  if (elWidth == 8 && lanes == 64)
+    return 64; // i8@512
+  if (elWidth == 16 && lanes == 32)
+    return 32; // i16@512
+  if (elWidth == 16 && lanes == 64)
+    return 64; // i16@1024
+  if (elWidth == 32 && lanes == 16)
+    return 32; // i32@512
+  if (elWidth == 32 && lanes == 32)
+    return 32; // i32@1024
+  return 0;
+}
+
+LogicalResult AIE4CmpOp::verify() {
+  auto lhsType = cast<VectorType>(getLhs().getType());
+  unsigned maskBits = getAIE4MaskCarrierBits(lhsType);
+  if (maskBits == 0)
+    return emitOpError("unsupported AIE4 vector shape for lhs/rhs: ")
+           << lhsType;
+
+  unsigned resultBits = getResult().getType().getIntOrFloatBitWidth();
+  if (resultBits != maskBits)
+    return emitOpError("result mask width (")
+           << resultBits << " bits) does not match the AIE4 mask carrier ("
+           << maskBits << " bits) for " << lhsType;
+
+  return success();
+}
+
+LogicalResult AIE4SelOp::verify() {
+  auto lhsType = cast<VectorType>(getLhs().getType());
+  unsigned maskBits = getAIE4MaskCarrierBits(lhsType);
+  if (maskBits == 0)
+    return emitOpError("unsupported AIE4 vector shape for lhs/rhs: ")
+           << lhsType;
+
+  unsigned selBits = getSel().getType().getIntOrFloatBitWidth();
+  if (selBits != maskBits)
+    return emitOpError("sel mask width (")
+           << selBits << " bits) does not match the AIE4 mask carrier ("
+           << maskBits << " bits) for " << lhsType;
+
+  return success();
+}
+
 #define GET_ATTRDEF_CLASSES
 #include "aie/Dialect/AIEVec/IR/AIEVecAttributes.cpp.inc"
 

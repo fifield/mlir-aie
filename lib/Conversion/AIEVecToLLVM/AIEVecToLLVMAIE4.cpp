@@ -16,6 +16,8 @@
 #include "aie/Dialect/XLLVM/XLLVMDialect.h"
 #include "mlir/Conversion/LLVMCommon/Pattern.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/IR/BuiltinTypes.h"
+#include "mlir/Support/LogicalResult.h"
 
 using namespace mlir;
 
@@ -109,10 +111,206 @@ struct AIE4SRSI32I16OpConversion
   }
 };
 
+//===----------------------------------------------------------------------===//
+// Integer min/max/compare/select
+//===----------------------------------------------------------------------===//
+
+namespace {
+// Intrinsic families shared by min/max, compare, and select lowering.
+enum class AIE4VAddFamily { I8x64, I16x32, I16x64, I32x16, I32x32 };
+} // namespace
+
+static FailureOr<AIE4VAddFamily> classifyAIE4VAddShape(VectorType vecTy) {
+  if (vecTy.getRank() != 1)
+    return failure();
+  unsigned elWidth = vecTy.getElementType().getIntOrFloatBitWidth();
+  int64_t lanes = vecTy.getShape()[0];
+  if (elWidth == 8 && lanes == 64)
+    return AIE4VAddFamily::I8x64;
+  if (elWidth == 16 && lanes == 32)
+    return AIE4VAddFamily::I16x32;
+  if (elWidth == 16 && lanes == 64)
+    return AIE4VAddFamily::I16x64;
+  if (elWidth == 32 && lanes == 16)
+    return AIE4VAddFamily::I32x16;
+  if (elWidth == 32 && lanes == 32)
+    return AIE4VAddFamily::I32x32;
+  return failure();
+}
+
+// Bridge scalar i64 masks and the intrinsic's vector<2xi32> mask type.
+static Value bitcastIfNeeded(ConversionPatternRewriter &rewriter,
+                              Location loc, Value v, Type destTy) {
+  if (v.getType() == destTy)
+    return v;
+  return rewriter.create<LLVM::BitcastOp>(loc, destTy, v);
+}
+
+// Return both fields of the intrinsic result. Lt/Ge callers must leave the
+// vector field unused because those instructions produce only a mask.
+static std::pair<Value, Value>
+buildAIE4VCmp(ConversionPatternRewriter &rewriter, Location loc,
+              AIE4VAddFamily family, Value lhs, Value rhs,
+              xllvm::AIE4OperandSign sign, xllvm::AIE4VCmpOpSel opsel) {
+  // XLLVM requires the result struct type explicitly.
+  Type i32Ty = rewriter.getI32Type();
+  Type vec2xi32Ty = VectorType::get({2}, i32Ty);
+  Value res;
+  switch (family) {
+  case AIE4VAddFamily::I8x64:
+    res = rewriter.create<xllvm::VAdd8I512CmpAIE4IntrOp>(
+        loc, LLVM::LLVMStructType::getLiteral(rewriter.getContext(),
+                                               {lhs.getType(), vec2xi32Ty}),
+        lhs, rhs, sign, opsel);
+    break;
+  case AIE4VAddFamily::I16x32:
+    res = rewriter.create<xllvm::VAdd16I512CmpAIE4IntrOp>(
+        loc,
+        LLVM::LLVMStructType::getLiteral(rewriter.getContext(),
+                                          {lhs.getType(), i32Ty}),
+        lhs, rhs, sign, opsel);
+    break;
+  case AIE4VAddFamily::I16x64:
+    res = rewriter.create<xllvm::VAdd16I1024CmpAIE4IntrOp>(
+        loc, LLVM::LLVMStructType::getLiteral(rewriter.getContext(),
+                                               {lhs.getType(), vec2xi32Ty}),
+        lhs, rhs, sign, opsel);
+    break;
+  case AIE4VAddFamily::I32x16:
+    res = rewriter.create<xllvm::VAdd32I512CmpAIE4IntrOp>(
+        loc,
+        LLVM::LLVMStructType::getLiteral(rewriter.getContext(),
+                                          {lhs.getType(), i32Ty}),
+        lhs, rhs, sign, opsel);
+    break;
+  case AIE4VAddFamily::I32x32:
+    res = rewriter.create<xllvm::VAdd32I1024CmpAIE4IntrOp>(
+        loc,
+        LLVM::LLVMStructType::getLiteral(rewriter.getContext(),
+                                          {lhs.getType(), i32Ty}),
+        lhs, rhs, sign, opsel);
+    break;
+  }
+  auto structTy = cast<LLVM::LLVMStructType>(res.getType());
+  Value vecResult = rewriter.create<LLVM::ExtractValueOp>(
+      loc, structTy.getBody()[0], res, ArrayRef<int64_t>{0});
+  Value maskResult = rewriter.create<LLVM::ExtractValueOp>(
+      loc, structTy.getBody()[1], res, ArrayRef<int64_t>{1});
+  return {vecResult, maskResult};
+}
+
+// `sel` must have the intrinsic family's i32 or vector<2xi32> mask type.
+static Value buildAIE4VSel(ConversionPatternRewriter &rewriter, Location loc,
+                           AIE4VAddFamily family, Value lhs, Value rhs,
+                           Value sel) {
+  switch (family) {
+  case AIE4VAddFamily::I8x64:
+    return rewriter.create<xllvm::VAdd8I512SelAIE4IntrOp>(loc, lhs.getType(),
+                                                           lhs, rhs, sel);
+  case AIE4VAddFamily::I16x32:
+    return rewriter.create<xllvm::VAdd16I512SelAIE4IntrOp>(loc, lhs.getType(),
+                                                            lhs, rhs, sel);
+  case AIE4VAddFamily::I16x64:
+    return rewriter.create<xllvm::VAdd16I1024SelAIE4IntrOp>(
+        loc, lhs.getType(), lhs, rhs, sel);
+  case AIE4VAddFamily::I32x16:
+    return rewriter.create<xllvm::VAdd32I512SelAIE4IntrOp>(loc, lhs.getType(),
+                                                            lhs, rhs, sel);
+  case AIE4VAddFamily::I32x32:
+    return rewriter.create<xllvm::VAdd32I1024SelAIE4IntrOp>(
+        loc, lhs.getType(), lhs, rhs, sel);
+  }
+  llvm_unreachable("unhandled AIE4VAddFamily");
+}
+
+struct AIE4MinMaxOpConversion
+    : mlir::ConvertOpToLLVMPattern<aievec::AIE4MinMaxOp> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(aievec::AIE4MinMaxOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto family = classifyAIE4VAddShape(cast<VectorType>(op.getLhs().getType()));
+    if (failed(family))
+      return rewriter.notifyMatchFailure(op, "unsupported AIE4 vector shape");
+
+    auto sign = op.getIsSigned() ? xllvm::AIE4OperandSign::Signed
+                                  : xllvm::AIE4OperandSign::Unsigned;
+    auto opsel = op.getKind() == aievec::AIE4MinMaxKind::Min
+                     ? xllvm::AIE4VCmpOpSel::MinGe
+                     : xllvm::AIE4VCmpOpSel::MaxLt;
+
+    auto [vecResult, maskResult] =
+        buildAIE4VCmp(rewriter, op.getLoc(), *family, adaptor.getLhs(),
+                      adaptor.getRhs(), sign, opsel);
+    (void)maskResult;
+    rewriter.replaceOp(op, vecResult);
+    return success();
+  }
+};
+
+struct AIE4CmpOpConversion
+    : mlir::ConvertOpToLLVMPattern<aievec::AIE4CmpOp> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(aievec::AIE4CmpOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto family = classifyAIE4VAddShape(cast<VectorType>(op.getLhs().getType()));
+    if (failed(family))
+      return rewriter.notifyMatchFailure(op, "unsupported AIE4 vector shape");
+
+    auto sign = op.getIsSigned() ? xllvm::AIE4OperandSign::Signed
+                                  : xllvm::AIE4OperandSign::Unsigned;
+    auto opsel = op.getPredicate() == aievec::AIE4CmpPredicate::Lt
+                     ? xllvm::AIE4VCmpOpSel::Lt
+                     : xllvm::AIE4VCmpOpSel::Ge;
+
+    auto [vecResult, maskResult] =
+        buildAIE4VCmp(rewriter, op.getLoc(), *family, adaptor.getLhs(),
+                      adaptor.getRhs(), sign, opsel);
+    // Lt/Ge produce only the mask; leave the vector result unused.
+    (void)vecResult;
+
+    Type destTy = getTypeConverter()->convertType(op.getResult().getType());
+    rewriter.replaceOp(
+        op, bitcastIfNeeded(rewriter, op.getLoc(), maskResult, destTy));
+    return success();
+  }
+};
+
+struct AIE4SelOpConversion
+    : mlir::ConvertOpToLLVMPattern<aievec::AIE4SelOp> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(aievec::AIE4SelOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto family = classifyAIE4VAddShape(cast<VectorType>(op.getLhs().getType()));
+    if (failed(family))
+      return rewriter.notifyMatchFailure(op, "unsupported AIE4 vector shape");
+
+    // Convert the scalar mask to the intrinsic's carrier of the same width.
+    Value lhs = adaptor.getLhs();
+    Type xllvmSelTy =
+        (*family == AIE4VAddFamily::I8x64 || *family == AIE4VAddFamily::I16x64)
+            ? (Type)VectorType::get({2}, rewriter.getI32Type())
+            : (Type)rewriter.getI32Type();
+    Value sel =
+        bitcastIfNeeded(rewriter, op.getLoc(), adaptor.getSel(), xllvmSelTy);
+
+    Value result = buildAIE4VSel(rewriter, op.getLoc(), *family, lhs,
+                                 adaptor.getRhs(), sel);
+    rewriter.replaceOp(op, result);
+    return success();
+  }
+};
+
 void populateAIEVecToLLVMAIE4ConversionPatterns(
     mlir::LLVMTypeConverter &converter, mlir::RewritePatternSet &patterns) {
   patterns.add<AIE4MulEwiseF32OpConversion, AIE4MacEwiseI16I32OpConversion,
-               AIE4SRSI32I16OpConversion>(converter);
+               AIE4SRSI32I16OpConversion, AIE4MinMaxOpConversion,
+               AIE4CmpOpConversion, AIE4SelOpConversion>(converter);
 }
 
 } // namespace xilinx::aievec

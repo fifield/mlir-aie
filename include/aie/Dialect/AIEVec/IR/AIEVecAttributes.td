@@ -126,4 +126,31 @@ def AIEVec_ShuffleModeAttr : EnumAttr<AIEVec_Dialect, ShuffleMode, "mode"> {
   let assemblyFormat = "`[` $value `]`";
 }
 
+//===----------------------------------------------------------------------===//
+// AIE4 integer min/max/compare/select
+//===----------------------------------------------------------------------===//
+
+def AIE4_MinMaxKind_Min : I32EnumAttrCase<"Min", 0, "min">;
+def AIE4_MinMaxKind_Max : I32EnumAttrCase<"Max", 1, "max">;
+def AIE4MinMaxKind : I32EnumAttr<"AIE4MinMaxKind",
+    "AIE4 native min/max selector", [AIE4_MinMaxKind_Min, AIE4_MinMaxKind_Max]> {
+  let cppNamespace = "::xilinx::aievec";
+  let genSpecializedAttr = 0;
+}
+
+def AIEVec_AIE4MinMaxKindAttr :
+    EnumAttr<AIEVec_Dialect, AIE4MinMaxKind, "aie4_minmax_kind">;
+
+def AIE4_CmpPredicate_Lt : I32EnumAttrCase<"Lt", 0, "lt">;
+def AIE4_CmpPredicate_Ge : I32EnumAttrCase<"Ge", 1, "ge">;
+def AIE4CmpPredicate : I32EnumAttr<"AIE4CmpPredicate",
+    "AIE4 native less-than or greater-or-equal predicate",
+    [AIE4_CmpPredicate_Lt, AIE4_CmpPredicate_Ge]> {
+  let cppNamespace = "::xilinx::aievec";
+  let genSpecializedAttr = 0;
+}
+
+def AIEVec_AIE4CmpPredicateAttr :
+    EnumAttr<AIEVec_Dialect, AIE4CmpPredicate, "aie4_cmp_predicate">;
+
 #endif // AIE_DIALECT_AIEVEC_IR_AIEVECATTRIBUTES_TD

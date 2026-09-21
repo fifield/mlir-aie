@@ -105,6 +105,14 @@ llvm::CallInst *createAIE4ConfIntrinsicCall(
     mlir::LLVM::ModuleTranslation &moduleTranslation, mlir::Operation *intrOp,
     llvm::StringRef intrinsicName, llvm::ArrayRef<uint32_t> trailingArgs);
 
+/// Builds a lane-select call with operands (lhs, rhs, sign, 2, sel, 0).
+/// `intrOp` supplies (lhs, rhs, sel); the literals encode VSEL and fporder.
+llvm::CallInst *
+createAIE4SelIntrinsicCall(llvm::IRBuilderBase &builder,
+                           mlir::LLVM::ModuleTranslation &moduleTranslation,
+                           mlir::Operation *intrOp,
+                           llvm::StringRef intrinsicName, uint32_t sign);
+
 } // namespace xilinx::xllvm
 
 #endif // AIE_DIALECT_XLLVM_XLLVMDIALECT_H

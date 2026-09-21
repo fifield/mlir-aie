@@ -238,4 +238,116 @@ def I512V32Acc32SrsAIE4IntrOp :
   }];
 }
 
+//===----------------------------------------------------------------------===//
+// Integer min/max/compare/select ("vadd" opsel multiplexer)
+//===----------------------------------------------------------------------===//
+//
+// The vadd family selects integer min/max/compare behavior with `opsel`:
+//   {<VEC>, <MASK>} (<VEC> lhs, <VEC> rhs, i32 sign, i32 opsel, i32 fporder)
+// These wrappers expose min/max and ordered comparisons. Integer patterns
+// require fporder = 0. The 128-lane i8 form is unsupported because its mask
+// exceeds the 64-bit carriers used by the AIEVec operations.
+def AIE4_VCmpOpSel_MinGe : I32EnumAttrCase<"MinGe", 13, "min_ge">;
+def AIE4_VCmpOpSel_MaxLt : I32EnumAttrCase<"MaxLt", 14, "max_lt">;
+def AIE4_VCmpOpSel_Lt    : I32EnumAttrCase<"Lt",    15, "lt">;
+def AIE4_VCmpOpSel_Ge    : I32EnumAttrCase<"Ge",    17, "ge">;
+
+def AIE4_VCmpOpSel : I32EnumAttr<"AIE4VCmpOpSel",
+    "AIE4 vadd-family opsel value selecting min/max/compare (int forms only)",
+    [AIE4_VCmpOpSel_MinGe, AIE4_VCmpOpSel_MaxLt, AIE4_VCmpOpSel_Lt,
+     AIE4_VCmpOpSel_Ge]> {
+  let cppNamespace = "::xilinx::xllvm";
+}
+
+class AIE4VCmpIntrOp<string mnemonic, Type vecTy, Type maskTy> :
+    AIEVec4_IntrOp<mnemonic,
+        [TypeIs<"res", LLVM_StructOf<[vecTy, maskTy]>>], /*numResults=*/2>,
+    Arguments<(ins vecTy:$lhs, vecTy:$rhs,
+                   AIE4_OperandSign:$sign,
+                   AIE4_VCmpOpSel:$opsel)> {
+  let summary = "AIE4 vector min/max/compare (vmin_ge/vmax_lt/vlt/vge)";
+  let description = [{
+    The result struct contains a vector in field 0 and a packed per-lane
+    mask in field 1. Field 0 holds min/max results for `MinGe`/`MaxLt` and
+    must remain unused for `Lt`/`Ge`, which produce only a mask.
+
+    `sign` selects `vaddSign0` (unsigned) or `vaddSign1` (signed), relying on
+    their ABI values. The mask uses the native `vsel` selector type: `i32`
+    for up to 32 lanes, or `vector<2xi32>` for 64 lanes.
+
+    LLVM translation appends `sign`, `opsel`, and the required `fporder = 0`.
+  }];
+
+  let llvmBuilder = [{
+    auto *inst = ::xilinx::xllvm::createAIE4ConfIntrinsicCall(builder,
+                      moduleTranslation, &opInst,
+                      "llvm.aie4.}] # mnemonic # [{",
+                      ::llvm::ArrayRef<uint32_t>{
+                          (uint32_t) op.getSign(),
+                          (uint32_t) op.getOpsel(),
+                          0u});
+    (void) inst;
+    $res = inst;
+  }];
+}
+
+def VAdd8I512CmpAIE4IntrOp :
+    AIE4VCmpIntrOp<"vadd8.512",
+        FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>,
+        FixedVectorOfRankAndLengthAndType<[1], [2], [I32]>>;
+def VAdd16I512CmpAIE4IntrOp :
+    AIE4VCmpIntrOp<"vadd16.512",
+        FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>, I32>;
+def VAdd16I1024CmpAIE4IntrOp :
+    AIE4VCmpIntrOp<"vadd16.1024",
+        FixedVectorOfRankAndLengthAndType<[1], [64], [I16]>,
+        FixedVectorOfRankAndLengthAndType<[1], [2], [I32]>>;
+def VAdd32I512CmpAIE4IntrOp :
+    AIE4VCmpIntrOp<"vadd32.512",
+        FixedVectorOfRankAndLengthAndType<[1], [16], [I32]>, I32>;
+def VAdd32I1024CmpAIE4IntrOp :
+    AIE4VCmpIntrOp<"vadd32.1024",
+        FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>, I32>;
+
+// Select signature:
+//   <VEC> (<VEC> lhs, <VEC> rhs, i32 sign, i32 opsel, <MASK> sel, i32 fporder)
+// Translation inserts the required literals sign = 0, opsel = 2, fporder = 0.
+// The mask appears between opsel and fporder, so it needs a dedicated builder.
+class AIE4VSelIntrOp<string mnemonic, Type vecTy, Type maskTy> :
+    AIEVec4_IntrOp<mnemonic, [TypeIs<"res", vecTy>]>,
+    Arguments<(ins vecTy:$lhs, vecTy:$rhs, maskTy:$sel)> {
+  let summary = "AIE4 vector lane select (vsel)";
+  let description = [{
+    Selects lane i of `lhs` when mask bit i is clear, or lane i of `rhs`
+    when it is set.
+  }];
+
+  let llvmBuilder = [{
+    auto *inst = ::xilinx::xllvm::createAIE4SelIntrinsicCall(builder,
+                      moduleTranslation, &opInst,
+                      "llvm.aie4.}] # mnemonic # [{",
+                      /*sign=*/0u);
+    (void) inst;
+    $res = inst;
+  }];
+}
+
+def VAdd8I512SelAIE4IntrOp :
+    AIE4VSelIntrOp<"vadd8.mask.512",
+        FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>,
+        FixedVectorOfRankAndLengthAndType<[1], [2], [I32]>>;
+def VAdd16I512SelAIE4IntrOp :
+    AIE4VSelIntrOp<"vadd16.mask.512",
+        FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>, I32>;
+def VAdd16I1024SelAIE4IntrOp :
+    AIE4VSelIntrOp<"vadd16.mask.1024",
+        FixedVectorOfRankAndLengthAndType<[1], [64], [I16]>,
+        FixedVectorOfRankAndLengthAndType<[1], [2], [I32]>>;
+def VAdd32I512SelAIE4IntrOp :
+    AIE4VSelIntrOp<"vadd32.mask.512",
+        FixedVectorOfRankAndLengthAndType<[1], [16], [I32]>, I32>;
+def VAdd32I1024SelAIE4IntrOp :
+    AIE4VSelIntrOp<"vadd32.mask.1024",
+        FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>, I32>;
+
 #endif // AIE_DIALECT_XLLVM_IR_XLLVMAIE4INTROPS_TD

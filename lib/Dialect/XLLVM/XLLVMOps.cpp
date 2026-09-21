@@ -108,6 +108,36 @@ createAIE4ConfIntrinsicCall(llvm::IRBuilderBase &builder,
   return builder.CreateCall(llvmIntr, operands);
 }
 
+llvm::CallInst *
+createAIE4SelIntrinsicCall(llvm::IRBuilderBase &builder,
+                           LLVM::ModuleTranslation &moduleTranslation,
+                           Operation *intrOp, llvm::StringRef intrinsicName,
+                           uint32_t sign) {
+  assert(intrOp->getNumOperands() == 3 &&
+         "AIE4 select intrinsic takes exactly (lhs, rhs, sel)");
+  assert(intrOp->getNumResults() == 1 &&
+         "AIE4 select intrinsic has exactly one result");
+  llvm::Type *resTy =
+      moduleTranslation.convertType(*(intrOp->getResultTypes().begin()));
+
+  auto operandVals = moduleTranslation.lookupValues(intrOp->getOperands());
+  // The mask precedes fporder in the intrinsic signature.
+  SmallVector<llvm::Value *> operands = {
+      operandVals[0],           operandVals[1],
+      builder.getInt32(sign),   builder.getInt32(2), // opsel = VSEL
+      operandVals[2],           builder.getInt32(0)  // fporder = 0
+  };
+
+  SmallVector<llvm::Type *> types;
+  for (auto *operand : operands)
+    types.push_back(operand->getType());
+
+  llvm::Module *module = builder.GetInsertBlock()->getModule();
+  llvm::Function *llvmIntr =
+      getNamedIntrinsicDeclaration(module, intrinsicName, resTy, types);
+  return builder.CreateCall(llvmIntr, operands);
+}
+
 } // namespace xilinx::xllvm
 
 #include "aie/Dialect/XLLVM/IR/XLLVMEnums.cpp.inc"

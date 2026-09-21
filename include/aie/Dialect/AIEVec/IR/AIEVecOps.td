@@ -156,6 +156,121 @@ def AIEVec_AIE4SRSI32I16Op:
   let hasVerifier = 0;
 }
 
+//===----------------------------------------------------------------------===//
+// AIE4 integer min/max/compare/select
+//===----------------------------------------------------------------------===//
+//
+// Integer min/max and compare use the ABI convention that vaddSign0 selects
+// unsigned comparison and vaddSign1 selects signed comparison. These ops model
+// fixed signedness and rely on those control bits retaining their ABI values.
+// The supported shapes use at most 64 mask bits; vector<128xi8> is unsupported.
+def AIEVec_AIE4MinMaxOp:
+  AIEVec_Op<"aie4.minmax", [
+    Pure,
+    AllTypesMatch<["lhs", "rhs", "result"]>
+  ]>,
+  Arguments<(ins AnyTypeOf<[
+                   FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [64], [I16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [16], [I32]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>]>:$lhs,
+                 AnyTypeOf<[
+                   FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [64], [I16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [16], [I32]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>]>:$rhs,
+                 AIEVec_AIE4MinMaxKindAttr:$kind,
+                 DefaultValuedAttr<BoolAttr, "true">:$isSigned)>,
+  Results<(outs AnyTypeOf<[
+                   FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [64], [I16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [16], [I32]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>]>:$result)> {
+  let summary = "AIE4 native signed/unsigned vector min/max";
+  let description = [{
+    Computes per-lane minimum or maximum, selected by `$kind`, with signed
+    or unsigned comparison selected by `$isSigned`. Lowers to `vmin_ge` or
+    `vmax_lt`.
+  }];
+  let assemblyFormat =
+      "$lhs `,` $rhs `` `[` `kind` `=` $kind `,` `signed` `=` $isSigned `]` attr-dict `:` type($result)";
+  let hasVerifier = 0;
+}
+
+def AIEVec_AIE4CmpOp:
+  AIEVec_Op<"aie4.cmp", [
+    Pure,
+    AllTypesMatch<["lhs", "rhs"]>
+  ]>,
+  Arguments<(ins AnyTypeOf<[
+                   FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [64], [I16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [16], [I32]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>]>:$lhs,
+                 AnyTypeOf<[
+                   FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [64], [I16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [16], [I32]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>]>:$rhs,
+                 AIEVec_AIE4CmpPredicateAttr:$predicate,
+                 DefaultValuedAttr<BoolAttr, "true">:$isSigned)>,
+  Results<(outs AnyUnsignedInteger:$result)> {
+  let summary = "AIE4 native vector compare, mask result";
+  let description = [{
+    Compares each lane using `lhs < rhs` (`lt`) or `lhs >= rhs` (`ge`),
+    with signedness selected by `$isSigned`. Greater-than and less-or-equal
+    comparisons use swapped operands. Equality predicates use generic lowering.
+
+    Result bit i contains the comparison for lane i. The mask type is `ui64`
+    for `vector<64xi8>` and `vector<64xi16>`, and `ui32` for `vector<32xi16>`,
+    `vector<16xi32>`, and `vector<32xi32>`. For `vector<16xi32>`, only the low
+    16 mask bits correspond to lanes. LLVM lowering represents 64-bit masks
+    as `vector<2xi32>` register pairs.
+  }];
+  let assemblyFormat =
+      "$lhs `,` $rhs `` `[` `pred` `=` $predicate `,` `signed` `=` $isSigned `]` attr-dict `:` type($lhs) `,` type($result)";
+  let hasVerifier = 1;
+}
+
+def AIEVec_AIE4SelOp:
+  AIEVec_Op<"aie4.sel", [
+    Pure,
+    AllTypesMatch<["lhs", "rhs", "result"]>
+  ]>,
+  Arguments<(ins AnyTypeOf<[
+                   FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [64], [I16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [16], [I32]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>]>:$lhs,
+                 AnyTypeOf<[
+                   FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [64], [I16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [16], [I32]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>]>:$rhs,
+                 AnyUnsignedInteger:$sel)>,
+  Results<(outs AnyTypeOf<[
+                   FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [64], [I16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [16], [I32]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>]>:$result)> {
+  let summary = "AIE4 native lane-wise select with a packed mask";
+  let description = [{
+    Selects `$rhs[i]` when bit i of `$sel` is set, and `$lhs[i]` otherwise.
+    The mask type follows the same vector-shape rules as `aievec.aie4.cmp`;
+    bits above the lane count are ignored. Lowers to `vsel`.
+  }];
+  let assemblyFormat =
+      "$lhs `,` $rhs `,` $sel attr-dict `:` type($lhs) `,` type($sel) `,` type($result)";
+  let hasVerifier = 1;
+}
 
 def AIEVec_SubElemOp:
   AIEVec_Op<"sub_elem", [
