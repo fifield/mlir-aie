@@ -10,7 +10,7 @@
 
 // RUN: aie-opt --split-input-file %s | FileCheck %s
 
-// AIE4 ArchSpec v1.5 section 7.4.4.11 enumerates the shim's channels as
+// the architecture specification enumerates the shim's channels as
 // MM2S0-3, S2MM0-1, Control MM2S0-1 and Trace S2MM: the control and trace
 // channels are separate hardware from the data ports and consume no
 // WireBundle::DMA connection. They must therefore not be counted against the

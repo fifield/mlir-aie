@@ -319,9 +319,11 @@ struct AIEVecTransformationPass
       populateAIEVecV2TransformationPatterns(patterns);
       configureAIEVecV2TransformationLegalizations(target);
     } else {
-      op->emitError() << "Vector optimization is not enabled for target "
-                      << aieTarget;
-      signalPassFailure();
+      // AIE4. There are no AIEVec peephole/transformation patterns for AIE4
+      // yet, and nothing to legalize away: its only lowering
+      // (aievec.aie4.mul_ewise_f32) is already in final form when it reaches
+      // this pass. Run as a no-op rather than erroring, so that AIE4 modules
+      // can traverse the standard convert-vector-to-aievec pipeline.
       return;
     }
     if (targetInfo.isAIE2P()) {

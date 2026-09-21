@@ -1414,17 +1414,20 @@ inline std::unique_ptr<mlir::PassManager> getInputWithAddressesPipeline(
     mlir::MLIRContext *ctx, mlir::ModuleOp mod, bool dynamicObjFifos,
     bool packetSwObjFifos, bool ctrlPktOverlay, bool bf16Emulation,
     unsigned optLevel, bool loadPdiToCtrlPkt = false,
-    bool skipObjectFifoVerify = false, bool assignAddresses = true,
+    bool skipObjectFifoVerify = false, bool enableAie4Vectorization = false,
+    bool assignAddresses = true,
     llvm::ArrayRef<int> coverColumns = {}, bool adaptiveOverlay = true,
     bool checkQueueSpace = true) {
   using namespace xilinx::AIE;
   namespace X = xilinx::AIEX;
   auto pm = std::make_unique<mlir::PassManager>(ctx);
   std::string target = detectAIETarget(mod);
-  if (target == "aie2" || target == "aieml" || target == "aie2p") {
+  bool aie2Family = target == "aie2" || target == "aieml" || target == "aie2p";
+  // AIE4 is gated behind a development opt-in, so it must not run by default.
+  if (aie2Family || (enableAie4Vectorization && target == "aie4")) {
     // Operates on scf.for loops inside aie.core, so it must run before
     // SCF-to-CF lowering.
-    if (optLevel >= 3) {
+    if (aie2Family && optLevel >= 3) {
       pm->addPass(createAIEHoistVectorTransferPointersPass());
     }
     if (mlir::failed(mlir::parsePassPipeline(

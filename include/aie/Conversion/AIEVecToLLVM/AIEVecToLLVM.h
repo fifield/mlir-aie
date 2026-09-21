@@ -38,6 +38,9 @@ void populateAIEVecToLLVMAIE2ConversionPatterns(
 void populateAIEVecToLLVMAIE2pConversionPatterns(
     mlir::LLVMTypeConverter &converter, mlir::RewritePatternSet &patterns);
 
+void populateAIEVecToLLVMAIE4ConversionPatterns(
+    mlir::LLVMTypeConverter &converter, mlir::RewritePatternSet &patterns);
+
 std::unique_ptr<mlir::OperationPass<mlir::ModuleOp>>
 createConvertAIEVecToLLVMPass();
 } // namespace aievec

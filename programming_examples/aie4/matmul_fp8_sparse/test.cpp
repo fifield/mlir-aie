@@ -12,7 +12,7 @@
 // C[4x64] += A[4x128] * B_sparse[128x64], fp8 (E4M3) inputs, fp32 output,
 // 4:2 structured sparsity.
 //
-// Operand convention (AIE4 ISA Spec v1.1, sections 2.7.2.5 and 14.1.5):
+// Operand convention (according to the AIE4 ISA):
 //   * A is DENSE: 128 logical K values per row (the activation operand is a
 //     v128), so A is 4 x 128 fp8 = 512 bytes.
 //   * load_staging() consumes exactly 32 x v128 = 4096 bytes of B, i.e. a
@@ -65,7 +65,7 @@ constexpr unsigned A_BYTES = M * K;              // 512
 constexpr unsigned MASK_WORDS = 192;             // 6 Kbit
 constexpr unsigned MASK_BYTES = MASK_WORDS * 4;  // 768
 
-// The six 4:2 quartet selections and their 3-bit encodings (ISA 14.1.5).
+// The six 4:2 quartet selections and their 3-bit encodings (ISA).
 // Anything outside 001..101 decodes to x[0],x[1].
 struct Selection {
   uint8_t code;

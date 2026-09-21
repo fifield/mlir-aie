@@ -229,10 +229,10 @@ public:
     // indexes a 16-entry bank, so masking *is* the bank-local conversion that
     // getDmaBdAddress performs explicitly for the BD register block --
     // 18 & 0xF == 18 - 16. Widening it to the 6-bit Start BD ID of the generic
-    // task format (ArchSpec v1.5 Table 3-25) would break that; see
+    // task format defined by the architecture specification would break that; see
     // test/Conversion/DmaToNpu/dma_to_npu_aie4_shim_upper_pool_bdid.mlir.
     // The repeat field width is generation-specific -- 8 bits [23:16] on AIE2,
-    // widened to 12 bits [27:16] on AIE4 (ArchSpec v1.5 Table 3-25) -- so take
+    // widened to 12 bits [27:16] on AIE4 -- so take
     // the mask from the target model, which is also what the op verifier
     // range-checks against. The two cannot drift apart that way.
     // bd_id and repeat_count may be runtime SSA; all-constant folds to one

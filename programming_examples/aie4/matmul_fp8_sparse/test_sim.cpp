@@ -12,7 +12,7 @@
 // memory.  C[4x64] += A[4x128] * B_sparse[128x64], 4:2 structured sparsity.
 //
 // The operand layout and the sparsity-register encoding are described in
-// README.md (AIE4 ISA Spec v1.1 sections 2.7.2.5 and 14.1.5); the XRT
+// README.md (according to the AIE4 ISA); the XRT
 // hardware host (test.cpp) uses the same data.
 //
 //===----------------------------------------------------------------------===//
@@ -42,7 +42,7 @@ constexpr unsigned A_BYTES = M * K;          // 512
 constexpr unsigned MASK_WORDS = 192;         // 6 Kbit
 constexpr unsigned B_BYTES = K_STORED * N;   // 4096
 
-// The six 4:2 quartet selections and their 3-bit encodings (ISA 14.1.5).
+// The six 4:2 quartet selections and their 3-bit encodings (ISA).
 struct Selection {
   uint8_t code;
   uint8_t pos[2];

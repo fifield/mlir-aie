@@ -6,7 +6,7 @@ Elementwise addition of two fp16 (IEEE half-precision) vectors producing fp16 ou
 
 ## ISA Reference
 
-ISA Spec Section 13.9: "VADD.f — Floating-point vector addition / subtraction"
+The ISA defines VADD.f for floating-point vector addition and subtraction.
 
 Uses the VMAC datapath in floating-point add mode. fp16 is selected via the
 X/Y buffer f16 type configuration bits (r[5], r[6] = 0 for fp16).

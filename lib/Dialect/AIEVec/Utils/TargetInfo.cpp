@@ -66,11 +66,11 @@ StringRef getCanonicalAIEVecTargetName(AIEVecTargetInfo info) {
 }
 
 bool isVectorLoweringEnabled(AIEVecTargetInfo info) {
-  return !(info.isAIE4() || info.isAIE2PS());
+  return !info.isAIE2PS();
 }
 
 bool isAIEVecToLLVMLoweringEnabled(AIEVecTargetInfo info) {
-  return !(info.isAIE4() || info.isAIE2PS());
+  return !info.isAIE2PS();
 }
 
 bool isConvolutionFoldingEnabled(AIEVecTargetInfo info) {

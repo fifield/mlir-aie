@@ -5,34 +5,28 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// aie4 and aie4b both resolve to aie4b
 //
 //===----------------------------------------------------------------------===//
 
-// RUN: not aie-opt %s --canonicalize-vector-for-aievec="aie-target=aie4" 2>%t.aie4-canon.err
-// RUN: not aie-opt %s --canonicalize-vector-for-aievec="aie-target=aie4b" 2>%t.aie4b-canon.err
-// RUN: sed -E 's/target aie4b?/target AIE4/' %t.aie4-canon.err > %t.aie4-canon-normalized.err
-// RUN: sed -E 's/target aie4b?/target AIE4/' %t.aie4b-canon.err > %t.aie4b-canon-normalized.err
-// RUN: diff %t.aie4-canon-normalized.err %t.aie4b-canon-normalized.err
+// RUN: aie-opt %s --canonicalize-vector-for-aievec="aie-target=aie4" > %t.aie4-canon.out
+// RUN: aie-opt %s --canonicalize-vector-for-aievec="aie-target=aie4b" > %t.aie4b-canon.out
+// RUN: diff %t.aie4-canon.out %t.aie4b-canon.out
 
-// RUN: not aie-opt %s --lower-vector-to-aievec="aie-target=aie4" 2>%t.aie4-lower.err
-// RUN: not aie-opt %s --lower-vector-to-aievec="aie-target=aie4b" 2>%t.aie4b-lower.err
-// RUN: sed -E 's/target aie4b?/target AIE4/' %t.aie4-lower.err > %t.aie4-lower-normalized.err
-// RUN: sed -E 's/target aie4b?/target AIE4/' %t.aie4b-lower.err > %t.aie4b-lower-normalized.err
-// RUN: diff %t.aie4-lower-normalized.err %t.aie4b-lower-normalized.err
+// RUN: aie-opt %s --lower-vector-to-aievec="aie-target=aie4" > %t.aie4-lower.out
+// RUN: aie-opt %s --lower-vector-to-aievec="aie-target=aie4b" > %t.aie4b-lower.out
+// RUN: diff %t.aie4-lower.out %t.aie4b-lower.out
 
-// RUN: not aie-opt %s --optimize-aievec="aie-target=aie4" 2>%t.aie4-opt.err
-// RUN: not aie-opt %s --optimize-aievec="aie-target=aie4b" 2>%t.aie4b-opt.err
-// RUN: sed -E 's/target aie4b?/target AIE4/' %t.aie4-opt.err > %t.aie4-opt-normalized.err
-// RUN: sed -E 's/target aie4b?/target AIE4/' %t.aie4b-opt.err > %t.aie4b-opt-normalized.err
-// RUN: diff %t.aie4-opt-normalized.err %t.aie4b-opt-normalized.err
+// RUN: aie-opt %s --optimize-aievec="aie-target=aie4" > %t.aie4-opt.out
+// RUN: aie-opt %s --optimize-aievec="aie-target=aie4b" > %t.aie4b-opt.out
+// RUN: diff %t.aie4-opt.out %t.aie4b-opt.out
 
-// RUN: not aie-opt %s --convert-vector-to-aievec="aie-target=aie4" 2>%t.aie4-conv.err
-// RUN: not aie-opt %s --convert-vector-to-aievec="aie-target=aie4b" 2>%t.aie4b-conv.err
-// RUN: sed -E 's/target aie4b?/target AIE4/' %t.aie4-conv.err > %t.aie4-conv-normalized.err
-// RUN: sed -E 's/target aie4b?/target AIE4/' %t.aie4b-conv.err > %t.aie4b-conv-normalized.err
-// RUN: diff %t.aie4-conv-normalized.err %t.aie4b-conv-normalized.err
+// RUN: aie-opt %s --convert-vector-to-aievec="aie-target=aie4" > %t.aie4-conv.out
+// RUN: aie-opt %s --convert-vector-to-aievec="aie-target=aie4b" > %t.aie4b-conv.out
+// RUN: diff %t.aie4-conv.out %t.aie4b-conv.out
 
-func.func @f() {
-  return
+// A vector<32xf32> multiply, so the two spellings are compared on a body that
+// actually exercises the AIE4 lowering rather than on an empty function.
+func.func @f(%a : vector<32xf32>, %b : vector<32xf32>) -> vector<32xf32> {
+  %0 = arith.mulf %a, %b : vector<32xf32>
+  return %0 : vector<32xf32>
 }

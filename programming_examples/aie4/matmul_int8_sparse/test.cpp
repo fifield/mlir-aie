@@ -11,7 +11,7 @@
 // Runs matmul_int8_sparse on npu3 hardware through XRT.
 // C[4x64] += A[4x128] * B_sparse[128x64] at 4:2 structured sparsity.
 //
-// Operand convention (AIE4 ISA Spec v1.1, sections 2.7.2.5 and 14.1.5):
+// Operand convention (according to the AIE4 ISA):
 //   * A is DENSE: 128 logical K values per row.
 //   * B is STORED compressed: 64 slots x 64 columns, column-major, 64 bytes
 //     per output column.  Column n's logical K quartet q keeps exactly two of
@@ -57,7 +57,7 @@ constexpr size_t AM_BYTES = A_BYTES + MASK_BYTES;    // 1280
 constexpr size_t B_BYTES = K_KEPT * N;               // 4096
 constexpr size_t C_BYTES = M * N * sizeof(int32_t);  // 1024
 
-// The six 4:2 quartet selections and their 3-bit encodings (ISA 14.1.5).
+// The six 4:2 quartet selections and their 3-bit encodings (ISA).
 // Anything outside 001..101 decodes to x[0],x[1].
 struct Selection {
   uint8_t code;

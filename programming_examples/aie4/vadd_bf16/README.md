@@ -6,7 +6,7 @@ Elementwise addition of two bf16 (bfloat16) vectors producing bf16 output.
 
 ## ISA Reference
 
-ISA Spec Section 13.9: "VADD.f — Floating-point vector addition / subtraction"
+The ISA defines VADD.f for floating-point vector addition and subtraction.
 
 Uses the VMAC datapath in floating-point add mode. bf16 is selected via the
 X/Y buffer f16 type configuration bits (r[5], r[6] = 1 for bf16).

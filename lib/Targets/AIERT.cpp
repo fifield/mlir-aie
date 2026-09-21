@@ -631,7 +631,8 @@ configureBdInBlock(const AIE::AIETargetModel &targetModel,
     if (bdOp.getConstantLen() == 0)
       return bdOp.emitOpError(
           "For MM2S channels, if Buffer_Length=0 then Enable_Packet must be "
-          "set to 0, otherwise behavior is undefined (3.7.8 arch spec)");
+          "set to 0, otherwise behavior is undefined (according to the "
+          "architecture specification)");
     TRY_XAIE_API_EMIT_ERROR(bdOp, XAie_DmaSetPkt, &dmaTileBd,
                             XAie_PacketInit(*packetID, *packetType));
   }

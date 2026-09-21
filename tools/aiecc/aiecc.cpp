@@ -1063,11 +1063,12 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
        bf16 = bf16Emulation.getValue(),
        skipVerify = skipObjectFifoVerify.getValue(), opt = optLevel.getValue(),
        queueSpace = checkQueueSpace.getValue(),
+       aie4vec = enableAie4Vectorization.getValue(),
        adaptiveOverlay = ctrlpktAdaptiveOverlay.getValue()](
           mlir::MLIRContext *ctx, mlir::ModuleOp mod,
           llvm::ArrayRef<int> coverColumns) {
         return getInputWithAddressesPipeline(
-            ctx, mod, dyn, pkt, ctrl, bf16, opt, ldpdi, skipVerify,
+            ctx, mod, dyn, pkt, ctrl, bf16, opt, ldpdi, skipVerify, aie4vec,
             /*assignAddresses=*/false, coverColumns, adaptiveOverlay,
             queueSpace);
       };

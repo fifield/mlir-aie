@@ -20,7 +20,7 @@
 //     subtraction: 18 & 0xF == 18 - 16 == 2.
 //
 // That second one reads like a truncation bug and is not: widening the mask
-// (e.g. to the 6-bit Start BD ID of AIE4 ArchSpec v1.5 Table 3-25's generic
+// (e.g. to the 6-bit Start BD ID of the architecture specification's generic
 // task format) would write the global id 18 into a field that means index 18
 // of a 16-entry bank. This test fails if either consumer stops agreeing on
 // the bank-local index.

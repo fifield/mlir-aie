@@ -69,7 +69,7 @@ int main(int argc, char *argv[]) {
   mlir_aie_sim_write32(locks_event_selection_A_1, 0x00010000);
 
   // Second set the perf counter start and stop
-  // http://cervino-doc/aie4/r0p41.1/tile_links/xregdb_aie4_shim_tile_doc.html#pl_module___Performance_Start_Stop_0_1
+  // Configure Performance_Start_Stop_0_1 as defined by the architecture.
 
   uint32_t stop_start_stop_start = 0x00000000;
   uint32_t start = 128; // LockSel0_acq_eq, we will use lock 0

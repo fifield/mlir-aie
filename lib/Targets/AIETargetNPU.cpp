@@ -734,13 +734,13 @@ LogicalResult xilinx::AIE::AIETranslateControlPacketsToUI32Vec(
                << "AIE4 control packet address 0x" << llvm::utohexstr(addr)
                << " is not 4-byte aligned";
       addr >>= 2;
-      // Bits 20-0 of the control word hold the tile-local word address (AIE4
-      // ArchSpec v1.5 Table 3-28), i.e. 8MiB of byte address space. A wider
+      // Bits 20-0 of the AIE4 control word hold the tile-local word address,
+      // i.e. 8MiB of byte address space. A wider
       // address would overflow into the beats and opcode fields.
       //
       // This is the encodability bound, deliberately looser than the address
       // space a tile actually owns (PoR: 1MiB for core/shim tiles, 5MiB for MEM
-      // tiles, ArchSpec v1.5 section 3.5.6). Addresses within the field but
+      // tiles, according to the architecture specification). Addresses within the field but
       // outside the tile's allocation are a runtime SLVERR, not an encoding
       // error, so they are not rejected here.
       if (addr > 0x1fffff)

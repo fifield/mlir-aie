@@ -5560,6 +5560,13 @@ void populateAIEVecToLLVMConversionPatterns(
     mlir::LLVMTypeConverter &converter, mlir::RewritePatternSet &patterns,
     Aie2Fp32Emulation aie2Fp32EmulationOption, AIEVecTargetInfo aieTarget) {
   assert(isAIEVecToLLVMLoweringEnabled(aieTarget) && "no AIEVec lowering for target");
+  // AIE4 shares no intrinsics with the AIE1/AIE2/AIE2p surface, so it takes
+  // its own arm rather than joining the binary AIE2/AIE2p split below. It
+  // also skips the common patterns, which are AIE1/AIE2-specific.
+  if (aieTarget.isAIE4()) {
+    populateAIEVecToLLVMAIE4ConversionPatterns(converter, patterns);
+    return;
+  }
   populateAIEVecToLLVMCommonConversionPatterns(converter, patterns);
   // AIE1 and AIE2 both use the AIE2 patterns. The common patterns cover the
   // aievec_aie1 ops.

@@ -1122,7 +1122,7 @@ LogicalResult AIEX::NpuWriteBdOp::verify() {
   // encoded range for a B-bit field is [0, 2^B - 1]. The widths are per tile
   // class and per generation, so take them from the target model rather than
   // a flat per-arch constant: an AIE2 core tile has an 8-bit wrap where the
-  // mem tile has 10, and AIE4 widens both (ArchSpec v1.5).
+  // mem tile has 10, and AIE4 widens both according to the architecture specification.
   AIE::AIETileType tileType = targetModel.getTileType(getColumn(), getRow());
   uint32_t wrapBits = targetModel.getDmaBdWrapBits(tileType);
   uint32_t stepBits = targetModel.getDmaBdStepBits(tileType);

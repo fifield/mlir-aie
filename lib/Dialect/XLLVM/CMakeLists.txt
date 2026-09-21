@@ -11,6 +11,7 @@ add_mlir_dialect_library(MLIRXLLVMDialect
 
   DEPENDS
   MLIRXLLVMOpsIncGen
+  MLIRXLLVMEnumsIncGen
 
   LINK_LIBS PUBLIC
   MLIRIR

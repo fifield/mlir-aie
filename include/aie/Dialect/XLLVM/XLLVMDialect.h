@@ -36,6 +36,10 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
 
+// AIE4 config-word enums must precede the op classes: the generated op
+// accessors return these enum types by value.
+#include "aie/Dialect/XLLVM/IR/XLLVMEnums.h.inc"
+
 #define GET_OP_CLASSES
 #include "aie/Dialect/XLLVM/IR/XLLVMOps.h.inc"
 
@@ -65,6 +69,27 @@ llvm::CallInst *createExternalLLVMIntrinsicCall(
     llvm::IRBuilderBase &builder,
     mlir::LLVM::ModuleTranslation &moduleTranslation, mlir::Operation *intrOp,
     llvm::StringRef intrinsicName);
+
+/// Pack an AIE4 vector-multiplier configuration word from its typed fields.
+///
+/// Layout defined by the ISA, restricted to the fields AIE4 elementwise
+/// multiply uses:
+///   bit    0   zero_acc
+///   bits 2:1   amode
+///   bits 4:3   bmode
+///
+/// e.g. zeroAcc=true, amode=Float(1), bmode=Mode32x32(3) -> 0b11011 == 27.
+uint32_t encodeAIE4MulConf(bool zeroAcc, AIE4AMode amode, AIE4BMode bmode);
+
+/// Like `createExternalLLVMIntrinsicCall`, but appends `conf` as a trailing
+/// i32 argument. AIE4 config words live in MLIR *attributes* (so their fields
+/// can be range-verified) rather than in operands, so they are not picked up
+/// by the operand-forwarding path.
+llvm::CallInst *
+createAIE4ConfIntrinsicCall(llvm::IRBuilderBase &builder,
+                            mlir::LLVM::ModuleTranslation &moduleTranslation,
+                            mlir::Operation *intrOp,
+                            llvm::StringRef intrinsicName, uint32_t conf);
 
 } // namespace xilinx::xllvm
 

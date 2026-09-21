@@ -10,7 +10,7 @@
 # C[4x64] += A[4x128] * B_sparse[128x64] at 4:2 structured sparsity.
 #
 # See README.md for the operand layout and the sparsity-register encoding
-# (AIE4 ISA Spec v1.1 sections 2.7.2.5 and 14.1.5).
+# (according to the AIE4 ISA).
 #
 # The kernel needs three inputs (A, B and the sparsity mask) but an AIE4
 # compute tile has only two input DMA channels, so A and the mask are

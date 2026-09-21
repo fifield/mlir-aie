@@ -11,7 +11,7 @@
 // RUN: aie-opt --split-input-file --verify-diagnostics %s
 
 // The payload word count is encoded as (words - 1) in a 4-bit field of the
-// AIE4 control word (ArchSpec v1.5 Table 3-28), so counts outside [1, 16] must
+// AIE4 control word (the architecture specification), so counts outside [1, 16] must
 // be rejected rather than masked into a different length.
 
 aie.device(npu3) {
@@ -57,7 +57,7 @@ aie.device(npu3) {
 
 // -----
 
-// Opcode "11" is reserved (ArchSpec v1.5 Table 3-29).
+// Opcode "11" is reserved (the architecture specification).
 
 aie.device(npu3) {
   aie.runtime_sequence() {

@@ -24,7 +24,7 @@
 //   mask[192]    = 768 bytes int32 (6-Kbit sparsity register image)
 //   C[4 * 64]    = 1024 bytes int32
 //
-// Sparsity structure (AIE4 ISA Spec v1.1 sections 2.7.2.5 and 14.1.5):
+// Sparsity structure (according to the AIE4 ISA):
 // each of the 64 matrix columns is divided into 32 quartets of 4 logical K
 // positions, of which exactly 2 are stored.  A per-column, per-quartet 3-bit
 // code selects which two, INDEPENDENTLY FOR EVERY COLUMN:

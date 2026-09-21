@@ -1,0 +1,25 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// AIE4 native vector-compute gate: `arith.mulf` on vector<32xf32> flowing
+// Vector -> AIEVec -> XLLVM -> LLVM -> Peano -> NPU3 hardware.
+//
+// The compute is MLIR-native (see vector_vector_mul_f32.py); no externally
+// compiled kernel object supplies the multiply. `--enable-aie4-vectorization`
+// is the development opt-in that routes AIE4 modules into the Vector->AIEVec
+// passes at all -- without it the multiply would not be vectorized.
+//
+// REQUIRES: ryzen_ai_npu3, peano
+//
+// RUN: %run_on_npu3% python %S/vector_vector_mul_f32.py -o vector_vector_mul_f32.mlir
+// RUN: %aiecc --enable-aie4-vectorization --get-full-elf --full-elf-name=vector_vector_mul_f32.elf vector_vector_mul_f32.mlir
+//
+// The gate: the object must contain a real `vmul.f`. llc happily accepts a
+// non-existent llvm.aie4.* name as an undefined external and emits `jl #0x0`
+// plus an R_AIE_23 relocation while still exiting 0, so a zero exit status
+// proves nothing -- only the mnemonic does.
+// RUN: llvm-objdump -dr vector_vector_mul_f32.mlir.prj/elfs_main_core_0_2/elfs_main_core_0_2.elf | FileCheck %s --check-prefix=VMUL
+// VMUL: vmul.f
+//
+// RUN: clang %S/test.cpp -o test.exe -std=c++17 -Wall %xrt_flags -lrt -lstdc++ %test_utils_flags
+// RUN: %run_on_npu3% ./test.exe

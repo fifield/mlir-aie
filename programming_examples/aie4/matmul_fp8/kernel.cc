@@ -11,7 +11,7 @@
 // Matrix multiply C[Mx64] += A[MxK] * B[Kx64] with fp8 (E4M3) inputs,
 // fp32 output. M=4 rows, K=256 (4 outer iterations of 64), N=64 columns.
 // Uses AIE4 MMAC unit: 64x64 fp8 matrix register, 4096 mults/cycle.
-// ISA: MMAC.f fp8*fp8 (14.5).
+// ISA: MMAC.f fp8*fp8.
 // Staging: load_staging(v128float8*) + staging_to_matrix_m64x64float8().
 // A input: v128float8 (2 rows of 64 fp8), extract_v64float8 per row.
 //

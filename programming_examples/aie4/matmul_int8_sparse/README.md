@@ -18,13 +18,13 @@ acc = mac_conf(Xbuff, 1, 1, acc, /*zero_acc=*/1);
 
 ## ISA Reference
 
-AIE4 ISA Specification v1.1:
+According to the AIE4 ISA:
 
-- **14.3** "MMAC — 8b integer sparse matrix multiplication"
+- `MMAC` performs 8-bit integer sparse matrix multiplication:
   - Instruction: `MMAC.i <adst>, <asrc>, <xsrc>, <qzsrc>, <mode>`
   - xsrc = Y register (1x128 int8 vector), qzsrc = QZb register
-- **14.1.5** "Sparse matrix multiplication modes" — the 3-bit quartet encoding
-- **2.7.2.5** "Sparsity Registers" — the 6-Kbit register layout
+- Sparse matrix multiplication uses a 3-bit quartet encoding.
+- Sparsity registers use a 6-Kbit register layout.
 
 ## Problem shape
 
@@ -52,7 +52,7 @@ C[4x64] += A[4x128] * B_sparse[128x64],  int8 x int8 -> int32
 
 ## Sparsity mask
 
-Per ISA 14.1.5, which two positions are kept is given by a **3-bit code, per
+Per ISA, which two positions are kept is given by a **3-bit code, per
 column and per quartet**:
 
 | code | selection |
@@ -65,7 +65,7 @@ column and per quartet**:
 | else | x[0], x[1] |
 
 Because the selection is per column, the register is
-64 columns x 32 quartets x 3 bits = **6 Kbit**. Per ISA 2.7.2.5 it is
+64 columns x 32 quartets x 3 bits = **6 Kbit**. Per ISA it is
 addressed as six 1-Kbit horizontal row slices, each holding 16 bits per
 column (two columns packed per 32-bit word); a quartet's 3 bits may straddle
 two slices. `test.cpp::set_sparsity_code()` implements exactly this packing.

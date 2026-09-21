@@ -164,6 +164,12 @@ inline cl::opt<bool>
     ctrlPktOverlay("generate-ctrl-pkt-overlay",
                    cl::desc("Route shim-to-tile control overlay"));
 inline cl::opt<bool> bf16Emulation("bf16-emulation", cl::desc("Emulate bf16"));
+// Development opt-in, AIE4 modules skip the
+// Vector->AIEVec pipeline entirely unless this flag is given. Default OFF.
+inline cl::opt<bool> enableAie4Vectorization(
+    "enable-aie4-vectorization",
+    cl::desc("(development) Run the Vector->AIEVec lowering for AIE4 targets. "
+             "AIE4 vectorization is incomplete; default off."));
 inline cl::opt<std::string> peanoInstallDir("peano",
                                             cl::desc("Peano install dir"));
 // Optimization level (0-3), default 2. The peano compile flow caps the

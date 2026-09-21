@@ -11,7 +11,7 @@
 // Matrix multiply C[Mx64] += A[MxK] * B[Kx64] with bf16 inputs, fp32 output.
 // M=4 rows, K=128 (4 outer iterations of 32), N=64 columns.
 // Uses AIE4 MMAC unit: 32x64 bf16 matrix register, 2048 mults/cycle.
-// ISA: MMAC.f bf16*bf16 (14.10, AIE4b).
+// ISA: MMAC.f bf16*bf16 on AIE4b.
 // Staging: load_staging(v64bfloat16*) + staging_to_matrix_m32x64bfloat16().
 // A input: v64bfloat16 (2 rows of 32 bf16), extract_v32bfloat16 per row.
 //

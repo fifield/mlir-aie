@@ -6,8 +6,9 @@ Mixed-precision matrix multiply: int16 activations × int8 weights → int32 out
 
 ## ISA Reference
 
-ISA Spec Table 195: "Example emulated MAC modes"
-- Row: 16-bit × 8-bit, No sparse, 1×64, 64×64, DM = X×Z + DM, output 1×64, 32-bit
+The ISA defines the following emulated MAC mode:
+
+- 16-bit × 8-bit, No sparse, 1×64, 64×64, DM = X×Z + DM, output 1×64, 32-bit
 - Available on: all cores (AIE4a and AIE4b)
 
 This mode is "emulated" — the hardware MMAC unit operates in int8×int8 mode

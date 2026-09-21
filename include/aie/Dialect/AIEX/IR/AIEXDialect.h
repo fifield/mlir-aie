@@ -101,7 +101,7 @@ mlir::Operation *findShimDmaStart(AIE::DeviceOp device);
 // Maximum control-packet payload, in 32-bit words. The beats field of the
 // control word is encoded as (words - 1), so this is also the largest value
 // the field can represent. AIE4 widened the field to 4 bits / 16 words
-// (AIE4 ArchSpec v1.5 Table 3-28); ME and AIE2* carry 2 bits / 4 words.
+// as defined by the architecture specification; ME and AIE2* carry 2 bits / 4 words.
 uint32_t getCtrlPktMaxPayloadWords(const AIE::AIETargetModel &targetModel);
 
 // Number of 32-bit words a control packet transfers as its payload: the data

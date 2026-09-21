@@ -9,7 +9,7 @@
 //===----------------------------------------------------------------------===//
 //
 // CPU reference for OCP MicroXcaling (MX) block floating-point formats
-// as used by AIE4b (ISA Spec v1.1, Sections 14.4, 14.7, Arch Spec 5.4-5.5):
+// as used by AIE4b (according to the architecture specification):
 //
 //   MXFP8:  block_size=32, E8M0 shared exponent, E4M3 elements
 //   MXFP6:  block_size=32, E8M0 shared exponent, E2M3 elements
@@ -210,7 +210,7 @@ static inline void float_to_mxfp4_block(const float *in,
 // Block of 8 signed int8 elements (6 fractional bits) + 1 E8M0 scale byte.
 // value[i] = (int8_t)element[i] / 64.0f * 2^(scale - 127)
 // Max negative = -2 (0x80 = -128, -128/64 = -2.0), asymmetric range.
-// ISA Spec 14.1.7: "MXINT8 with element type S8 (note 6 fractional bits)"
+// The ISA defines: "MXINT8 with element type S8 (note 6 fractional bits)"
 
 #define MXINT8_BLOCK_SIZE 8
 #define MXINT8_BLOCK_BYTES (MXINT8_BLOCK_SIZE + 1) // 9 bytes per block

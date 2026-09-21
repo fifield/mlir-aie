@@ -11,7 +11,7 @@
 // Mixed-precision matrix multiply C[Mx64] += A[MxK] * B[Kx64]
 // with int16 A inputs and int8 B inputs, int32 output.
 // M=4 rows, K=128 (2 outer iterations of 64), N=64 columns.
-// Uses AIE4 MMAC unit via emulated mode (ISA Table 195): cast int16 A
+// Uses AIE4 MMAC unit via emulated mode (ISA): cast int16 A
 // to int8 (truncate to lower 8 bits) and use 64x64 int8 matrix register.
 // For true int16*int8 without truncation, the aie::mmul API would be needed.
 //

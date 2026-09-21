@@ -1419,7 +1419,7 @@ public:
 
   /// AIE4 uses a non-trivial address encoding: a MEM tile owns 5MiB of address
   /// space rather than the 1MiB every other tile gets, so Address[24:20] is no
-  /// longer the row index (AIE4 ArchSpec v1.5 Table 3-51/3-52, Section 3.9.1).
+  /// longer the row index, according to the architecture specification.
   /// Logical MEM row `m` (1-based) covers address rows 5m-4 .. 5m, and each MEM
   /// row therefore pushes the core rows up by 4, not by 5:
   ///
@@ -1464,12 +1464,11 @@ public:
   /// stream-switch slot `id` field are both 5 bits wide, same as AIE1/AIE2.
   uint32_t getMaxPacketId() const override { return 31; }
   /// Out-of-order BD index is a 4-bit field ([8:5] of the stream packet
-  /// header, AIE4 ArchSpec v1.5 Table 3-35), matching the 4-bit
+  /// header), matching the 4-bit
   /// Out_Of_Order_BD_ID in every AIE4 module's BD registers.
   uint32_t getMaxOutOfOrderId() const override { return 15; }
   /// Repeat count is bits [27:16] of the DMA task word -- 12 bits, widened
-  /// from AIE2's 8 (AIE4 ArchSpec v1.5 Table 3-25; the v1.1 change list records
-  /// "Task queue repeat count - 256 (8-bit) -> 4k (12-bit)").
+  /// from AIE2's 8, as defined by the architecture specification.
   uint32_t getMaxRepeatCount() const override { return 4095; }
 
   /// Iteration_Wrap is a 6-bit field, as on AIE1/AIE2.

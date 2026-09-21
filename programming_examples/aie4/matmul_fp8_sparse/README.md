@@ -9,14 +9,14 @@
 
 ## ISA Reference
 
-AIE4 ISA Specification v1.1:
+According to the AIE4 ISA:
 
-- **14.6** "MMAC — fp8 sparse matrix multiplication"
+- `MMAC` performs fp8 sparse matrix multiplication:
   - Instruction: `MMAC.f <adst>, <asrc>, <xsrc>, <qf_zsrc>, <mode>`
   - xsrc = Y register (1x128 fp8 vector), qf_zsrc = QF_Zb register
   - Output: 1x64 fp32 accumulator
-- **14.1.5** "Sparse matrix multiplication modes" — the 3-bit quartet encoding
-- **2.7.2.5** "Sparsity Registers" — the 6-Kbit register layout
+- Sparse matrix multiplication uses a 3-bit quartet encoding.
+- Sparsity registers use a 6-Kbit register layout.
 
 ## Problem shape and data layout
 
@@ -47,7 +47,7 @@ The shape originally assumed by `test_sim.cpp` was wrong (it treated A as
 
 ## Sparsity mask
 
-Per ISA 14.1.5, which two of the four positions in a quartet are kept is
+Per ISA, which two of the four positions in a quartet are kept is
 given by a **3-bit code, per column and per quartet**:
 
 | code | selection |
@@ -60,7 +60,7 @@ given by a **3-bit code, per column and per quartet**:
 | else | x[0], x[1] |
 
 Since the selection is per column, the register holds
-64 columns x 32 quartets x 3 bits = **6 Kbit**. Per ISA 2.7.2.5 it is
+64 columns x 32 quartets x 3 bits = **6 Kbit**. Per ISA it is
 addressed as six 1-Kbit horizontal row slices, each holding 16 bits per
 column (two columns per 32-bit word); a quartet's 3 bits may straddle two
 slices. `test.cpp::set_sparsity_code()` implements exactly this packing.

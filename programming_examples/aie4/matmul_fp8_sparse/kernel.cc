@@ -12,7 +12,7 @@
 // inputs and fp32 output, at 4:2 structured sparsity.
 // M=4 rows, N=64 columns.
 // Uses the AIE4 MMAC sparse unit: 128x64 fp8 sparse matrix register (QF_Zb).
-// ISA: MMAC.f sparse (14.6).  xsrc = Y (128 dense fp8), qf_zsrc = QF_Zb.
+// ISA: MMAC.f sparse.  xsrc = Y (128 dense fp8), qf_zsrc = QF_Zb.
 //
 // Operand shapes:
 //   A[4 * 128]   = 512 bytes fp8   (DENSE: 128 logical K per row)
@@ -21,7 +21,7 @@
 //   mask[192]    = 768 bytes int32 (6-Kbit sparsity register image)
 //   C[4 * 64]    = 1024 bytes fp32
 //
-// Sparsity structure (AIE4 ISA Spec v1.1 sections 2.7.2.5 and 14.1.5):
+// Sparsity structure (according to the AIE4 ISA):
 // each of the 64 matrix columns is divided into 32 quartets of 4 logical K
 // positions, of which exactly 2 are stored.  A per-column, per-quartet 3-bit
 // code selects which two, INDEPENDENTLY FOR EVERY COLUMN:

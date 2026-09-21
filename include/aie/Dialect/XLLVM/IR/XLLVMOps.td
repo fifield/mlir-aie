@@ -15,4 +15,8 @@ include "aie/Dialect/XLLVM/IR/XLLVM.td"
 // Include AIE2 intrinsics.
 include "aie/Dialect/XLLVM/IR/XLLVMAIE2IntrOps.td"
 
+// Include AIE4 intrinsics. Must follow the AIE2 include: it reuses the
+// `AIEVecIntrOpBase` class defined there.
+include "aie/Dialect/XLLVM/IR/XLLVMAIE4IntrOps.td"
+
 #endif

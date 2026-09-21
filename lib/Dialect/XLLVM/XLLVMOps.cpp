@@ -64,7 +64,37 @@ llvm::CallInst *createExternalLLVMIntrinsicCall(
   return builder.CreateCall(llvmIntr, operands);
 }
 
+uint32_t encodeAIE4MulConf(bool zeroAcc, AIE4AMode amode, AIE4BMode bmode) {
+  return (zeroAcc ? 1u : 0u) | (static_cast<uint32_t>(amode) << 1) |
+         (static_cast<uint32_t>(bmode) << 3);
+}
+
+llvm::CallInst *createAIE4ConfIntrinsicCall(
+    llvm::IRBuilderBase &builder, LLVM::ModuleTranslation &moduleTranslation,
+    Operation *intrOp, llvm::StringRef intrinsicName, uint32_t conf) {
+  assert(intrOp->getNumResults() == 1 &&
+         "AIE4 conf intrinsics have exactly one result");
+  llvm::Type *resTy =
+      moduleTranslation.convertType(*(intrOp->getResultTypes().begin()));
+
+  auto operands = moduleTranslation.lookupValues(intrOp->getOperands());
+  // The config word is an MLIR attribute, not an operand: materialize it as
+  // the trailing i32 argument the intrinsic's signature expects.
+  operands.push_back(builder.getInt32(conf));
+
+  SmallVector<llvm::Type *> types;
+  for (auto *op : operands)
+    types.push_back(op->getType());
+
+  llvm::Module *module = builder.GetInsertBlock()->getModule();
+  llvm::Function *llvmIntr =
+      getNamedIntrinsicDeclaration(module, intrinsicName, resTy, types);
+  return builder.CreateCall(llvmIntr, operands);
+}
+
 } // namespace xilinx::xllvm
+
+#include "aie/Dialect/XLLVM/IR/XLLVMEnums.cpp.inc"
 
 #define GET_OP_CLASSES
 #include "aie/Dialect/XLLVM/IR/XLLVMOps.cpp.inc"

@@ -5582,6 +5582,41 @@ struct FlattenElementwiseVectorToRank1Pattern : OpConversionPattern<OpTy> {
   }
 };
 
+struct ConvertMulFToAIE4MulEwiseF32Pattern
+    : OpConversionPattern<arith::MulFOp> {
+  using OpConversionPattern::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(arith::MulFOp mulOp, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto vecTy = dyn_cast<VectorType>(mulOp.getType());
+    if (!vecTy || vecTy.isScalable() || vecTy.getRank() != 1 ||
+        !vecTy.getElementType().isF32() ||
+        vecTy.getShape()[0] != 32)
+      return failure();
+
+    rewriter.replaceOpWithNewOp<aievec::AIE4MulEwiseF32Op>(
+        mulOp, vecTy, adaptor.getLhs(), adaptor.getRhs());
+    return success();
+  }
+};
+
+static void populateAIEVecV4ConversionPatterns(RewritePatternSet &patterns) {
+  patterns.add<ConvertMulFToAIE4MulEwiseF32Pattern>(patterns.getContext());
+}
+
+static void configureAIEVecV4Legalizations(ConversionTarget &target) {
+  target.addLegalDialect<aievec::AIEVecDialect>();
+  // Only the exact <32xf32> shape is claimed by an AIE4 intrinsic; every
+  // other arith.mulf stays legal and falls through to the generic path.
+  target.addDynamicallyLegalOp<arith::MulFOp>([](arith::MulFOp mulOp) {
+    auto vecTy = dyn_cast<VectorType>(mulOp.getType());
+    return !vecTy || vecTy.isScalable() || vecTy.getRank() != 1 ||
+           !vecTy.getElementType().isF32() ||
+           vecTy.getShape()[0] != 32;
+  });
+}
+
 // The lane counts at which the AIE2P lowering of `op` takes one op, smallest
 // first, or none if it has no such lowering. For a compare they are those of
 // its operands.
@@ -7026,6 +7061,9 @@ struct LowerVectorToAIEVec : PassWrapper<LowerVectorToAIEVec, OperationPass<>> {
       configureAIEVecV2PLegalizations(target, planner);
       // Last, as it overrides the predicates above for the ops it rewrites.
       AIE2PElementwise::markIllegal(target, &getContext());
+    } else if (targetInfo.isAIE4()) {
+      populateAIEVecV4ConversionPatterns(patterns);
+      configureAIEVecV4Legalizations(target);
     } else {
       llvm_unreachable("AIE version is misconfigured");
     }

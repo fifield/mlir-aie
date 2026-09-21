@@ -140,7 +140,7 @@ Design notes:
   need three inputs, so they stream the activations and the sparsity mask as
   one contiguous buffer and split it again on the core with an additive
   `matmul_hw` wrapper at the bottom of their `kernel.cc`.
-- The two sparse examples follow AIE4 ISA Spec for Sparsity Registers and
+- The two sparse examples follow the AIE4 ISA for sparsity registers and
   Sparse matrix multiplication modesS:
   a 3-bit code per column per quartet selects which 2 of every 4 logical K
   positions are stored, so the sparsity register is 6 Kbit and must be

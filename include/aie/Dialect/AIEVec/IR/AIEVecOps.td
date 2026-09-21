@@ -45,10 +45,45 @@ def AIEVec_AddElemOp
   let hasVerifier = 0;
 }
 
-def AIEVec_SubElemOp
-    : AIEVec_Op<"sub_elem", [Pure, AllTypesMatch<["lhs", "rhs", "result"]>]>,
-      Arguments<(ins AnyVectorOfNonZeroRank:$lhs, AnyVectorOfNonZeroRank:$rhs)>,
-      Results<(outs AnyVectorOfNonZeroRank:$result)> {
+
+// AIE4-specific. Deliberately a separate op from `aievec.mul_elem`, which
+// carries the AIE2-only `isOperandResultTypePairValidForAIE2MulElem` type
+// constraint (its legal lhs/rhs/acc combinations are AIE2 accumulator shapes,
+// none of which describe AIE4's <32xf32> -> <32xf32> form).
+//
+// Unlike `aievec.mul_elem`, this op is NOT marked `Pure`. It lowers to
+// `llvm.aie4.I1024.I1024.ACC1024.fp.mul.ewise.conf`, whose intrinsic
+// definition carries no `IntrNoMem`, so LLVM itself treats it as potentially
+// side-effecting. Modelling it as pure here would let MLIR hoist/CSE it more
+// aggressively than the backend will.
+def AIEVec_AIE4MulEwiseF32Op:
+  AIEVec_Op<"aie4.mul_ewise_f32", [
+    AllTypesMatch<["lhs", "rhs", "result"]>
+  ]>,
+  Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$lhs,
+                 FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$rhs)>,
+  Results<(outs FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$result)> {
+  let summary = "AIE4 elementwise f32 vector multiply";
+  let description = [{
+    AIE4-specific elementwise multiply of two 1024-bit (`vector<32xf32>`)
+    vectors: `$result = $lhs * $rhs`.
+
+    Same type in and out: AIE4's 1024-bit f32 accumulator has the same shape as
+    the input vector, so this needs no UPS/SRS pair and no shift/sign
+    bookkeeping. Lowers to a single `vmul.f` instruction.
+  }];
+  let assemblyFormat = "$lhs `,` $rhs attr-dict `:` type($result)";
+  let hasVerifier = 0;
+}
+
+
+def AIEVec_SubElemOp:
+  AIEVec_Op<"sub_elem", [
+    Pure,
+    AllTypesMatch<["lhs", "rhs", "result"]>
+  ]>,
+  Arguments<(ins AnyVectorOfNonZeroRank:$lhs, AnyVectorOfNonZeroRank:$rhs)>,
+  Results<(outs AnyVectorOfNonZeroRank:$result)> {
   let summary = "AIE vector sub elem";
   let description = [{
     AMD-specific AIE2 intrinsic that allows you to perform substraction operation
