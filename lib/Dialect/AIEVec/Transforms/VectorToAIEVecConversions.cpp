@@ -5682,6 +5682,11 @@ static void populateAIEVecV4ConversionPatterns(RewritePatternSet &patterns) {
 
 static void configureAIEVecV4Legalizations(ConversionTarget &target) {
   target.addLegalDialect<aievec::AIEVecDialect>();
+
+  // Unaligned reads introduce slices, but AIE4 has no AIEVec slice pattern.
+  // Keep them legal for generic lowering, which may scalarize unaligned slices.
+  target.addLegalOp<vector::ExtractStridedSliceOp>();
+
   // Only the exact <32xf32> shape is claimed by an AIE4 intrinsic; every
   // other arith.mulf stays legal and falls through to the generic path.
   target.addDynamicallyLegalOp<arith::MulFOp>([](arith::MulFOp mulOp) {
