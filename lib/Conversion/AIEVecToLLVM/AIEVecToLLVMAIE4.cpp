@@ -111,6 +111,56 @@ struct AIE4SRSI32I16OpConversion
   }
 };
 
+// aievec.aie4.ups_i16_i32 -> llvm.aie4.acc32.v32.I512.ups
+//
+// Mirrors AIE4SRSI32I16OpConversion: shift and sign are attribute-resident
+// trailing arguments, not opaque operands.
+struct AIE4UPSI16I32OpConversion
+    : mlir::ConvertOpToLLVMPattern<aievec::AIE4UPSI16I32Op> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(aievec::AIE4UPSI16I32Op op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    rewriter.replaceOpWithNewOp<xllvm::Acc32V32I512UpsAIE4IntrOp>(
+        op, op.getResult().getType(), adaptor.getSource(), op.getShift(),
+        op.getIsSigned() ? xllvm::AIE4UPSSign::Signed
+                          : xllvm::AIE4UPSSign::Unsigned);
+    return success();
+  }
+};
+
+// aievec.aie4.conv_bf16_f32 -> llvm.aie4.v32bf16.to.v32accfloat
+//
+// Plain operand forwarding: this intrinsic takes no attribute-resident
+// config word, unlike SRS/UPS/MAC.
+struct AIE4ConvBF16F32OpConversion
+    : mlir::ConvertOpToLLVMPattern<aievec::AIE4ConvBF16F32Op> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(aievec::AIE4ConvBF16F32Op op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    rewriter.replaceOpWithNewOp<xllvm::V32Bf16ToV32AccFloatAIE4IntrOp>(
+        op, op.getResult().getType(), adaptor.getSource());
+    return success();
+  }
+};
+
+// aievec.aie4.conv_f32_bf16 -> llvm.aie4.v32accfloat.to.v32bfloat16
+struct AIE4ConvF32BF16OpConversion
+    : mlir::ConvertOpToLLVMPattern<aievec::AIE4ConvF32BF16Op> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(aievec::AIE4ConvF32BF16Op op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    rewriter.replaceOpWithNewOp<xllvm::V32AccFloatToV32Bfloat16AIE4IntrOp>(
+        op, op.getResult().getType(), adaptor.getSource());
+    return success();
+  }
+};
+
 //===----------------------------------------------------------------------===//
 // Integer min/max/compare/select
 //===----------------------------------------------------------------------===//
@@ -309,8 +359,10 @@ struct AIE4SelOpConversion
 void populateAIEVecToLLVMAIE4ConversionPatterns(
     mlir::LLVMTypeConverter &converter, mlir::RewritePatternSet &patterns) {
   patterns.add<AIE4MulEwiseF32OpConversion, AIE4MacEwiseI16I32OpConversion,
-               AIE4SRSI32I16OpConversion, AIE4MinMaxOpConversion,
-               AIE4CmpOpConversion, AIE4SelOpConversion>(converter);
+               AIE4SRSI32I16OpConversion, AIE4UPSI16I32OpConversion,
+               AIE4ConvBF16F32OpConversion, AIE4ConvF32BF16OpConversion,
+               AIE4MinMaxOpConversion, AIE4CmpOpConversion,
+               AIE4SelOpConversion>(converter);
 }
 
 } // namespace xilinx::aievec

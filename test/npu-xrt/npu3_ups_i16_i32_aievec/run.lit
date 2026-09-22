@@ -1,0 +1,18 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// Shift-zero UPS must sign-extend i16 inputs exactly.
+
+// REQUIRES: ryzen_ai_npu3, peano
+//
+// RUN: %run_on_npu3% python %S/ups_i16_i32.py -o ups_i16_i32.mlir
+// RUN: %aiecc -j 4 --enable-aie4-vectorization --get-full-elf --full-elf-name=ups_i16_i32.elf ups_i16_i32.mlir
+//
+// The mnemonic gate: llc accepts a non-existent llvm.aie4.* name as an
+// undefined external and emits `jl #0x0` plus an R_AIE_23 relocation while
+// still exiting 0, so a zero exit status alone proves nothing.
+// RUN: llvm-objdump -dr ups_i16_i32.mlir.prj/elfs_main_core_0_2/elfs_main_core_0_2.elf | FileCheck %s --check-prefix=VUPS
+// VUPS: {{(v)?ups}}
+//
+// RUN: clang %S/test.cpp -o test.exe -std=c++17 -Wall %xrt_flags -lrt -lstdc++ %test_utils_flags
+// RUN: %run_on_npu3% ./test.exe

@@ -21,34 +21,8 @@ namespace xilinx::xllvm {
 // AIE4 control/status register side-effect resources
 //===----------------------------------------------------------------------===//
 //
-// Separate resources model control/status dependencies independently of memory.
-// SRS reads its mode registers and writes overflow status; MAC reads crVecSat.
-// The SRS write effect prevents CSE. Identical MACs may be merged when no
-// interfering effects occur between them.
-
-/// `crSat` -- saturation mode consulted by SRS.
-struct AIE4CRSatResource
-    : public mlir::SideEffects::Resource::Base<AIE4CRSatResource> {
-  llvm::StringRef getName() const final { return "AIE4CRSat"; }
-};
-
-/// `crRnd` -- rounding mode consulted by SRS.
-struct AIE4CRRndResource
-    : public mlir::SideEffects::Resource::Base<AIE4CRRndResource> {
-  llvm::StringRef getName() const final { return "AIE4CRRnd"; }
-};
-
-/// `crSRSMode` -- SRS accumulator lane-width control.
-struct AIE4CRSRSModeResource
-    : public mlir::SideEffects::Resource::Base<AIE4CRSRSModeResource> {
-  llvm::StringRef getName() const final { return "AIE4CRSRSMode"; }
-};
-
-/// `srSRS_of` -- overflow status written by SRS.
-struct AIE4SRSOverflowResource
-    : public mlir::SideEffects::Resource::Base<AIE4SRSOverflowResource> {
-  llvm::StringRef getName() const final { return "AIE4SRSOverflow"; }
-};
+// MAC reads crVecSat; identical MACs may be merged without intervening writes.
+// SRS and UPS omit effect declarations so MLIR treats them conservatively.
 
 /// `crVecSat` -- vector saturation mode consulted by the integer VMAC.
 struct AIE4CRVecSatResource

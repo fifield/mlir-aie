@@ -5675,6 +5675,96 @@ struct ConvertIntMacToAIE4MacPattern : OpConversionPattern<arith::AddIOp> {
   }
 };
 
+// `arith.extsi`/`arith.extui` vector<32xi16> -> vector<32xi32>
+//     -> aievec.aie4.ups_i16_i32 {shift = 0}
+//
+// Shift-zero widening is exact. Preserve signed extensions feeding native MAC
+// chains so the MAC pattern can absorb them instead of emitting standalone UPS.
+static bool feedsAIE4MacChain(arith::ExtSIOp extOp) {
+  for (Operation *user : extOp.getResult().getUsers()) {
+    auto mulOp = dyn_cast<arith::MulIOp>(user);
+    if (!mulOp)
+      continue;
+    Value a, b;
+    if (!matchWidenedI16Product(mulOp.getResult(), a, b))
+      continue;
+    for (Operation *mulUser : mulOp.getResult().getUsers()) {
+      auto addOp = dyn_cast<arith::AddIOp>(mulUser);
+      if (!addOp)
+        continue;
+      Value acc, aa, bb;
+      if (matchIntMacChain(addOp, acc, aa, bb))
+        return true;
+    }
+  }
+  return false;
+}
+
+template <typename SrcOpTy>
+struct ConvertExtToAIE4UPSPattern : OpConversionPattern<SrcOpTy> {
+  using OpConversionPattern<SrcOpTy>::OpConversionPattern;
+  using OpAdaptor = typename SrcOpTy::Adaptor;
+
+  static bool matches(SrcOpTy extOp) {
+    auto srcTy = dyn_cast<VectorType>(extOp.getIn().getType());
+    auto dstTy = dyn_cast<VectorType>(extOp.getOut().getType());
+    if (!srcTy || !dstTy)
+      return false;
+    if (!isVecOfIntN(srcTy, 32, 16) || !isVecOfIntN(dstTy, 32, 32))
+      return false;
+    if constexpr (std::is_same_v<SrcOpTy, arith::ExtSIOp>) {
+      if (feedsAIE4MacChain(extOp))
+        return false;
+    }
+    return true;
+  }
+
+  LogicalResult
+  matchAndRewrite(SrcOpTy extOp, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    if (!matches(extOp))
+      return failure();
+
+    constexpr bool isSigned = std::is_same_v<SrcOpTy, arith::ExtSIOp>;
+    auto upsOp = aievec::AIE4UPSI16I32Op::create(
+        rewriter, extOp.getLoc(), extOp.getType(), adaptor.getIn(),
+        rewriter.getI32IntegerAttr(0), rewriter.getBoolAttr(isSigned));
+    rewriter.replaceOp(extOp, upsOp.getResult());
+    return success();
+  }
+};
+
+using ConvertExtSIToAIE4UPSPattern = ConvertExtToAIE4UPSPattern<arith::ExtSIOp>;
+using ConvertExtUIToAIE4UPSPattern = ConvertExtToAIE4UPSPattern<arith::ExtUIOp>;
+
+//===----------------------------------------------------------------------===//
+// AIE4 bf16 widening
+//===----------------------------------------------------------------------===//
+
+struct ConvertExtFToAIE4ConvPattern : OpConversionPattern<arith::ExtFOp> {
+  using OpConversionPattern::OpConversionPattern;
+
+  static bool matches(arith::ExtFOp extOp) {
+    auto srcTy = dyn_cast<VectorType>(extOp.getIn().getType());
+    auto dstTy = dyn_cast<VectorType>(extOp.getOut().getType());
+    if (!srcTy || !dstTy || srcTy.isScalable() || dstTy.isScalable())
+      return false;
+    return srcTy.getRank() == 1 && dstTy.getRank() == 1 &&
+           srcTy.getShape()[0] == 32 && dstTy.getShape()[0] == 32 &&
+           srcTy.getElementType().isBF16() && dstTy.getElementType().isF32();
+  }
+
+  LogicalResult
+  matchAndRewrite(arith::ExtFOp extOp, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    if (!matches(extOp))
+      return failure();
+    rewriter.replaceOpWithNewOp<aievec::AIE4ConvBF16F32Op>(
+        extOp, extOp.getType(), adaptor.getIn());
+    return success();
+  }
+};
+
 //===----------------------------------------------------------------------===//
 // AIE4 integer min/max/compare/select
 //===----------------------------------------------------------------------===//
@@ -5948,6 +6038,8 @@ struct LowerAIE4SelectOp : OpConversionPattern<arith::SelectOp> {
 static void populateAIEVecV4ConversionPatterns(RewritePatternSet &patterns) {
   patterns
       .add<ConvertMulFToAIE4MulEwiseF32Pattern, ConvertIntMacToAIE4MacPattern,
+           ConvertExtSIToAIE4UPSPattern, ConvertExtUIToAIE4UPSPattern,
+           ConvertExtFToAIE4ConvPattern,
            LowerAIE4MinSIOp, LowerAIE4MaxSIOp, LowerAIE4MinUIOp,
            LowerAIE4MaxUIOp, LowerAIE4CmpIOp, LowerAIE4SelectOp,
            LowerAIE4MaskExtractOp>(patterns.getContext());
@@ -5985,6 +6077,28 @@ static void configureAIEVecV4Legalizations(ConversionTarget &target) {
   // Fusion requires lowering that establishes floor rounding and
   // wrapping, then restores the caller's modes. Explicit SRS ops remain legal.
   target.addLegalOp<arith::ShRSIOp, arith::TruncIOp>();
+
+  // Use native conversion only for shapes claimed by the AIE4 patterns.
+  target.addDynamicallyLegalOp<arith::ExtSIOp>([](arith::ExtSIOp op) {
+    return !ConvertExtSIToAIE4UPSPattern::matches(op);
+  });
+  target.addDynamicallyLegalOp<arith::ExtUIOp>([](arith::ExtUIOp op) {
+    return !ConvertExtUIToAIE4UPSPattern::matches(op);
+  });
+  target.addDynamicallyLegalOp<arith::ExtFOp>([](arith::ExtFOp op) {
+    return !ConvertExtFToAIE4ConvPattern::matches(op);
+  });
+  // Native narrowing reads ambient rounding and saturation modes. Keep truncf
+  // generic until lowering can establish its requested modes and restore them.
+  target.addLegalOp<arith::TruncFOp>();
+
+  // Let the f32 arithmetic between bf16 conversions reach generic lowering.
+  target.addDynamicallyLegalOp<arith::AddFOp, arith::SubFOp>([](Operation *op) {
+    auto vecTy = dyn_cast<VectorType>(op->getResultTypes()[0]);
+    return !vecTy || (!vecTy.isScalable() && vecTy.getRank() == 1 &&
+                      vecTy.getShape()[0] == 32 &&
+                      vecTy.getElementType().isF32());
+  });
 
   // Require native lowering only for supported integer vector shapes.
   target.addDynamicallyLegalOp<arith::MinSIOp, arith::MaxSIOp, arith::MinUIOp,

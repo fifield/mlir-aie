@@ -7,8 +7,8 @@
 // Fuse widened integer products into MAC; keep shift/truncate arithmetic
 // independent of the mutable SRS rounding and saturation modes.
 //
-// RUN: aie-opt %s -split-input-file --lower-vector-to-aievec="aie-target=aie4b" | FileCheck %s --implicit-check-not=aievec.aie4.srs_i32_i16
-// RUN: aie-opt %s -split-input-file --convert-vector-to-aievec="aie-target=aie4b" | FileCheck %s --implicit-check-not=aievec.aie4.srs_i32_i16
+// RUN: aie-opt %s -split-input-file --lower-vector-to-aievec="aie-target=aie4b" | FileCheck %s --check-prefixes=CHECK,LOWER --implicit-check-not=aievec.aie4.srs_i32_i16
+// RUN: aie-opt %s -split-input-file --convert-vector-to-aievec="aie-target=aie4b" | FileCheck %s --check-prefixes=CHECK,CONVERT --implicit-check-not=aievec.aie4.srs_i32_i16
 
 // Fuse the i16 sign extensions, i32 multiply, and add into one native MAC.
 //
@@ -152,4 +152,162 @@ func.func @mac_then_srs(%a : vector<32xi16>, %b : vector<32xi16>,
   %r = arith.shrsi %s, %sh : vector<32xi32>
   %t = arith.trunci %r : vector<32xi32> to vector<32xi16>
   return %t : vector<32xi16>
+}
+
+// -----
+
+//===----------------------------------------------------------------------===//
+// AIE4 UPS
+//===----------------------------------------------------------------------===//
+
+// Signed i16 widening becomes a shift-zero UPS.
+// CHECK-LABEL: func.func @ups_signed_widen
+// CHECK: aievec.aie4.ups_i16_i32 %arg0 {shift = 0 : i32} : vector<32xi16>, vector<32xi32>
+// CHECK-NOT: arith.extsi
+func.func @ups_signed_widen(%a : vector<32xi16>) -> vector<32xi32> {
+  %0 = arith.extsi %a : vector<32xi16> to vector<32xi32>
+  return %0 : vector<32xi32>
+}
+
+// -----
+
+// `arith.extui` becomes the unsigned UPS form.
+// CHECK-LABEL: func.func @ups_unsigned_widen
+// CHECK: aievec.aie4.ups_i16_i32 %arg0 {isSigned = false, shift = 0 : i32} : vector<32xi16>, vector<32xi32>
+// CHECK-NOT: arith.extui
+func.func @ups_unsigned_widen(%a : vector<32xi16>) -> vector<32xi32> {
+  %0 = arith.extui %a : vector<32xi16> to vector<32xi32>
+  return %0 : vector<32xi32>
+}
+
+// -----
+
+// Wrong shape (16 lanes, not 32): no AIE4 UPS intrinsic covers this, so the
+// extend must stay legal and untouched.
+// CHECK-LABEL: func.func @ups_wrong_shape_untouched
+// CHECK: arith.extsi
+// CHECK-NOT: aievec.aie4.ups_i16_i32
+func.func @ups_wrong_shape_untouched(%a : vector<16xi16>) -> vector<16xi32> {
+  %0 = arith.extsi %a : vector<16xi16> to vector<16xi32>
+  return %0 : vector<16xi32>
+}
+
+// -----
+
+// MAC fusion absorbs its input extensions before standalone UPS lowering.
+// CHECK-LABEL: func.func @mac_extsi_not_stolen_by_ups
+// CHECK-NOT: aievec.aie4.ups_i16_i32
+// CHECK: aievec.aie4.mac_ewise_i16_i32 %arg0, %arg1, %arg2 : vector<32xi16>, vector<32xi32>
+// CHECK-NOT: aievec.aie4.ups_i16_i32
+func.func @mac_extsi_not_stolen_by_ups(%a : vector<32xi16>, %b : vector<32xi16>,
+                                       %acc : vector<32xi32>) -> vector<32xi32> {
+  %ea = arith.extsi %a : vector<32xi16> to vector<32xi32>
+  %eb = arith.extsi %b : vector<32xi16> to vector<32xi32>
+  %p = arith.muli %ea, %eb : vector<32xi32>
+  %s = arith.addi %acc, %p : vector<32xi32>
+  return %s : vector<32xi32>
+}
+
+// -----
+
+// Lowering retains UPS and truncation; the full pipeline folds the identity.
+// CHECK-LABEL: func.func @ups_trunc_roundtrip
+// LOWER: %[[U:.*]] = aievec.aie4.ups_i16_i32 %arg0 {shift = 0 : i32} : vector<32xi16>, vector<32xi32>
+// LOWER: %[[R:.*]] = arith.trunci %[[U]] : vector<32xi32> to vector<32xi16>
+// LOWER: return %[[R]] : vector<32xi16>
+// CONVERT-NEXT: return %arg0 : vector<32xi16>
+func.func @ups_trunc_roundtrip(%a : vector<32xi16>) -> vector<32xi16> {
+  %0 = arith.extsi %a : vector<32xi16> to vector<32xi32>
+  %sh = arith.constant dense<0> : vector<32xi32>
+  %r = arith.shrsi %0, %sh : vector<32xi32>
+  %t = arith.trunci %r : vector<32xi32> to vector<32xi16>
+  return %t : vector<32xi16>
+}
+
+// -----
+
+//===----------------------------------------------------------------------===//
+// AIE4 bf16 widening and generic narrowing
+//===----------------------------------------------------------------------===//
+
+// A plain `arith.extf` widening vector<32xbf16> to vector<32xf32> becomes the
+// widening conv op. This is exact (no control register read), so no rounding
+// caveat applies on this side.
+// CHECK-LABEL: func.func @conv_bf16_to_f32
+// CHECK: aievec.aie4.conv_bf16_f32 %arg0 : vector<32xbf16>, vector<32xf32>
+// CHECK-NOT: arith.extf
+func.func @conv_bf16_to_f32(%a : vector<32xbf16>) -> vector<32xf32> {
+  %0 = arith.extf %a : vector<32xbf16> to vector<32xf32>
+  return %0 : vector<32xf32>
+}
+
+// -----
+
+// Preserve arithmetic narrowing independently of ambient conversion modes.
+// CHECK-LABEL: func.func @conv_f32_to_bf16
+// CHECK: arith.truncf %arg0 : vector<32xf32> to vector<32xbf16>
+// CHECK-NOT: aievec.aie4.conv_f32_bf16
+func.func @conv_f32_to_bf16(%a : vector<32xf32>) -> vector<32xbf16> {
+  %0 = arith.truncf %a : vector<32xf32> to vector<32xbf16>
+  return %0 : vector<32xbf16>
+}
+
+// -----
+
+// Wrong shape (16 lanes, not 32): no AIE4 intrinsic covers this shape, so the
+// extf must stay legal and untouched, falling through to the generic path.
+// CHECK-LABEL: func.func @conv_wrong_shape_untouched
+// CHECK: arith.extf
+// CHECK-NOT: aievec.aie4.conv_bf16_f32
+func.func @conv_wrong_shape_untouched(%a : vector<16xbf16>) -> vector<16xf32> {
+  %0 = arith.extf %a : vector<16xbf16> to vector<16xf32>
+  return %0 : vector<16xf32>
+}
+
+// -----
+
+// Wrong element type (f16, not bf16): AIE4's widening conv op only claims
+// bf16 -> f32; an f16 -> f32 extend must stay legal and untouched.
+// CHECK-LABEL: func.func @conv_wrong_type_untouched
+// CHECK: arith.extf
+// CHECK-NOT: aievec.aie4.conv_bf16_f32
+func.func @conv_wrong_type_untouched(%a : vector<32xf16>) -> vector<32xf32> {
+  %0 = arith.extf %a : vector<32xf16> to vector<32xf32>
+  return %0 : vector<32xf32>
+}
+
+// -----
+
+// Widen bf16 operands for f32 arithmetic; preserve generic narrowing.
+// CHECK-LABEL: func.func @bf16_add_via_f32_conv
+// CHECK: %[[A:.*]] = aievec.aie4.conv_bf16_f32 %arg0 : vector<32xbf16>, vector<32xf32>
+// CHECK: %[[B:.*]] = aievec.aie4.conv_bf16_f32 %arg1 : vector<32xbf16>, vector<32xf32>
+// CHECK: %[[S:.*]] = arith.addf %[[A]], %[[B]] : vector<32xf32>
+// CHECK: arith.truncf %[[S]] : vector<32xf32> to vector<32xbf16>
+// CHECK-NOT: arith.extf
+func.func @bf16_add_via_f32_conv(%a : vector<32xbf16>, %b : vector<32xbf16>)
+    -> vector<32xbf16> {
+  %ea = arith.extf %a : vector<32xbf16> to vector<32xf32>
+  %eb = arith.extf %b : vector<32xbf16> to vector<32xf32>
+  %s = arith.addf %ea, %eb : vector<32xf32>
+  %r = arith.truncf %s : vector<32xf32> to vector<32xbf16>
+  return %r : vector<32xbf16>
+}
+
+// -----
+
+// Same recipe with `arith.subf`, exercising the SubFOp override in
+// configureAIEVecV4Legalizations alongside the AddFOp one.
+// CHECK-LABEL: func.func @bf16_sub_via_f32_conv
+// CHECK: %[[A:.*]] = aievec.aie4.conv_bf16_f32 %arg0 : vector<32xbf16>, vector<32xf32>
+// CHECK: %[[B:.*]] = aievec.aie4.conv_bf16_f32 %arg1 : vector<32xbf16>, vector<32xf32>
+// CHECK: %[[S:.*]] = arith.subf %[[A]], %[[B]] : vector<32xf32>
+// CHECK: arith.truncf %[[S]] : vector<32xf32> to vector<32xbf16>
+func.func @bf16_sub_via_f32_conv(%a : vector<32xbf16>, %b : vector<32xbf16>)
+    -> vector<32xbf16> {
+  %ea = arith.extf %a : vector<32xbf16> to vector<32xf32>
+  %eb = arith.extf %b : vector<32xbf16> to vector<32xf32>
+  %s = arith.subf %ea, %eb : vector<32xf32>
+  %r = arith.truncf %s : vector<32xf32> to vector<32xbf16>
+  return %r : vector<32xbf16>
 }

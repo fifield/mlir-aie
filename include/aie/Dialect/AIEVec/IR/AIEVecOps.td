@@ -80,12 +80,7 @@ def AIEVec_AIE4MulEwiseF32Op:
 // AIE4 control-register side-effect resources
 //===----------------------------------------------------------------------===//
 //
-// Share resource identities with XLLVM through AIE4CtrlRegResources.h.
-def AIEVec_AIE4CRSatRes  : Resource<"::xilinx::xllvm::AIE4CRSatResource">;
-def AIEVec_AIE4CRRndRes  : Resource<"::xilinx::xllvm::AIE4CRRndResource">;
-def AIEVec_AIE4CRSRSModeRes :
-    Resource<"::xilinx::xllvm::AIE4CRSRSModeResource">;
-def AIEVec_AIE4SRSOfRes  : Resource<"::xilinx::xllvm::AIE4SRSOverflowResource">;
+// Share the MAC resource identity with XLLVM through AIE4CtrlRegResources.h.
 def AIEVec_AIE4CRVecSatRes :
     Resource<"::xilinx::xllvm::AIE4CRVecSatResource">;
 
@@ -122,12 +117,7 @@ def AIEVec_AIE4MacEwiseI16I32Op:
 //===----------------------------------------------------------------------===//
 
 def AIEVec_AIE4SRSI32I16Op:
-  AIEVec_Op<"aie4.srs_i32_i16", [
-    MemoryEffects<[MemRead<AIEVec_AIE4CRSatRes>,
-                   MemRead<AIEVec_AIE4CRRndRes>,
-                   MemRead<AIEVec_AIE4CRSRSModeRes>,
-                   MemWrite<AIEVec_AIE4SRSOfRes>]>
-  ]>,
+  AIEVec_Op<"aie4.srs_i32_i16", []>,
   Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>:$source,
                  ConfinedAttr<I32Attr, [IntMinValue<0>, IntMaxValue<31>]>:$shift,
                  DefaultValuedAttr<BoolAttr, "true">:$isSigned)>,
@@ -150,6 +140,69 @@ def AIEVec_AIE4SRSI32I16Op:
 
     The op reads the mode registers and writes the SRS overflow status flag;
     it must not be treated as pure.
+  }];
+  let assemblyFormat =
+      "$source attr-dict `:` type($source) `,` type($result)";
+  let hasVerifier = 0;
+}
+
+//===----------------------------------------------------------------------===//
+// AIE4 UPS
+//===----------------------------------------------------------------------===//
+
+def AIEVec_AIE4UPSI16I32Op:
+  AIEVec_Op<"aie4.ups_i16_i32", []>,
+  Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>:$source,
+                 ConfinedAttr<I32Attr, [IntMinValue<0>, IntMaxValue<31>]>:$shift,
+                 DefaultValuedAttr<BoolAttr, "true">:$isSigned)>,
+  Results<(outs FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>:$result)> {
+  let summary = "AIE4 up-shift: i16 vector -> i32 accumulator";
+  let description = [{
+    Sign- or zero-extends `vector<32xi16>` to `vector<32xi32>`, then
+    left-shifts by `$shift`. Reads `crSat`, `crUPSMode`, and the selected
+    `upsSign0`/`upsSign1` field, and updates `srUPS_of`.
+
+    Shift-zero widening is exact under the ABI signedness modes and is used
+    for `arith.extsi`/`arith.extui`. Nonzero shifts can overflow; wrapping or
+    saturation depends on the ambient modes. Lowers to `vups.2x` or the
+    load-fused `vlda.ups.2x`.
+  }];
+  let assemblyFormat =
+      "$source attr-dict `:` type($source) `,` type($result)";
+  let hasVerifier = 0;
+}
+
+//===----------------------------------------------------------------------===//
+// AIE4 bf16 <-> f32 accumulator conversion
+//===----------------------------------------------------------------------===//
+def AIEVec_AIE4ConvBF16F32Op:
+  AIEVec_Op<"aie4.conv_bf16_f32", [Pure]>,
+  Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$source)>,
+  Results<(outs FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$result)> {
+  let summary = "AIE4 widen bf16 vector -> f32 accumulator, exact";
+  let description = [{
+    Exactly widens `vector<32xbf16>` to `vector<32xf32>` without reading or
+    updating control registers. Lowers to `vconv.fp32.bf16` or the
+    load-fused `vlda.conv.fp32.bf16`.
+  }];
+  let assemblyFormat =
+      "$source attr-dict `:` type($source) `,` type($result)";
+  let hasVerifier = 0;
+}
+
+def AIEVec_AIE4ConvF32BF16Op:
+  AIEVec_Op<"aie4.conv_f32_bf16", []>,
+  Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$source)>,
+  Results<(outs FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$result)> {
+  let summary = "AIE4 narrow f32 accumulator -> bf16 vector, ambient rounding";
+  let description = [{
+    Narrows `vector<32xf32>` to `vector<32xbf16>` using the ambient rounding
+    and saturation modes. Reads `crRnd`, `crFPConvSat`, and `crF2FMask`, and
+    updates `srF2FFlags`. With `crRnd == 0`, rounding is toward negative
+    infinity. The operation does not establish or restore these modes and
+    does not implement the rounding contract of `arith.truncf`.
+
+    Lowers to `vconv.bf16.fp32` or the store-fused `vst.conv.bf16.fp32`.
   }];
   let assemblyFormat =
       "$source attr-dict `:` type($source) `,` type($result)";

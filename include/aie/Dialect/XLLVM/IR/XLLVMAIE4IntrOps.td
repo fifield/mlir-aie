@@ -134,22 +134,12 @@ def MulEwiseFpConfAIE4IntrOp :
 // AIE4 control-register side-effect resources
 //===----------------------------------------------------------------------===//
 //
-// Share resource identities with AIEVec through AIE4CtrlRegResources.h.
-def AIE4_CRSatResource     : Resource<"::xilinx::xllvm::AIE4CRSatResource">;
-def AIE4_CRRndResource     : Resource<"::xilinx::xllvm::AIE4CRRndResource">;
-def AIE4_CRSRSModeResource : Resource<"::xilinx::xllvm::AIE4CRSRSModeResource">;
-def AIE4_SRSOverflowResource :
-    Resource<"::xilinx::xllvm::AIE4SRSOverflowResource">;
-def AIE4_CRVecSatResource  : Resource<"::xilinx::xllvm::AIE4CRVecSatResource">;
-
-// Keep these effects consistent with the corresponding AIEVec operations.
-defvar AIE4_SRSEffects = MemoryEffects<[
-    MemRead<AIE4_CRSatResource>,
-    MemRead<AIE4_CRRndResource>,
-    MemRead<AIE4_CRSRSModeResource>,
-    MemWrite<AIE4_SRSOverflowResource>]>;
+// Share the MAC resource identity with AIEVec through AIE4CtrlRegResources.h.
+def AIE4_CRVecSatResource : Resource<"::xilinx::xllvm::AIE4CRVecSatResource">;
 
 defvar AIE4_MacEffects = MemoryEffects<[MemRead<AIE4_CRVecSatResource>]>;
+
+// SRS omits effect declarations so CSE and LICM treat it conservatively.
 
 //===----------------------------------------------------------------------===//
 // MAC
@@ -211,7 +201,7 @@ def AIE4_SRSSign : I32EnumAttr<"AIE4SRSSign",
 // saturation modes, and writes SRS overflow status.
 def I512V32Acc32SrsAIE4IntrOp :
     AIEVec4_IntrOp<"I512.v32.acc32.srs",
-        [TypeIs<"res", FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>>, AIE4_SRSEffects]>,
+        [TypeIs<"res", FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>>]>,
     Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>:$acc,
                    ConfinedAttr<I32Attr, [IntMinValue<0>, IntMaxValue<31>]>:$shift,
                    AIE4_SRSSign:$sign)> {
@@ -236,6 +226,67 @@ def I512V32Acc32SrsAIE4IntrOp :
     (void) inst;
     $res = inst;
   }];
+}
+
+//===----------------------------------------------------------------------===//
+// UPS
+//===----------------------------------------------------------------------===//
+
+// The `sign` argument selects between `vups.2x ..., upssign0` (unsigned) and
+// `..., upssign1` (signed) -- a separate i32 operand, not a packed field, just
+// like SRS's `sign`. Verified by disassembly: `(v, 0, 1)` emits `upssign1`,
+// `(v, 0, 0)` emits `upssign0`.
+def AIE4_UPSSign_Unsigned : I32EnumAttrCase<"Unsigned", 0, "unsigned">;
+def AIE4_UPSSign_Signed   : I32EnumAttrCase<"Signed",   1, "signed">;
+
+def AIE4_UPSSign : I32EnumAttr<"AIE4UPSSign",
+    "AIE4 UPS signedness (selects the upssign0/upssign1 instruction form)",
+    [AIE4_UPSSign_Unsigned, AIE4_UPSSign_Signed]> {
+  let cppNamespace = "::xilinx::xllvm";
+}
+
+// Widens i16 lanes, then shifts under the ambient UPS and saturation modes.
+// Reads crSat/crUPSMode/upsSign and updates srUPS_of.
+def Acc32V32I512UpsAIE4IntrOp :
+    AIEVec4_IntrOp<"acc32.v32.I512.ups",
+        [TypeIs<"res", FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>>]>,
+    Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>:$src,
+                   ConfinedAttr<I32Attr, [IntMinValue<0>, IntMaxValue<31>]>:$shift,
+                   AIE4_UPSSign:$sign)> {
+  let summary = "AIE4 up-shift i16 vector -> i32 accumulator (vups.2x)";
+  let description = [{
+    `shift` is in 0..31. Automatic integer widening uses only shift zero;
+    explicit nonzero shifts can overflow according to the ambient modes.
+  }];
+
+  let llvmBuilder = [{
+    auto *inst = ::xilinx::xllvm::createAIE4ConfIntrinsicCall(builder,
+                      moduleTranslation, &opInst,
+                      "llvm.aie4.acc32.v32.I512.ups",
+                      ::llvm::ArrayRef<uint32_t>{
+                          (uint32_t) op.getShift(),
+                          (uint32_t) op.getSign()});
+    (void) inst;
+    $res = inst;
+  }];
+}
+
+// Exact bf16 widening has no control-register dependencies.
+def V32Bf16ToV32AccFloatAIE4IntrOp :
+    AIEVec4_IntrOp<"v32bf16.to.v32accfloat",
+        [Pure, TypeIs<"res", FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>>]>,
+    Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$src)> {
+  let summary = "AIE4 widen bf16 vector -> f32 accumulator, exact (vconv.fp32.bf16)";
+}
+
+// Narrowing reads crRnd/crFPConvSat/crF2FMask and updates srF2FFlags.
+// Rounding is toward negative infinity when crRnd == 0; callers supply
+// the ambient modes. This operation does not model arith.truncf semantics.
+def V32AccFloatToV32Bfloat16AIE4IntrOp :
+    AIEVec4_IntrOp<"v32accfloat.to.v32bfloat16",
+        [TypeIs<"res", FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>>]>,
+    Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$src)> {
+  let summary = "AIE4 narrow f32 accumulator -> bf16 vector, ambient rounding (vconv.bf16.fp32)";
 }
 
 //===----------------------------------------------------------------------===//
