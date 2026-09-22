@@ -8,8 +8,6 @@
 // REQUIRES: chess, aietools_aie
 // RUN: not %aiecc --xchesscc --xbridge %s 2>&1 | FileCheck %s --check-prefix=CHESS
 // CHESS: Error: could not find free space for SpaceSymbol x in memory DMb
-// XFAIL: *
-
 // If we use all of the local memory, then linking the AIE executable should
 // fail. The fundamental problem here is that we can stuff things in the
 // executable that aren't visibla at the MLIR level, so the

@@ -104,20 +104,30 @@ module @pinned_channels {
 // -----
 
 module @s2mm_exhausted {
+  // expected-remark@+1 {{could not find a spill-aware allocation with size-first and demand-first packing and bounded local-pool retries; tile placement and buffer packing remain greedy}}
   aie.device(npu3) {
     // expected-error@+1 {{number of input DMA channel exceeded!}}
     %mem = aie.tile(0, 1)
     aie.objectfifo.pool @p(%mem) {depth = 1 : i32} : memref<16xi32> {
       aie.objectfifo.segment @s0 {offset = 0 : i32, size = 16 : i32}
     }
+    // expected-note@+1 {{DMA endpoint @dma0; occupies channel 0}}
     aie.objectfifo.dma_endpoint @dma0(%mem) fills @p
+    // expected-note@+1 {{DMA endpoint @dma1; occupies channel 1}}
     aie.objectfifo.dma_endpoint @dma1(%mem) fills @p
+    // expected-note@+1 {{DMA endpoint @dma2; occupies channel 4}}
     aie.objectfifo.dma_endpoint @dma2(%mem) fills @p
+    // expected-note@+1 {{DMA endpoint @dma3; occupies channel 5}}
     aie.objectfifo.dma_endpoint @dma3(%mem) fills @p
+    // expected-note@+1 {{DMA endpoint @dma4; occupies channel 2}}
     aie.objectfifo.dma_endpoint @dma4(%mem) fills @p
+    // expected-note@+1 {{DMA endpoint @dma5; occupies channel 3}}
     aie.objectfifo.dma_endpoint @dma5(%mem) fills @p
+    // expected-note@+1 {{DMA endpoint @dma6; occupies channel 6}}
     aie.objectfifo.dma_endpoint @dma6(%mem) fills @p
+    // expected-note@+1 {{DMA endpoint @dma7; occupies channel 7}}
     aie.objectfifo.dma_endpoint @dma7(%mem) fills @p
+    // expected-note@+1 {{DMA endpoint @dma8}}
     aie.objectfifo.dma_endpoint @dma8(%mem) fills @p
   }
 }
@@ -125,22 +135,34 @@ module @s2mm_exhausted {
 // -----
 
 module @mm2s_exhausted {
+  // expected-remark@+1 {{could not find a spill-aware allocation with size-first and demand-first packing and bounded local-pool retries; tile placement and buffer packing remain greedy}}
   aie.device(npu3) {
     // expected-error@+1 {{number of output DMA channel exceeded!}}
     %mem = aie.tile(0, 1)
     aie.objectfifo.pool @p(%mem) {depth = 1 : i32} : memref<16xi32> {
       aie.objectfifo.segment @s0 {offset = 0 : i32, size = 16 : i32}
     }
+    // expected-note@+1 {{DMA endpoint @dma0; occupies channel 0}}
     aie.objectfifo.dma_endpoint @dma0(%mem) drains @p
+    // expected-note@+1 {{DMA endpoint @dma1; occupies channel 1}}
     aie.objectfifo.dma_endpoint @dma1(%mem) drains @p
+    // expected-note@+1 {{DMA endpoint @dma2; occupies channel 2}}
     aie.objectfifo.dma_endpoint @dma2(%mem) drains @p
+    // expected-note@+1 {{DMA endpoint @dma3; occupies channel 3}}
     aie.objectfifo.dma_endpoint @dma3(%mem) drains @p
+    // expected-note@+1 {{DMA endpoint @dma4; occupies channel 5}}
     aie.objectfifo.dma_endpoint @dma4(%mem) drains @p
+    // expected-note@+1 {{DMA endpoint @dma5; occupies channel 6}}
     aie.objectfifo.dma_endpoint @dma5(%mem) drains @p
+    // expected-note@+1 {{DMA endpoint @dma6; occupies channel 7}}
     aie.objectfifo.dma_endpoint @dma6(%mem) drains @p
+    // expected-note@+1 {{DMA endpoint @dma7; occupies channel 8}}
     aie.objectfifo.dma_endpoint @dma7(%mem) drains @p
+    // expected-note@+1 {{DMA endpoint @dma8; occupies channel 4}}
     aie.objectfifo.dma_endpoint @dma8(%mem) drains @p
+    // expected-note@+1 {{DMA endpoint @dma9; occupies channel 9}}
     aie.objectfifo.dma_endpoint @dma9(%mem) drains @p
+    // expected-note@+1 {{DMA endpoint @dma10}}
     aie.objectfifo.dma_endpoint @dma10(%mem) drains @p
   }
 }

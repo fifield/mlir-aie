@@ -95,11 +95,11 @@ module {
       %lo = vector.transfer_read %buf_lo[%c0], %c0_i32 {in_bounds = [true]} : memref<16xi32>, vector<16xi32>
       %hi = vector.transfer_read %buf_hi[%c0], %c0_i32 {in_bounds = [true]} : memref<16xi32>, vector<16xi32>
       %z = arith.constant dense<0> : vector<32xi32>
-      %t1 = vector.insert_strided_slice %lo, %z {offsets = [0], strides = [1]} : vector<16xi32> into vector<32xi32>
-      %t2 = vector.insert_strided_slice %hi, %t1 {offsets = [16], strides = [1]} : vector<16xi32> into vector<32xi32>
+      %t1 = vector.insert_strided_slice %lo, %z offsets = [0], strides = [1] : vector<16xi32> into vector<32xi32>
+      %t2 = vector.insert_strided_slice %hi, %t1 offsets = [16], strides = [1] : vector<16xi32> into vector<32xi32>
       vector.transfer_write %t2, %buf_concat[%c0] {in_bounds = [true]} : vector<32xi32>, memref<32xi32>
 
-      %exthi = vector.extract_strided_slice %t2 {offsets = [16], sizes = [16], strides = [1]} : vector<32xi32> to vector<16xi32>
+      %exthi = vector.extract_strided_slice %t2 offsets = [16], sizes = [16], strides = [1] : vector<32xi32> to vector<16xi32>
       vector.transfer_write %exthi, %buf_exthi[%c0] {in_bounds = [true]} : vector<16xi32>, memref<16xi32>
 
       aie.end

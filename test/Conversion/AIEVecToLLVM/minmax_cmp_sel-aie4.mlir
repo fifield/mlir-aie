@@ -15,7 +15,7 @@ func.func @minmax_i8x64_min_signed(%a: vector<64xi8>, %b: vector<64xi8>) -> vect
   // CHECK-SAME: sign = 1 : i32
   // CHECK-SAME: -> !llvm.struct<(vector<64xi8>, vector<2xi32>)>
   // CHECK: llvm.extractvalue %[[R]][0]
-  %0 = aievec.aie4.minmax %a, %b [kind = min, signed = true] : vector<64xi8>
+  %0 = aievec.aie4.minmax %a, %b [kind = <min>, signed = true] : vector<64xi8>
   return %0 : vector<64xi8>
 }
 
@@ -26,7 +26,7 @@ func.func @minmax_i32x16_max_unsigned(%a: vector<16xi32>, %b: vector<16xi32>) ->
   // CHECK-SAME: sign = 0 : i32
   // CHECK-SAME: -> !llvm.struct<(vector<16xi32>, i32)>
   // CHECK: llvm.extractvalue %[[R]][0]
-  %0 = aievec.aie4.minmax %a, %b [kind = max, signed = false] : vector<16xi32>
+  %0 = aievec.aie4.minmax %a, %b [kind = <max>, signed = false] : vector<16xi32>
   return %0 : vector<16xi32>
 }
 
@@ -44,7 +44,7 @@ func.func @cmp_i16x32_lt_signed(%a: vector<32xi16>, %b: vector<32xi16>) -> ui32 
   // Native i32 mask carrier: no bitcast needed before the result is returned.
   // CHECK-NOT: llvm.bitcast
   // CHECK: builtin.unrealized_conversion_cast %[[MASK]]
-  %0 = aievec.aie4.cmp %a, %b [pred = lt, signed = true] : vector<32xi16>, ui32
+  %0 = aievec.aie4.cmp %a, %b [pred = <lt>, signed = true] : vector<32xi16>, ui32
   return %0 : ui32
 }
 
@@ -57,7 +57,7 @@ func.func @cmp_i8x64_ge_unsigned(%a: vector<64xi8>, %b: vector<64xi8>) -> ui64 {
   // CHECK: %[[MASK:.*]] = llvm.extractvalue %[[R]][1]
   // 64-bit register-pair mask carrier: must be bitcast <2 x i32> -> i64.
   // CHECK: llvm.bitcast %[[MASK]] : vector<2xi32> to i64
-  %0 = aievec.aie4.cmp %a, %b [pred = ge, signed = false] : vector<64xi8>, ui64
+  %0 = aievec.aie4.cmp %a, %b [pred = <ge>, signed = false] : vector<64xi8>, ui64
   return %0 : ui64
 }
 

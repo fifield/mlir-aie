@@ -13,7 +13,7 @@
 
 // CHECK-LABEL: func.func @unaligned_read(
 // CHECK: vector.transfer_read %{{.*}} : memref<64xi32>, vector<32xi32>
-// CHECK: vector.extract_strided_slice %{{.*}} {offsets = [3], sizes = [16], strides = [1]} : vector<32xi32> to vector<16xi32>
+// CHECK: vector.extract_strided_slice %{{.*}} offsets = [3], sizes = [16], strides = [1] : vector<32xi32> to vector<16xi32>
 func.func @unaligned_read(%mem: memref<64xi32>) -> vector<16xi32> {
   %c0 = arith.constant 0 : i32
   %c3 = arith.constant 3 : index

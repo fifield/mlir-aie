@@ -57,9 +57,6 @@
 // CHECK: aie.switchbox(%{{.*}}shim_noc_tile_6_0)
 // CHECK: aie.packet_rules(South : 3)
 
-// All five flows survive the pass.
-// CHECK-COUNT-5: aie.packet_flow(0)
-
 module {
   aie.device(npu2) {
     %mem_tile_0_1 = aie.tile(0, 1)

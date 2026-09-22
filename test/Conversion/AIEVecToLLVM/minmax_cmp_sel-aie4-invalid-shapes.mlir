@@ -7,7 +7,7 @@
 
 func.func @minmax_scalable(%a: vector<[16]xi32>, %m: ui32) {
   // expected-error @+1 {{operand #0 must be fixed-length vector}}
-  %r = "aievec.aie4.minmax"(%a, %a) {kind = #aievec<aie4_minmax_kind min>, isSigned = true} : (vector<[16]xi32>, vector<[16]xi32>) -> vector<[16]xi32>
+  %r = "aievec.aie4.minmax"(%a, %a) {kind = #aievec.aie4_minmax_kind<min>, isSigned = true} : (vector<[16]xi32>, vector<[16]xi32>) -> vector<[16]xi32>
   return
 }
 
@@ -15,7 +15,7 @@ func.func @minmax_scalable(%a: vector<[16]xi32>, %m: ui32) {
 
 func.func @cmp_scalable(%a: vector<[16]xi32>, %m: ui32) {
   // expected-error @+1 {{operand #0 must be fixed-length vector}}
-  %r = "aievec.aie4.cmp"(%a, %a) {predicate = #aievec<aie4_cmp_predicate lt>, isSigned = true} : (vector<[16]xi32>, vector<[16]xi32>) -> ui32
+  %r = "aievec.aie4.cmp"(%a, %a) {predicate = #aievec.aie4_cmp_predicate<lt>, isSigned = true} : (vector<[16]xi32>, vector<[16]xi32>) -> ui32
   return
 }
 
@@ -47,7 +47,7 @@ func.func @intrinsic_vadd32_mask_512_scalable(%a: vector<[16]xi32>, %m: i32) {
 
 func.func @minmax_rank_two(%a: vector<4x4xi32>, %m: ui32) {
   // expected-error @+1 {{operand #0 must be fixed-length vector}}
-  %r = "aievec.aie4.minmax"(%a, %a) {kind = #aievec<aie4_minmax_kind min>, isSigned = true} : (vector<4x4xi32>, vector<4x4xi32>) -> vector<4x4xi32>
+  %r = "aievec.aie4.minmax"(%a, %a) {kind = #aievec.aie4_minmax_kind<min>, isSigned = true} : (vector<4x4xi32>, vector<4x4xi32>) -> vector<4x4xi32>
   return
 }
 
@@ -55,7 +55,7 @@ func.func @minmax_rank_two(%a: vector<4x4xi32>, %m: ui32) {
 
 func.func @cmp_rank_two(%a: vector<4x4xi32>, %m: ui32) {
   // expected-error @+1 {{operand #0 must be fixed-length vector}}
-  %r = "aievec.aie4.cmp"(%a, %a) {predicate = #aievec<aie4_cmp_predicate lt>, isSigned = true} : (vector<4x4xi32>, vector<4x4xi32>) -> ui32
+  %r = "aievec.aie4.cmp"(%a, %a) {predicate = #aievec.aie4_cmp_predicate<lt>, isSigned = true} : (vector<4x4xi32>, vector<4x4xi32>) -> ui32
   return
 }
 

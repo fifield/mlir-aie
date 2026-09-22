@@ -11,21 +11,21 @@
 
 // CHECK-LABEL: @minsi_i8x64
 func.func @minsi_i8x64(%a: vector<64xi8>, %b: vector<64xi8>) -> vector<64xi8> {
-  // CHECK: aievec.aie4.minmax %{{.*}}, %{{.*}}[kind = min, signed = true] : vector<64xi8>
+  // CHECK: aievec.aie4.minmax %{{.*}}, %{{.*}}[kind = <min>, signed = true] : vector<64xi8>
   %0 = arith.minsi %a, %b : vector<64xi8>
   return %0 : vector<64xi8>
 }
 
 // CHECK-LABEL: @maxui_i32x16
 func.func @maxui_i32x16(%a: vector<16xi32>, %b: vector<16xi32>) -> vector<16xi32> {
-  // CHECK: aievec.aie4.minmax %{{.*}}, %{{.*}}[kind = max, signed = false] : vector<16xi32>
+  // CHECK: aievec.aie4.minmax %{{.*}}, %{{.*}}[kind = <max>, signed = false] : vector<16xi32>
   %0 = arith.maxui %a, %b : vector<16xi32>
   return %0 : vector<16xi32>
 }
 
 // CHECK-LABEL: @minui_i16x64
 func.func @minui_i16x64(%a: vector<64xi16>, %b: vector<64xi16>) -> vector<64xi16> {
-  // CHECK: aievec.aie4.minmax %{{.*}}, %{{.*}}[kind = min, signed = false] : vector<64xi16>
+  // CHECK: aievec.aie4.minmax %{{.*}}, %{{.*}}[kind = <min>, signed = false] : vector<64xi16>
   %0 = arith.minui %a, %b : vector<64xi16>
   return %0 : vector<64xi16>
 }
@@ -45,7 +45,7 @@ func.func @minsi_out_of_scope(%a: vector<8xi32>, %b: vector<8xi32>) -> vector<8x
 
 // CHECK-LABEL: @cmpi_slt_i16x32
 func.func @cmpi_slt_i16x32(%a: vector<32xi16>, %b: vector<32xi16>) -> vector<32xi1> {
-  // CHECK: %[[C:.*]] = aievec.aie4.cmp %{{.*}}, %{{.*}}[pred = lt, signed = true] : vector<32xi16>, ui32
+  // CHECK: %[[C:.*]] = aievec.aie4.cmp %{{.*}}, %{{.*}}[pred = <lt>, signed = true] : vector<32xi16>, ui32
   // CHECK: %[[S:.*]] = builtin.unrealized_conversion_cast %[[C]] : ui32 to i32
   // CHECK: %[[V:.*]] = vector.broadcast %[[S]] : i32 to vector<1xi32>
   // CHECK: vector.bitcast %[[V]] : vector<1xi32> to vector<32xi1>
@@ -57,7 +57,7 @@ func.func @cmpi_slt_i16x32(%a: vector<32xi16>, %b: vector<32xi16>) -> vector<32x
 // CHECK-LABEL: @cmpi_sgt_i16x32
 // CHECK-SAME: %[[A:.*]]: vector<32xi16>, %[[B:.*]]: vector<32xi16>
 func.func @cmpi_sgt_i16x32(%a: vector<32xi16>, %b: vector<32xi16>) -> vector<32xi1> {
-  // CHECK: aievec.aie4.cmp %[[B]], %[[A]][pred = lt, signed = true] : vector<32xi16>, ui32
+  // CHECK: aievec.aie4.cmp %[[B]], %[[A]][pred = <lt>, signed = true] : vector<32xi16>, ui32
   %0 = arith.cmpi sgt, %a, %b : vector<32xi16>
   return %0 : vector<32xi1>
 }
@@ -66,7 +66,7 @@ func.func @cmpi_sgt_i16x32(%a: vector<32xi16>, %b: vector<32xi16>) -> vector<32x
 // CHECK-LABEL: @cmpi_ule_i32x16
 // CHECK-SAME: %[[A:.*]]: vector<16xi32>, %[[B:.*]]: vector<16xi32>
 func.func @cmpi_ule_i32x16(%a: vector<16xi32>, %b: vector<16xi32>) -> vector<16xi1> {
-  // CHECK: aievec.aie4.cmp %[[B]], %[[A]][pred = ge, signed = false] : vector<16xi32>, ui32
+  // CHECK: aievec.aie4.cmp %[[B]], %[[A]][pred = <ge>, signed = false] : vector<16xi32>, ui32
   %0 = arith.cmpi ule, %a, %b : vector<16xi32>
   return %0 : vector<16xi1>
 }
