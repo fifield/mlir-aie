@@ -1,0 +1,21 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// Compile and run an f32 MAC accumulation loop through Vector/Arith ->
+// AIEVec -> XLLVM -> Peano -> NPU3.
+//
+// REQUIRES: ryzen_ai_npu3, peano
+//
+// RUN: %run_on_npu3% python %S/macf32.py -o macf32.mlir
+// RUN: %aiecc --enable-aie4-vectorization --get-full-elf --full-elf-name=macf32.elf macf32.mlir
+//
+// Check instruction selection: an unknown intrinsic can compile as an external call.
+// RUN: llvm-objdump -dr macf32.mlir.prj/elfs_main_core_0_2/elfs_main_core_0_2.elf > dis.txt
+//
+// f32 MAC (conf 26).
+// RUN: FileCheck %s --check-prefix=VMAC --input-file=dis.txt
+// VMAC: vmac.f
+//
+// Small integer inputs keep products and sums exact; test.cpp compares exactly.
+// RUN: clang %S/test.cpp -o test.exe -std=c++17 -Wall %xrt_flags -lrt -lstdc++ %test_utils_flags
+// RUN: %run_on_npu3% ./test.exe

@@ -1,0 +1,25 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// Compile and run bf16 -> f32 MUL/MAC through Vector/Arith -> AIEVec ->
+// XLLVM -> Peano -> NPU3.
+//
+// REQUIRES: ryzen_ai_npu3, peano
+//
+// RUN: %run_on_npu3% python %S/macf_bf16.py -o macf_bf16.mlir
+// RUN: %aiecc --enable-aie4-vectorization --get-full-elf --full-elf-name=macf_bf16.elf macf_bf16.mlir
+//
+// Check instruction selection: an unknown intrinsic can compile as an external call.
+// RUN: llvm-objdump -dr macf_bf16.mlir.prj/elfs_main_core_0_2/elfs_main_core_0_2.elf > dis.txt
+//
+// The plain MUL (config 107).
+// RUN: FileCheck %s --check-prefix=VMUL --input-file=dis.txt
+// VMUL: vmul.f
+//
+// The accumulating MAC (config 106).
+// RUN: FileCheck %s --check-prefix=VMAC --input-file=dis.txt
+// VMAC: vmac.f
+//
+// Small integer inputs keep products and sums exact; test.cpp compares exactly.
+// RUN: clang %S/test.cpp -o test.exe -std=c++17 -Wall %xrt_flags -lrt -lstdc++ %test_utils_flags
+// RUN: %run_on_npu3% ./test.exe

@@ -76,6 +76,12 @@ uint32_t encodeAIE4MacConf(bool zeroAcc, AIE4AMode amode, AIE4BMode bmode,
          (static_cast<uint32_t>(lhsSign) << 9);
 }
 
+uint32_t encodeAIE4Bf16FpConf(bool zeroAcc, AIE4AMode amode, AIE4BMode bmode,
+                              bool xIsBf16, bool yIsBf16) {
+  return encodeAIE4MulConf(zeroAcc, amode, bmode) |
+         (xIsBf16 ? 1u << 5 : 0u) | (yIsBf16 ? 1u << 6 : 0u);
+}
+
 llvm::CallInst *createAIE4ConfIntrinsicCall(
     llvm::IRBuilderBase &builder, LLVM::ModuleTranslation &moduleTranslation,
     Operation *intrOp, llvm::StringRef intrinsicName, uint32_t conf) {

@@ -89,6 +89,14 @@ uint32_t encodeAIE4MulConf(bool zeroAcc, AIE4AMode amode, AIE4BMode bmode);
 uint32_t encodeAIE4MacConf(bool zeroAcc, AIE4AMode amode, AIE4BMode bmode,
                            AIE4OperandSign lhsSign, AIE4OperandSign rhsSign);
 
+/// Pack zeroAcc/amode/bmode as in encodeAIE4MulConf, plus the bf16 format bits:
+/// bit 5 for the X buffer, bit 6 for the Y buffer (clear selects fp16).
+/// Current callers set both bits. Mixed bf16/fp16 forms require verifying
+/// which intrinsic argument maps to each buffer.
+/// Float/Mode16x16 with both bits set encodes MUL as 107 and MAC as 106.
+uint32_t encodeAIE4Bf16FpConf(bool zeroAcc, AIE4AMode amode, AIE4BMode bmode,
+                              bool xIsBf16, bool yIsBf16);
+
 /// Like `createExternalLLVMIntrinsicCall`, but appends `conf` as a trailing
 /// i32 argument. AIE4 config words live in MLIR *attributes* (so their fields
 /// can be range-verified) rather than in operands, so they are not picked up

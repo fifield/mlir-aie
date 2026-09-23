@@ -92,6 +92,64 @@ struct AIE4MacEwiseI16I32OpConversion
   }
 };
 
+// f32 MAC: conf 26 (0x1a), the f32 MUL configuration with zeroAcc cleared.
+struct AIE4MacEwiseF32OpConversion
+    : mlir::ConvertOpToLLVMPattern<aievec::AIE4MacEwiseF32Op> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(aievec::AIE4MacEwiseF32Op op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    rewriter.replaceOpWithNewOp<xllvm::MacEwiseFpConfAIE4IntrOp>(
+        op, op.getResult().getType(), adaptor.getLhs(), adaptor.getRhs(),
+        adaptor.getAcc(),
+        /*zeroAcc=*/false,
+        /*amode=*/xllvm::AIE4AMode::Float,
+        /*bmode=*/xllvm::AIE4BMode::Mode32x32);
+    return success();
+  }
+};
+
+// bf16 -> f32 MUL: conf 107 (0x6b). Float/Mode16x16 selects the 32-lane
+// form; both operand format bits select bf16.
+struct AIE4MulEwiseBf16F32OpConversion
+    : mlir::ConvertOpToLLVMPattern<aievec::AIE4MulEwiseBf16F32Op> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(aievec::AIE4MulEwiseBf16F32Op op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    rewriter.replaceOpWithNewOp<xllvm::MulEwiseBf16ConfAIE4IntrOp>(
+        op, op.getResult().getType(), adaptor.getLhs(), adaptor.getRhs(),
+        /*zeroAcc=*/true,
+        /*amode=*/xllvm::AIE4AMode::Float,
+        /*bmode=*/xllvm::AIE4BMode::Mode16x16,
+        /*xIsBf16=*/true,
+        /*yIsBf16=*/true);
+    return success();
+  }
+};
+
+// bf16 -> f32 MAC: conf 106 (0x6a), the MUL configuration with zeroAcc cleared.
+struct AIE4MacEwiseBf16F32OpConversion
+    : mlir::ConvertOpToLLVMPattern<aievec::AIE4MacEwiseBf16F32Op> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(aievec::AIE4MacEwiseBf16F32Op op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    rewriter.replaceOpWithNewOp<xllvm::MacEwiseBf16ConfAIE4IntrOp>(
+        op, op.getResult().getType(), adaptor.getLhs(), adaptor.getRhs(),
+        adaptor.getAcc(),
+        /*zeroAcc=*/false,
+        /*amode=*/xllvm::AIE4AMode::Float,
+        /*bmode=*/xllvm::AIE4BMode::Mode16x16,
+        /*xIsBf16=*/true,
+        /*yIsBf16=*/true);
+    return success();
+  }
+};
+
 // aievec.aie4.srs_i32_i16 -> llvm.aie4.I512.v32.acc32.srs
 //
 // XLLVM materializes the verified shift and sign attributes as separate
@@ -358,7 +416,9 @@ struct AIE4SelOpConversion
 
 void populateAIEVecToLLVMAIE4ConversionPatterns(
     mlir::LLVMTypeConverter &converter, mlir::RewritePatternSet &patterns) {
-  patterns.add<AIE4MulEwiseF32OpConversion, AIE4MacEwiseI16I32OpConversion,
+  patterns.add<AIE4MulEwiseF32OpConversion, AIE4MacEwiseF32OpConversion,
+               AIE4MacEwiseI16I32OpConversion,
+               AIE4MulEwiseBf16F32OpConversion, AIE4MacEwiseBf16F32OpConversion,
                AIE4SRSI32I16OpConversion, AIE4UPSI16I32OpConversion,
                AIE4ConvBF16F32OpConversion, AIE4ConvF32BF16OpConversion,
                AIE4MinMaxOpConversion, AIE4CmpOpConversion,

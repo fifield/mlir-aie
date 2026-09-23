@@ -21,6 +21,7 @@
 
 #include "aie/Dialect/AIEVec/Utils/Utils.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/EmitC/IR/EmitC.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Math/IR/Math.h"
@@ -5582,6 +5583,98 @@ struct FlattenElementwiseVectorToRank1Pattern : OpConversionPattern<OpTy> {
   }
 };
 
+//===----------------------------------------------------------------------===//
+// AIE4
+//===----------------------------------------------------------------------===//
+
+// AIE4 f32 and bf16 MUL/MAC matching. Generic LLVM lowering cannot legalize
+// fmul on <32 x float>, so surviving products require native lowering.
+static bool isVecF32x32(Type ty) {
+  auto vecTy = dyn_cast<VectorType>(ty);
+  return vecTy && !vecTy.isScalable() && vecTy.getRank() == 1 &&
+         vecTy.getShape()[0] == 32 && vecTy.getElementType().isF32();
+}
+static bool isVecBf16x32(Type ty) {
+  auto vecTy = dyn_cast<VectorType>(ty);
+  return vecTy && !vecTy.isScalable() && vecTy.getRank() == 1 &&
+         vecTy.getShape()[0] == 32 && vecTy.getElementType().isBF16();
+}
+
+static bool hasContract(arith::FastMathFlagsAttr fmf) {
+  return fmf && arith::bitEnumContainsAll(fmf.getValue(),
+                                           arith::FastMathFlags::contract);
+}
+
+/// Return the bf16 source of a fixed vector<32xbf16> -> vector<32xf32> extf.
+static Value matchExtFFromBf16(Value v) {
+  auto extOp = v.getDefiningOp<arith::ExtFOp>();
+  if (!extOp || !isVecF32x32(extOp.getType()) ||
+      !isVecBf16x32(extOp.getIn().getType()))
+    return nullptr;
+  return extOp.getIn();
+}
+
+/// Match a widened bf16 product and return its bf16 operands. Widening is
+/// exact and native multiplication retains f32 product rounding, so this
+/// replacement needs no contraction permission.
+static bool matchBf16Product(arith::MulFOp mulOp, Value &a, Value &b) {
+  if (!isVecF32x32(mulOp.getType()))
+    return false;
+  a = matchExtFFromBf16(mulOp.getLhs());
+  b = matchExtFFromBf16(mulOp.getRhs());
+  return a && b;
+}
+
+struct FloatMacMatch {
+  arith::MulFOp product;
+  Value acc;
+  Value lhs;
+  Value rhs;
+  bool isBf16;
+};
+
+/// Select the product of a contract-enabled f32 or widened-bf16 MAC.
+/// Both the multiply and add must permit contraction, since fusion removes
+/// the intermediate rounding of the product.
+/// Legality and both rewrites must agree on this choice when both add operands
+/// are products. Prefer the RHS, irrespective of the product's element type.
+static std::optional<FloatMacMatch> matchFloatMacChain(arith::AddFOp addOp) {
+  if (!isVecF32x32(addOp.getType()) || !hasContract(addOp.getFastmathAttr()))
+    return std::nullopt;
+  auto tryOperand = [&](Value mulSide,
+                        Value accSide) -> std::optional<FloatMacMatch> {
+    auto mulOp = mulSide.getDefiningOp<arith::MulFOp>();
+    if (!mulOp || !isVecF32x32(mulOp.getType()) ||
+        !hasContract(mulOp.getFastmathAttr()))
+      return std::nullopt;
+    Value a, b;
+    if (matchBf16Product(mulOp, a, b))
+      return FloatMacMatch{mulOp, accSide, a, b, true};
+    return FloatMacMatch{mulOp, accSide, mulOp.getLhs(), mulOp.getRhs(), false};
+  };
+  if (auto match = tryOperand(addOp.getRhs(), addOp.getLhs()))
+    return match;
+  return tryOperand(addOp.getLhs(), addOp.getRhs());
+}
+
+/// Defer a multiply only if every use disappears through MAC fusion. Native
+/// float multiplies are not Pure, so eagerly lowering a product that fusion
+/// eliminates would leave an unnecessary, non-eliminable instruction.
+/// Conversely, a surviving product must be lowered now: dialect conversion does
+/// not revisit operations it has already accepted as legal.
+static bool feedsFusableFloatMacChain(arith::MulFOp mulOp) {
+  if (mulOp.getResult().use_empty())
+    return false;
+  return llvm::all_of(mulOp.getResult().getUsers(), [&](Operation *user) {
+    auto addOp = dyn_cast<arith::AddFOp>(user);
+    if (!addOp)
+      return false;
+    auto match = matchFloatMacChain(addOp);
+    // For addf %m, %m, fusion still needs %m as its accumulator.
+    return match && match->product == mulOp && match->acc != mulOp.getResult();
+  });
+}
+
 struct ConvertMulFToAIE4MulEwiseF32Pattern
     : OpConversionPattern<arith::MulFOp> {
   using OpConversionPattern::OpConversionPattern;
@@ -5595,8 +5688,70 @@ struct ConvertMulFToAIE4MulEwiseF32Pattern
         vecTy.getShape()[0] != 32)
       return failure();
 
+    // Let the bf16 pattern use the operands before widening.
+    Value a, b;
+    if (matchBf16Product(mulOp, a, b))
+      return failure();
+
     rewriter.replaceOpWithNewOp<aievec::AIE4MulEwiseF32Op>(
         mulOp, vecTy, adaptor.getLhs(), adaptor.getRhs());
+    return success();
+  }
+};
+
+// arith.mulf(extf(a: bf16), extf(b: bf16)) : vector<32xf32>
+//     -> aievec.aie4.mul_ewise_bf16_f32
+struct ConvertMulFToAIE4MulEwiseBf16Pattern
+    : OpConversionPattern<arith::MulFOp> {
+  using OpConversionPattern::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(arith::MulFOp mulOp, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    Value a, b;
+    if (!matchBf16Product(mulOp, a, b))
+      return failure();
+
+    rewriter.replaceOpWithNewOp<aievec::AIE4MulEwiseBf16F32Op>(
+        mulOp, mulOp.getType(), a, b);
+    return success();
+  }
+};
+
+// arith.addf(acc, arith.mulf(a, b)) : vector<32xf32>, contract/fast on both
+//     -> aievec.aie4.mac_ewise_f32
+struct ConvertMacFToAIE4MacEwiseF32Pattern
+    : OpConversionPattern<arith::AddFOp> {
+  using OpConversionPattern::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(arith::AddFOp addOp, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto match = matchFloatMacChain(addOp);
+    if (!match || match->isBf16)
+      return failure();
+
+    rewriter.replaceOpWithNewOp<aievec::AIE4MacEwiseF32Op>(
+        addOp, addOp.getType(), match->lhs, match->rhs, match->acc);
+    return success();
+  }
+};
+
+// arith.addf(acc, arith.mulf(extf(a: bf16), extf(b: bf16))) : vector<32xf32>,
+// contract/fast on both -> aievec.aie4.mac_ewise_bf16_f32
+struct ConvertMacFToAIE4MacEwiseBf16Pattern
+    : OpConversionPattern<arith::AddFOp> {
+  using OpConversionPattern::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(arith::AddFOp addOp, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto match = matchFloatMacChain(addOp);
+    if (!match || !match->isBf16)
+      return failure();
+
+    rewriter.replaceOpWithNewOp<aievec::AIE4MacEwiseBf16F32Op>(
+        addOp, addOp.getType(), match->lhs, match->rhs, match->acc);
     return success();
   }
 };
@@ -6037,7 +6192,10 @@ struct LowerAIE4SelectOp : OpConversionPattern<arith::SelectOp> {
 
 static void populateAIEVecV4ConversionPatterns(RewritePatternSet &patterns) {
   patterns
-      .add<ConvertMulFToAIE4MulEwiseF32Pattern, ConvertIntMacToAIE4MacPattern,
+      .add<ConvertMulFToAIE4MulEwiseF32Pattern,
+           ConvertMulFToAIE4MulEwiseBf16Pattern,
+           ConvertMacFToAIE4MacEwiseF32Pattern,
+           ConvertMacFToAIE4MacEwiseBf16Pattern, ConvertIntMacToAIE4MacPattern,
            ConvertExtSIToAIE4UPSPattern, ConvertExtUIToAIE4UPSPattern,
            ConvertExtFToAIE4ConvPattern,
            LowerAIE4MinSIOp, LowerAIE4MaxSIOp, LowerAIE4MinUIOp,
@@ -6063,8 +6221,11 @@ static void configureAIEVecV4Legalizations(ConversionTarget &target) {
   // other arith.mulf stays legal and falls through to the generic path.
   target.addDynamicallyLegalOp<arith::MulFOp>([](arith::MulFOp mulOp) {
     auto vecTy = dyn_cast<VectorType>(mulOp.getType());
-    return !vecTy || vecTy.isScalable() || vecTy.getRank() != 1 ||
-           !vecTy.getElementType().isF32() || vecTy.getShape()[0] != 32;
+    if (!vecTy || vecTy.isScalable() || vecTy.getRank() != 1 ||
+        !vecTy.getElementType().isF32() || vecTy.getShape()[0] != 32)
+      return true;
+    // Defer only products whose uses all disappear through MAC fusion.
+    return feedsFusableFloatMacChain(mulOp);
   });
 
   // Use the same predicate as the rewrite so only supported MAC roots are illegal.
@@ -6093,11 +6254,21 @@ static void configureAIEVecV4Legalizations(ConversionTarget &target) {
   target.addLegalOp<arith::TruncFOp>();
 
   // Let the f32 arithmetic between bf16 conversions reach generic lowering.
-  target.addDynamicallyLegalOp<arith::AddFOp, arith::SubFOp>([](Operation *op) {
-    auto vecTy = dyn_cast<VectorType>(op->getResultTypes()[0]);
+  target.addDynamicallyLegalOp<arith::SubFOp>([](arith::SubFOp op) {
+    auto vecTy = dyn_cast<VectorType>(op.getType());
     return !vecTy || (!vecTy.isScalable() && vecTy.getRank() == 1 &&
                       vecTy.getShape()[0] == 32 &&
                       vecTy.getElementType().isF32());
+  });
+  // Fuse matching MAC roots; ordinary scalar and fixed 32xf32 adds stay legal.
+  target.addDynamicallyLegalOp<arith::AddFOp>([](arith::AddFOp op) {
+    auto vecTy = dyn_cast<VectorType>(op.getType());
+    if (!vecTy)
+      return true;
+    if (vecTy.isScalable() || vecTy.getRank() != 1 ||
+        vecTy.getShape()[0] != 32 || !vecTy.getElementType().isF32())
+      return false;
+    return !matchFloatMacChain(op);
   });
 
   // Require native lowering only for supported integer vector shapes.

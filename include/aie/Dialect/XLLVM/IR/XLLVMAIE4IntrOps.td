@@ -180,6 +180,97 @@ def MacEwiseIntConfAIE4IntrOp :
   }];
 }
 
+// llvm.aie4.I1024.I1024.ACC1024.fp.mac.ewise.conf
+//     <32 x float> (<32 x float>, <32 x float>, <32 x float>, i32)
+//
+// Fused f32 MAC; LLVM argument order is (lhs, rhs, acc, conf).
+// The float MUL/MAC intrinsics read crFPVMask/crVecRnd and update srFPVFlags,
+// so none of these operations is Pure.
+def MacEwiseFpConfAIE4IntrOp :
+    AIEVec4_IntrOp<"I1024.I1024.ACC1024.fp.mac.ewise.conf",
+        [TypeIs<"res", FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>>]>,
+    Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$lhs,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$rhs,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$acc,
+                   UnitAttr:$zeroAcc,
+                   AIE4_AMode:$amode,
+                   AIE4_BMode:$bmode)> {
+  let summary = "AIE4 elementwise f32 vector multiply-accumulate (vmac.f)";
+
+  let llvmBuilder = [{
+    auto *inst = ::xilinx::xllvm::createAIE4ConfIntrinsicCall(builder,
+                      moduleTranslation, &opInst,
+                      "llvm.aie4.I1024.I1024.ACC1024.fp.mac.ewise.conf",
+                      ::xilinx::xllvm::encodeAIE4MulConf(
+                          op.getZeroAcc(), op.getAmode(), op.getBmode()));
+    (void) inst;
+    $res = inst;
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// bf16 x bf16 -> f32 accumulator MUL/MAC
+//===----------------------------------------------------------------------===//
+//
+// This 32-lane form uses bf16 inputs and an f32 result. The generic bf16
+// multiply uses a separate 64-lane form with a bf16 result.
+//
+// llvm.aie4.bf16.I512.bf16.I512.ACC1024.fp.mul.ewise.conf
+//     <32 x float> (<32 x bfloat>, <32 x bfloat>, i32)
+def MulEwiseBf16ConfAIE4IntrOp :
+    AIEVec4_IntrOp<"bf16.I512.bf16.I512.ACC1024.fp.mul.ewise.conf",
+        [TypeIs<"res", FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>>]>,
+    Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$lhs,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$rhs,
+                   UnitAttr:$zeroAcc,
+                   AIE4_AMode:$amode,
+                   AIE4_BMode:$bmode,
+                   UnitAttr:$xIsBf16,
+                   UnitAttr:$yIsBf16)> {
+  let summary = "AIE4 elementwise bf16 x bf16 -> f32 vector multiply (vmul.f)";
+  let description = [{
+    The bf16 operands use 512-bit `x` registers; the f32 result uses a
+    1024-bit `y` accumulator.
+  }];
+  let llvmBuilder = [{
+    auto *inst = ::xilinx::xllvm::createAIE4ConfIntrinsicCall(builder,
+                      moduleTranslation, &opInst,
+                      "llvm.aie4.bf16.I512.bf16.I512.ACC1024.fp.mul.ewise.conf",
+                      ::xilinx::xllvm::encodeAIE4Bf16FpConf(
+                          op.getZeroAcc(), op.getAmode(), op.getBmode(),
+                          op.getXIsBf16(), op.getYIsBf16()));
+    (void) inst;
+    $res = inst;
+  }];
+}
+
+// llvm.aie4.bf16.I512.bf16.I512.ACC1024.fp.mac.ewise.conf
+//     <32 x float> (<32 x bfloat>, <32 x bfloat>, <32 x float>, i32)
+def MacEwiseBf16ConfAIE4IntrOp :
+    AIEVec4_IntrOp<"bf16.I512.bf16.I512.ACC1024.fp.mac.ewise.conf",
+        [TypeIs<"res", FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>>]>,
+    Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$lhs,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$rhs,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$acc,
+                   UnitAttr:$zeroAcc,
+                   AIE4_AMode:$amode,
+                   AIE4_BMode:$bmode,
+                   UnitAttr:$xIsBf16,
+                   UnitAttr:$yIsBf16)> {
+  let summary = "AIE4 elementwise bf16 x bf16 -> f32 vector MAC (vmac.f)";
+
+  let llvmBuilder = [{
+    auto *inst = ::xilinx::xllvm::createAIE4ConfIntrinsicCall(builder,
+                      moduleTranslation, &opInst,
+                      "llvm.aie4.bf16.I512.bf16.I512.ACC1024.fp.mac.ewise.conf",
+                      ::xilinx::xllvm::encodeAIE4Bf16FpConf(
+                          op.getZeroAcc(), op.getAmode(), op.getBmode(),
+                          op.getXIsBf16(), op.getYIsBf16()));
+    (void) inst;
+    $res = inst;
+  }];
+}
+
 //===----------------------------------------------------------------------===//
 // SRS
 //===----------------------------------------------------------------------===//
