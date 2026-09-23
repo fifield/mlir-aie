@@ -110,7 +110,7 @@ jobs:
             -DAIE_ENABLE_XRT_PYTHON_BINDINGS=ON \
             -DAIE_INCLUDE_INTEGRATION_TESTS=OFF
 
-          ninja install
+          ninja -j4 install
           popd
 
       - name: Run XRT NPU3 tests
@@ -132,7 +132,7 @@ jobs:
 
           pushd build
           export LIT_OPTS="-sv --time-tests -j4 --timeout 600 --show-unsupported --show-pass --order=random"
-          ninja check-aie-cpp
-          ninja check-aie
-          ninja check-reference-designs
+          ninja -j4 check-aie-cpp
+          ninja -j4 check-aie
+          ninja -j4 check-reference-designs
           popd
