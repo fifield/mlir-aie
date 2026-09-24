@@ -11,7 +11,6 @@ Nonzero capture data is not evidence of a valid trace packet. An invalid first
 header used to leave the packet location empty, and the next payload word then
 crashed with KeyError: ''.
 """
-
 import pytest
 from aie.utils.trace.utils import trace_pkts_de_interleave
 
