@@ -6190,6 +6190,93 @@ struct LowerAIE4SelectOp : OpConversionPattern<arith::SelectOp> {
   }
 };
 
+//===----------------------------------------------------------------------===//
+// AIE4 vector reductions
+//===----------------------------------------------------------------------===//
+//
+// Only fixed 32-lane signed min/max, floating minimum/maximum, and
+// reassociable f32 add map to native reductions. Integer add wraps in MLIR
+// but saturates on AIE4; ordered f32 add may round differently on AIE4.
+struct LowerAIE4VectorReductionOp : OpConversionPattern<vector::ReductionOp> {
+  using OpConversionPattern::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(vector::ReductionOp srcOp, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    // Dialect conversion hides pattern-emitted errors; warnings retain the
+    // specific refusal reason alongside its legalization error.
+    auto vecTy = dyn_cast<VectorType>(srcOp.getVector().getType());
+    if (!vecTy || vecTy.isScalable() || vecTy.getRank() != 1) {
+      srcOp.emitWarning("AIE4: only fixed 1-D vector.reduction is supported");
+      return failure();
+    }
+
+    Type elemTy = vecTy.getElementType();
+    if (!elemTy.isInteger(32) && !elemTy.isF32()) {
+      srcOp.emitWarning()
+          << "AIE4: vector.reduction only supports i32/f32 elements, not "
+          << elemTy;
+      return failure();
+    }
+
+    if (int64_t lanes = vecTy.getShape()[0]; lanes != 32) {
+      srcOp.emitWarning()
+          << "AIE4: vector.reduction requires a 1024-bit (32-lane) "
+             "vector; no reduce instruction exists at "
+          << (lanes * elemTy.getIntOrFloatBitWidth())
+          << "-bit width (in particular, there is no 512-bit reduce "
+             "instruction at all)";
+      return failure();
+    }
+
+    aievec::AIE4ReduceKind kind;
+    switch (srcOp.getKind()) {
+    case vector::CombiningKind::ADD:
+      kind = aievec::AIE4ReduceKind::Add;
+      break;
+    case vector::CombiningKind::MINSI:
+      kind = aievec::AIE4ReduceKind::Min;
+      break;
+    case vector::CombiningKind::MAXSI:
+      kind = aievec::AIE4ReduceKind::Max;
+      break;
+    case vector::CombiningKind::MINIMUMF:
+      kind = aievec::AIE4ReduceKind::Min;
+      break;
+    case vector::CombiningKind::MAXIMUMF:
+      kind = aievec::AIE4ReduceKind::Max;
+      break;
+    case vector::CombiningKind::MINUI:
+    case vector::CombiningKind::MAXUI:
+      srcOp.emitWarning()
+          << "AIE4 has no unsigned vector reduce instruction (the ISA "
+             "defines the int32 reduce variant as signed-only); rewrite "
+             "as a signed reduction or scalarize";
+      return failure();
+    case vector::CombiningKind::MINNUMF:
+    case vector::CombiningKind::MAXNUMF:
+      srcOp.emitWarning()
+          << "AIE4's VMINR.f/VMAXR.f hard-wire IEEE minimum/maximum "
+             "(NaN-propagating) semantics with no control-register "
+             "escape, so minnumf/maxnumf cannot be lowered; use "
+             "minimumf/maximumf if that NaN-propagation is acceptable";
+      return failure();
+    case vector::CombiningKind::MUL:
+    case vector::CombiningKind::AND:
+    case vector::CombiningKind::OR:
+    case vector::CombiningKind::XOR:
+      srcOp.emitWarning()
+          << "AIE4 has no vector reduce instruction for this combining "
+             "kind (only add/min/max are implemented in hardware)";
+      return failure();
+    }
+
+    rewriter.replaceOpWithNewOp<aievec::AIE4ReduceOp>(
+        srcOp, elemTy, adaptor.getVector(), adaptor.getAcc(), kind);
+    return success();
+  }
+};
+
 static void populateAIEVecV4ConversionPatterns(RewritePatternSet &patterns) {
   patterns
       .add<ConvertMulFToAIE4MulEwiseF32Pattern,
@@ -6200,7 +6287,8 @@ static void populateAIEVecV4ConversionPatterns(RewritePatternSet &patterns) {
            ConvertExtFToAIE4ConvPattern,
            LowerAIE4MinSIOp, LowerAIE4MaxSIOp, LowerAIE4MinUIOp,
            LowerAIE4MaxUIOp, LowerAIE4CmpIOp, LowerAIE4SelectOp,
-           LowerAIE4MaskExtractOp>(patterns.getContext());
+           LowerAIE4MaskExtractOp, LowerAIE4VectorReductionOp>(
+        patterns.getContext());
 }
 
 static void configureAIEVecV4Legalizations(ConversionTarget &target) {
@@ -6289,6 +6377,16 @@ static void configureAIEVecV4Legalizations(ConversionTarget &target) {
       return true;
     return cmpOp.getPredicate() == arith::CmpIPredicate::eq ||
            cmpOp.getPredicate() == arith::CmpIPredicate::ne;
+  });
+
+  // Keep add reductions generic unless native f32 reassociation is allowed.
+  target.addDynamicallyLegalOp<vector::ReductionOp>([](vector::ReductionOp op) {
+    if (op.getKind() != vector::CombiningKind::ADD)
+      return false;
+    auto vecTy = cast<VectorType>(op.getVector().getType());
+    return !isVecF32x32(vecTy) ||
+           !arith::bitEnumContainsAll(op.getFastmath(),
+                                      arith::FastMathFlags::reassoc);
   });
 }
 

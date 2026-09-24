@@ -492,4 +492,59 @@ def VAdd32I1024SelAIE4IntrOp :
     AIE4VSelIntrOp<"vadd32.mask.1024",
         FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>, I32>;
 
+//===----------------------------------------------------------------------===//
+// 1024-bit vector reductions (min/max/add, i32 and f32)
+//===----------------------------------------------------------------------===//
+//
+// Only 1024-bit reductions are available. The intrinsics are `Pure` because
+// their instructions neither access memory nor read control registers.
+// Integer forms always take a seed; a literal zero folds to the unseeded
+// instruction. Float forms use separate seeded (`.scl`) intrinsics.
+
+// llvm.aie4.min.reduce.I1024 / llvm.aie4.max.reduce.I1024 /
+// llvm.aie4.add.reduce.I1024
+//     i32 (<32 x i32> src, i32 seed)
+//
+class AIE4IntReduceIntrOp<string mnemonic> :
+    AIEVec4_IntrOp<mnemonic, [Pure, TypeIs<"res", I32>]>,
+    Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>:$src, I32:$seed)> {
+  let summary = "AIE4 i32 1024-bit vector reduction (vminr/vmaxr/vaddr)";
+  let description = [{
+    A literal zero seed selects the unseeded hardware form through
+    `PatAbsMinMaxAddReduceZero`; other seeds select the scalar form.
+  }];
+}
+
+def MinReduceI1024AIE4IntrOp : AIE4IntReduceIntrOp<"min.reduce.I1024">;
+def MaxReduceI1024AIE4IntrOp : AIE4IntReduceIntrOp<"max.reduce.I1024">;
+def AddReduceI1024AIE4IntrOp : AIE4IntReduceIntrOp<"add.reduce.I1024">;
+
+// llvm.aie4.{min,max,add}.reduce.FP1024
+//     float (<32 x float> src)
+// llvm.aie4.{min,max,add}.reduce.FP1024.scl
+//     float (<32 x float> src, float seed)
+//
+class AIE4FpReduceIntrOp<string mnemonic> :
+    AIEVec4_IntrOp<mnemonic, [Pure, TypeIs<"res", F32>]>,
+    Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$src)> {
+  let summary = "AIE4 f32 1024-bit vector reduction, no seed (vminr.f/vmaxr.f/vaddr.f)";
+}
+
+class AIE4FpReduceSclIntrOp<string mnemonic> :
+    AIEVec4_IntrOp<mnemonic, [Pure, TypeIs<"res", F32>]>,
+    Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$src, F32:$seed)> {
+  let summary = "AIE4 f32 1024-bit vector reduction, with seed (vminr.f/vmaxr.f/vaddr.f)";
+  let description = [{
+    For `add`, VADDR.f accumulates in a wider adder and rounds once. Its
+    result can differ from a sequential f32 sum.
+  }];
+}
+
+def MinReduceFP1024AIE4IntrOp : AIE4FpReduceIntrOp<"min.reduce.FP1024">;
+def MinReduceFP1024SclAIE4IntrOp : AIE4FpReduceSclIntrOp<"min.reduce.FP1024.scl">;
+def MaxReduceFP1024AIE4IntrOp : AIE4FpReduceIntrOp<"max.reduce.FP1024">;
+def MaxReduceFP1024SclAIE4IntrOp : AIE4FpReduceSclIntrOp<"max.reduce.FP1024.scl">;
+def AddReduceFP1024AIE4IntrOp : AIE4FpReduceIntrOp<"add.reduce.FP1024">;
+def AddReduceFP1024SclAIE4IntrOp : AIE4FpReduceSclIntrOp<"add.reduce.FP1024.scl">;
+
 #endif // AIE_DIALECT_XLLVM_IR_XLLVMAIE4INTROPS_TD

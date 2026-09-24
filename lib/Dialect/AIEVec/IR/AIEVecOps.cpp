@@ -1910,6 +1910,23 @@ LogicalResult AIE4SelOp::verify() {
   return success();
 }
 
+LogicalResult AIE4ReduceOp::verify() {
+  auto sourceType = cast<VectorType>(getSource().getType());
+  Type elemType = sourceType.getElementType();
+  Type resultType = getResult().getType();
+  if (elemType != resultType)
+    return emitOpError("result type (")
+           << resultType << ") must match the source vector's element type ("
+           << elemType << ")";
+
+  if (Value seed = getSeed(); seed && seed.getType() != resultType)
+    return emitOpError("seed type (")
+           << seed.getType() << ") must match the result type (" << resultType
+           << ")";
+
+  return success();
+}
+
 #define GET_ATTRDEF_CLASSES
 #include "aie/Dialect/AIEVec/IR/AIEVecAttributes.cpp.inc"
 

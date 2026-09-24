@@ -153,4 +153,21 @@ def AIE4CmpPredicate : I32EnumAttr<"AIE4CmpPredicate",
 def AIEVec_AIE4CmpPredicateAttr :
     EnumAttr<AIEVec_Dialect, AIE4CmpPredicate, "aie4_cmp_predicate">;
 
+//===----------------------------------------------------------------------===//
+// AIE4 1024-bit vector reductions
+//===----------------------------------------------------------------------===//
+
+def AIE4_ReduceKind_Add : I32EnumAttrCase<"Add", 0, "add">;
+def AIE4_ReduceKind_Min : I32EnumAttrCase<"Min", 1, "min">;
+def AIE4_ReduceKind_Max : I32EnumAttrCase<"Max", 2, "max">;
+def AIE4ReduceKind : I32EnumAttr<"AIE4ReduceKind",
+    "AIE4 native 1024-bit vector-to-scalar reduction kind",
+    [AIE4_ReduceKind_Add, AIE4_ReduceKind_Min, AIE4_ReduceKind_Max]> {
+  let cppNamespace = "::xilinx::aievec";
+  let genSpecializedAttr = 0;
+}
+
+def AIEVec_AIE4ReduceKindAttr :
+    EnumAttr<AIEVec_Dialect, AIE4ReduceKind, "aie4_reduce_kind">;
+
 #endif // AIE_DIALECT_AIEVEC_IR_AIEVECATTRIBUTES_TD

@@ -403,6 +403,33 @@ def AIEVec_AIE4SelOp:
   let hasVerifier = 1;
 }
 
+//===----------------------------------------------------------------------===//
+// AIE4 1024-bit vector reductions
+//===----------------------------------------------------------------------===//
+def AIEVec_AIE4ReduceOp:
+  AIEVec_Op<"aie4.reduce", [Pure]>,
+  Arguments<(ins AnyTypeOf<[
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>]>:$source,
+                 Optional<AnyTypeOf<[I32, F32]>>:$seed,
+                 AIEVec_AIE4ReduceKindAttr:$kind)>,
+  Results<(outs AnyTypeOf<[I32, F32]>:$result)> {
+  let summary = "AIE4 native 1024-bit vector reduction (vminr/vmaxr/vaddr[.f])";
+  let description = [{
+    Reduces a fixed 32-lane i32 or f32 vector. An optional scalar seed
+    participates as an additional value; its type and the result type match
+    the vector element type. Integer min/max are signed, and floating min/max
+    propagate NaNs.
+
+    Native integer `add` saturates at the i32 limits; standard
+    `vector.reduction<add>` wraps. Native f32 `add` accumulates in a wider
+    adder and rounds once, so it may differ from an ordered f32 reduction.
+  }];
+  let assemblyFormat =
+      "$kind $source (`,` $seed^)? attr-dict `:` type($source) (`,` type($seed)^)? `->` type($result)";
+  let hasVerifier = 1;
+}
+
 def AIEVec_SubElemOp:
   AIEVec_Op<"sub_elem", [
     Pure,

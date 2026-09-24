@@ -414,6 +414,79 @@ struct AIE4SelOpConversion
   }
 };
 
+//===----------------------------------------------------------------------===//
+// Vector reduction
+//===----------------------------------------------------------------------===//
+//
+// Integer intrinsics require a seed, so supply zero for an unseeded op.
+// Float intrinsics have separate seeded and unseeded forms.
+struct AIE4ReduceOpConversion
+    : mlir::ConvertOpToLLVMPattern<aievec::AIE4ReduceOp> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(aievec::AIE4ReduceOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+    Type elemTy =
+        cast<VectorType>(op.getSource().getType()).getElementType();
+    Type resTy = op.getResult().getType();
+    Value src = adaptor.getSource();
+    Value seed = adaptor.getSeed();
+
+    if (elemTy.isInteger(32)) {
+      if (!seed)
+        seed = LLVM::ConstantOp::create(rewriter, loc, rewriter.getI32Type(),
+                                         (int32_t)0);
+      switch (op.getKind()) {
+      case aievec::AIE4ReduceKind::Add:
+        rewriter.replaceOpWithNewOp<xllvm::AddReduceI1024AIE4IntrOp>(
+            op, resTy, src, seed);
+        break;
+      case aievec::AIE4ReduceKind::Min:
+        rewriter.replaceOpWithNewOp<xllvm::MinReduceI1024AIE4IntrOp>(
+            op, resTy, src, seed);
+        break;
+      case aievec::AIE4ReduceKind::Max:
+        rewriter.replaceOpWithNewOp<xllvm::MaxReduceI1024AIE4IntrOp>(
+            op, resTy, src, seed);
+        break;
+      }
+      return success();
+    }
+
+    assert(elemTy.isF32() && "AIE4ReduceOp::verify() should have rejected "
+                              "any other element type");
+    switch (op.getKind()) {
+    case aievec::AIE4ReduceKind::Add:
+      if (seed)
+        rewriter.replaceOpWithNewOp<xllvm::AddReduceFP1024SclAIE4IntrOp>(
+            op, resTy, src, seed);
+      else
+        rewriter.replaceOpWithNewOp<xllvm::AddReduceFP1024AIE4IntrOp>(
+            op, resTy, src);
+      break;
+    case aievec::AIE4ReduceKind::Min:
+      if (seed)
+        rewriter.replaceOpWithNewOp<xllvm::MinReduceFP1024SclAIE4IntrOp>(
+            op, resTy, src, seed);
+      else
+        rewriter.replaceOpWithNewOp<xllvm::MinReduceFP1024AIE4IntrOp>(
+            op, resTy, src);
+      break;
+    case aievec::AIE4ReduceKind::Max:
+      if (seed)
+        rewriter.replaceOpWithNewOp<xllvm::MaxReduceFP1024SclAIE4IntrOp>(
+            op, resTy, src, seed);
+      else
+        rewriter.replaceOpWithNewOp<xllvm::MaxReduceFP1024AIE4IntrOp>(
+            op, resTy, src);
+      break;
+    }
+    return success();
+  }
+};
+
 void populateAIEVecToLLVMAIE4ConversionPatterns(
     mlir::LLVMTypeConverter &converter, mlir::RewritePatternSet &patterns) {
   patterns.add<AIE4MulEwiseF32OpConversion, AIE4MacEwiseF32OpConversion,
@@ -422,7 +495,7 @@ void populateAIEVecToLLVMAIE4ConversionPatterns(
                AIE4SRSI32I16OpConversion, AIE4UPSI16I32OpConversion,
                AIE4ConvBF16F32OpConversion, AIE4ConvF32BF16OpConversion,
                AIE4MinMaxOpConversion, AIE4CmpOpConversion,
-               AIE4SelOpConversion>(converter);
+               AIE4SelOpConversion, AIE4ReduceOpConversion>(converter);
 }
 
 } // namespace xilinx::aievec

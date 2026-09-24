@@ -114,3 +114,80 @@ llvm.func @vadd32_mask_1024(%lhs: vector<32xi32>, %rhs: vector<32xi32>, %sel: i3
 // CHECK-LABEL: declare <64 x i16> @llvm.aie4.vadd16.mask.1024(<64 x i16>, <64 x i16>, i32, i32, <2 x i32>, i32)
 // CHECK-LABEL: declare <16 x i32> @llvm.aie4.vadd32.mask.512(<16 x i32>, <16 x i32>, i32, i32, i32, i32)
 // CHECK-LABEL: declare <32 x i32> @llvm.aie4.vadd32.mask.1024(<32 x i32>, <32 x i32>, i32, i32, i32, i32)
+
+// -----
+
+// Check the names and signatures of all nine reduction intrinsics.
+
+// CHECK-LABEL: define i32 @min_reduce_i1024
+llvm.func @min_reduce_i1024(%src: vector<32xi32>, %seed: i32) -> i32 {
+    // CHECK: call i32 @llvm.aie4.min.reduce.I1024(<32 x i32> %{{[0-9]+}}, i32 %{{[0-9]+}})
+    %0 = "xllvm.intr.aie4.min.reduce.I1024"(%src, %seed) : (vector<32xi32>, i32) -> i32
+    llvm.return %0 : i32
+}
+
+// CHECK-LABEL: define i32 @max_reduce_i1024
+llvm.func @max_reduce_i1024(%src: vector<32xi32>, %seed: i32) -> i32 {
+    // CHECK: call i32 @llvm.aie4.max.reduce.I1024(<32 x i32> %{{[0-9]+}}, i32 %{{[0-9]+}})
+    %0 = "xllvm.intr.aie4.max.reduce.I1024"(%src, %seed) : (vector<32xi32>, i32) -> i32
+    llvm.return %0 : i32
+}
+
+// CHECK-LABEL: define i32 @add_reduce_i1024
+llvm.func @add_reduce_i1024(%src: vector<32xi32>, %seed: i32) -> i32 {
+    // CHECK: call i32 @llvm.aie4.add.reduce.I1024(<32 x i32> %{{[0-9]+}}, i32 %{{[0-9]+}})
+    %0 = "xllvm.intr.aie4.add.reduce.I1024"(%src, %seed) : (vector<32xi32>, i32) -> i32
+    llvm.return %0 : i32
+}
+
+// CHECK-LABEL: define float @min_reduce_fp1024
+llvm.func @min_reduce_fp1024(%src: vector<32xf32>) -> f32 {
+    // CHECK: call float @llvm.aie4.min.reduce.FP1024(<32 x float> %{{[0-9]+}})
+    %0 = "xllvm.intr.aie4.min.reduce.FP1024"(%src) : (vector<32xf32>) -> f32
+    llvm.return %0 : f32
+}
+
+// CHECK-LABEL: define float @min_reduce_fp1024_scl
+llvm.func @min_reduce_fp1024_scl(%src: vector<32xf32>, %seed: f32) -> f32 {
+    // CHECK: call float @llvm.aie4.min.reduce.FP1024.scl(<32 x float> %{{[0-9]+}}, float %{{[0-9]+}})
+    %0 = "xllvm.intr.aie4.min.reduce.FP1024.scl"(%src, %seed) : (vector<32xf32>, f32) -> f32
+    llvm.return %0 : f32
+}
+
+// CHECK-LABEL: define float @max_reduce_fp1024
+llvm.func @max_reduce_fp1024(%src: vector<32xf32>) -> f32 {
+    // CHECK: call float @llvm.aie4.max.reduce.FP1024(<32 x float> %{{[0-9]+}})
+    %0 = "xllvm.intr.aie4.max.reduce.FP1024"(%src) : (vector<32xf32>) -> f32
+    llvm.return %0 : f32
+}
+
+// CHECK-LABEL: define float @max_reduce_fp1024_scl
+llvm.func @max_reduce_fp1024_scl(%src: vector<32xf32>, %seed: f32) -> f32 {
+    // CHECK: call float @llvm.aie4.max.reduce.FP1024.scl(<32 x float> %{{[0-9]+}}, float %{{[0-9]+}})
+    %0 = "xllvm.intr.aie4.max.reduce.FP1024.scl"(%src, %seed) : (vector<32xf32>, f32) -> f32
+    llvm.return %0 : f32
+}
+
+// CHECK-LABEL: define float @add_reduce_fp1024
+llvm.func @add_reduce_fp1024(%src: vector<32xf32>) -> f32 {
+    // CHECK: call float @llvm.aie4.add.reduce.FP1024(<32 x float> %{{[0-9]+}})
+    %0 = "xllvm.intr.aie4.add.reduce.FP1024"(%src) : (vector<32xf32>) -> f32
+    llvm.return %0 : f32
+}
+
+// CHECK-LABEL: define float @add_reduce_fp1024_scl
+llvm.func @add_reduce_fp1024_scl(%src: vector<32xf32>, %seed: f32) -> f32 {
+    // CHECK: call float @llvm.aie4.add.reduce.FP1024.scl(<32 x float> %{{[0-9]+}}, float %{{[0-9]+}})
+    %0 = "xllvm.intr.aie4.add.reduce.FP1024.scl"(%src, %seed) : (vector<32xf32>, f32) -> f32
+    llvm.return %0 : f32
+}
+
+// CHECK-LABEL: declare i32 @llvm.aie4.min.reduce.I1024(<32 x i32>, i32)
+// CHECK-LABEL: declare i32 @llvm.aie4.max.reduce.I1024(<32 x i32>, i32)
+// CHECK-LABEL: declare i32 @llvm.aie4.add.reduce.I1024(<32 x i32>, i32)
+// CHECK-LABEL: declare float @llvm.aie4.min.reduce.FP1024(<32 x float>)
+// CHECK-LABEL: declare float @llvm.aie4.min.reduce.FP1024.scl(<32 x float>, float)
+// CHECK-LABEL: declare float @llvm.aie4.max.reduce.FP1024(<32 x float>)
+// CHECK-LABEL: declare float @llvm.aie4.max.reduce.FP1024.scl(<32 x float>, float)
+// CHECK-LABEL: declare float @llvm.aie4.add.reduce.FP1024(<32 x float>)
+// CHECK-LABEL: declare float @llvm.aie4.add.reduce.FP1024.scl(<32 x float>, float)
