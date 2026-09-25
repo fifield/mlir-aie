@@ -170,4 +170,34 @@ def AIE4ReduceKind : I32EnumAttr<"AIE4ReduceKind",
 def AIEVec_AIE4ReduceKindAttr :
     EnumAttr<AIEVec_Dialect, AIE4ReduceKind, "aie4_reduce_kind">;
 
+//===----------------------------------------------------------------------===//
+// AIE4 shuffle
+//===----------------------------------------------------------------------===//
+//
+// AIE4 encodings from Peano's aie4/aie4_enums.h, checked against the ISA.
+// AIE2 uses different encodings, so these modes need a separate enum.
+// Keep values in sync with the XLLVM AIE4ShuffleMode enum.
+//
+// T32_4X4 and T8_8X8 transpose one 512-bit vector. T32_2X16_LO/HI
+// interleave the lower/upper eight lanes of two 16-lane vectors.
+def AIE4_ShuffleMode_T32_4X4 :
+    I32EnumAttrCase<"T32_4X4", 90, "t32_4x4">;
+def AIE4_ShuffleMode_T8_8X8 :
+    I32EnumAttrCase<"T8_8X8", 72, "t8_8x8">;
+def AIE4_ShuffleMode_T32_2X16_LO :
+    I32EnumAttrCase<"T32_2X16_LO", 66, "t32_2x16_lo">;
+def AIE4_ShuffleMode_T32_2X16_HI :
+    I32EnumAttrCase<"T32_2X16_HI", 67, "t32_2x16_hi">;
+
+def AIE4ShuffleMode : I32EnumAttr<"AIE4ShuffleMode",
+    "AIE4 vector shuffle/transpose mode",
+    [AIE4_ShuffleMode_T32_4X4, AIE4_ShuffleMode_T8_8X8,
+     AIE4_ShuffleMode_T32_2X16_LO, AIE4_ShuffleMode_T32_2X16_HI]> {
+  let cppNamespace = "::xilinx::aievec";
+  let genSpecializedAttr = 0;
+}
+
+def AIEVec_AIE4ShuffleModeAttr :
+    EnumAttr<AIEVec_Dialect, AIE4ShuffleMode, "aie4_shuffle_mode">;
+
 #endif // AIE_DIALECT_AIEVEC_IR_AIEVECATTRIBUTES_TD

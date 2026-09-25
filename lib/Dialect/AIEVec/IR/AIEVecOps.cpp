@@ -1585,6 +1585,48 @@ LogicalResult ShuffleOp::verify() {
   return success();
 }
 
+//===----------------------------------------------------------------------===//
+// AIE4ShuffleOp
+//===----------------------------------------------------------------------===//
+
+// Check the element width and second-operand requirement for each mode.
+LogicalResult AIE4ShuffleOp::verify() {
+  unsigned modeBitWidth;
+  bool requireRhs;
+  auto mode = getMode();
+  switch (mode) {
+  case AIE4ShuffleMode::T32_4X4:
+    modeBitWidth = 32;
+    requireRhs = false;
+    break;
+  case AIE4ShuffleMode::T8_8X8:
+    modeBitWidth = 8;
+    requireRhs = false;
+    break;
+  case AIE4ShuffleMode::T32_2X16_LO:
+  case AIE4ShuffleMode::T32_2X16_HI:
+    modeBitWidth = 32;
+    requireRhs = true;
+    break;
+  }
+
+  if (requireRhs && !getRhs())
+    return emitOpError() << "shuffle mode '" << stringifyEnum(mode)
+                         << "' requires a second operand";
+  if (!requireRhs && getRhs())
+    return emitOpError() << "shuffle mode '" << stringifyEnum(mode)
+                         << "' does not admit a second operand";
+
+  auto elemBitWidth =
+      cast<VectorType>(getLhs().getType()).getElementTypeBitWidth();
+  if (modeBitWidth != elemBitWidth)
+    return emitOpError() << "shuffle mode '" << stringifyEnum(mode)
+                         << "' requires vectors of " << modeBitWidth
+                         << "-bit elements";
+
+  return success();
+}
+
 // Print out Shuffle op.
 void LegacyShuffleOp::print(OpAsmPrinter &p) {
   // Print the source vector

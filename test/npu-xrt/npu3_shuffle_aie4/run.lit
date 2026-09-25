@@ -1,0 +1,27 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Check all four AIE4 shuffle modes on NPU3 using distinct constant inputs.
+// Also check that applying either square transpose twice restores its input.
+// Vector-to-AIEVec pattern matching is tested in Conversion/VectorToAIEVec.
+
+// REQUIRES: ryzen_ai_npu3, peano
+
+// RUN: %run_on_npu3% python %S/shuffle_aie4.py -o shuffle_aie4.mlir
+// RUN: %aiecc --enable-aie4-vectorization --get-full-elf --full-elf-name=shuffle_aie4.elf shuffle_aie4.mlir
+
+// Require real vshuffle instructions: llc can accept an unknown intrinsic
+// name as an external call and still return success.
+// RUN: llvm-objdump -dr shuffle_aie4.mlir.prj/elfs_main_core_0_2/elfs_main_core_0_2.elf > dis.txt
+// RUN: FileCheck %s --check-prefix=MNEMONIC --input-file=dis.txt
+
+// Six shuffles: two transposes, two round trips, and zip lo/hi.
+// MNEMONIC: vshuffle
+// MNEMONIC: vshuffle
+// MNEMONIC: vshuffle
+// MNEMONIC: vshuffle
+// MNEMONIC: vshuffle
+// MNEMONIC: vshuffle
+
+// RUN: clang %S/test.cpp -o test.exe -std=c++17 -Wall %xrt_flags -lrt -lstdc++ %test_utils_flags
+// RUN: %run_on_npu3% ./test.exe

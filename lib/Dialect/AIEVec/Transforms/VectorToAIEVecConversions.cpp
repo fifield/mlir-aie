@@ -6277,6 +6277,124 @@ struct LowerAIE4VectorReductionOp : OpConversionPattern<vector::ReductionOp> {
   }
 };
 
+//===----------------------------------------------------------------------===//
+// Shuffle / transpose
+//===----------------------------------------------------------------------===//
+//
+// Lower supported transposes and interleaves to AIE4 shuffles. Other forms
+// remain legal for generic lowering.
+
+// Flatten square transposes to one 512-bit vector, then restore the shape.
+struct LowerVectorTransposeOpToAIE4ShuffleOpPattern
+    : OpConversionPattern<vector::TransposeOp> {
+  using OpConversionPattern::OpConversionPattern;
+
+  // Share matching with the legality predicate so every illegal op has a
+  // matching rewrite.
+  static std::optional<aievec::AIE4ShuffleMode>
+  matchMode(vector::TransposeOp transpOp) {
+    auto resTy = transpOp.getResultVectorType();
+    auto resShape = resTy.getShape();
+    if (resTy.isScalable() || resShape.size() != 2)
+      return std::nullopt;
+
+    Type elemTy = resTy.getElementType();
+    if (!elemTy.isSignlessInteger(8) && !elemTy.isSignlessInteger(32) &&
+        !elemTy.isF32())
+      return std::nullopt;
+
+    auto elemTyBitWidth = resTy.getElementTypeBitWidth();
+    auto vBitWidth = resShape[0] * resShape[1] * elemTyBitWidth;
+    if (vBitWidth != 512)
+      return std::nullopt;
+
+    // These modes implement square transposes with permutation [1, 0].
+    ArrayRef<int64_t> perm = transpOp.getPermutation();
+    if (perm.size() != 2 || perm[0] != 1 || perm[1] != 0)
+      return std::nullopt;
+    if (resShape[0] != resShape[1])
+      return std::nullopt;
+
+    if (elemTyBitWidth == 32 && resShape[0] == 4)
+      return aievec::AIE4ShuffleMode::T32_4X4;
+    if (elemTyBitWidth == 8 && resShape[0] == 8)
+      return aievec::AIE4ShuffleMode::T8_8X8;
+    return std::nullopt;
+  }
+
+  LogicalResult
+  matchAndRewrite(vector::TransposeOp transpOp, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto modeOr = matchMode(transpOp);
+    if (!modeOr)
+      return failure();
+
+    auto resTy = transpOp.getResultVectorType();
+    auto elemTyBitWidth = resTy.getElementTypeBitWidth();
+    auto loc = transpOp.getLoc();
+    auto flatVecTy =
+        VectorType::get({512 / elemTyBitWidth}, resTy.getElementType());
+    auto flatInput = vector::ShapeCastOp::create(rewriter, loc, flatVecTy,
+                                                 adaptor.getVector());
+    auto shuffOp = aievec::AIE4ShuffleOp::create(
+        rewriter, loc, flatVecTy, flatInput, /*rhs=*/nullptr, *modeOr);
+    rewriter.replaceOpWithNewOp<vector::ShapeCastOp>(transpOp, resTy, shuffOp);
+    return success();
+  }
+};
+
+// Match interleaves of lanes 0-7 (lo) or 8-15 (hi) of two 16-lane i32
+// vectors. The mask alternates v1[base+i] and v2[base+i] for i in [0, 8).
+struct LowerVectorShuffleOpToAIE4ShuffleOpPattern
+    : OpConversionPattern<vector::ShuffleOp> {
+  using OpConversionPattern::OpConversionPattern;
+
+  static SmallVector<int64_t, 16> interleaveMask(int64_t base) {
+    SmallVector<int64_t, 16> m;
+    for (int64_t i = 0; i < 8; ++i) {
+      m.push_back(base + i);
+      m.push_back(base + i + 16);
+    }
+    return m;
+  }
+
+  // Use the same match for rewriting and dynamic legality.
+  static std::optional<aievec::AIE4ShuffleMode>
+  matchMode(vector::ShuffleOp shuffleOp) {
+    auto v1Ty = dyn_cast<VectorType>(shuffleOp.getV1().getType());
+    auto v2Ty = dyn_cast<VectorType>(shuffleOp.getV2().getType());
+    if (!v1Ty || !v2Ty || v1Ty.isScalable() || v2Ty.isScalable() ||
+        v1Ty.getRank() != 1 || v2Ty.getRank() != 1)
+      return std::nullopt;
+    if (v1Ty.getShape()[0] != 16 || v2Ty.getShape()[0] != 16 ||
+        !v1Ty.getElementType().isSignlessInteger(32) ||
+        !v2Ty.getElementType().isSignlessInteger(32))
+      return std::nullopt;
+
+    ArrayRef<int64_t> mask = shuffleOp.getMask();
+    if (mask.size() != 16)
+      return std::nullopt;
+
+    if (mask == ArrayRef<int64_t>(interleaveMask(0)))
+      return aievec::AIE4ShuffleMode::T32_2X16_LO;
+    if (mask == ArrayRef<int64_t>(interleaveMask(8)))
+      return aievec::AIE4ShuffleMode::T32_2X16_HI;
+    return std::nullopt;
+  }
+
+  LogicalResult
+  matchAndRewrite(vector::ShuffleOp shuffleOp, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto modeOr = matchMode(shuffleOp);
+    if (!modeOr)
+      return failure();
+    rewriter.replaceOpWithNewOp<aievec::AIE4ShuffleOp>(
+        shuffleOp, cast<VectorType>(shuffleOp.getV1().getType()),
+        adaptor.getV1(), adaptor.getV2(), *modeOr);
+    return success();
+  }
+};
+
 static void populateAIEVecV4ConversionPatterns(RewritePatternSet &patterns) {
   patterns
       .add<ConvertMulFToAIE4MulEwiseF32Pattern,
@@ -6287,8 +6405,10 @@ static void populateAIEVecV4ConversionPatterns(RewritePatternSet &patterns) {
            ConvertExtFToAIE4ConvPattern,
            LowerAIE4MinSIOp, LowerAIE4MaxSIOp, LowerAIE4MinUIOp,
            LowerAIE4MaxUIOp, LowerAIE4CmpIOp, LowerAIE4SelectOp,
-           LowerAIE4MaskExtractOp, LowerAIE4VectorReductionOp>(
-        patterns.getContext());
+           LowerAIE4MaskExtractOp, LowerAIE4VectorReductionOp,
+           LowerVectorTransposeOpToAIE4ShuffleOpPattern,
+           LowerVectorShuffleOpToAIE4ShuffleOpPattern>(
+           patterns.getContext());
 }
 
 static void configureAIEVecV4Legalizations(ConversionTarget &target) {
@@ -6300,6 +6420,9 @@ static void configureAIEVecV4Legalizations(ConversionTarget &target) {
   target.addDynamicallyLegalOp<vector::ExtractOp>([](vector::ExtractOp op) {
     return !isAIE4MaskExtract(op);
   });
+
+  // Transpose lowering uses shape casts around the flat AIE4 shuffle.
+  target.addLegalOp<vector::ShapeCastOp>();
 
   // Unaligned reads introduce slices, but AIE4 has no AIEVec slice pattern.
   // Keep them legal for generic lowering, which may scalarize unaligned slices.
@@ -6387,6 +6510,18 @@ static void configureAIEVecV4Legalizations(ConversionTarget &target) {
     return !isVecF32x32(vecTy) ||
            !arith::bitEnumContainsAll(op.getFastmath(),
                                       arith::FastMathFlags::reassoc);
+  });
+
+  // Lower supported transpose/shuffle modes; leave other forms generic.
+  target.addDynamicallyLegalOp<vector::TransposeOp>(
+      [](vector::TransposeOp transpOp) {
+        return !LowerVectorTransposeOpToAIE4ShuffleOpPattern::matchMode(
+                    transpOp)
+                    .has_value();
+      });
+  target.addDynamicallyLegalOp<vector::ShuffleOp>([](vector::ShuffleOp shuffleOp) {
+    return !LowerVectorShuffleOpToAIE4ShuffleOpPattern::matchMode(shuffleOp)
+                .has_value();
   });
 }
 

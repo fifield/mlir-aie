@@ -430,6 +430,47 @@ def AIEVec_AIE4ReduceOp:
   let hasVerifier = 1;
 }
 
+//===----------------------------------------------------------------------===//
+// AIE4 shuffle
+//===----------------------------------------------------------------------===//
+//
+// VSHUFFLE takes 512-bit operands. Two-operand modes transpose their
+// logical 1024-bit concatenation and return one 512-bit half.
+def AIEVec_AIE4ShuffleVector : AllOfType<[
+    FixedVectorOfRank<[1]>,
+    VectorOfBitWidthAndElementTypes<512, [I8, I16, I32, BF16, F32]>],
+    "fixed one-dimensional 512-bit vector of i8, i16, i32, bf16 or f32">;
+
+def AIEVec_AIE4ShuffleOp:
+  AIEVec_Op<"aie4.shuffle", [
+    Pure,
+    AllTypesMatch<["lhs", "result"]>,
+    OptionalTypesMatchWith<"result and rhs have the same type", "result",
+                           "rhs", "::llvm::cast<Type>($_self)">
+  ]>,
+  Arguments<(ins AIEVec_AIE4ShuffleVector:$lhs,
+                 Optional<AIEVec_AIE4ShuffleVector>:$rhs,
+                 AIEVec_AIE4ShuffleModeAttr:$mode)>,
+  Results<(outs AIEVec_AIE4ShuffleVector:$result)> {
+  let summary = "AIE4 512-bit vector shuffle/transpose (vshuffle)";
+  let description = [{
+    Shuffles fixed, one-dimensional 512-bit vectors using `llvm.aie4.vshuffle`.
+    Mode encodings are specific to AIE4.
+
+    `t32_4x4` and `t8_8x8` transpose a row-major square matrix in `lhs`
+    and forbid `rhs`. `t32_2x16_lo` and `t32_2x16_hi` require `rhs` and interleave
+    lanes 0-7 or 8-15, respectively, with `lhs` supplying the even lanes.
+    All operands and the result must have the same type, and the element
+    width must match the mode's `T<w>_` prefix.
+
+    The operation is pure: the intrinsic has no memory effects, and the
+    instruction neither reads nor writes status or control registers.
+  }];
+  let assemblyFormat =
+      "$lhs (`,` $rhs^)? `` `[` `mode` `=` $mode `]` attr-dict `:` type($result)";
+  let hasVerifier = 1;
+}
+
 def AIEVec_SubElemOp:
   AIEVec_Op<"sub_elem", [
     Pure,

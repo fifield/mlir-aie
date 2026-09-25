@@ -487,6 +487,52 @@ struct AIE4ReduceOpConversion
   }
 };
 
+//===----------------------------------------------------------------------===//
+// Shuffle
+//===----------------------------------------------------------------------===//
+//
+// The intrinsic uses vector<16xi32> for every mode. Bitcast other element
+// types to that representation and cast the result back. Single-operand
+// modes ignore xsrc1, so pass lhs for both intrinsic operands.
+static xllvm::AIE4ShuffleMode
+translateAIE4ShuffleMode(aievec::AIE4ShuffleMode mode) {
+  switch (mode) {
+  case aievec::AIE4ShuffleMode::T32_4X4:
+    return xllvm::AIE4ShuffleMode::T32_4X4;
+  case aievec::AIE4ShuffleMode::T8_8X8:
+    return xllvm::AIE4ShuffleMode::T8_8X8;
+  case aievec::AIE4ShuffleMode::T32_2X16_LO:
+    return xllvm::AIE4ShuffleMode::T32_2X16_LO;
+  case aievec::AIE4ShuffleMode::T32_2X16_HI:
+    return xllvm::AIE4ShuffleMode::T32_2X16_HI;
+  }
+  llvm_unreachable("unhandled aievec::AIE4ShuffleMode");
+}
+
+struct AIE4ShuffleOpConversion
+    : mlir::ConvertOpToLLVMPattern<aievec::AIE4ShuffleOp> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(aievec::AIE4ShuffleOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+    Type xllvmVecTy = VectorType::get({16}, rewriter.getI32Type());
+
+    Value xsrc0 = bitcastIfNeeded(rewriter, loc, adaptor.getLhs(), xllvmVecTy);
+    Value rhs = adaptor.getRhs();
+    Value xsrc1 = bitcastIfNeeded(rewriter, loc, rhs ? rhs : adaptor.getLhs(),
+                                   xllvmVecTy);
+
+    Value shuffled = rewriter.create<xllvm::ShuffleAIE4IntrOp>(
+        loc, xllvmVecTy, xsrc0, xsrc1, translateAIE4ShuffleMode(op.getMode()));
+
+    rewriter.replaceOp(op, bitcastIfNeeded(rewriter, loc, shuffled,
+                                            op.getResult().getType()));
+    return success();
+  }
+};
+
 void populateAIEVecToLLVMAIE4ConversionPatterns(
     mlir::LLVMTypeConverter &converter, mlir::RewritePatternSet &patterns) {
   patterns.add<AIE4MulEwiseF32OpConversion, AIE4MacEwiseF32OpConversion,
@@ -495,7 +541,8 @@ void populateAIEVecToLLVMAIE4ConversionPatterns(
                AIE4SRSI32I16OpConversion, AIE4UPSI16I32OpConversion,
                AIE4ConvBF16F32OpConversion, AIE4ConvF32BF16OpConversion,
                AIE4MinMaxOpConversion, AIE4CmpOpConversion,
-               AIE4SelOpConversion, AIE4ReduceOpConversion>(converter);
+               AIE4SelOpConversion, AIE4ReduceOpConversion,
+               AIE4ShuffleOpConversion>(converter);
 }
 
 } // namespace xilinx::aievec

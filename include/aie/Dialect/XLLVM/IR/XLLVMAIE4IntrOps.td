@@ -547,4 +547,53 @@ def MaxReduceFP1024SclAIE4IntrOp : AIE4FpReduceSclIntrOp<"max.reduce.FP1024.scl"
 def AddReduceFP1024AIE4IntrOp : AIE4FpReduceIntrOp<"add.reduce.FP1024">;
 def AddReduceFP1024SclAIE4IntrOp : AIE4FpReduceSclIntrOp<"add.reduce.FP1024.scl">;
 
+//===----------------------------------------------------------------------===//
+// Shuffle
+//===----------------------------------------------------------------------===//
+//
+// llvm.aie4.vshuffle: v16i32 (v16i32, v16i32, i32).
+// Hardware takes mode in a register; this op uses a verified attribute to
+// restrict calls to supported modes. Keep these encodings in sync with
+// AIEVec's AIE4ShuffleMode and Peano's aie4/aie4_enums.h.
+def AIE4_ShuffleMode_T32_4X4 :
+    I32EnumAttrCase<"T32_4X4", 90, "t32_4x4">;
+def AIE4_ShuffleMode_T8_8X8 :
+    I32EnumAttrCase<"T8_8X8", 72, "t8_8x8">;
+def AIE4_ShuffleMode_T32_2X16_LO :
+    I32EnumAttrCase<"T32_2X16_LO", 66, "t32_2x16_lo">;
+def AIE4_ShuffleMode_T32_2X16_HI :
+    I32EnumAttrCase<"T32_2X16_HI", 67, "t32_2x16_hi">;
+
+def AIE4_ShuffleMode : I32EnumAttr<"AIE4ShuffleMode",
+    "AIE4 vshuffle mode (register operand, verified at compile time)",
+    [AIE4_ShuffleMode_T32_4X4, AIE4_ShuffleMode_T8_8X8,
+     AIE4_ShuffleMode_T32_2X16_LO, AIE4_ShuffleMode_T32_2X16_HI]> {
+  let cppNamespace = "::xilinx::xllvm";
+}
+
+// The intrinsic is IntrNoMem and the ISA specifies no status/control
+// register use, so the operation is pure.
+def ShuffleAIE4IntrOp :
+    AIEVec4_IntrOp<"vshuffle",
+        [Pure, TypeIs<"res", FixedVectorOfRankAndLengthAndType<[1], [16], [I32]>>]>,
+    Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [16], [I32]>:$xsrc0,
+                   FixedVectorOfRankAndLengthAndType<[1], [16], [I32]>:$xsrc1,
+                   AIE4_ShuffleMode:$mode)> {
+  let summary = "AIE4 512-bit vector shuffle/transpose (vshuffle)";
+  let description = [{
+    Shuffles two 512-bit vectors according to `mode`. The single-operand
+    modes (`t32_4x4`, `t8_8x8`) ignore `xsrc1`; AIEVec lowering duplicates
+    `xsrc0` into that operand.
+  }];
+
+  let llvmBuilder = [{
+    auto *inst = ::xilinx::xllvm::createAIE4ConfIntrinsicCall(builder,
+                      moduleTranslation, &opInst,
+                      "llvm.aie4.vshuffle",
+                      (uint32_t) op.getMode());
+    (void) inst;
+    $res = inst;
+  }];
+}
+
 #endif // AIE_DIALECT_XLLVM_IR_XLLVMAIE4INTROPS_TD
