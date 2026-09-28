@@ -10,13 +10,15 @@
 // A wide detour is available for this otherwise restricted DMA loopback.
 // Do not downsize it merely to save hops or win a tie.
 // CHECK-LABEL: aie.device(npu3_1col)
+// CHECK-NOT: aie.connect<{{.*}}Switch
 // CHECK: aie.switchbox(%mem_tile_0_1) {
 // CHECK-NOT: Switch32
 // CHECK-NOT: Switch512
-// CHECK: aie.connect<North : [[UP:[0-9]+]], DMA : 2>
-// CHECK: aie.connect<DMA : 0, North : [[OUT:[0-9]+]]>
-// CHECK: aie.switchbox(%tile_0_2) {
-// CHECK: aie.connect<South : [[OUT]], South : [[UP]]>
+// Either cardinal detour is valid; adding an unrelated manager port can
+// change which equal-cost path wins.
+// CHECK: aie.connect<{{North|South}} : {{[0-9]+}}, DMA : 2>
+// CHECK: aie.connect<DMA : 0, {{North|South}} : {{[0-9]+}}>
+// CHECK-NOT: aie.connect<{{.*}}Switch
 
 module {
   aie.device(npu3_1col) {
@@ -99,28 +101,27 @@ module {
 
 // -----
 
-// With the fixed penalty, IDs 1/2 stay wide and ID 3 crosses only once,
-// at the shim. Sharing a source with an intentional crossing must not make
+// IDs 1/2 stay wide through a shim loopback, while ID 3 crosses once at
+// the shim. Sharing a source with an intentional crossing must not make
 // the data destinations pay for an unnecessary narrow detour.
 // CHECK-LABEL: aie.device(npu3_1col)
 // CHECK: aie.switchbox(%mem_tile_0_1) {
 // CHECK: aie.masterset(DMA : 2, %[[DMA_AMSEL:[a-zA-Z0-9_]+]])
-// CHECK: aie.masterset(South : [[CTRL:[0-9]+]], %[[CTRL_AMSEL:[a-zA-Z0-9_]+]])
-// CHECK: aie.masterset(North : [[DATA:[0-9]+]], %[[DATA_AMSEL:[a-zA-Z0-9_]+]])
+// CHECK: aie.masterset(South : [[DOWN:[0-9]+]], %[[DOWN_AMSEL:[a-zA-Z0-9_]+]])
 // CHECK-NOT: Switch32
 // CHECK-NOT: Switch512
 // CHECK: aie.packet_rules(DMA : 0) {
-// CHECK-NEXT: aie.rule(31, 3, %[[CTRL_AMSEL]])
-// CHECK-NEXT: aie.rule(31, 1, %[[DATA_AMSEL]])
-// CHECK-NEXT: aie.rule(31, 2, %[[DATA_AMSEL]])
-// CHECK-NEXT: }
-// CHECK: aie.packet_rules(North : [[DATA]]) {
+// CHECK-NEXT: aie.rule(28, 0, %[[DOWN_AMSEL]])
+// CHECK: aie.packet_rules(South : [[UP:[0-9]+]]) {
 // CHECK-NEXT: aie.rule(28, 0, %[[DMA_AMSEL]])
 // CHECK: aie.switchbox(%shim_noc_tile_0_0) {
+// CHECK: aie.masterset(North : [[UP]], %[[UP_AMSEL:[a-zA-Z0-9_]+]])
 // CHECK: aie.masterset(Switch32 : [[BR:[0-9]+]], %[[BR_AMSEL:[a-zA-Z0-9_]+]])
 // CHECK: aie.masterset(Controller32 : 0, %[[DEST_AMSEL:[a-zA-Z0-9_]+]])
-// CHECK: aie.packet_rules(North : [[CTRL]]) {
+// CHECK: aie.packet_rules(North : [[DOWN]]) {
 // CHECK-NEXT: aie.rule(31, 3, %[[BR_AMSEL]])
+// CHECK-NEXT: aie.rule(31, 1, %[[UP_AMSEL]])
+// CHECK-NEXT: aie.rule(31, 2, %[[UP_AMSEL]])
 // CHECK: aie.packet_rules(Switch512 : [[BR]]) {
 // CHECK-NEXT: aie.rule(31, 3, %[[DEST_AMSEL]])
 

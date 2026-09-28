@@ -8,14 +8,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-// `default-bd-id` names a channel-local slot. A generic AIE4 shim S2MM pool
-// contains 16 slots, so 16 and larger are configuration errors rather than
+// `default-bd-id` names a channel-local slot. The AIE4 TraceS2MM pool
+// contains four slots, so 4 and larger are configuration errors rather than
 // requests to be silently remapped into another slot.
 
-// RUN: aie-opt %s --aie-insert-trace-flows="default-bd-id=16" -verify-diagnostics
+// RUN: aie-opt %s --aie-insert-trace-flows="default-bd-id=4" -verify-diagnostics
 
 module {
-  // expected-error@+1 {{trace buffer descriptor ID 16 is outside the channel-local range}}
+  // expected-error@+1 {{trace buffer descriptor ID 4 is outside the channel-local range}}
   aie.device(npu3) {
     %shim = aie.tile(0, 0)
     %tile = aie.tile(0, 2)

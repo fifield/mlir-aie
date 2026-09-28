@@ -2039,7 +2039,6 @@ AIE4TargetModel::getMemLocalBaseAddress(int localCol, int localRow, int memCol,
 uint32_t
 AIE4TargetModel::getNumDestSwitchboxConnections(int col, int row,
                                                 WireBundle bundle) const {
-
   if (isMemTile(col, row))
     switch (bundle) {
     case WireBundle::DMA:
@@ -2064,6 +2063,8 @@ AIE4TargetModel::getNumDestSwitchboxConnections(int col, int row,
 
   if (isShimNOCTile(col, row))
     switch (bundle) {
+    case WireBundle::DMATrace:
+      return 1;
     case WireBundle::DMA:
       return 2;
     case WireBundle::North:
@@ -2448,6 +2449,14 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
 
   // Shimtile
   if (isShimNOCorPLTile(col, row)) {
+    // The dedicated trace DMA is a wide-switch manager. Like the hardware's
+    // TS2MM connectivity column, it accepts cardinal inputs and the 32b bridge,
+    // but neither data MM2S nor control MM2S inputs.
+    if (dstBundle == WireBundle::DMATrace)
+      return isBundleInList(srcBundle,
+                            {WireBundle::North, WireBundle::East,
+                             WireBundle::West, WireBundle::Switch32});
+
     // DMA subordinate
     if (srcBundle == WireBundle::DMA) {
       if (dstBundle == WireBundle::DMA) {

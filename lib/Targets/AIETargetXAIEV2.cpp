@@ -84,6 +84,8 @@ static std::string wireBundleToPortType(WireBundle bundle) {
     return "_32B_CTRL";
   case WireBundle::Trace32:
     return "_32B_TRACE";
+  case WireBundle::DMATrace:
+    return "DMA_Trace";
   case WireBundle::South32:
     return "_32B_SOUTH";
   case WireBundle::West32:

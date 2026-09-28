@@ -105,18 +105,23 @@ struct AIEInsertTraceFlowsPass
     if (traces.empty())
       return;
 
-    // The trace DMA program below targets one of the two shim S2MM channels
-    // and a shim BD; reject options it cannot encode.
-    int shimChannel = clShimChannel;
-    if (shimChannel < 0 || shimChannel > 1) {
-      device.emitError() << "shim-channel " << shimChannel
-                         << " is not a shim S2MM channel; expected 0 or 1";
+    const bool dedicatedTrace = isa<AIE4TargetModel>(&targetModel);
+    const int numChannels = dedicatedTrace ? 1 : 2;
+    const int shimChannel =
+        clShimChannel == -1 ? (dedicatedTrace ? 0 : 1) : clShimChannel;
+    const int defaultBdId =
+        clDefaultBdId == -1 ? (dedicatedTrace ? 3 : 15) : clDefaultBdId;
+    if (shimChannel < 0 || shimChannel >= numChannels) {
+      device.emitError() << "trace shim channel " << shimChannel
+                         << " is outside the range [0, " << numChannels
+                         << ") for " << (dedicatedTrace ? "TraceS2MM" : "S2MM");
       return signalPassFailure();
     }
+
     uint32_t numShimBds = targetModel.getNumBDs(AIETileType::ShimNOCTile);
-    int bdId = clDefaultBdId;
-    if (bdId < 0 || static_cast<uint32_t>(bdId) >= numShimBds) {
-      device.emitError() << "default-bd-id " << bdId
+    if (!dedicatedTrace &&
+        (defaultBdId < 0 || static_cast<uint32_t>(defaultBdId) >= numShimBds)) {
+      device.emitError() << "default-bd-id " << defaultBdId
                          << " is not a shim BD; expected [0, " << numShimBds
                          << ")";
       return signalPassFailure();
@@ -448,8 +453,8 @@ struct AIEInsertTraceFlowsPass
 
       ShimInfo shimInfo;
       shimInfo.shimTile = shimTile;
-      shimInfo.channel = clShimChannel;
-      shimInfo.bdId = clDefaultBdId;
+      shimInfo.channel = shimChannel;
+      shimInfo.bdId = defaultBdId;
       shimInfo.traceSources = traceInfos;
       // Collect broadcast channels from traces that use them
       for (auto &trace : traceInfos) {
@@ -542,7 +547,7 @@ struct AIEInsertTraceFlowsPass
         continue; // No conflicts on this shim
 
       const auto &usedSet = usedIt->second;
-      int freeCount = 2 - static_cast<int>(usedSet.size());
+      int freeCount = numChannels - static_cast<int>(usedSet.size());
 
       if (freeCount <= 0) {
         // No channels free -- try lateral redirect
@@ -554,34 +559,35 @@ struct AIEInsertTraceFlowsPass
           });
           // Also treat columns with full shims as "active" for spare search
           for (auto &[fullCol, channels] : usedChannels) {
-            if (static_cast<int>(channels.size()) >= 2)
+            if (static_cast<int>(channels.size()) >= numChannels)
               activeColumns.insert(fullCol);
           }
           int spare =
               findNearestSpareColumn(shimCol, activeColumns, targetModel);
           if (spare >= 0) {
             shimInfo.shimTile = getOrCreateShim(device, builder, spare);
-            // A spare has no core but can still carry one flow; it is not
-            // full, so its other channel is free.
-            shimInfo.channel = usedChannels[spare].count(clShimChannel)
-                                   ? 1 - clShimChannel
-                                   : clShimChannel;
+            // A spare has no core but can still carry a flow. Use an available
+            // channel if the preferred one is already claimed.
+            shimInfo.channel = usedChannels[spare].count(shimChannel)
+                                   ? 1 - shimChannel
+                                   : shimChannel;
             continue;
           }
         }
         // No lateral available -- emit error
         device.emitError()
-            << "no S2MM channels available on shim tile at column " << shimCol
-            << " (both channels in use by existing flows or objectFifos); "
-               "set egress_shim_col to a column with a free channel, or "
-               "enable lateral-routing to redirect to a spare column";
+            << "no " << (dedicatedTrace ? "TraceS2MM" : "S2MM")
+            << " channels available on shim tile at column " << shimCol
+            << " (all channels in use by existing flows or objectFifos); set "
+               "egress_shim_col to a column with a free channel, or enable "
+               "lateral-routing to redirect to a spare column";
         return signalPassFailure();
       }
 
       if (freeCount == 1) {
         // One channel free -- use it
         int freeChannel = -1;
-        for (int ch = 0; ch < 2; ch++) {
+        for (int ch = 0; ch < numChannels; ch++) {
           if (usedSet.count(ch) == 0) {
             freeChannel = ch;
             break;
@@ -594,7 +600,8 @@ struct AIEInsertTraceFlowsPass
     // Build channel descriptors and trace-to-channel assignments
     for (auto &[col, shimInfo] : shimInfos) {
       int shimCol = shimInfo.shimTile.getCol();
-      std::set<int> available = {0, 1};
+      std::set<int> available =
+          dedicatedTrace ? std::set<int>{0} : std::set<int>{0, 1};
       auto usedIt = usedChannels.find(shimCol);
       if (usedIt != usedChannels.end()) {
         for (int ch : usedIt->second)
@@ -688,9 +695,10 @@ struct AIEInsertTraceFlowsPass
                              Value(info.tile.getResult()), info.tracePort,
                              info.traceChannel);
 
-      PacketDestOp::create(flowBuilder, device.getLoc(),
-                           Value(shimInfo.shimTile.getResult()),
-                           WireBundle::DMA, chanDesc.channel);
+      PacketDestOp::create(
+          flowBuilder, device.getLoc(), Value(shimInfo.shimTile.getResult()),
+          dedicatedTrace ? WireBundle::DMATrace : WireBundle::DMA,
+          chanDesc.channel);
 
       EndOp::create(flowBuilder, device.getLoc());
 
@@ -714,6 +722,7 @@ struct AIEInsertTraceFlowsPass
     OpBuilder builder(device);
     const auto &targetModel = device.getTargetModel();
     RuntimeSequenceOp runtimeSeq = cfg.seq;
+    const DMAChannelDir direction = getTraceDirection(targetModel);
     int bufferSizeBytes = cfg.bufferSizeBytes;
 
     // A second S2MM channel doubles the bytes the DMAs write. The host and
@@ -846,17 +855,19 @@ struct AIEInsertTraceFlowsPass
         // 4c. Write buffer descriptor
         xilinx::AIEX::NpuWriteBdOp::create(
             builder, runtimeSeq.getLoc(),
-            shimCol,           // column
-            0,                 // row (shim row)
-            chanDesc.channel,  // channel
-            0,                 // direction
-            chanDesc.bdId,     // bd_id
-            bufferLengthWords, // buffer_length (in 32-bit words)
-            0,                 // buffer_offset
-            1,                 // enable_packet
-            0,                 // out_of_order_id
-            0,                 // packet_id (not used for reception)
-            0,                 // packet_type (not used for reception)
+            shimCol,                     // column
+            0,                           // row (shim row)
+            chanDesc.channel,            // channel
+            static_cast<int>(direction), // direction
+            chanDesc.bdId,               // bd_id
+            bufferLengthWords,           // buffer_length (in 32-bit words)
+            0,                           // buffer_offset
+            // The dedicated trace DMA always receives trace packets; its
+            // corresponding packet-enable bit is reserved.
+            direction == DMAChannelDir::TraceS2MM ? 0 : 1, // enable_packet
+            0,                                             // out_of_order_id
+            0, // packet_id (not used for reception)
+            0, // packet_type (not used for reception)
             0, 0, 0, 0, 0,
             0, // d0_size, d0_stride, d1_size, d1_stride, d2_size, d2_stride
             0, 0, 0, // iteration_current, iteration_size, iteration_stride
@@ -886,14 +897,13 @@ struct AIEInsertTraceFlowsPass
             AIEX::createConstantI32(builder, runtimeSeq.getLoc(), chanOffset));
 
         // 4e. DMA channel configuration — set Controller_ID from tile attribute
-        uint32_t ctrlAddr =
-            computeCtrlAddress(DMAChannelDir::S2MM, chanDesc.channel,
-                               shimInfo.shimTile, targetModel);
+        uint32_t ctrlAddr = computeCtrlAddress(direction, chanDesc.channel,
+                                               shimInfo.shimTile, targetModel);
         ensureControllerIdAttr(shimInfo.shimTile, targetModel);
         auto ctrlIdAttr =
             shimInfo.shimTile->getAttrOfType<PacketInfoAttr>("controller_id");
         std::string ctrlRegName =
-            (chanDesc.channel == 0) ? "DMA_S2MM_0_Ctrl" : "DMA_S2MM_1_Ctrl";
+            getDmaRegisterPrefix(direction, chanDesc.channel) + "_Ctrl";
         const RegisterInfo *ctrlReg = targetModel.lookupRegister(
             ctrlRegName, shimInfo.shimTile.getTileID());
         if (!ctrlReg)
@@ -921,9 +931,8 @@ struct AIEInsertTraceFlowsPass
             builder.getI32IntegerAttr(0));
 
         // Push BD to task queue
-        std::string taskQueueRegName = (chanDesc.channel == 0)
-                                           ? "DMA_S2MM_0_Task_Queue"
-                                           : "DMA_S2MM_1_Task_Queue";
+        std::string taskQueueRegName =
+            getDmaRegisterPrefix(direction, chanDesc.channel) + "_Task_Queue";
         const RegisterInfo *queueReg = targetModel.lookupRegister(
             taskQueueRegName, shimInfo.shimTile.getTileID());
         if (!queueReg)
@@ -935,8 +944,9 @@ struct AIEInsertTraceFlowsPass
         if (!tokenField || !bdIdField)
           llvm::report_fatal_error(
               "Failed to lookup Enable_Token_Issue or Start_BD_ID fields");
-        uint32_t bdPool = targetModel.getBdPoolId(shimCol, 0, chanDesc.channel,
-                                                DMAChannelDir::S2MM);
+
+        uint32_t bdPool =
+            targetModel.getBdPoolId(shimCol, 0, chanDesc.channel, direction);
         uint32_t localBdId =
             chanDesc.bdId - targetModel.getBdPoolStartId(shimCol, 0, bdPool);
         auto tokenValue = targetModel.encodeFieldValue(*tokenField, 1);
@@ -1096,6 +1106,17 @@ struct AIEInsertTraceFlowsPass
   }
 
 private:
+  static DMAChannelDir getTraceDirection(const AIETargetModel &tm) {
+    return isa<AIE4TargetModel>(&tm) ? DMAChannelDir::TraceS2MM
+                                     : DMAChannelDir::S2MM;
+  }
+
+  static std::string getDmaRegisterPrefix(DMAChannelDir dir, int channel) {
+    if (dir == DMAChannelDir::TraceS2MM)
+      return "DMA_Trace_S2MM";
+    return "DMA_S2MM_" + std::to_string(channel);
+  }
+
   /// Ensure a tile has a controller_id attribute. If missing, assign one
   /// using the target model's mapping.
   void ensureControllerIdAttr(TileOp tile, const AIETargetModel &tm) {
@@ -1110,7 +1131,7 @@ private:
   uint32_t computeBDAddress(int col, int bdId, int channel, TileOp shimTile,
                             const AIETargetModel &tm) {
     int row = shimTile.getRow();
-    return tm.getDmaBdAddress(col, row, bdId, channel, DMAChannelDir::S2MM) +
+    return tm.getDmaBdAddress(col, row, bdId, channel, getTraceDirection(tm)) +
            tm.getDmaBdAddressOffset(col, row);
   }
 
@@ -1134,12 +1155,7 @@ private:
   // Compute DMA control register address
   uint32_t computeCtrlAddress(DMAChannelDir dir, int channel, TileOp shimTile,
                               const AIETargetModel &tm) {
-    std::string regName;
-    if (dir == DMAChannelDir::S2MM) {
-      regName = (channel == 0) ? "DMA_S2MM_0_Ctrl" : "DMA_S2MM_1_Ctrl";
-    } else { // MM2S
-      regName = (channel == 0) ? "DMA_MM2S_0_Ctrl" : "DMA_MM2S_1_Ctrl";
-    }
+    std::string regName = getDmaRegisterPrefix(dir, channel) + "_Ctrl";
     const RegisterInfo *reg = tm.lookupRegister(regName, shimTile.getTileID());
     if (!reg)
       llvm::report_fatal_error(llvm::Twine("Failed to lookup ") + regName);
@@ -1165,12 +1181,14 @@ private:
   /// id, recovered by subtracting the pool start when it is encoded.
   FailureOr<int> globalBdIdFor(DeviceOp device, int col, int channel,
                                int localBdId, const AIETargetModel &tm) const {
-    uint32_t pool = tm.getBdPoolId(col, 0, channel, DMAChannelDir::S2MM);
+    DMAChannelDir direction = getTraceDirection(tm);
+    uint32_t pool = tm.getBdPoolId(col, 0, channel, direction);
     uint32_t count = tm.getNumBDsInPool(col, 0, pool);
     if (localBdId < 0 || static_cast<uint32_t>(localBdId) >= count) {
       device.emitError() << "trace buffer descriptor ID " << localBdId
                          << " is outside the channel-local range [0, " << count
-                         << ") for S2MM channel " << channel
+                         << ") for " << stringifyDMAChannelDir(direction)
+                         << " channel " << channel
                          << " on the shim tile at column " << col;
       return failure();
     }
@@ -1191,7 +1209,8 @@ private:
     if (failed(primary))
       return failure();
     chans.push_back({primaryChannel, *primary});
-    if (clDistributeChannels && numTraces > 1 && primaryLocalBdId > 0) {
+    if (clDistributeChannels && !isa<AIE4TargetModel>(&tm) && numTraces > 1 &&
+        primaryLocalBdId > 0) {
       int ch2 = (primaryChannel == 1) ? 0 : 1;
       // Only add secondary channel if it's available (not claimed by existing
       // flows)
@@ -1232,10 +1251,14 @@ private:
   /// ShimDMAAllocationOp declarations, and objectFifos that end at a shim.
   std::map<int, std::set<int>> scanUsedS2MMChannels(DeviceOp device) {
     std::map<int, std::set<int>> used; // shimCol -> set of used S2MM channels
+    DMAChannelDir direction = getTraceDirection(device.getTargetModel());
+    WireBundle bundle = direction == DMAChannelDir::TraceS2MM
+                            ? WireBundle::DMATrace
+                            : WireBundle::DMA;
 
     device.walk([&](FlowOp flow) {
       auto destTile = cast<TileOp>(flow.getDest().getDefiningOp());
-      if (destTile.isShimTile() && flow.getDestBundle() == WireBundle::DMA) {
+      if (destTile.isShimTile() && flow.getDestBundle() == bundle) {
         used[destTile.getCol()].insert(flow.getDestChannel());
       }
     });
@@ -1244,7 +1267,7 @@ private:
       for (auto &op : pktFlow.getPorts().front()) {
         if (auto dest = dyn_cast<PacketDestOp>(op)) {
           auto destTile = cast<TileOp>(dest.getTile().getDefiningOp());
-          if (destTile.isShimTile() && dest.getBundle() == WireBundle::DMA) {
+          if (destTile.isShimTile() && dest.getBundle() == bundle) {
             used[destTile.getCol()].insert(dest.getChannel());
           }
         }
@@ -1252,7 +1275,7 @@ private:
     });
 
     device.walk([&](ShimDMAAllocationOp alloc) {
-      if (alloc.getChannelDir() == DMAChannelDir::S2MM) {
+      if (alloc.getChannelDir() == direction) {
         auto tile = alloc.getTileOp();
         used[tile.getCol()].insert(alloc.getChannelIndex());
       }

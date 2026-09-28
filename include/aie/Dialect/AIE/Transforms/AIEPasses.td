@@ -997,16 +997,16 @@ def AIEInsertTraceFlows : Pass<"aie-insert-trace-flows", "DeviceOp"> {
   ];
 
   let options =
-      [Option<"clShimChannel", "shim-channel", "int", "1",
-              "S2MM DMA channel to use for trace (default: 1)">,
-       Option<"clDefaultBdId", "default-bd-id", "int", "15",
-              "Channel-local buffer descriptor ID for trace (default: 15)">,
+      [Option<"clShimChannel", "shim-channel", "int", "-1",
+              "S2MM DMA channel for trace (-1: AIE4 TraceS2MM 0, otherwise S2MM 1)">,
+       Option<"clDefaultBdId", "default-bd-id", "int", "-1",
+              "Channel-local buffer descriptor ID for trace (-1: AIE4 3, otherwise 15)">,
        Option<"clPacketIdStart", "packet-id-start", "int", "1",
               "Starting packet ID for trace flows (default: 1)">,
        Option<"clTraceBurstLength", "burst-length", "int", "64",
               "DMA burst length for trace transfers (default: 64 bytes)">,
        Option<"clDistributeChannels", "distribute-channels", "bool", "false",
-              "Distribute traces across multiple S2MM channels per shim tile">,
+              "Distribute traces across available S2MM channels (AIE4 has one dedicated trace channel)">,
        Option<
            "clLateralRouting", "lateral-routing", "bool", "false",
            "Route traces to spare columns to minimize data path perturbation">,
