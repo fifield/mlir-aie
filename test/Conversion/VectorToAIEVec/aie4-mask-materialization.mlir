@@ -133,9 +133,8 @@ func.func @scalar_select_64(%m: i1, %t: vector<64xi8>, %f: vector<64xi8>) -> vec
 }
 
 // CHECK-LABEL: define <16 x float> @float_select(
-// CHECK-NOT: @llvm.aie4
-// CHECK: %[[R:[0-9]+]] = select <16 x i1> {{.*}}, <16 x float> {{.*}}, <16 x float>
-// CHECK-NOT: @llvm.aie4
+// CHECK: %[[S:[0-9]+]] = call <16 x i32> @llvm.aie4.vadd32.mask.512
+// CHECK: %[[R:[0-9]+]] = bitcast <16 x i32> %[[S]] to <16 x float>
 // CHECK: ret <16 x float> %[[R]]
 func.func @float_select(%m: vector<16xi1>, %t: vector<16xf32>, %f: vector<16xf32>) -> vector<16xf32> {
   %r = arith.select %m, %t, %f : vector<16xi1>, vector<16xf32>

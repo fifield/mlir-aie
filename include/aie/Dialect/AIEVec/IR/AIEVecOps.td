@@ -404,6 +404,95 @@ def AIEVec_AIE4SelOp:
 }
 
 //===----------------------------------------------------------------------===//
+// AIE4 float min/max/compare
+//===----------------------------------------------------------------------===//
+//
+// Native operations read ambient crFPOrder. Source IEEE arithmetic compares
+// integer encodings to remain independent of the mode.
+def AIEVec_AIE4CRFPOrderRes :
+    Resource<"::xilinx::xllvm::AIE4CRFPOrderResource">;
+
+def AIEVec_AIE4FMinMaxOp:
+  AIEVec_Op<"aie4.fminmax", [
+    MemoryEffects<[MemRead<AIEVec_AIE4CRFPOrderRes>]>,
+    AllTypesMatch<["lhs", "rhs", "result"]>
+  ]>,
+  Arguments<(ins AnyTypeOf<[
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [64], [BF16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [F16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [64], [F16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [16], [F32]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>]>:$lhs,
+                 AnyTypeOf<[
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [64], [BF16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [F16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [64], [F16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [16], [F32]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>]>:$rhs,
+                 AIEVec_AIE4MinMaxKindAttr:$kind)>,
+  Results<(outs AnyTypeOf<[
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [64], [BF16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [F16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [64], [F16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [16], [F32]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>]>:$result)> {
+  let summary = "AIE4 native float vector min/max using ambient crFPOrder";
+  let description = [{
+    Computes per-lane native minimum or maximum. At `crFPOrder = 0`, NaNs
+    propagate and -0 orders before +0. Other modes use the hardware ordering
+    selected by the ambient register. This operation does not change the mode.
+
+    Lowering uses a helper call to preserve ordering across mode changes until
+    Peano models the intrinsic's FPOrder dependency. This adds call overhead.
+  }];
+  let assemblyFormat =
+      "$lhs `,` $rhs `` `[` `kind` `=` $kind `]` attr-dict `:` type($result)";
+  let hasVerifier = 0;
+}
+
+def AIEVec_AIE4FCmpOp:
+  AIEVec_Op<"aie4.fcmp", [
+    MemoryEffects<[MemRead<AIEVec_AIE4CRFPOrderRes>]>,
+    AllTypesMatch<["lhs", "rhs"]>
+  ]>,
+  Arguments<(ins AnyTypeOf<[
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [64], [BF16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [F16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [64], [F16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [16], [F32]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>]>:$lhs,
+                 AnyTypeOf<[
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [64], [BF16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [F16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [64], [F16]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [16], [F32]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>]>:$rhs,
+                 AIEVec_AIE4CmpPredicateAttr:$predicate)>,
+  Results<(outs AnyUnsignedInteger:$result)> {
+  let summary = "AIE4 native float vector compare using ambient crFPOrder";
+  let description = [{
+    Computes per-lane native `lhs < rhs` (`lt`) or `lhs >= rhs` (`ge`). At
+    `crFPOrder = 0`, both predicates are false for NaN operands, and signed
+    zeros compare equal. Other modes use the hardware ordering selected by
+    the ambient register. This operation does not change the mode.
+
+    The unsigned result packs lane i into bit i: ui32 for 16 or 32 lanes,
+    ui64 for 64 lanes. Only the low 16 bits are meaningful for 16 lanes.
+
+    Lowering uses a helper call to preserve ordering across mode changes until
+    Peano models the intrinsic's FPOrder dependency. This adds call overhead.
+  }];
+  let assemblyFormat =
+      "$lhs `,` $rhs `` `[` `pred` `=` $predicate `]` attr-dict `:` type($lhs) `,` type($result)";
+  let hasVerifier = 1;
+}
+
+//===----------------------------------------------------------------------===//
 // AIE4 1024-bit vector reductions
 //===----------------------------------------------------------------------===//
 def AIEVec_AIE4ReduceOp:

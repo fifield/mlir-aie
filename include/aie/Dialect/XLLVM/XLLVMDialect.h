@@ -113,6 +113,14 @@ llvm::CallInst *createAIE4ConfIntrinsicCall(
     mlir::LLVM::ModuleTranslation &moduleTranslation, mlir::Operation *intrOp,
     llvm::StringRef intrinsicName, llvm::ArrayRef<uint32_t> trailingArgs);
 
+/// Calls native float min/max or comparison through an opaque helper so reads of
+/// crFPOrder survive LLVM optimization and instruction scheduling. Peano's
+/// vaddfloat-family intrinsics currently omit this control-register dependency.
+llvm::Value *createAIE4FPOrderIntrinsicCall(
+    llvm::IRBuilderBase &builder,
+    mlir::LLVM::ModuleTranslation &moduleTranslation, mlir::Operation *intrOp,
+    llvm::StringRef intrinsicName, uint32_t opsel);
+
 /// Builds a lane-select call with operands (lhs, rhs, sign, 2, sel, 0).
 /// `intrOp` supplies (lhs, rhs, sel); the literals encode VSEL and fporder.
 llvm::CallInst *

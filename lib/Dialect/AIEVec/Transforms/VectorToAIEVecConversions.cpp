@@ -6067,6 +6067,29 @@ struct LowerAIE4MaskExtractOp : OpConversionPattern<vector::ExtractOp> {
   }
 };
 
+// Supported float shapes: fixed 512- or 1024-bit BF16, FP16, and FP32 vectors.
+// Their integer bitcasts use the same compare/select mask carriers.
+static bool isAIE4VFCmpShape(VectorType vecTy) {
+  if (vecTy.isScalable() || vecTy.getRank() != 1)
+    return false;
+  Type elTy = vecTy.getElementType();
+  int64_t lanes = vecTy.getShape()[0];
+  return (elTy.isBF16() && (lanes == 32 || lanes == 64)) ||
+         (elTy.isF16() && (lanes == 32 || lanes == 64)) ||
+         (elTy.isF32() && (lanes == 16 || lanes == 32));
+}
+
+// Preserve each lane's bits in a signless integer vector for native integer
+// comparisons and selects. The caller must check isAIE4VFCmpShape first.
+static Value bitcastToAIE4SelIntType(ConversionPatternRewriter &rewriter,
+                                      Location loc, Value v) {
+  auto vecTy = cast<VectorType>(v.getType());
+  Type intElemTy =
+      rewriter.getIntegerType(vecTy.getElementType().getIntOrFloatBitWidth());
+  Type intVecTy = VectorType::get(vecTy.getShape(), intElemTy);
+  return vector::BitCastOp::create(rewriter, loc, intVecTy, v);
+}
+
 template <typename SrcOpTy>
 struct LowerAIE4MinMaxOp : OpConversionPattern<SrcOpTy> {
   using OpConversionPattern<SrcOpTy>::OpConversionPattern;
@@ -6175,7 +6198,10 @@ struct LowerAIE4SelectOp : OpConversionPattern<arith::SelectOp> {
   matchAndRewrite(arith::SelectOp srcOp, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     auto resultType = dyn_cast<VectorType>(srcOp.getType());
-    if (!resultType || !isAIE4VAddShape(resultType))
+    if (!resultType)
+      return failure();
+    bool isFloatShape = isAIE4VFCmpShape(resultType);
+    if (!isAIE4VAddShape(resultType) && !isFloatShape)
       return failure();
 
     Location loc = srcOp.getLoc();
@@ -6183,9 +6209,223 @@ struct LowerAIE4SelectOp : OpConversionPattern<arith::SelectOp> {
     Value mask = packAIE4Mask(loc, adaptor.getCondition(), maskTy,
                               resultType.getNumElements(), rewriter);
 
-    rewriter.replaceOpWithNewOp<aievec::AIE4SelOp>(
-        srcOp, resultType, adaptor.getFalseValue(), adaptor.getTrueValue(),
-        mask);
+    if (!isFloatShape) {
+      rewriter.replaceOpWithNewOp<aievec::AIE4SelOp>(
+          srcOp, resultType, adaptor.getFalseValue(), adaptor.getTrueValue(),
+          mask);
+      return success();
+    }
+
+    // AIE4SelOp accepts integers; bitcast float lanes before and after selection.
+    Value falseInt =
+        bitcastToAIE4SelIntType(rewriter, loc, adaptor.getFalseValue());
+    Value trueInt =
+        bitcastToAIE4SelIntType(rewriter, loc, adaptor.getTrueValue());
+    Value selInt = aievec::AIE4SelOp::create(rewriter, loc, falseInt.getType(),
+                                             falseInt, trueInt,
+                                             mask);
+    rewriter.replaceOpWithNewOp<vector::BitCastOp>(srcOp, resultType, selInt);
+    return success();
+  }
+};
+
+// Compare IEEE encodings with integer instructions so ambient crFPOrder cannot
+// change source arithmetic. Masks use signless scalars for Boolean composition.
+class AIE4FloatOrder {
+public:
+  AIE4FloatOrder(ConversionPatternRewriter &rewriter, Location loc, Value a,
+                 Value b)
+      : rewriter(rewriter), loc(loc), floatType(cast<VectorType>(a.getType())),
+        maskType(getAIE4MaskCarrierType(rewriter.getContext(), floatType)),
+        scalarType(rewriter.getIntegerType(maskType.getIntOrFloatBitWidth())) {
+    lhs = bitcastToAIE4SelIntType(rewriter, loc, a);
+    rhs = bitcastToAIE4SelIntType(rewriter, loc, b);
+    unsigned width = floatType.getElementTypeBitWidth();
+    Value signBit = splat(uint64_t(1) << (width - 1));
+    Value magnitudeMask = splat((uint64_t(1) << (width - 1)) - 1);
+    lhsMagnitude = arith::AndIOp::create(rewriter, loc, lhs, magnitudeMask);
+    rhsMagnitude = arith::AndIOp::create(rewriter, loc, rhs, magnitudeMask);
+    // Complement negative encodings; flip the sign bit on positive encodings.
+    // Unsigned key order then places -0 immediately before +0.
+    auto key = [&](Value bits) -> Value {
+      Value negative = cmp(bits, splat(0), true);
+      Value flipped = arith::XOrIOp::create(rewriter, loc, bits, signBit);
+      Value inverted = arith::XOrIOp::create(rewriter, loc, bits, splat(-1));
+      return select(flipped, inverted, negative);
+    };
+    lhsKey = key(lhs);
+    rhsKey = key(rhs);
+    uint64_t infinity = floatType.getElementType().isF32()   ? 0x7f800000
+                        : floatType.getElementType().isF16() ? 0x7c00
+                                                             : 0x7f80;
+    Value firstNaN = splat(infinity + 1);
+    // Clearing the sign puts every NaN above infinity in unsigned order.
+    lhsNumber = cmp(lhsMagnitude, firstNaN);
+    rhsNumber = cmp(rhsMagnitude, firstNaN);
+  }
+
+  Value constant(int64_t value) {
+    return arith::ConstantOp::create(
+        rewriter, loc, scalarType, rewriter.getIntegerAttr(scalarType, value));
+  }
+  Value bitNot(Value value) {
+    return arith::XOrIOp::create(rewriter, loc, value, constant(-1));
+  }
+  Value bitAnd(Value a, Value b) {
+    return arith::AndIOp::create(rewriter, loc, a, b);
+  }
+  Value bitOr(Value a, Value b) {
+    return arith::OrIOp::create(rewriter, loc, a, b);
+  }
+  Value ordered() { return bitAnd(lhsNumber, rhsNumber); }
+  Value less(bool swap = false) {
+    Value lt = swap ? cmp(rhsKey, lhsKey) : cmp(lhsKey, rhsKey);
+    // IEEE comparisons treat -0 and +0 as equal, unlike the sortable keys.
+    Value magnitudes =
+        arith::OrIOp::create(rewriter, loc, lhsMagnitude, rhsMagnitude);
+    Value nonzero = bitNot(cmp(magnitudes, splat(1)));
+    return bitAnd(bitAnd(lt, nonzero), ordered());
+  }
+  Value minimumMaximum(bool isMin, bool numberSemantics) {
+    Value lt = cmp(lhsKey, rhsKey);
+    Value result = isMin ? select(rhs, lhs, lt) : select(lhs, rhs, lt);
+    // minnum/maxnum prefer the numeric operand; minimum/maximum propagate NaN.
+    if (numberSemantics) {
+      result = select(lhs, result, rhsNumber);
+      result = select(rhs, result, lhsNumber);
+    } else {
+      result = select(rhs, result, rhsNumber);
+      result = select(lhs, result, lhsNumber);
+    }
+    return vector::BitCastOp::create(rewriter, loc, floatType, result);
+  }
+
+private:
+  Value splat(int64_t value) {
+    auto type = cast<VectorType>(lhs.getType());
+    return arith::ConstantOp::create(
+        rewriter, loc, type,
+        DenseElementsAttr::get(
+            type, rewriter.getIntegerAttr(type.getElementType(), value)));
+  }
+  Value cmp(Value a, Value b, bool isSigned = false) {
+    Value mask = aievec::AIE4CmpOp::create(
+        rewriter, loc, maskType, a, b, aievec::AIE4CmpPredicate::Lt, isSigned);
+    return UnrealizedConversionCastOp::create(rewriter, loc, scalarType, mask)
+        .getResult(0);
+  }
+  Value select(Value a, Value b, Value mask) {
+    // A set mask bit selects the second operand.
+    Value carrier =
+        UnrealizedConversionCastOp::create(rewriter, loc, maskType, mask)
+            .getResult(0);
+    return aievec::AIE4SelOp::create(rewriter, loc, a.getType(), a, b, carrier);
+  }
+
+  ConversionPatternRewriter &rewriter;
+  Location loc;
+  VectorType floatType;
+  Type maskType, scalarType;
+  Value lhs, rhs, lhsMagnitude, rhsMagnitude, lhsKey, rhsKey;
+  Value lhsNumber, rhsNumber;
+};
+
+template <typename SrcOpTy>
+struct LowerAIE4FloatMinMaxOp : OpConversionPattern<SrcOpTy> {
+  using OpConversionPattern<SrcOpTy>::OpConversionPattern;
+  using OpAdaptor = typename SrcOpTy::Adaptor;
+
+  LogicalResult
+  matchAndRewrite(SrcOpTy srcOp, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto resultType = dyn_cast<VectorType>(srcOp.getType());
+    if (!resultType || !isAIE4VFCmpShape(resultType))
+      return failure();
+    constexpr bool isMin = std::is_same_v<SrcOpTy, arith::MinimumFOp> ||
+                           std::is_same_v<SrcOpTy, arith::MinNumFOp>;
+    constexpr bool numberSemantics =
+        std::is_same_v<SrcOpTy, arith::MinNumFOp> ||
+        std::is_same_v<SrcOpTy, arith::MaxNumFOp>;
+    AIE4FloatOrder order(rewriter, srcOp.getLoc(), adaptor.getLhs(),
+                         adaptor.getRhs());
+    rewriter.replaceOp(srcOp, order.minimumMaximum(isMin, numberSemantics));
+    return success();
+  }
+};
+
+using LowerAIE4MinimumFOp = LowerAIE4FloatMinMaxOp<arith::MinimumFOp>;
+using LowerAIE4MaximumFOp = LowerAIE4FloatMinMaxOp<arith::MaximumFOp>;
+using LowerAIE4MinNumFOp = LowerAIE4FloatMinMaxOp<arith::MinNumFOp>;
+using LowerAIE4MaxNumFOp = LowerAIE4FloatMinMaxOp<arith::MaxNumFOp>;
+
+struct LowerAIE4CmpFOp : OpConversionPattern<arith::CmpFOp> {
+  using OpConversionPattern::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(arith::CmpFOp srcOp, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto lhsType = dyn_cast<VectorType>(srcOp.getLhs().getType());
+    if (!lhsType || !isAIE4VFCmpShape(lhsType))
+      return failure();
+    Location loc = srcOp.getLoc();
+    AIE4FloatOrder order(rewriter, loc, adaptor.getLhs(), adaptor.getRhs());
+    Value result;
+    switch (srcOp.getPredicate()) {
+    case arith::CmpFPredicate::OLT:
+      result = order.less();
+      break;
+    case arith::CmpFPredicate::OGT:
+      result = order.less(true);
+      break;
+    case arith::CmpFPredicate::OLE:
+      result = order.bitAnd(order.bitNot(order.less(true)), order.ordered());
+      break;
+    case arith::CmpFPredicate::OGE:
+      result = order.bitAnd(order.bitNot(order.less()), order.ordered());
+      break;
+    case arith::CmpFPredicate::OEQ:
+      result = order.bitAnd(
+          order.bitNot(order.bitOr(order.less(), order.less(true))),
+          order.ordered());
+      break;
+    case arith::CmpFPredicate::ONE:
+      result = order.bitOr(order.less(), order.less(true));
+      break;
+    case arith::CmpFPredicate::ORD:
+      result = order.ordered();
+      break;
+    case arith::CmpFPredicate::UNO:
+      result = order.bitNot(order.ordered());
+      break;
+    case arith::CmpFPredicate::ULT:
+      result = order.bitOr(order.less(), order.bitNot(order.ordered()));
+      break;
+    case arith::CmpFPredicate::UGE:
+      result = order.bitNot(order.less());
+      break;
+    case arith::CmpFPredicate::UGT:
+      result = order.bitOr(order.less(true), order.bitNot(order.ordered()));
+      break;
+    case arith::CmpFPredicate::ULE:
+      result = order.bitNot(order.less(true));
+      break;
+    case arith::CmpFPredicate::UEQ:
+      result = order.bitNot(order.bitOr(order.less(), order.less(true)));
+      break;
+    case arith::CmpFPredicate::UNE:
+      result = order.bitOr(order.bitOr(order.less(), order.less(true)),
+                           order.bitNot(order.ordered()));
+      break;
+    case arith::CmpFPredicate::AlwaysFalse:
+      result = order.constant(0);
+      break;
+    case arith::CmpFPredicate::AlwaysTrue:
+      result = order.constant(-1);
+      break;
+    }
+    auto resultType = cast<VectorType>(srcOp.getResult().getType());
+    rewriter.replaceOp(srcOp,
+                       unpackAIE4Mask(loc, result, resultType, rewriter));
     return success();
   }
 };
@@ -6406,6 +6646,8 @@ static void populateAIEVecV4ConversionPatterns(RewritePatternSet &patterns) {
            LowerAIE4MinSIOp, LowerAIE4MaxSIOp, LowerAIE4MinUIOp,
            LowerAIE4MaxUIOp, LowerAIE4CmpIOp, LowerAIE4SelectOp,
            LowerAIE4MaskExtractOp, LowerAIE4VectorReductionOp,
+           LowerAIE4MinimumFOp, LowerAIE4MaximumFOp, LowerAIE4CmpFOp,
+           LowerAIE4MinNumFOp, LowerAIE4MaxNumFOp,
            LowerVectorTransposeOpToAIE4ShuffleOpPattern,
            LowerVectorShuffleOpToAIE4ShuffleOpPattern>(
            patterns.getContext());
@@ -6490,7 +6732,20 @@ static void configureAIEVecV4Legalizations(ConversionTarget &target) {
   });
   target.addDynamicallyLegalOp<arith::SelectOp>([](arith::SelectOp selOp) {
     auto vecTy = dyn_cast<VectorType>(selOp.getType());
-    return !vecTy || !isAIE4VAddShape(vecTy);
+    return !vecTy || (!isAIE4VAddShape(vecTy) && !isAIE4VFCmpShape(vecTy));
+  });
+
+  // Integer encoding comparisons preserve IEEE semantics in every FPOrder mode.
+  target.addDynamicallyLegalOp<arith::MinimumFOp, arith::MaximumFOp,
+                               arith::MinNumFOp, arith::MaxNumFOp>(
+      [](Operation *op) {
+        auto vecTy = dyn_cast<VectorType>(op->getResultTypes()[0]);
+        return !vecTy || !isAIE4VFCmpShape(vecTy);
+      });
+
+  target.addDynamicallyLegalOp<arith::CmpFOp>([](arith::CmpFOp cmpOp) {
+    auto vecTy = dyn_cast<VectorType>(cmpOp.getLhs().getType());
+    return !vecTy || !isAIE4VFCmpShape(vecTy);
   });
 
   // Equality predicates and unsupported shapes retain generic lowering.

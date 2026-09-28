@@ -415,6 +415,201 @@ struct AIE4SelOpConversion
 };
 
 //===----------------------------------------------------------------------===//
+// Float min/max/compare
+//===----------------------------------------------------------------------===//
+//
+// Native float operations dispatch by element format and lane count. Selectors
+// also depend on the format; resolveAIE4VFCmpOpsel centralizes that mapping.
+
+namespace {
+enum class AIE4VFCmpFamily { Bf16x32, Bf16x64, Fp16x32, Fp16x64, Fp32x16, Fp32x32 };
+// Native operations use the ordering selected by ambient crFPOrder.
+enum class AIE4VFCmpOp { MinGe, MaxLt, Lt, Ge };
+} // namespace
+
+static FailureOr<AIE4VFCmpFamily> classifyAIE4VFCmpShape(VectorType vecTy) {
+  if (vecTy.getRank() != 1)
+    return failure();
+  Type elTy = vecTy.getElementType();
+  int64_t lanes = vecTy.getShape()[0];
+  if (elTy.isBF16() && lanes == 32)
+    return AIE4VFCmpFamily::Bf16x32;
+  if (elTy.isBF16() && lanes == 64)
+    return AIE4VFCmpFamily::Bf16x64;
+  if (elTy.isF16() && lanes == 32)
+    return AIE4VFCmpFamily::Fp16x32;
+  if (elTy.isF16() && lanes == 64)
+    return AIE4VFCmpFamily::Fp16x64;
+  if (elTy.isF32() && lanes == 16)
+    return AIE4VFCmpFamily::Fp32x16;
+  if (elTy.isF32() && lanes == 32)
+    return AIE4VFCmpFamily::Fp32x32;
+  return failure();
+}
+
+// FP32 uses Ge=48 and Lt=49, reversing the selector order of BF16 and FP16.
+static xllvm::AIE4VFCmpOpSel resolveAIE4VFCmpOpsel(AIE4VFCmpFamily family,
+                                                    AIE4VFCmpOp op) {
+  switch (family) {
+  case AIE4VFCmpFamily::Bf16x32:
+  case AIE4VFCmpFamily::Bf16x64:
+    switch (op) {
+    case AIE4VFCmpOp::MinGe:
+      return xllvm::AIE4VFCmpOpSel::Bf16MinGe;
+    case AIE4VFCmpOp::MaxLt:
+      return xllvm::AIE4VFCmpOpSel::Bf16MaxLt;
+    case AIE4VFCmpOp::Lt:
+      return xllvm::AIE4VFCmpOpSel::Bf16Lt;
+    case AIE4VFCmpOp::Ge:
+      return xllvm::AIE4VFCmpOpSel::Bf16Ge;
+    }
+    break;
+  case AIE4VFCmpFamily::Fp16x32:
+  case AIE4VFCmpFamily::Fp16x64:
+    switch (op) {
+    case AIE4VFCmpOp::MinGe:
+      return xllvm::AIE4VFCmpOpSel::Fp16MinGe;
+    case AIE4VFCmpOp::MaxLt:
+      return xllvm::AIE4VFCmpOpSel::Fp16MaxLt;
+    case AIE4VFCmpOp::Lt:
+      return xllvm::AIE4VFCmpOpSel::Fp16Lt;
+    case AIE4VFCmpOp::Ge:
+      return xllvm::AIE4VFCmpOpSel::Fp16Ge;
+    }
+    break;
+  case AIE4VFCmpFamily::Fp32x16:
+  case AIE4VFCmpFamily::Fp32x32:
+    switch (op) {
+    case AIE4VFCmpOp::MinGe:
+      return xllvm::AIE4VFCmpOpSel::Fp32MinGe;
+    case AIE4VFCmpOp::MaxLt:
+      return xllvm::AIE4VFCmpOpSel::Fp32MaxLt;
+    case AIE4VFCmpOp::Lt:
+      return xllvm::AIE4VFCmpOpSel::Fp32Lt;
+    case AIE4VFCmpOp::Ge:
+      return xllvm::AIE4VFCmpOpSel::Fp32Ge;
+    }
+    break;
+  }
+  llvm_unreachable("unhandled AIE4VFCmpFamily/AIE4VFCmpOp");
+}
+
+// Build the XLLVM operation for this float shape and extract its vector and mask.
+static std::pair<Value, Value>
+buildAIE4VFCmp(ConversionPatternRewriter &rewriter, Location loc,
+               AIE4VFCmpFamily family, Value lhs, Value rhs,
+               xllvm::AIE4VFCmpOpSel opsel) {
+  Type i32Ty = rewriter.getI32Type();
+  Type vec2xi32Ty = VectorType::get({2}, i32Ty);
+  Value res;
+  switch (family) {
+  case AIE4VFCmpFamily::Bf16x32:
+    res = rewriter.create<xllvm::VAddBf16I512CmpAIE4IntrOp>(
+        loc,
+        LLVM::LLVMStructType::getLiteral(rewriter.getContext(),
+                                          {lhs.getType(), i32Ty}),
+        lhs, rhs, opsel);
+    break;
+  case AIE4VFCmpFamily::Bf16x64:
+    res = rewriter.create<xllvm::VAddBf16I1024CmpAIE4IntrOp>(
+        loc, LLVM::LLVMStructType::getLiteral(rewriter.getContext(),
+                                               {lhs.getType(), vec2xi32Ty}),
+        lhs, rhs, opsel);
+    break;
+  case AIE4VFCmpFamily::Fp16x32:
+    res = rewriter.create<xllvm::VAddFp16I512CmpAIE4IntrOp>(
+        loc,
+        LLVM::LLVMStructType::getLiteral(rewriter.getContext(),
+                                          {lhs.getType(), i32Ty}),
+        lhs, rhs, opsel);
+    break;
+  case AIE4VFCmpFamily::Fp16x64:
+    res = rewriter.create<xllvm::VAddFp16I1024CmpAIE4IntrOp>(
+        loc, LLVM::LLVMStructType::getLiteral(rewriter.getContext(),
+                                               {lhs.getType(), vec2xi32Ty}),
+        lhs, rhs, opsel);
+    break;
+  case AIE4VFCmpFamily::Fp32x16:
+    res = rewriter.create<xllvm::VAddFp32I512CmpAIE4IntrOp>(
+        loc,
+        LLVM::LLVMStructType::getLiteral(rewriter.getContext(),
+                                          {lhs.getType(), i32Ty}),
+        lhs, rhs, opsel);
+    break;
+  case AIE4VFCmpFamily::Fp32x32:
+    res = rewriter.create<xllvm::VAddFp32I1024CmpAIE4IntrOp>(
+        loc,
+        LLVM::LLVMStructType::getLiteral(rewriter.getContext(),
+                                          {lhs.getType(), i32Ty}),
+        lhs, rhs, opsel);
+    break;
+  }
+  auto structTy = cast<LLVM::LLVMStructType>(res.getType());
+  Value vecResult = rewriter.create<LLVM::ExtractValueOp>(
+      loc, structTy.getBody()[0], res, ArrayRef<int64_t>{0});
+  Value maskResult = rewriter.create<LLVM::ExtractValueOp>(
+      loc, structTy.getBody()[1], res, ArrayRef<int64_t>{1});
+  return {vecResult, maskResult};
+}
+
+struct AIE4FMinMaxOpConversion
+    : mlir::ConvertOpToLLVMPattern<aievec::AIE4FMinMaxOp> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(aievec::AIE4FMinMaxOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto family =
+        classifyAIE4VFCmpShape(cast<VectorType>(op.getLhs().getType()));
+    if (failed(family))
+      return rewriter.notifyMatchFailure(op, "unsupported AIE4 vector shape");
+
+    auto vfOp = op.getKind() == aievec::AIE4MinMaxKind::Min
+                    ? AIE4VFCmpOp::MinGe
+                    : AIE4VFCmpOp::MaxLt;
+    auto opsel = resolveAIE4VFCmpOpsel(*family, vfOp);
+
+    auto [vecResult, maskResult] = buildAIE4VFCmp(
+        rewriter, op.getLoc(), *family, adaptor.getLhs(), adaptor.getRhs(),
+        opsel);
+    (void)maskResult;
+    rewriter.replaceOp(op, vecResult);
+    return success();
+  }
+};
+
+struct AIE4FCmpOpConversion
+    : mlir::ConvertOpToLLVMPattern<aievec::AIE4FCmpOp> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(aievec::AIE4FCmpOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto family =
+        classifyAIE4VFCmpShape(cast<VectorType>(op.getLhs().getType()));
+    if (failed(family))
+      return rewriter.notifyMatchFailure(op, "unsupported AIE4 vector shape");
+
+    auto vfOp = op.getPredicate() == aievec::AIE4CmpPredicate::Lt
+                    ? AIE4VFCmpOp::Lt
+                    : AIE4VFCmpOp::Ge;
+    auto opsel = resolveAIE4VFCmpOpsel(*family, vfOp);
+
+    auto [vecResult, maskResult] = buildAIE4VFCmp(
+        rewriter, op.getLoc(), *family, adaptor.getLhs(), adaptor.getRhs(),
+        opsel);
+    // As with the integer compare, the vector result of a Lt/Ge opsel is
+    // architecturally undefined; only the mask is meaningful.
+    (void)vecResult;
+
+    Type destTy = getTypeConverter()->convertType(op.getResult().getType());
+    rewriter.replaceOp(
+        op, bitcastIfNeeded(rewriter, op.getLoc(), maskResult, destTy));
+    return success();
+  }
+};
+
+//===----------------------------------------------------------------------===//
 // Vector reduction
 //===----------------------------------------------------------------------===//
 //
@@ -541,7 +736,8 @@ void populateAIEVecToLLVMAIE4ConversionPatterns(
                AIE4SRSI32I16OpConversion, AIE4UPSI16I32OpConversion,
                AIE4ConvBF16F32OpConversion, AIE4ConvF32BF16OpConversion,
                AIE4MinMaxOpConversion, AIE4CmpOpConversion,
-               AIE4SelOpConversion, AIE4ReduceOpConversion,
+               AIE4SelOpConversion, AIE4FMinMaxOpConversion,
+               AIE4FCmpOpConversion, AIE4ReduceOpConversion,
                AIE4ShuffleOpConversion>(converter);
 }
 

@@ -3,12 +3,12 @@
 
 // RUN: aie-opt %s --convert-vector-to-aievec="aie-target=aie4b" | FileCheck %s
 
-// Unsupported element types and vector shapes retain generic operations.
+// Supported float selects bitcast through integer select operations.
+// Unsupported vector shapes retain generic operations.
 
 // CHECK-LABEL: @float16
-// CHECK-NOT: aievec.aie4
-// CHECK: arith.select
-// CHECK-NOT: aievec.aie4
+// CHECK: aievec.aie4.sel {{.*}} : vector<16xi32>, ui32, vector<16xi32>
+// CHECK: vector.bitcast {{.*}} : vector<16xi32> to vector<16xf32>
 // CHECK: return
 func.func @float16(%m: vector<16xi1>, %a: vector<16xf32>, %b: vector<16xf32>) -> vector<16xf32> {
   %r = arith.select %m, %a, %b : vector<16xi1>, vector<16xf32>
@@ -16,9 +16,8 @@ func.func @float16(%m: vector<16xi1>, %a: vector<16xf32>, %b: vector<16xf32>) ->
 }
 
 // CHECK-LABEL: @float32
-// CHECK-NOT: aievec.aie4
-// CHECK: arith.select
-// CHECK-NOT: aievec.aie4
+// CHECK: aievec.aie4.sel {{.*}} : vector<32xi32>, ui32, vector<32xi32>
+// CHECK: vector.bitcast {{.*}} : vector<32xi32> to vector<32xf32>
 // CHECK: return
 func.func @float32(%m: vector<32xi1>, %a: vector<32xf32>, %b: vector<32xf32>) -> vector<32xf32> {
   %r = arith.select %m, %a, %b : vector<32xi1>, vector<32xf32>
@@ -26,9 +25,8 @@ func.func @float32(%m: vector<32xi1>, %a: vector<32xf32>, %b: vector<32xf32>) ->
 }
 
 // CHECK-LABEL: @half32
-// CHECK-NOT: aievec.aie4
-// CHECK: arith.select
-// CHECK-NOT: aievec.aie4
+// CHECK: aievec.aie4.sel {{.*}} : vector<32xi16>, ui32, vector<32xi16>
+// CHECK: vector.bitcast {{.*}} : vector<32xi16> to vector<32xf16>
 // CHECK: return
 func.func @half32(%m: vector<32xi1>, %a: vector<32xf16>, %b: vector<32xf16>) -> vector<32xf16> {
   %r = arith.select %m, %a, %b : vector<32xi1>, vector<32xf16>
@@ -36,9 +34,8 @@ func.func @half32(%m: vector<32xi1>, %a: vector<32xf16>, %b: vector<32xf16>) -> 
 }
 
 // CHECK-LABEL: @half64
-// CHECK-NOT: aievec.aie4
-// CHECK: arith.select
-// CHECK-NOT: aievec.aie4
+// CHECK: aievec.aie4.sel {{.*}} : vector<64xi16>, ui64, vector<64xi16>
+// CHECK: vector.bitcast {{.*}} : vector<64xi16> to vector<64xf16>
 // CHECK: return
 func.func @half64(%m: vector<64xi1>, %a: vector<64xf16>, %b: vector<64xf16>) -> vector<64xf16> {
   %r = arith.select %m, %a, %b : vector<64xi1>, vector<64xf16>
@@ -124,4 +121,3 @@ func.func @unsigned(%m: vector<16xi1>, %a: vector<16xui32>, %b: vector<16xui32>)
   %r = arith.select %m, %a, %b : vector<16xi1>, vector<16xui32>
   return %r : vector<16xui32>
 }
-

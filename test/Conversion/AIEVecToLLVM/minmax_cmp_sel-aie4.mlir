@@ -89,3 +89,138 @@ func.func @sel_i16x64(%a: vector<64xi16>, %b: vector<64xi16>, %sel: ui64) -> vec
   %0 = aievec.aie4.sel %a, %b, %sel : vector<64xi16>, ui64, vector<64xi16>
   return %0 : vector<64xi16>
 }
+
+// -----
+
+// -- FLOAT MINMAX/CMP --
+//
+// Check XLLVM selectors and result types for all six supported float shapes.
+// FP32 uses Ge=48 and Lt=49, reversing the selector order of BF16 and FP16.
+
+// CHECK-LABEL: @fminmax_bf16x32_min
+func.func @fminmax_bf16x32_min(%a: vector<32xbf16>, %b: vector<32xbf16>) -> vector<32xbf16> {
+  // CHECK: %[[R:.*]] = "xllvm.intr.aie4.vaddbfloat16.512"
+  // CHECK-SAME: opsel = 20 : i32
+  // CHECK-SAME: -> !llvm.struct<(vector<32xbf16>, i32)>
+  // CHECK: llvm.extractvalue %[[R]][0]
+  %0 = aievec.aie4.fminmax %a, %b [kind = <min>] : vector<32xbf16>
+  return %0 : vector<32xbf16>
+}
+
+// CHECK-LABEL: @fminmax_bf16x64_max
+func.func @fminmax_bf16x64_max(%a: vector<64xbf16>, %b: vector<64xbf16>) -> vector<64xbf16> {
+  // CHECK: %[[R:.*]] = "xllvm.intr.aie4.vaddbfloat16.1024"
+  // CHECK-SAME: opsel = 24 : i32
+  // CHECK-SAME: -> !llvm.struct<(vector<64xbf16>, vector<2xi32>)>
+  // CHECK: llvm.extractvalue %[[R]][0]
+  %0 = aievec.aie4.fminmax %a, %b [kind = <max>] : vector<64xbf16>
+  return %0 : vector<64xbf16>
+}
+
+// CHECK-LABEL: @fminmax_fp16x32_min
+func.func @fminmax_fp16x32_min(%a: vector<32xf16>, %b: vector<32xf16>) -> vector<32xf16> {
+  // CHECK: %[[R:.*]] = "xllvm.intr.aie4.vaddfloat16.512"
+  // CHECK-SAME: opsel = 21 : i32
+  // CHECK-SAME: -> !llvm.struct<(vector<32xf16>, i32)>
+  // CHECK: llvm.extractvalue %[[R]][0]
+  %0 = aievec.aie4.fminmax %a, %b [kind = <min>] : vector<32xf16>
+  return %0 : vector<32xf16>
+}
+
+// CHECK-LABEL: @fminmax_fp16x64_max
+func.func @fminmax_fp16x64_max(%a: vector<64xf16>, %b: vector<64xf16>) -> vector<64xf16> {
+  // CHECK: %[[R:.*]] = "xllvm.intr.aie4.vaddfloat16.1024"
+  // CHECK-SAME: opsel = 25 : i32
+  // CHECK-SAME: -> !llvm.struct<(vector<64xf16>, vector<2xi32>)>
+  // CHECK: llvm.extractvalue %[[R]][0]
+  %0 = aievec.aie4.fminmax %a, %b [kind = <max>] : vector<64xf16>
+  return %0 : vector<64xf16>
+}
+
+// CHECK-LABEL: @fminmax_fp32x16_min
+func.func @fminmax_fp32x16_min(%a: vector<16xf32>, %b: vector<16xf32>) -> vector<16xf32> {
+  // CHECK: %[[R:.*]] = "xllvm.intr.aie4.vaddfloat.512"
+  // CHECK-SAME: opsel = 36 : i32
+  // CHECK-SAME: -> !llvm.struct<(vector<16xf32>, i32)>
+  // CHECK: llvm.extractvalue %[[R]][0]
+  %0 = aievec.aie4.fminmax %a, %b [kind = <min>] : vector<16xf32>
+  return %0 : vector<16xf32>
+}
+
+// CHECK-LABEL: @fminmax_fp32x32_max
+func.func @fminmax_fp32x32_max(%a: vector<32xf32>, %b: vector<32xf32>) -> vector<32xf32> {
+  // CHECK: %[[R:.*]] = "xllvm.intr.aie4.vaddfloat.1024"
+  // CHECK-SAME: opsel = 37 : i32
+  // CHECK-SAME: -> !llvm.struct<(vector<32xf32>, i32)>
+  // CHECK: llvm.extractvalue %[[R]][0]
+  %0 = aievec.aie4.fminmax %a, %b [kind = <max>] : vector<32xf32>
+  return %0 : vector<32xf32>
+}
+
+// -----
+
+// -- FLOAT CMP --
+
+// CHECK-LABEL: @fcmp_bf16x32_lt
+func.func @fcmp_bf16x32_lt(%a: vector<32xbf16>, %b: vector<32xbf16>) -> ui32 {
+  // CHECK: %[[R:.*]] = "xllvm.intr.aie4.vaddbfloat16.512"
+  // CHECK-SAME: opsel = 40 : i32
+  // CHECK-SAME: -> !llvm.struct<(vector<32xbf16>, i32)>
+  // CHECK: %[[MASK:.*]] = llvm.extractvalue %[[R]][1]
+  // CHECK: builtin.unrealized_conversion_cast %[[MASK]]
+  %0 = aievec.aie4.fcmp %a, %b [pred = <lt>] : vector<32xbf16>, ui32
+  return %0 : ui32
+}
+
+// CHECK-LABEL: @fcmp_bf16x64_ge
+func.func @fcmp_bf16x64_ge(%a: vector<64xbf16>, %b: vector<64xbf16>) -> ui64 {
+  // CHECK: %[[R:.*]] = "xllvm.intr.aie4.vaddbfloat16.1024"
+  // CHECK-SAME: opsel = 44 : i32
+  // CHECK-SAME: -> !llvm.struct<(vector<64xbf16>, vector<2xi32>)>
+  // CHECK: %[[MASK:.*]] = llvm.extractvalue %[[R]][1]
+  // 64-bit register-pair mask carrier: must be bitcast <2 x i32> -> i64.
+  // CHECK: llvm.bitcast %[[MASK]] : vector<2xi32> to i64
+  %0 = aievec.aie4.fcmp %a, %b [pred = <ge>] : vector<64xbf16>, ui64
+  return %0 : ui64
+}
+
+// CHECK-LABEL: @fcmp_fp16x32_lt
+func.func @fcmp_fp16x32_lt(%a: vector<32xf16>, %b: vector<32xf16>) -> ui32 {
+  // CHECK: %[[R:.*]] = "xllvm.intr.aie4.vaddfloat16.512"
+  // CHECK-SAME: opsel = 41 : i32
+  // CHECK: %[[MASK:.*]] = llvm.extractvalue %[[R]][1]
+  // CHECK: builtin.unrealized_conversion_cast %[[MASK]]
+  %0 = aievec.aie4.fcmp %a, %b [pred = <lt>] : vector<32xf16>, ui32
+  return %0 : ui32
+}
+
+// CHECK-LABEL: @fcmp_fp16x64_ge
+func.func @fcmp_fp16x64_ge(%a: vector<64xf16>, %b: vector<64xf16>) -> ui64 {
+  // CHECK: %[[R:.*]] = "xllvm.intr.aie4.vaddfloat16.1024"
+  // CHECK-SAME: opsel = 45 : i32
+  // CHECK: %[[MASK:.*]] = llvm.extractvalue %[[R]][1]
+  // CHECK: llvm.bitcast %[[MASK]] : vector<2xi32> to i64
+  %0 = aievec.aie4.fcmp %a, %b [pred = <ge>] : vector<64xf16>, ui64
+  return %0 : ui64
+}
+
+// Check both FP32 selectors explicitly to catch an accidental lt/ge swap.
+// CHECK-LABEL: @fcmp_fp32x16_ge
+func.func @fcmp_fp32x16_ge(%a: vector<16xf32>, %b: vector<16xf32>) -> ui32 {
+  // CHECK: %[[R:.*]] = "xllvm.intr.aie4.vaddfloat.512"
+  // CHECK-SAME: opsel = 48 : i32
+  // CHECK: %[[MASK:.*]] = llvm.extractvalue %[[R]][1]
+  // CHECK: builtin.unrealized_conversion_cast %[[MASK]]
+  %0 = aievec.aie4.fcmp %a, %b [pred = <ge>] : vector<16xf32>, ui32
+  return %0 : ui32
+}
+
+// CHECK-LABEL: @fcmp_fp32x32_lt
+func.func @fcmp_fp32x32_lt(%a: vector<32xf32>, %b: vector<32xf32>) -> ui32 {
+  // CHECK: %[[R:.*]] = "xllvm.intr.aie4.vaddfloat.1024"
+  // CHECK-SAME: opsel = 49 : i32
+  // CHECK: %[[MASK:.*]] = llvm.extractvalue %[[R]][1]
+  // CHECK: builtin.unrealized_conversion_cast %[[MASK]]
+  %0 = aievec.aie4.fcmp %a, %b [pred = <lt>] : vector<32xf32>, ui32
+  return %0 : ui32
+}

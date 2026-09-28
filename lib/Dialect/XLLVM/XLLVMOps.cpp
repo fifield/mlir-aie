@@ -14,6 +14,7 @@
 #include "mlir/Target/LLVMIR/ModuleTranslation.h"
 #include "mlir/Transforms/FoldUtils.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Intrinsics.h"
 
 using namespace mlir;
 using namespace xilinx;
@@ -112,6 +113,79 @@ createAIE4ConfIntrinsicCall(llvm::IRBuilderBase &builder,
   llvm::Function *llvmIntr =
       getNamedIntrinsicDeclaration(module, intrinsicName, resTy, types);
   return builder.CreateCall(llvmIntr, operands);
+}
+
+llvm::Value *createAIE4FPOrderIntrinsicCall(
+    llvm::IRBuilderBase &builder, LLVM::ModuleTranslation &moduleTranslation,
+    Operation *intrOp, llvm::StringRef intrinsicName, uint32_t opsel) {
+  auto *resTy = moduleTranslation.convertType(intrOp->getResult(0).getType());
+  // Compare selectors leave the vector result undefined. Keep that result out
+  // of the helper ABI: Peano cannot assign a register class to it at O0.
+  auto selector = static_cast<AIE4VFCmpOpSel>(opsel);
+  bool isCompare = selector == AIE4VFCmpOpSel::Bf16Lt ||
+                   selector == AIE4VFCmpOpSel::Bf16Ge ||
+                   selector == AIE4VFCmpOpSel::Fp16Lt ||
+                   selector == AIE4VFCmpOpSel::Fp16Ge ||
+                   selector == AIE4VFCmpOpSel::Fp32Lt ||
+                   selector == AIE4VFCmpOpSel::Fp32Ge;
+  auto *helperResTy = isCompare
+                          ? llvm::cast<llvm::StructType>(resTy)->getElementType(1)
+                          : resTy;
+  auto operands = moduleTranslation.lookupValues(intrOp->getOperands());
+  SmallVector<llvm::Type *> types;
+  for (auto *operand : operands)
+    types.push_back(operand->getType());
+
+  auto *module = builder.GetInsertBlock()->getModule();
+  const std::string baseName =
+      ("__mlir_aie4_fporder_" + intrinsicName + "_" + llvm::Twine(opsel)).str();
+  std::string helperName = baseName;
+  auto *helperTy = llvm::FunctionType::get(helperResTy, types, false);
+  auto *helper = module->getFunction(helperName);
+  // Do not capture a user symbol that happens to use the generated name.
+  // The marker also lets subsequent operations reuse a renamed helper.
+  for (unsigned suffix = 1; module->getNamedValue(helperName); ++suffix) {
+    if (helper && helper->hasInternalLinkage() &&
+        helper->getFunctionType() == helperTy &&
+        helper->hasFnAttribute("aie4-fporder-helper") &&
+        helper->getFnAttribute("aie4-fporder-helper").getValueAsString() ==
+            baseName)
+      break;
+    helperName = (baseName + "." + llvm::Twine(suffix)).str();
+    helper = module->getFunction(helperName);
+  }
+  if (!helper) {
+    helper = llvm::Function::Create(
+        helperTy, llvm::GlobalValue::InternalLinkage, helperName, module);
+    // Keep the native instruction inside a call boundary during scheduling.
+    // llvm.sideeffect gives that call inaccessible-memory effects even after
+    // interprocedural attribute inference, so LLVM cannot CSE or move it across
+    // mode changes despite the incorrectly pure native intrinsic. This costs a
+    // call until Peano models crFPOrder on these intrinsics.
+    helper->addFnAttr(llvm::Attribute::NoInline);
+    helper->addFnAttr("aie4-fporder-helper", baseName);
+    llvm::IRBuilder<> helperBuilder(
+        llvm::BasicBlock::Create(builder.getContext(), "entry", helper));
+    helperBuilder.CreateCall(llvm::Intrinsic::getOrInsertDeclaration(
+        module, llvm::Intrinsic::sideeffect));
+    SmallVector<llvm::Value *> args;
+    for (auto &arg : helper->args())
+      args.push_back(&arg);
+    for (uint32_t arg : {0u, opsel, 0u}) {
+      args.push_back(helperBuilder.getInt32(arg));
+      types.push_back(helperBuilder.getInt32Ty());
+    }
+    auto *intrinsic =
+        getNamedIntrinsicDeclaration(module, intrinsicName, resTy, types);
+    llvm::Value *result = helperBuilder.CreateCall(intrinsic, args);
+    if (isCompare)
+      result = helperBuilder.CreateExtractValue(result, 1);
+    helperBuilder.CreateRet(result);
+  }
+  llvm::Value *result = builder.CreateCall(helper, operands);
+  if (isCompare)
+    result = builder.CreateInsertValue(llvm::PoisonValue::get(resTy), result, 1);
+  return result;
 }
 
 llvm::CallInst *

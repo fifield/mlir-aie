@@ -493,6 +493,106 @@ def VAdd32I1024SelAIE4IntrOp :
         FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>, I32>;
 
 //===----------------------------------------------------------------------===//
+// Float min/max/compare selectors for the vaddfloat-family intrinsics
+//===----------------------------------------------------------------------===//
+//
+// The backend's literal fporder=0 does not set crFPOrder or model a register
+// dependency. Native operations read ambient state through helper calls;
+// source IEEE arithmetic uses integer comparisons to be independent of it.
+// Selectors differ by element format; fp32 uses GE=48 and LT=49.
+def AIE4_VFCmpOpSel_Bf16MinGe : I32EnumAttrCase<"Bf16MinGe", 20, "bf16_min_ge">;
+def AIE4_VFCmpOpSel_Bf16MaxLt : I32EnumAttrCase<"Bf16MaxLt", 24, "bf16_max_lt">;
+def AIE4_VFCmpOpSel_Bf16Lt    : I32EnumAttrCase<"Bf16Lt",    40, "bf16_lt">;
+def AIE4_VFCmpOpSel_Bf16Ge    : I32EnumAttrCase<"Bf16Ge",    44, "bf16_ge">;
+def AIE4_VFCmpOpSel_Fp16MinGe : I32EnumAttrCase<"Fp16MinGe", 21, "fp16_min_ge">;
+def AIE4_VFCmpOpSel_Fp16MaxLt : I32EnumAttrCase<"Fp16MaxLt", 25, "fp16_max_lt">;
+def AIE4_VFCmpOpSel_Fp16Lt    : I32EnumAttrCase<"Fp16Lt",    41, "fp16_lt">;
+def AIE4_VFCmpOpSel_Fp16Ge    : I32EnumAttrCase<"Fp16Ge",    45, "fp16_ge">;
+def AIE4_VFCmpOpSel_Fp32MinGe : I32EnumAttrCase<"Fp32MinGe", 36, "fp32_min_ge">;
+def AIE4_VFCmpOpSel_Fp32MaxLt : I32EnumAttrCase<"Fp32MaxLt", 37, "fp32_max_lt">;
+def AIE4_VFCmpOpSel_Fp32Ge    : I32EnumAttrCase<"Fp32Ge",    48, "fp32_ge">;
+def AIE4_VFCmpOpSel_Fp32Lt    : I32EnumAttrCase<"Fp32Lt",    49, "fp32_lt">;
+
+def AIE4_VFCmpOpSel : I32EnumAttr<"AIE4VFCmpOpSel",
+    "AIE4 float min/max/compare selector for the operand element format",
+    [AIE4_VFCmpOpSel_Bf16MinGe, AIE4_VFCmpOpSel_Bf16MaxLt,
+     AIE4_VFCmpOpSel_Bf16Lt, AIE4_VFCmpOpSel_Bf16Ge,
+     AIE4_VFCmpOpSel_Fp16MinGe, AIE4_VFCmpOpSel_Fp16MaxLt,
+     AIE4_VFCmpOpSel_Fp16Lt, AIE4_VFCmpOpSel_Fp16Ge,
+     AIE4_VFCmpOpSel_Fp32MinGe, AIE4_VFCmpOpSel_Fp32MaxLt,
+     AIE4_VFCmpOpSel_Fp32Ge, AIE4_VFCmpOpSel_Fp32Lt]> {
+  let cppNamespace = "::xilinx::xllvm";
+}
+
+def AIE4_Bf16VFCmpOpSel : ConfinedAttr<AIE4_VFCmpOpSel,
+    [IntIsOneOf<[AIE4_VFCmpOpSel_Bf16MinGe.value,
+                 AIE4_VFCmpOpSel_Bf16MaxLt.value,
+                 AIE4_VFCmpOpSel_Bf16Lt.value,
+                 AIE4_VFCmpOpSel_Bf16Ge.value]>]>;
+def AIE4_Fp16VFCmpOpSel : ConfinedAttr<AIE4_VFCmpOpSel,
+    [IntIsOneOf<[AIE4_VFCmpOpSel_Fp16MinGe.value,
+                 AIE4_VFCmpOpSel_Fp16MaxLt.value,
+                 AIE4_VFCmpOpSel_Fp16Lt.value,
+                 AIE4_VFCmpOpSel_Fp16Ge.value]>]>;
+def AIE4_Fp32VFCmpOpSel : ConfinedAttr<AIE4_VFCmpOpSel,
+    [IntIsOneOf<[AIE4_VFCmpOpSel_Fp32MinGe.value,
+                 AIE4_VFCmpOpSel_Fp32MaxLt.value,
+                 AIE4_VFCmpOpSel_Fp32Ge.value,
+                 AIE4_VFCmpOpSel_Fp32Lt.value]>]>;
+
+def AIE4_CRFPOrderResource : Resource<"::xilinx::xllvm::AIE4CRFPOrderResource">;
+
+class AIE4VFCmpIntrOp<string mnemonic, Type vecTy, Type maskTy,
+                    Attr opselAttr> :
+    AIEVec4_IntrOp<mnemonic,
+        [MemoryEffects<[MemRead<AIE4_CRFPOrderResource>]>,
+         TypeIs<"res", LLVM_StructOf<[vecTy, maskTy]>>], /*numResults=*/2>,
+    Arguments<(ins vecTy:$lhs, vecTy:$rhs, opselAttr:$opsel)> {
+  let summary = "AIE4 float vector min/max/compare (vmin_ge/vmax_lt/vlt/vge, float forms)";
+  let description = [{
+    Native float min/max/compare using ambient `crFPOrder`. The intrinsic
+    receives literal zero for `sign` (ignored) and `fporder`; the backend
+    does not change the ordering mode for that literal.
+
+    Translation uses a `noinline` helper with `llvm.sideeffect` to preserve
+    ordering across mode changes during optimization and scheduling. This
+    adds call overhead until Peano models the intrinsic's FPOrder dependency.
+
+    The vector result is undefined for `Lt`/`Ge` selectors.
+  }];
+
+  let llvmBuilder = [{
+    auto *inst = ::xilinx::xllvm::createAIE4FPOrderIntrinsicCall(builder,
+                      moduleTranslation, &opInst,
+                      "llvm.aie4.}] # mnemonic # [{",
+                      (uint32_t) op.getOpsel());
+    (void) inst;
+    $res = inst;
+  }];
+}
+
+def VAddBf16I512CmpAIE4IntrOp :
+    AIE4VFCmpIntrOp<"vaddbfloat16.512",
+        FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>, I32, AIE4_Bf16VFCmpOpSel>;
+def VAddBf16I1024CmpAIE4IntrOp :
+    AIE4VFCmpIntrOp<"vaddbfloat16.1024",
+        FixedVectorOfRankAndLengthAndType<[1], [64], [BF16]>,
+        FixedVectorOfRankAndLengthAndType<[1], [2], [I32]>, AIE4_Bf16VFCmpOpSel>;
+def VAddFp16I512CmpAIE4IntrOp :
+    AIE4VFCmpIntrOp<"vaddfloat16.512",
+        FixedVectorOfRankAndLengthAndType<[1], [32], [F16]>, I32, AIE4_Fp16VFCmpOpSel>;
+def VAddFp16I1024CmpAIE4IntrOp :
+    AIE4VFCmpIntrOp<"vaddfloat16.1024",
+        FixedVectorOfRankAndLengthAndType<[1], [64], [F16]>,
+        FixedVectorOfRankAndLengthAndType<[1], [2], [I32]>, AIE4_Fp16VFCmpOpSel>;
+def VAddFp32I512CmpAIE4IntrOp :
+    AIE4VFCmpIntrOp<"vaddfloat.512",
+        FixedVectorOfRankAndLengthAndType<[1], [16], [F32]>, I32, AIE4_Fp32VFCmpOpSel>;
+def VAddFp32I1024CmpAIE4IntrOp :
+    AIE4VFCmpIntrOp<"vaddfloat.1024",
+        FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>, I32, AIE4_Fp32VFCmpOpSel>;
+
+//===----------------------------------------------------------------------===//
 // 1024-bit vector reductions (min/max/add, i32 and f32)
 //===----------------------------------------------------------------------===//
 //

@@ -1900,23 +1900,25 @@ ParseResult FMAConvOp::parse(OpAsmParser &parser, OperationState &result) {
 //===----------------------------------------------------------------------===//
 
 // Mask carrier width for supported shapes, or zero for unsupported types.
-// The 16-lane i32 shape uses the low 16 bits of a 32-bit carrier.
+// Integer and float shapes share carriers; 16-lane shapes use only 16 bits.
 static unsigned getAIE4MaskCarrierBits(VectorType vecTy) {
+  Type elemTy = vecTy.getElementType();
   if (vecTy.isScalable() || vecTy.getRank() != 1 ||
-      !vecTy.getElementType().isSignlessInteger())
+      !(elemTy.isSignlessInteger() || elemTy.isBF16() || elemTy.isF16() ||
+        elemTy.isF32()))
     return 0;
   unsigned elWidth = vecTy.getElementType().getIntOrFloatBitWidth();
   int64_t lanes = vecTy.getShape()[0];
   if (elWidth == 8 && lanes == 64)
     return 64; // i8@512
   if (elWidth == 16 && lanes == 32)
-    return 32; // i16@512
+    return 32; // i16@512, bf16@512, fp16@512
   if (elWidth == 16 && lanes == 64)
-    return 64; // i16@1024
+    return 64; // i16@1024, bf16@1024, fp16@1024
   if (elWidth == 32 && lanes == 16)
-    return 32; // i32@512
+    return 32; // i32@512, fp32@512
   if (elWidth == 32 && lanes == 32)
-    return 32; // i32@1024
+    return 32; // i32@1024, fp32@1024
   return 0;
 }
 
@@ -1947,6 +1949,22 @@ LogicalResult AIE4SelOp::verify() {
   if (selBits != maskBits)
     return emitOpError("sel mask width (")
            << selBits << " bits) does not match the AIE4 mask carrier ("
+           << maskBits << " bits) for " << lhsType;
+
+  return success();
+}
+
+LogicalResult AIE4FCmpOp::verify() {
+  auto lhsType = cast<VectorType>(getLhs().getType());
+  unsigned maskBits = getAIE4MaskCarrierBits(lhsType);
+  if (maskBits == 0)
+    return emitOpError("unsupported AIE4 vector shape for lhs/rhs: ")
+           << lhsType;
+
+  unsigned resultBits = getResult().getType().getIntOrFloatBitWidth();
+  if (resultBits != maskBits)
+    return emitOpError("result mask width (")
+           << resultBits << " bits) does not match the AIE4 mask carrier ("
            << maskBits << " bits) for " << lhsType;
 
   return success();

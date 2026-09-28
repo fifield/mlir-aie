@@ -30,6 +30,12 @@ struct AIE4CRVecSatResource
   llvm::StringRef getName() const final { return "AIE4CRVecSat"; }
 };
 
+/// `crFPOrder` -- ordering mode consulted by native float min/max/compare.
+struct AIE4CRFPOrderResource
+    : public mlir::SideEffects::Resource::Base<AIE4CRFPOrderResource> {
+  llvm::StringRef getName() const final { return "AIE4CRFPOrder"; }
+};
+
 } // namespace xilinx::xllvm
 
 #endif // AIE_DIALECT_XLLVM_AIE4CTRLREGRESOURCES_H
