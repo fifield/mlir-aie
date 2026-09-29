@@ -63,6 +63,10 @@ to drop them.
   already zero-initialised, so the serialized bytes are unchanged. Upstream:
   [Xilinx/aie-rt#33](https://github.com/Xilinx/aie-rt/pull/33).
 
-Note: `0003` is maintained against this branch's aie-rt pin, where
-`_XAie_AppendBlockWrite32`/`_opt` take `(Cmd, TxnPtr)` rather than upstream's
-`(DevInst, Cmd, TxnPtr)`; regenerate it if the submodule is bumped.
+Note: `0003` and `0005` are maintained against this branch's aie-rt pin, where
+the `_XAie_Append*` serializers take `(Cmd, TxnPtr)` rather than upstream's
+`(DevInst, Cmd, TxnPtr)` and write `OpHdr.Col`/`Row` as 0; regenerate them if
+the submodule is bumped. `0003` is generated with two lines of context
+(`git diff -U2`) so its leading context does not overlap the
+`_XAie_AppendMaskPollBusy32` body that `0005` rewrites; otherwise the
+reverse-apply idempotency check in `aiert.cmake` fails on re-configure.

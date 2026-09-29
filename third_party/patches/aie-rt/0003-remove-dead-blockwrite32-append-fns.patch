@@ -2,8 +2,7 @@ diff --git a/driver/src/common/xaie_txn.c b/driver/src/common/xaie_txn.c
 index 2b6c9a14..e3e88329 100644
 --- a/driver/src/common/xaie_txn.c
 +++ b/driver/src/common/xaie_txn.c
-@@ -701,27 +701,6 @@ static inline void _XAie_AppendMaskPollBusy32(XAie_TxnCmd *Cmd, uint8_t *TxnPtr)
- 	Hdr->OpHdr.Op = (u8)XAIE_IO_MASKPOLL_BUSY;
+@@ -702,25 +702,4 @@ static inline void _XAie_AppendMaskPollBusy32(XAie_TxnCmd *Cmd, uint8_t *TxnPtr)
  }
  
 -static inline void _XAie_AppendBlockWrite32(XAie_TxnCmd *Cmd, u8 *TxnPtr)
@@ -29,9 +28,7 @@ index 2b6c9a14..e3e88329 100644
 -
  static inline void _XAie_AppendBlockSet32(XAie_TxnCmd *Cmd, u8 *TxnPtr)
  {
- 	u8 *Payload = TxnPtr + sizeof(XAie_BlockWrite32Hdr);
-@@ -910,26 +889,6 @@ static inline void _XAie_AppendMaskPollBusy32_opt(XAie_TxnCmd *Cmd, uint8_t *Txn
- 	Hdr->Value = Cmd->Value;
+@@ -911,24 +890,4 @@ static inline void _XAie_AppendMaskPollBusy32_opt(XAie_TxnCmd *Cmd, uint8_t *Txn
  	Hdr->OpHdr.Op = (u8)XAIE_IO_MASKPOLL_BUSY;
  }
 -static inline void _XAie_AppendBlockWrite32_opt(XAie_TxnCmd *Cmd, u8 *TxnPtr)
@@ -56,4 +53,3 @@ index 2b6c9a14..e3e88329 100644
 -
  static inline void _XAie_AppendBlockSet32_opt(XAie_TxnCmd *Cmd, u8 *TxnPtr)
  {
- 	u8 *Payload = TxnPtr + sizeof(XAie_BlockWrite32Hdr_opt);
