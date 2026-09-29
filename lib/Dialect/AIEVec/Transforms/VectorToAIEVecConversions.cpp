@@ -6706,23 +6706,13 @@ static void configureAIEVecV4Legalizations(ConversionTarget &target) {
   // generic until lowering can establish its requested modes and restore them.
   target.addLegalOp<arith::TruncFOp>();
 
-  // Let the f32 arithmetic between bf16 conversions reach generic lowering.
-  target.addDynamicallyLegalOp<arith::SubFOp>([](arith::SubFOp op) {
-    auto vecTy = dyn_cast<VectorType>(op.getType());
-    return !vecTy || (!vecTy.isScalable() && vecTy.getRank() == 1 &&
-                      vecTy.getShape()[0] == 32 &&
-                      vecTy.getElementType().isF32());
-  });
-  // Fuse matching MAC roots; ordinary scalar and fixed 32xf32 adds stay legal.
-  target.addDynamicallyLegalOp<arith::AddFOp>([](arith::AddFOp op) {
-    auto vecTy = dyn_cast<VectorType>(op.getType());
-    if (!vecTy)
-      return true;
-    if (vecTy.isScalable() || vecTy.getRank() != 1 ||
-        vecTy.getShape()[0] != 32 || !vecTy.getElementType().isF32())
-      return false;
-    return !matchFloatMacChain(op);
-  });
+  // No AIE4 pattern rewrites arith.subf, and the shared legalizations mark
+  // every vector subf illegal, so it has to be put back explicitly.
+  target.addLegalOp<arith::SubFOp>();
+  // Fuse matching MAC roots. matchFloatMacChain applies its own shape and
+  // fastmath conditions; every add it does not match stays legal.
+  target.addDynamicallyLegalOp<arith::AddFOp>(
+      [](arith::AddFOp op) { return !matchFloatMacChain(op); });
 
   // Require native lowering only for supported integer vector shapes.
   target.addDynamicallyLegalOp<arith::MinSIOp, arith::MaxSIOp, arith::MinUIOp,
