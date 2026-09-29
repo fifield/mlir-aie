@@ -286,6 +286,18 @@ def AIECoreToStandard : Pass<"aie-standard-lowering", "mlir::ModuleOp"> {
   ];
 }
 
+def AIENarrowCoreLoops : Pass<"aie-narrow-core-loops", "DeviceOp"> {
+  let summary = "Use 32-bit counters for safe AIE4 core loops";
+  let description = [{
+    Narrow nonnegative constant-bound, signed scf.for counters when the bounds,
+    step, and final increment fit in i32. Other index uses, wide loops, and
+    external function arguments retain their existing width.
+  }];
+  let constructor = "xilinx::AIE::createAIENarrowCoreLoopsPass()";
+  let dependentDialects = ["mlir::arith::ArithDialect",
+                           "mlir::scf::SCFDialect"];
+}
+
 def AIELocalizeLocks : Pass<"aie-localize-locks", "DeviceOp"> {
   let summary = "Convert global locks to a core-relative index";
   let description = [{

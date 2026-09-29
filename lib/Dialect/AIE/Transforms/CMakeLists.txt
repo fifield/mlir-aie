@@ -23,6 +23,7 @@ add_mlir_dialect_library(
   AIECreatePathFindFlows.cpp
   AIECoreToStandard.cpp
   AIECoreIntRangeNarrowing.cpp
+  AIENarrowCoreLoops.cpp
   AIECanonicalizeDevice.cpp
   AIELocalizeLocks.cpp
   AIENormalizeDmaBdDims.cpp

@@ -91,6 +91,7 @@ createAIEObjectFifoInsertCoreQueuePushesPass(
     const AIEObjectFifoInsertCoreQueuePushesOptions &options);
 std::unique_ptr<mlir::OperationPass<DeviceOp>> createAIEFindFlowsPass();
 std::unique_ptr<mlir::OperationPass<DeviceOp>> createAIESplitFlowViasPass();
+std::unique_ptr<mlir::OperationPass<DeviceOp>> createAIENarrowCoreLoopsPass();
 std::unique_ptr<mlir::OperationPass<DeviceOp>> createAIELocalizeLocksPass();
 std::unique_ptr<mlir::OperationPass<DeviceOp>>
 createAIENormalizeAddressSpacesPass();

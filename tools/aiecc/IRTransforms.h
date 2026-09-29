@@ -1461,6 +1461,7 @@ inline std::unique_ptr<mlir::PassManager> getInputWithAddressesPipeline(
   if (optLevel >= 1) {
     dpm2.addPass(createAIECoreIntRangeNarrowingPass());
   }
+  dpm2.addPass(createAIENarrowCoreLoopsPass());
   pm->addPass(xilinx::AIEX::createAIESCFToControlFlowPass());
   return pm;
 }
