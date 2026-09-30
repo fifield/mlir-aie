@@ -1215,7 +1215,18 @@ void xilinx::aievec::buildCanonicalizeVectorForAIEVec(
   // TODO: Add passes to split vectors that won't fit in registers
 
   // If bf16-emulation is enabled, demote f32 vector arithmetic to bf16 first.
-  if (options.enableBF16Emulation)
+  //
+  // Not on AIE4, which inverts the premise the demotion rests on. AIE2 and
+  // AIE2P have bf16 vector arithmetic and no f32 vector ALU, so trading 16
+  // mantissa bits buys the only vector path there is. AIE4 has f32 vadd.f,
+  // vsub.f and vmul.f, and has no bf16 vector adder at any width, so demoting
+  // there loses the precision and the instruction: arith.addf on bf16 reaches
+  // Peano as G_FADD <N x s16> and fails to legalize.
+  std::string targetError;
+  std::optional<AIEVecTargetInfo> targetInfo =
+      parseAIEVecTarget(options.aieTarget, targetError);
+  bool isAIE4 = targetInfo && targetInfo->isAIE4();
+  if (options.enableBF16Emulation && !isAIE4)
     pm.addPass(createBF16EmulationPass());
 
   pm.addPass(createReorderOperationsPass());

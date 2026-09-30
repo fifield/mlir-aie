@@ -7,8 +7,13 @@
 
 // Test the bf16-emulation option, which runs f32 vector arithmetic on the bf16
 // datapath: multiplies and transcendentals take bf16 inputs, sums stay f32.
+//
+// AIE4 is excluded: it has f32 vector arithmetic and no bf16 vector adder, so
+// the demotion would cost precision and produce an op the target cannot run.
+// AIE4 coverage lives in test-bf16-emulation-aie4.mlir.
 
 // RUN: aie-opt %s -split-input-file --canonicalize-vector-for-aievec="aie-target=aie2 bf16-emulation" | FileCheck %s
+// RUN: aie-opt %s -split-input-file --canonicalize-vector-for-aievec="aie-target=aie2p bf16-emulation" | FileCheck %s
 
 // Test: addf stays f32
 // CHECK-LABEL: func @test_addf
