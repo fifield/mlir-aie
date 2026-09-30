@@ -2,6 +2,7 @@
 *.elf
 *.exe
 gemv_placed*.mlir
+gemv_vector*.mlir
 project*/
 
 # Trace outputs (`make run_trace`)

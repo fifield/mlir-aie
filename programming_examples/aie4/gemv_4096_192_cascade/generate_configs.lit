@@ -11,3 +11,16 @@
 // RUN: %python %S/gemv_placed.py --ntotal 128 --rows 2 --streams 4 --ktotal 2048 --kchunk 2 | aie-opt -o /dev/null
 // RUN: not %python %S/gemv_placed.py --ntotal 64 --rows 1 --streams 4 --ktotal 256 --kchunk 0 2>&1 | FileCheck %s
 // CHECK: --streams 4 requires --rows to be divisible by 2; got --rows 1
+//
+// Lower --vector int8 MACs to native unpack + VMAC for chunked and
+// single-row (no cascade) geometries.
+// RUN: %python %S/gemv_placed.py --ntotal 64 --rows 1 --ktotal 256 --vector | aie-opt --convert-vector-to-aievec="aie-target=aie4" | FileCheck %s --check-prefix=VEC
+// RUN: %python %S/gemv_placed.py --ntotal 192 --rows 4 --kchunk 2 --vector | aie-opt --convert-vector-to-aievec="aie-target=aie4" | FileCheck %s --check-prefix=VEC
+// VEC-NOT: link_with
+// VEC: aievec.aie4.unpack_i8_i16
+// VEC: aievec.aie4.mac_ewise_i16_i32
+// VEC-NOT: arith.muli {{.*}} : vector<32xi32>
+//
+// One K-tile folds the loop and its initial add-to-zero. Both products must
+// still lower natively, including the product used as the MAC accumulator.
+// RUN: %python %S/gemv_placed.py --ntotal 64 --rows 1 --ktotal 64 --kchunk 1 --vector | aie-opt --convert-vector-to-aievec="aie-target=aie4" | FileCheck %s --check-prefix=VEC --implicit-check-not="arith.muli {{.*}} : vector<32xi32>" --implicit-check-not=arith.extsi

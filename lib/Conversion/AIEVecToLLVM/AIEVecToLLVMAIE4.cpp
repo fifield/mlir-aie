@@ -188,6 +188,22 @@ struct AIE4UPSI16I32OpConversion
   }
 };
 
+// aievec.aie4.unpack_i8_i16 -> llvm.aie4.unpack.I512.I16.I8
+struct AIE4UnpackI8I16OpConversion
+    : mlir::ConvertOpToLLVMPattern<aievec::AIE4UnpackI8I16Op> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(aievec::AIE4UnpackI8I16Op op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    rewriter.replaceOpWithNewOp<xllvm::UnpackI512I16I8AIE4IntrOp>(
+        op, op.getResult().getType(), adaptor.getSource(),
+        op.getIsSigned() ? xllvm::AIE4UPSSign::Signed
+                         : xllvm::AIE4UPSSign::Unsigned);
+    return success();
+  }
+};
+
 // aievec.aie4.conv_bf16_f32 -> llvm.aie4.v32bf16.to.v32accfloat
 //
 // Plain operand forwarding: this intrinsic takes no attribute-resident
@@ -770,6 +786,7 @@ void populateAIEVecToLLVMAIE4ConversionPatterns(
                AIE4MacEwiseI16I32OpConversion,
                AIE4MulEwiseBf16F32OpConversion, AIE4MacEwiseBf16F32OpConversion,
                AIE4SRSI32I16OpConversion, AIE4UPSI16I32OpConversion,
+               AIE4UnpackI8I16OpConversion,
                AIE4ConvBF16F32OpConversion, AIE4ConvF32BF16OpConversion,
                AIE4MinMaxOpConversion, AIE4CmpOpConversion,
                AIE4SelOpConversion, AIE4FMinMaxOpConversion,

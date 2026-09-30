@@ -5767,94 +5767,152 @@ static bool isVecOfIntN(Type ty, int64_t n, unsigned bits) {
          vecTy.getShape()[0] == n && vecTy.getElementType().isInteger(bits);
 }
 
-/// Return the vector<32xi16> source of a sign extension to vector<32xi32>,
-/// or nullptr. VMAC performs this widening internally.
-static Value matchExtSIFromI16(Value v) {
-  auto extOp = v.getDefiningOp<arith::ExtSIOp>();
-  if (!extOp)
+/// Return the narrow source of an extension to vector<32xi32> supported by
+/// the signed i16 VMAC, or nullptr. Signed i16 is consumed directly; signed
+/// and unsigned i8 fit in signed i16 after unpacking with their own signedness.
+/// Unsigned i16 is rejected because it does not fit in signed i16.
+static Value matchMacOperandSource(Value v) {
+  Operation *extOp = v.getDefiningOp();
+  if (!extOp || !isa<arith::ExtSIOp, arith::ExtUIOp>(extOp) ||
+      !isVecOfIntN(v.getType(), 32, 32))
     return nullptr;
-  if (!isVecOfIntN(extOp.getType(), 32, 32))
-    return nullptr;
-  Value src = extOp.getIn();
-  if (!isVecOfIntN(src.getType(), 32, 16))
-    return nullptr;
-  return src;
+  Value src = extOp->getOperand(0);
+  if (isVecOfIntN(src.getType(), 32, 8))
+    return src;
+  if (isa<arith::ExtSIOp>(extOp) && isVecOfIntN(src.getType(), 32, 16))
+    return src;
+  return nullptr;
 }
 
-/// Match `arith.muli(extsi(a : vector<32xi16>), extsi(b : vector<32xi16>))`
-/// and bind `a`/`b`. Returns false if `v` is not that exact shape.
+/// Convert an extension accepted by matchMacOperandSource to a VMAC operand:
+/// pass through i16, or unpack i8 to i16 with the extension's signedness.
+static Value widenMacOperandToI16(OpBuilder &b, Location loc, Value ext) {
+  Value src = matchMacOperandSource(ext);
+  assert(src && "not a MAC operand extension");
+  if (isVecOfIntN(src.getType(), 32, 16))
+    return src;
+  bool isSigned = isa<arith::ExtSIOp>(ext.getDefiningOp());
+  auto i16Ty = VectorType::get({32}, b.getI16Type());
+  return aievec::AIE4UnpackI8I16Op::create(b, loc, i16Ty, src,
+                                           b.getBoolAttr(isSigned));
+}
+
+/// Match a vector<32xi32> product of supported extensions, binding `a` and
+/// `b` to the extensions rather than their narrow sources.
 static bool matchWidenedI16Product(Value v, Value &a, Value &b) {
   auto mulOp = v.getDefiningOp<arith::MulIOp>();
   if (!mulOp || !isVecOfIntN(mulOp.getType(), 32, 32))
     return false;
-  a = matchExtSIFromI16(mulOp.getLhs());
-  b = matchExtSIFromI16(mulOp.getRhs());
-  return a && b;
-}
-
-/// Match a widened i16 product on either side of `arith.addi`, trying the RHS
-/// first. Use the other operand as the accumulator.
-static bool matchIntMacChain(arith::AddIOp addOp, Value &acc, Value &a,
-                             Value &b) {
-  if (!isVecOfIntN(addOp.getType(), 32, 32))
+  if (!matchMacOperandSource(mulOp.getLhs()) ||
+      !matchMacOperandSource(mulOp.getRhs()))
     return false;
-  if (matchWidenedI16Product(addOp.getRhs(), a, b)) {
-    acc = addOp.getLhs();
-    return true;
-  }
-  if (matchWidenedI16Product(addOp.getLhs(), a, b)) {
-    acc = addOp.getRhs();
-    return true;
-  }
-  return false;
+  a = mulOp.getLhs();
+  b = mulOp.getRhs();
+  return true;
 }
 
-// arith.addi(acc, arith.muli(arith.extsi a, arith.extsi b))
+struct IntMacMatch {
+  arith::MulIOp product;
+  Value acc;
+  Value lhs;
+  Value rhs;
+};
+
+/// Select the widened product fused into an integer MAC. When both operands
+/// are products, prefer the RHS; the LHS must still be materialized as the
+/// accumulator. Legality and the rewrites must agree on this choice.
+static std::optional<IntMacMatch> matchIntMacChain(arith::AddIOp addOp) {
+  if (!isVecOfIntN(addOp.getType(), 32, 32))
+    return std::nullopt;
+  auto tryOperand = [&](Value product,
+                        Value acc) -> std::optional<IntMacMatch> {
+    Value a, b;
+    if (!matchWidenedI16Product(product, a, b))
+      return std::nullopt;
+    return IntMacMatch{product.getDefiningOp<arith::MulIOp>(), acc, a, b};
+  };
+  if (auto match = tryOperand(addOp.getRhs(), addOp.getLhs()))
+    return match;
+  return tryOperand(addOp.getLhs(), addOp.getRhs());
+}
+
+/// Defer a product only when every use disappears through MAC fusion.
+/// A product used as the accumulator (including addi %p, %p) or outside
+/// fusible MACs needs native multiply lowering. Dialect conversion does
+/// not revisit operations it has already accepted as legal.
+static bool feedsFusableIntMacChain(arith::MulIOp mulOp) {
+  if (mulOp.getResult().use_empty())
+    return false;
+  return llvm::all_of(mulOp.getResult().getUsers(), [&](Operation *user) {
+    auto addOp = dyn_cast<arith::AddIOp>(user);
+    if (!addOp)
+      return false;
+    auto match = matchIntMacChain(addOp);
+    return match && match->product == mulOp && match->acc != mulOp.getResult();
+  });
+}
+
+// Materialize a surviving widened product with a zero-accumulator VMAC.
+// A signed i16 product fits in i32, so saturation cannot change the result.
+// This also handles products whose initial add-to-zero was canonicalized away.
+struct ConvertIntMulToAIE4MacPattern : OpConversionPattern<arith::MulIOp> {
+  using OpConversionPattern::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(arith::MulIOp mulOp, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    Value a, b;
+    if (!matchWidenedI16Product(mulOp.getResult(), a, b))
+      return failure();
+    Location loc = mulOp.getLoc();
+    a = widenMacOperandToI16(rewriter, loc, a);
+    b = widenMacOperandToI16(rewriter, loc, b);
+    Value zero = arith::ConstantOp::create(
+        rewriter, loc, mulOp.getType(), rewriter.getZeroAttr(mulOp.getType()));
+    rewriter.replaceOpWithNewOp<aievec::AIE4MacEwiseI16I32Op>(
+        mulOp, mulOp.getType(), a, b, zero);
+    return success();
+  }
+};
+
+// arith.addi(acc, arith.muli(arith.ext{si,ui} a, arith.ext{si,ui} b))
 //     -> aievec.aie4.mac_ewise_i16_i32 a, b, acc
 //
-// Fuse the signed widening, multiply, and add into the native MAC.
+// Fuse the widening, multiply, and add into the native MAC. i8 operands
+// (signed or unsigned) are unpacked to i16 first.
 struct ConvertIntMacToAIE4MacPattern : OpConversionPattern<arith::AddIOp> {
   using OpConversionPattern::OpConversionPattern;
 
   LogicalResult
   matchAndRewrite(arith::AddIOp addOp, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    Value acc, a, b;
-    if (!matchIntMacChain(addOp, acc, a, b))
+    auto match = matchIntMacChain(addOp);
+    if (!match)
       return failure();
 
+    Location loc = addOp.getLoc();
+    Value a = widenMacOperandToI16(rewriter, loc, match->lhs);
+    Value b = widenMacOperandToI16(rewriter, loc, match->rhs);
     auto macOp = aievec::AIE4MacEwiseI16I32Op::create(
-        rewriter, addOp.getLoc(), addOp.getType(), a, b, acc);
+        rewriter, loc, addOp.getType(), a, b, match->acc);
     rewriter.replaceOp(addOp, macOp.getResult());
     return success();
   }
 };
 
-// `arith.extsi`/`arith.extui` vector<32xi16> -> vector<32xi32>
-//     -> aievec.aie4.ups_i16_i32 {shift = 0}
-//
-// Shift-zero widening is exact. Preserve signed extensions feeding native MAC
-// chains so the MAC pattern can absorb them instead of emitting standalone UPS.
-static bool feedsAIE4MacChain(arith::ExtSIOp extOp) {
-  for (Operation *user : extOp.getResult().getUsers()) {
+// Preserve extensions used exclusively by supported widened products so
+// native multiply lowering or MAC fusion can consume them. Independent uses
+// need standalone widening.
+static bool feedsAIE4WidenedProduct(Operation *extOp) {
+  Value res = extOp->getResult(0);
+  return !res.use_empty() && llvm::all_of(res.getUsers(), [](Operation *user) {
     auto mulOp = dyn_cast<arith::MulIOp>(user);
-    if (!mulOp)
-      continue;
     Value a, b;
-    if (!matchWidenedI16Product(mulOp.getResult(), a, b))
-      continue;
-    for (Operation *mulUser : mulOp.getResult().getUsers()) {
-      auto addOp = dyn_cast<arith::AddIOp>(mulUser);
-      if (!addOp)
-        continue;
-      Value acc, aa, bb;
-      if (matchIntMacChain(addOp, acc, aa, bb))
-        return true;
-    }
-  }
-  return false;
+    return mulOp && matchWidenedI16Product(mulOp.getResult(), a, b);
+  });
 }
 
+// Lower vector<32xi16> -> vector<32xi32> extensions to exact, shift-zero UPS.
 template <typename SrcOpTy>
 struct ConvertExtToAIE4UPSPattern : OpConversionPattern<SrcOpTy> {
   using OpConversionPattern<SrcOpTy>::OpConversionPattern;
@@ -5868,7 +5926,7 @@ struct ConvertExtToAIE4UPSPattern : OpConversionPattern<SrcOpTy> {
     if (!isVecOfIntN(srcTy, 32, 16) || !isVecOfIntN(dstTy, 32, 32))
       return false;
     if constexpr (std::is_same_v<SrcOpTy, arith::ExtSIOp>) {
-      if (feedsAIE4MacChain(extOp))
+      if (feedsAIE4WidenedProduct(extOp))
         return false;
     }
     return true;
@@ -5891,6 +5949,54 @@ struct ConvertExtToAIE4UPSPattern : OpConversionPattern<SrcOpTy> {
 
 using ConvertExtSIToAIE4UPSPattern = ConvertExtToAIE4UPSPattern<arith::ExtSIOp>;
 using ConvertExtUIToAIE4UPSPattern = ConvertExtToAIE4UPSPattern<arith::ExtUIOp>;
+
+// `arith.extsi`/`arith.extui` vector<32xi8> -> vector<32xi16>
+//     -> aievec.aie4.unpack_i8_i16
+// `arith.extsi`/`arith.extui` vector<32xi8> -> vector<32xi32>
+//     -> aievec.aie4.unpack_i8_i16 + aievec.aie4.ups_i16_i32 {shift = 0}
+//
+// Both are exact. Preserve i8 -> i32 extensions used exclusively by supported
+// widened products for native multiply lowering or MAC fusion.
+template <typename SrcOpTy>
+struct ConvertExtI8ToAIE4UnpackPattern : OpConversionPattern<SrcOpTy> {
+  using OpConversionPattern<SrcOpTy>::OpConversionPattern;
+  using OpAdaptor = typename SrcOpTy::Adaptor;
+
+  static bool matches(SrcOpTy extOp) {
+    if (!isVecOfIntN(extOp.getIn().getType(), 32, 8))
+      return false;
+    Type dstTy = extOp.getOut().getType();
+    if (isVecOfIntN(dstTy, 32, 16))
+      return true;
+    if (!isVecOfIntN(dstTy, 32, 32))
+      return false;
+    return !feedsAIE4WidenedProduct(extOp);
+  }
+
+  LogicalResult
+  matchAndRewrite(SrcOpTy extOp, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    if (!matches(extOp))
+      return failure();
+
+    constexpr bool isSigned = std::is_same_v<SrcOpTy, arith::ExtSIOp>;
+    Location loc = extOp.getLoc();
+    auto i16Ty = VectorType::get({32}, rewriter.getI16Type());
+    Value wide = aievec::AIE4UnpackI8I16Op::create(
+        rewriter, loc, i16Ty, adaptor.getIn(), rewriter.getBoolAttr(isSigned));
+    if (isVecOfIntN(extOp.getType(), 32, 32))
+      wide = aievec::AIE4UPSI16I32Op::create(
+          rewriter, loc, extOp.getType(), wide, rewriter.getI32IntegerAttr(0),
+          rewriter.getBoolAttr(isSigned));
+    rewriter.replaceOp(extOp, wide);
+    return success();
+  }
+};
+
+using ConvertExtSIToAIE4UnpackPattern =
+    ConvertExtI8ToAIE4UnpackPattern<arith::ExtSIOp>;
+using ConvertExtUIToAIE4UnpackPattern =
+    ConvertExtI8ToAIE4UnpackPattern<arith::ExtUIOp>;
 
 //===----------------------------------------------------------------------===//
 // AIE4 bf16 widening
@@ -6745,12 +6851,14 @@ struct LowerAIE4ApproxMathOp : OpConversionPattern<MathOpTy> {
 };
 
 static void populateAIEVecV4ConversionPatterns(RewritePatternSet &patterns) {
+  patterns.add<ConvertIntMulToAIE4MacPattern>(patterns.getContext());
   patterns
       .add<ConvertMulFToAIE4MulEwiseF32Pattern,
            ConvertMulFToAIE4MulEwiseBf16Pattern,
            ConvertMacFToAIE4MacEwiseF32Pattern,
            ConvertMacFToAIE4MacEwiseBf16Pattern, ConvertIntMacToAIE4MacPattern,
            ConvertExtSIToAIE4UPSPattern, ConvertExtUIToAIE4UPSPattern,
+           ConvertExtSIToAIE4UnpackPattern, ConvertExtUIToAIE4UnpackPattern,
            ConvertExtFToAIE4ConvPattern,
            LowerAIE4MinSIOp, LowerAIE4MaxSIOp, LowerAIE4MinUIOp,
            LowerAIE4MaxUIOp, LowerAIE4CmpIOp, LowerAIE4SelectOp,
@@ -6792,11 +6900,17 @@ static void configureAIEVecV4Legalizations(ConversionTarget &target) {
     return feedsFusableFloatMacChain(mulOp);
   });
 
-  // Use the same predicate as the rewrite so only supported MAC roots are illegal.
-  target.addDynamicallyLegalOp<arith::AddIOp>([](arith::AddIOp addOp) {
-    Value acc, a, b;
-    return !matchIntMacChain(addOp, acc, a, b);
+  // Materialize surviving widened products; defer only those eliminated by
+  // fusion. Unsupported integer multiplies retain their generic lowering.
+  target.addDynamicallyLegalOp<arith::MulIOp>([](arith::MulIOp mulOp) {
+    Value a, b;
+    return !matchWidenedI16Product(mulOp.getResult(), a, b) ||
+           feedsFusableIntMacChain(mulOp);
   });
+
+  // Use the same predicate as the rewrite so only supported MAC roots are illegal.
+  target.addDynamicallyLegalOp<arith::AddIOp>(
+      [](arith::AddIOp addOp) { return !matchIntMacChain(addOp); });
 
   // Keep shift/truncate arithmetic legal: SRS reads mutable crRnd/crSat state.
   // Fusion requires lowering that establishes floor rounding and
@@ -6805,10 +6919,12 @@ static void configureAIEVecV4Legalizations(ConversionTarget &target) {
 
   // Use native conversion only for shapes claimed by the AIE4 patterns.
   target.addDynamicallyLegalOp<arith::ExtSIOp>([](arith::ExtSIOp op) {
-    return !ConvertExtSIToAIE4UPSPattern::matches(op);
+    return !ConvertExtSIToAIE4UPSPattern::matches(op) &&
+           !ConvertExtSIToAIE4UnpackPattern::matches(op);
   });
   target.addDynamicallyLegalOp<arith::ExtUIOp>([](arith::ExtUIOp op) {
-    return !ConvertExtUIToAIE4UPSPattern::matches(op);
+    return !ConvertExtUIToAIE4UPSPattern::matches(op) &&
+           !ConvertExtUIToAIE4UnpackPattern::matches(op);
   });
   target.addDynamicallyLegalOp<arith::ExtFOp>([](arith::ExtFOp op) {
     return !ConvertExtFToAIE4ConvPattern::matches(op);

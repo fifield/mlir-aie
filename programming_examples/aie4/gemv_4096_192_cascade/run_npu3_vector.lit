@@ -1,0 +1,44 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// Compile and run --vector GEMV with the same tiling, data movement, host
+// layout, and reference as the kernel.o variant.
+//
+// REQUIRES: ryzen_ai_npu3, peano
+//
+// RUN: mkdir -p test_npu3_vector
+// RUN: cd test_npu3_vector
+// RUN: make -f %S/Makefile clean
+// RUN: make -f %S/Makefile vector
+//
+// Check one core per role (sink row 2, pass row 3, send row 5) for native
+// int8 widening and VMAC, with no external compute kernels.
+// RUN: llvm-nm project_vector/elfs_main_core_0_2/elfs_main_core_0_2.elf | FileCheck %s --check-prefix=SYMS
+// RUN: llvm-nm project_vector/elfs_main_core_0_3/elfs_main_core_0_3.elf | FileCheck %s --check-prefix=SYMS
+// RUN: llvm-nm project_vector/elfs_main_core_0_5/elfs_main_core_0_5.elf | FileCheck %s --check-prefix=SYMS
+// SYMS-NOT: gemv_
+// SYMS: T core_0_{{[2-5]}}
+// SYMS-NOT: gemv_
+// RUN: llvm-objdump -d project_vector/elfs_main_core_0_2/elfs_main_core_0_2.elf | FileCheck %s --check-prefixes=VEC,SINK
+// RUN: llvm-objdump -d project_vector/elfs_main_core_0_3/elfs_main_core_0_3.elf | FileCheck %s --check-prefixes=VEC,PASS
+// RUN: llvm-objdump -d project_vector/elfs_main_core_0_5/elfs_main_core_0_5.elf | FileCheck %s --check-prefixes=VEC,SEND
+// VEC-DAG: vldb.unpack.2x{{.*}}unpacksign1
+// VEC-DAG: vmac
+// SINK-DAG: vmov{{.*}}, scd
+// PASS-DAG: vmov{{.*}}, scd
+// PASS-DAG: vmov{{.*}}mcd,
+// SEND-DAG: vmov{{.*}}mcd,
+//
+// RUN: %run_on_npu3% make -f %S/Makefile run_vector
+//
+// Full-range int8 inputs exercise signed unpack and products at the input
+// limits. The output bound is 2^26 at K = 4096, within i32.
+// RUN: %run_on_npu3% make -f %S/Makefile run_vector_full_range | FileCheck %s --check-prefix=FULL
+// FULL: inputs=full-range int8
+// FULL: PASS
+//
+// Single-tile chunks exercise the zero-accumulator multiply fallback after
+// canonicalization removes the first add-to-zero. Check full-range numerics.
+// RUN: make -f %S/Makefile clean
+// RUN: make -f %S/Makefile N=64 ROWS=1 K=64 KCHUNK=1 gemv_4096_192_cascade_vector.elf test.exe
+// RUN: %run_on_npu3% ./test.exe --full-range gemv_4096_192_cascade_vector.elf 1 | FileCheck %s --check-prefix=FULL

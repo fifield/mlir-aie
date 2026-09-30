@@ -362,6 +362,32 @@ def Acc32V32I512UpsAIE4IntrOp :
   }];
 }
 
+//===----------------------------------------------------------------------===//
+// Unpack
+//===----------------------------------------------------------------------===//
+
+// llvm.aie4.unpack.I512.I16.I8 <32 x i16> (<32 x i8>, i32 sign)
+//
+// The backend sets the unpack size; the result is independent of caller mode
+// state. AIE4_UPSSign also encodes unpack signedness: 0 = zero-extend,
+// 1 = sign-extend.
+def UnpackI512I16I8AIE4IntrOp :
+    AIEVec4_IntrOp<"unpack.I512.I16.I8",
+        [Pure, TypeIs<"res", FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>>]>,
+    Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [I8]>:$src,
+                   AIE4_UPSSign:$sign)> {
+  let summary = "AIE4 widen i8 vector -> i16 vector, exact (vunpack)";
+
+  let llvmBuilder = [{
+    auto *inst = ::xilinx::xllvm::createAIE4ConfIntrinsicCall(builder,
+                      moduleTranslation, &opInst,
+                      "llvm.aie4.unpack.I512.I16.I8",
+                      ::llvm::ArrayRef<uint32_t>{(uint32_t) op.getSign()});
+    (void) inst;
+    $res = inst;
+  }];
+}
+
 // Exact bf16 widening has no control-register dependencies.
 def V32Bf16ToV32AccFloatAIE4IntrOp :
     AIEVec4_IntrOp<"v32bf16.to.v32accfloat",

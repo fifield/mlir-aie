@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iomanip>
@@ -153,7 +154,8 @@ static inline size_t pack_a_byte(int c, int k) {
   return col_blob_off + aw_row_off + in_chunk_off;
 }
 
-// Usage: test.exe [elf_file] [iters_per_call] [trace_elems]
+// Usage: test.exe [--full-range] [elf_file] [iters_per_call] [trace_elems]
+//   --full-range   use [-128, 127] inputs and pinned boundary cases.
 //   elf_file       default "gemv_4096_192_cascade_bench.elf"
 //   iters_per_call must match the ELF's build-time iteration count. It is a
 //                  reporting divisor, not a runtime control; use the Makefile
@@ -162,19 +164,32 @@ static inline size_t pack_a_byte(int c, int k) {
 //                  of this many INT32 elements (default 8192) and write
 //                  it to trace.bin after the run.
 int main(int argc, const char *argv[]) {
+  bool full_range = false;
+  std::vector<const char *> args;
+  for (int i = 1; i < argc; i++) {
+    if (std::string(argv[i]) == "--full-range")
+      full_range = true;
+    else
+      args.push_back(argv[i]);
+  }
   const std::string elfFile =
-      (argc > 1) ? argv[1] : "gemv_4096_192_cascade_bench.elf";
-  const int iters_per_call = (argc > 2) ? std::atoi(argv[2]) : 1;
-  const int trace_elems = (argc > 3) ? std::atoi(argv[3]) : 8192;
+      (args.size() > 0) ? args[0] : "gemv_4096_192_cascade_bench.elf";
+  const int iters_per_call = (args.size() > 1) ? std::atoi(args[1]) : 1;
+  const int trace_elems = (args.size() > 2) ? std::atoi(args[2]) : 8192;
   const bool enable_trace = elfFile.find("trace") != std::string::npos;
 
   std::cout << "ELF: " << elfFile << "  iters/call=" << iters_per_call
-            << "  trace=" << (enable_trace ? "on" : "off") << "\n";
+            << "  trace=" << (enable_trace ? "on" : "off")
+            << "  inputs=" << (full_range ? "full-range int8" : "bounded")
+            << "\n";
   // ------------------------------------------------------------------
   // Inputs.  Bounded values so INT32 accumulator stays in range:
   //   A bounded [-4, 3]  (max |A| = 4)
   //   W bounded [-2, 2]  (max |W| = 2)
   //   max |C[n]| <= 4 * 2 * K_TOTAL
+  // With --full-range, A and W are drawn from [-128, 127]:
+  //   max |C[n]| <= 128 * 128 * K_TOTAL = 2^26 at K_TOTAL = 4096.
+  // Pin boundary cases below to guarantee coverage.
   // ------------------------------------------------------------------
   // Pseudo-random inputs so every (k, n) byte position is exercised
   // distinctly.  Linear-congruential, deterministic across runs.
@@ -184,13 +199,37 @@ int main(int argc, const char *argv[]) {
   };
   uint32_t s = 0xC0FFEEu;
 
+  static_assert(int64_t(128) * 128 * K_TOTAL <= INT32_MAX,
+                "--full-range reference could overflow INT32");
+  auto full = [&]() { return static_cast<int8_t>(lcg(s) >> 24); };
+  const int8_t extremes[] = {-128, 127, -1, 0};
+
   std::vector<int8_t> A_logical(K_TOTAL);
   for (int k = 0; k < K_TOTAL; k++)
-    A_logical[k] = static_cast<int8_t>((lcg(s) & 0x7) - 4); // [-4, 3]
+    A_logical[k] = full_range
+                       ? full()
+                       : static_cast<int8_t>((lcg(s) & 0x7) - 4); // [-4, 3]
 
   std::vector<int8_t> W_logical(K_TOTAL * N_TOTAL);
   for (int i = 0; i < K_TOTAL * N_TOTAL; i++)
-    W_logical[i] = static_cast<int8_t>((lcg(s) % 5) - 2); // [-2, 2]
+    W_logical[i] =
+        full_range ? full() : static_cast<int8_t>((lcg(s) % 5) - 2); // [-2, 2]
+
+  if (full_range) {
+    // Exercise all pairs from {-128, 127, -1, 0}.
+    for (int k = 0; k < 4; k++) {
+      A_logical[k] = extremes[k];
+      for (int n = 0; n < 4; n++)
+        W_logical[k * N_TOTAL + n] = extremes[n];
+    }
+    // Prevent cancellation: columns 4 and 5 use full-scale weights to make
+    // every product nonnegative and nonpositive, respectively.
+    for (int k = 0; k < K_TOTAL; k++) {
+      const bool neg = A_logical[k] < 0;
+      W_logical[k * N_TOTAL + 4] = neg ? int8_t(-128) : int8_t(127);
+      W_logical[k * N_TOTAL + 5] = neg ? int8_t(127) : int8_t(-128);
+    }
+  }
 
   // Host reference: C[n] = sum_k A[k] * W[k, n]
   std::vector<int32_t> C_ref(N_TOTAL, 0);
@@ -200,6 +239,12 @@ int main(int argc, const char *argv[]) {
       acc += static_cast<int32_t>(A_logical[k]) *
              static_cast<int32_t>(W_logical[k * N_TOTAL + n]);
     C_ref[n] = acc;
+  }
+  if (full_range) {
+    int64_t max_abs = 0;
+    for (int n = 0; n < N_VALID; n++)
+      max_abs = std::max(max_abs, std::abs(static_cast<int64_t>(C_ref[n])));
+    std::cout << "max |C_ref| = " << max_abs << "\n";
   }
 
   // ------------------------------------------------------------------

@@ -1,0 +1,29 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// Check signed/unsigned int8 widening and signed/mixed-sign MACs on NPU3,
+// using native unpack, UPS, and i16 VMAC instructions.
+//
+// REQUIRES: ryzen_ai_npu3, peano
+//
+// RUN: %run_on_npu3% python %S/unpack_i8.py -o unpack_i8.mlir
+// RUN: %aiecc --enable-aie4-vectorization --get-full-elf --full-elf-name=unpack_i8.elf unpack_i8.mlir
+//
+// Require native instructions and no unresolved llvm.aie4 symbols.
+// RUN: llvm-objdump -dr unpack_i8.mlir.prj/elfs_main_core_0_2/elfs_main_core_0_2.elf > dis.txt
+// RUN: FileCheck %s --check-prefix=ASM --input-file=dis.txt
+// ASM-DAG: unpack.2x{{.*}}unpacksign1
+// ASM-DAG: unpack.2x{{.*}}unpacksign0
+// ASM-DAG: vups.2x{{.*}}upssign1
+// ASM-DAG: vups.2x{{.*}}upssign0
+// ASM-DAG: vmac
+// RUN: FileCheck %s --check-prefix=NOEXT --input-file=dis.txt
+// NOEXT-NOT: llvm.aie4
+//
+// RUN: clang %S/test.cpp -o test.exe -std=c++17 -Wall %xrt_flags -lrt -lstdc++ %test_utils_flags
+// RUN: %run_on_npu3% ./test.exe | FileCheck %s
+// CHECK: sext: 0 errors
+// CHECK: zext: 0 errors
+// CHECK: mac_s8s8_zacc: 0 errors
+// CHECK: mac_u8s8: 0 errors
+// CHECK: PASS!

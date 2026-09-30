@@ -251,6 +251,27 @@ def AIEVec_AIE4UPSI16I32Op:
 }
 
 //===----------------------------------------------------------------------===//
+// AIE4 i8 -> i16 unpack
+//===----------------------------------------------------------------------===//
+
+def AIEVec_AIE4UnpackI8I16Op:
+  AIEVec_Op<"aie4.unpack_i8_i16", [Pure]>,
+  Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [I8]>:$source,
+                 DefaultValuedAttr<BoolAttr, "true">:$isSigned)>,
+  Results<(outs FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>:$result)> {
+  let summary = "AIE4 widen i8 vector -> i16 vector, exact";
+  let description = [{
+    Sign-extends `vector<32xi8>` to `vector<32xi16>` when `isSigned` is true
+    (the default), and zero-extends otherwise. The result is exact and
+    independent of caller-controlled mode state; the backend sets the unpack
+    size. Lowers to `vunpack` or the load-fused `vldb.unpack.2x`.
+  }];
+  let assemblyFormat =
+      "$source attr-dict `:` type($source) `,` type($result)";
+  let hasVerifier = 0;
+}
+
+//===----------------------------------------------------------------------===//
 // AIE4 bf16 <-> f32 accumulator conversion
 //===----------------------------------------------------------------------===//
 def AIEVec_AIE4ConvBF16F32Op:

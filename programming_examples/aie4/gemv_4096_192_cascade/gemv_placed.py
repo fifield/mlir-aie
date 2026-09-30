@@ -15,8 +15,21 @@ import numpy as np
 
 from aie.dialects.aie import *
 from aie.dialects.aiex import *
+from aie.dialects import arith as arith_d
+from aie.dialects import memref as memref_d
+from aie.dialects import vector as vector_d
 from aie.extras.context import mlir_mod_ctx
 from aie.helpers.dialects.scf import _for as range_
+from aie.helpers.dialects.scf import yield_
+from aie.ir import (
+    AffineMap,
+    AffineMapAttr,
+    DenseElementsAttr,
+    IndexType,
+    IntegerAttr,
+    IntegerType,
+    VectorType,
+)
 
 # Hardware partitioning.  ALL_COMPUTE_ROWS lists the 4 compute rows of an
 # npu3 column, row2 (index 0, adjacent to the memtile/shim) first; --rows
@@ -46,6 +59,157 @@ MAX_BD_REPEAT = 64
 L1_WEIGHT_BUDGET = 128 * 1024 - 3 * 1024  # ~125 KB
 
 
+def make_external_kernels(aw_lo_chunk_ty, w_hi_chunk_ty, partial_ty, c_slab_ty):
+    """Declare the kernel.o entry points (compiled from kernel.cc)."""
+    gemv_zero_partial = external_func(
+        "gemv_zero_partial",
+        inputs=[partial_ty],
+        link_with="project/kernel.o",
+    )
+    gemv_chunk_accumulate = external_func(
+        "gemv_chunk_accumulate",
+        inputs=[aw_lo_chunk_ty, w_hi_chunk_ty, partial_ty],
+        link_with="project/kernel.o",
+    )
+    gemv_finish_send = external_func(
+        "gemv_finish_send",
+        inputs=[partial_ty],
+        link_with="project/kernel.o",
+    )
+    gemv_finish_pass = external_func(
+        "gemv_finish_pass",
+        inputs=[partial_ty],
+        link_with="project/kernel.o",
+    )
+    gemv_finish_sink = external_func(
+        "gemv_finish_sink",
+        inputs=[partial_ty, c_slab_ty],
+        link_with="project/kernel.o",
+    )
+    gemv_finish_solo = external_func(
+        "gemv_finish_solo",
+        inputs=[partial_ty, c_slab_ty],
+        link_with="project/kernel.o",
+    )
+    return (
+        gemv_zero_partial,
+        gemv_chunk_accumulate,
+        gemv_finish_send,
+        gemv_finish_pass,
+        gemv_finish_sink,
+        gemv_finish_solo,
+    )
+
+
+# Each output column's 64-element K-tile uses two 32-lane i16 VMAC steps.
+VEC_LANES = 32
+# Cascade words are 512 bits: 16 INT32 lanes.
+CASCADE_LANES = 16
+
+
+def make_vector_kernels(
+    chunk_a_bytes, k_chunk_tiles, aw_lo_chunk_bytes, w_hi_chunk_bytes
+):
+    """Emit the kernel.cc entry points as vector/arith IR in the core body.
+
+    Preserve kernel.cc's buffer layout: each K-tile has 64 contiguous weights
+    per output column. W_lo stores columns 0..31 after the chunk's A slice;
+    W_hi stores columns 32..63 in a separate buffer. Within either half's
+    2 KB tile, local column n starts at byte n * 64.
+
+    Accumulate 32-lane products across the chunk's K-tiles, then reduce once
+    per output column and add to its partial sum.
+    """
+    i8 = IntegerType.get_signless(8)
+    i32 = IntegerType.get_signless(32)
+    idx = IndexType.get()
+    v32i8 = VectorType.get([VEC_LANES], i8)
+    v32i32 = VectorType.get([VEC_LANES], i32)
+    v16i32 = VectorType.get([CASCADE_LANES], i32)
+    id_map = AffineMapAttr.get(AffineMap.get_identity(1))
+    tile_w_bytes = TILE_K * TILE_N // 2  # 2 KB of one half's weights per K-tile
+
+    def c_idx(v):
+        return arith_d.constant(idx, v)
+
+    def zeros(ty):
+        return arith_d.constant(
+            ty, DenseElementsAttr.get_splat(ty, IntegerAttr.get(i32, 0))
+        )
+
+    def read(ty, mem, offset):
+        pad = arith_d.constant(ty.element_type, 0)
+        return vector_d.transfer_read(ty, mem, [offset], id_map, pad, [True])
+
+    def write(value, mem, offset):
+        vector_d.transfer_write(None, value, mem, [offset], id_map, [True])
+
+    def zero_partial(partial):
+        z = zeros(v32i32)
+        for base in range(0, N_PER_COL, VEC_LANES):
+            write(z, partial, c_idx(base))
+
+    def accumulate_half(aw, w_mem, w_base, partial, out_base):
+        # partial[out_base + n] += sum_k A[k] * W[k, out_base + n]
+        c64 = c_idx(TILE_K)
+        c_tile = c_idx(tile_w_bytes)
+        for n in range_(0, TILE_N // 2):
+            col_off = arith_d.addi(arith_d.muli(n, c64), c_idx(w_base))
+            for t, acc, acc_out in range_(
+                0, k_chunk_tiles, iter_args=[zeros(v32i32)], insert_yield=False
+            ):
+                a_off = arith_d.muli(t, c64)
+                w_off = arith_d.addi(arith_d.muli(t, c_tile), col_off)
+                for h in range(0, TILE_K, VEC_LANES):
+                    ch = c_idx(h)
+                    a = read(v32i8, aw, arith_d.addi(a_off, ch))
+                    w = read(v32i8, w_mem, arith_d.addi(w_off, ch))
+                    prod = arith_d.muli(
+                        arith_d.extsi(v32i32, a), arith_d.extsi(v32i32, w)
+                    )
+                    acc = arith_d.addi(acc, prod)
+                yield_([acc])
+            dot = vector_d.reduction(i32, vector_d.CombiningKind.ADD, acc_out)
+            out = arith_d.addi(n, c_idx(out_base))
+            memref_d.store(
+                arith_d.addi(memref_d.load(partial, [out]), dot), partial, [out]
+            )
+
+    def chunk_accumulate(aw, whi, partial):
+        accumulate_half(aw, aw, chunk_a_bytes, partial, 0)
+        accumulate_half(aw, whi, 0, partial, TILE_N // 2)
+
+    def cascade_words(partial):
+        return [
+            read(v16i32, partial, c_idx(i)) for i in range(0, N_PER_COL, CASCADE_LANES)
+        ]
+
+    def finish_send(partial):
+        for p in cascade_words(partial):
+            put_cascade(p)
+
+    def finish_pass(partial):
+        for p in cascade_words(partial):
+            put_cascade(arith_d.addi(get_cascade(v16i32), p))
+
+    def finish_sink(partial, c_out):
+        for i, p in zip(range(0, N_PER_COL, CASCADE_LANES), cascade_words(partial)):
+            write(arith_d.addi(get_cascade(v16i32), p), c_out, c_idx(i))
+
+    def finish_solo(partial, c_out):
+        for i in range(0, N_PER_COL, VEC_LANES):
+            write(read(v32i32, partial, c_idx(i)), c_out, c_idx(i))
+
+    return (
+        zero_partial,
+        chunk_accumulate,
+        finish_send,
+        finish_pass,
+        finish_sink,
+        finish_solo,
+    )
+
+
 def my_gemv(
     dev,
     n_total=192,
@@ -59,6 +223,7 @@ def my_gemv(
     aw_lo_depth=AW_LO_DEPTH,
     w_hi_depth=W_HI_DEPTH,
     k_chunk_tiles=0,
+    vector_kernel=False,
 ):
     # Pad device geometry to TILE_N; the host checks only the requested lanes.
     if n_total < 1:
@@ -194,40 +359,31 @@ def my_gemv(
         c_tensor_ty = np.ndarray[(N_TOTAL,), np.dtype[np.int32]]
 
         # ---------------------------------------------------------------
-        # External kernels.  gemv_chunk_accumulate is called once per chunk
-        # (num_chunks times per core per iteration); gemv_finish_* is
-        # called once per core per iteration after all chunks land.
+        # Select kernel.o calls or inline vector/arith IR. Accumulate once
+        # per chunk and finish once per core per iteration, after all chunks.
         # ---------------------------------------------------------------
-        gemv_zero_partial = external_func(
-            "gemv_zero_partial",
-            inputs=[partial_ty],
-            link_with="project/kernel.o",
-        )
-        gemv_chunk_accumulate = external_func(
-            "gemv_chunk_accumulate",
-            inputs=[aw_lo_chunk_ty, w_hi_chunk_ty, partial_ty],
-            link_with="project/kernel.o",
-        )
-        gemv_finish_send = external_func(
-            "gemv_finish_send",
-            inputs=[partial_ty],
-            link_with="project/kernel.o",
-        )
-        gemv_finish_pass = external_func(
-            "gemv_finish_pass",
-            inputs=[partial_ty],
-            link_with="project/kernel.o",
-        )
-        gemv_finish_sink = external_func(
-            "gemv_finish_sink",
-            inputs=[partial_ty, c_slab_ty],
-            link_with="project/kernel.o",
-        )
-        gemv_finish_solo = external_func(
-            "gemv_finish_solo",
-            inputs=[partial_ty, c_slab_ty],
-            link_with="project/kernel.o",
-        )
+        if vector_kernel:
+            (
+                gemv_zero_partial,
+                gemv_chunk_accumulate,
+                gemv_finish_send,
+                gemv_finish_pass,
+                gemv_finish_sink,
+                gemv_finish_solo,
+            ) = make_vector_kernels(
+                CHUNK_A_BYTES, K_CHUNK_TILES, AW_LO_CHUNK_BYTES, W_HI_CHUNK_BYTES
+            )
+        else:
+            (
+                gemv_zero_partial,
+                gemv_chunk_accumulate,
+                gemv_finish_send,
+                gemv_finish_pass,
+                gemv_finish_sink,
+                gemv_finish_solo,
+            ) = make_external_kernels(
+                aw_lo_chunk_ty, w_hi_chunk_ty, partial_ty, c_slab_ty
+            )
 
         # ---------------------------------------------------------------
         # Tiles
@@ -620,6 +776,12 @@ parser.add_argument(
     help="memtile->core W_hi FIFO depth (core L1, per chunk)",
 )
 parser.add_argument(
+    "--vector",
+    action="store_true",
+    help="Emit the compute as vector/arith IR for the AIE4 vector pipeline "
+    "(aiecc --enable-aie4-vectorization) instead of linking kernel.o",
+)
+parser.add_argument(
     "--trace",
     action="store_true",
     help="Enable event trace (emits extra trace buffer arg)",
@@ -646,6 +808,7 @@ with mlir_mod_ctx() as ctx:
         aw_lo_depth=args.awdepth,
         w_hi_depth=args.whidepth,
         k_chunk_tiles=args.kchunk,
+        vector_kernel=args.vector,
     )
     res = ctx.module.operation.verify()
     if res is True:

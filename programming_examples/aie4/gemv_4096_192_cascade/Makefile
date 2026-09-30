@@ -67,6 +67,23 @@ gemv_placed_bench.mlir: ${srcdir}/gemv_placed.py
 gemv_placed_trace.mlir: ${srcdir}/gemv_placed.py
 	python $< -d npu3 -n $(N) -r $(ROWS) -s $(STREAMS) -k $(K) -i 1 --kchunk $(KCHUNK) $(DEPTH_FLAGS) --trace --trace_size $(TRACE_SIZE) > $@
 
+# Compile --vector compute IR through the AIE4 vector pipeline and Peano.
+gemv_vector.mlir: ${srcdir}/gemv_placed.py
+	python $< -d npu3 -n $(N) -r $(ROWS) -s $(STREAMS) -k $(K) -i $(ITERS) --kchunk $(KCHUNK) $(DEPTH_FLAGS) --vector > $@
+
+gemv_vector_bench.mlir: ${srcdir}/gemv_placed.py
+	python $< -d npu3 -n $(N) -r $(ROWS) -s $(STREAMS) -k $(K) -i $(BENCH_ITERS) --kchunk $(KCHUNK) $(DEPTH_FLAGS) --vector > $@
+
+gemv_4096_192_cascade_vector.elf: gemv_vector.mlir
+	aiecc -v --tmpdir=project_vector --enable-aie4-vectorization \
+		--get-full-elf --full-elf-name=$@ $<
+
+gemv_4096_192_cascade_vector_bench.elf: gemv_vector_bench.mlir
+	aiecc -v --tmpdir=project_vector_bench --enable-aie4-vectorization \
+		--get-full-elf --full-elf-name=$@ $<
+
+vector: gemv_4096_192_cascade_vector.elf gemv_4096_192_cascade_vector_bench.elf test.exe
+
 gemv_4096_192_cascade.elf: gemv_placed.mlir project/kernel.o
 	aiecc -v --tmpdir=project --xchesscc --xbridge \
 		--get-full-elf --full-elf-name=$@ $<
@@ -82,6 +99,18 @@ gemv_4096_192_cascade_trace.elf: gemv_placed_trace.mlir project/kernel.o
 # Run correctness + per-call benchmark (single iter per call).
 run: test.exe gemv_4096_192_cascade.elf
 	./test.exe gemv_4096_192_cascade.elf 1
+
+run_vector: test.exe gemv_4096_192_cascade_vector.elf
+	./test.exe gemv_4096_192_cascade_vector.elf 1
+
+run_vector_full_range: test.exe gemv_4096_192_cascade_vector.elf
+	./test.exe --full-range gemv_4096_192_cascade_vector.elf 1
+
+run_full_range: test.exe gemv_4096_192_cascade.elf
+	./test.exe --full-range gemv_4096_192_cascade.elf 1
+
+run_vector_bench: test.exe gemv_4096_192_cascade_vector_bench.elf
+	./test.exe gemv_4096_192_cascade_vector_bench.elf $(BENCH_ITERS)
 
 # Run batched benchmark to amortize XRT overhead.
 run_bench: test.exe gemv_4096_192_cascade_bench.elf
@@ -116,6 +145,10 @@ clean: clean_trace
 	rm -rf project project_bench project_trace \
 		gemv_placed.mlir gemv_placed_bench.mlir gemv_placed_trace.mlir \
 		gemv_4096_192_cascade.elf gemv_4096_192_cascade_bench.elf \
-		gemv_4096_192_cascade_trace.elf test.exe
+		gemv_4096_192_cascade_trace.elf test.exe \
+		project_vector project_vector_bench gemv_vector.mlir \
+		gemv_vector_bench.mlir gemv_4096_192_cascade_vector.elf \
+		gemv_4096_192_cascade_vector_bench.elf
 
-.PHONY: all run run_bench run_trace clean clean_trace
+.PHONY: all vector run run_bench run_full_range run_vector run_vector_bench \
+	run_vector_full_range run_trace clean clean_trace

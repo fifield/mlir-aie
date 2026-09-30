@@ -41,6 +41,42 @@ control. The Makefile supplies the matching value for each target. The
 host also rejects implausible bandwidth, but this check does not establish
 that the divisor is correct.
 
+## Vector variant
+
+`gemv_placed.py --vector` keeps the design (tiling, object FIFOs, cascade,
+DMA, host layout) but emits each compute entry point as vector/arith IR in
+the core body instead of calling `kernel.o`. aiecc compiles it with
+`--enable-aie4-vectorization` through the AIE4 Vector -> AIEVec -> LLVM
+pipeline and Peano; neither Chess nor `kernel.cc` is involved.
+
+```bash
+make vector           # vector ELFs + test.exe (no kernel.o)
+make run_vector       # correctness and per-call latency
+make run_vector_bench # correctness and batched throughput
+make run_vector_full_range # correctness on full-range int8 inputs
+```
+
+`test.exe --full-range` (targets `run_vector_full_range` and
+`run_full_range`) draws A and W from all of [-128, 127], pins the
+extremes, and adds two columns whose products all share one sign; the
+largest possible |C| is 128 * 128 * K = 2^26 at K = 4096, well inside
+int32. The default inputs are small ([-4, 3] and [-2, 2]).
+
+Each output lane is a dot product: in the weight layout below, one N
+column's 64 K values in a K-tile are contiguous. The core multiplies
+32-lane `vector<32xi8>` slices of A and W (sign-extended to i32),
+accumulates across the chunk's K-tiles, and reduces each column once per
+chunk. The pipeline lowers this to `vldb.unpack.2x` (exact i8 -> i16),
+`vmac` (i16 x i16 -> i32, 32 lanes) and a `vadd.32` reduction tree; the
+cascade finish uses `vmov mcd`/`vmov scd`. It uses the element-wise VMAC
+rather than the 64x64 MMAC that `kernel.cc` drives, so it is compute-bound
+and slower than the `kernel.o` build.
+
+All trip counts are static multiples of the vector width: K per row is a
+multiple of 64 by construction (the host packs whole 64-K tiles), each
+tile's column splits into two 32-lane steps, and N per column is 64.
+There is no remainder loop to mask.
+
 ## Configuration
 
 Run `make clean` before rebuilding with different settings: make does not
@@ -168,6 +204,7 @@ word per line for `parse.py`.
 | File | Purpose |
 |---|---|
 | `kernel.cc` | Chunk accumulation and send/pass/sink/solo finish kernels. |
-| `gemv_placed.py` | Device geometry, weight distribution, cascade, runtime DMA, and optional trace. |
+| `run_npu3_vector.lit` | Builds and runs the `--vector` variant on npu3, checking native instructions. |
+| `gemv_placed.py` | Device geometry, weight distribution, cascade, runtime DMA, optional trace, and the `--vector` compute IR. |
 | `test.cpp` | Host packing, CPU reference, correctness checks, benchmark, and trace capture. |
 | `Makefile` | Default, batched, and trace builds and run targets. |
