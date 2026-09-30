@@ -1,0 +1,69 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// Accuracy and special values of afn math.exp2 / math.tanh (VEXP2, VTANH)
+// on NPU3, against a double-precision host reference.
+//
+// REQUIRES: ryzen_ai_npu3, peano
+//
+// RUN: %run_on_npu3% python %S/approx_math.py -o approx_math.mlir
+// RUN: %aiecc -j 4 --enable-aie4-vectorization --get-full-elf --full-elf-name=approx_math.elf approx_math.mlir
+//
+// Check actual mnemonics; an unknown intrinsic can compile as an external call.
+// RUN: llvm-objdump -dr approx_math.mlir.prj/elfs_main_core_0_2/elfs_main_core_0_2.elf > dis.txt
+// RUN: FileCheck %s --check-prefix=MNEMONIC --input-file=dis.txt
+// MNEMONIC-DAG: vexp2.fp32
+// MNEMONIC-DAG: vexp2.bf16
+// MNEMONIC-DAG: vtanh
+//
+// RUN: clang %S/test.cpp -o test.exe -std=c++17 -Wall %xrt_flags -lrt -lstdc++ -lm %test_utils_flags
+// RUN: %run_on_npu3% ./test.exe
+//
+// Recorded on NPU3 with Peano llvm_aie g699c75e4. The bf16 checks use the
+// measured <= 1 ULP bound; NPU3 does not guarantee faithful bracketing.
+//
+// VEXP2 objective: 2^t, t = floor((b - 895) * 2^11) / 2^11. The ULP metric
+// rounds to 10 (fp32 form) or 7 (bf16 form) mantissa bits with f32 exponents
+// and gradual underflow below 2^-126.
+//   fp32: <= 1 fp16 ULP on the sweep, including subnormals; 11 LSBs clear.
+//     t < -138 -> 0; t >= 128 -> +Inf.
+//   bf16: <= 1 bf16 ULP from RNE(2^t), with 271 of 7890 grid inputs 1 ULP
+//     off, so the instruction does not always produce RNE(2^t).
+//     t <= -134 -> 0; t >= 128 -> +Inf. Raw bf16 agrees with RNE(raw fp32)
+//     for 15952 of 16382 non-NaN inputs.
+//
+// End-to-end exp2 error against a double reference:
+//   f32, -126 <= x < 127 (15781 points): max relative error 6.62e-4,
+//     max 1 fp16 ULP, mean relative error -4.24e-6; all 37 tested integer
+//     inputs in [-137, 127) produce exact powers of two.
+//   f32, -137 <= x < -126: max relative error 0.481, max 1 fp16 ULP.
+//   bf16, -126 <= xb < 127: max relative error 4.43e-3, max 1 bf16 ULP.
+// VTANH error against tanh(trunc_bf16(x)): max relative error 8.198% at
+//   x = 0.5 (result 0.5), below the tested 8.3% bound; max absolute error 0.0379.
+//   tanh(1) = 0.77734375; tanh(+/-denorm_min) = +/-0.
+// All six outputs were non-decreasing over each ascending sweep.
+//
+// The bias add uses VADD.f and crVecRnd. Recorded runs used RNE (value 12)
+// set by the loader; the test does not initialize it.
+//
+// Recorded special values (bits):
+//   input           exp2 f32     exp2 bf16  tanh f32     tanh bf16
+//   +qNaN 7fc00000  7fc00000     7fc0       7f810000     7f81
+//   -qNaN ffc00000  7fc00000     7fc0       ff810000     ff81
+//   sNaN  7f800001  7fc00000     7fc0       7f810000     7f81
+//   +Inf            +Inf         +Inf       +1           +1
+//   -Inf            +0           +0         -1           -1
+//   +0              3f800000     3f80       +0           +0
+//   -0              3f800000     3f80       -0           -0
+//   +denorm_min     3f800000     3f80       +0           +0
+//   127.99          7f7e5000     7f80 (*)   +1           +1
+//   128, 200, FLT_MAX  +Inf      +Inf       +1           +1
+//   -126            00800000     0080       -1           -1
+//   -133            00010000     0001       -1           -1
+//   -134            00008000     0000       -1           -1
+//   -138            00000800     0000       -1           -1
+//   -138.1, -1000, -FLT_MAX  +0  +0         -1           -1
+//   (*) the bf16 input rounds to 128.
+// Raw VEXP2 (b = input): NaN of either sign -> 7fc00000 / 7fc0; +Inf -> +Inf;
+//   -Inf, 0, 512 -> +0; b = 1022.99951171875 -> 7f7fe800 / 7f7f (finite,
+//   max bf16); b = 1023 -> +Inf; b = 757 (t = -138) -> 00000800 / 0000.

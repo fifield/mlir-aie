@@ -560,6 +560,56 @@ def AIEVec_AIE4ShuffleOp:
   let hasVerifier = 1;
 }
 
+//===----------------------------------------------------------------------===//
+// AIE4 approximate transcendentals (VEXP2, VTANH)
+//===----------------------------------------------------------------------===//
+//
+// Vector-to-AIEVec creates these ops only from exp2/tanh with fastmath<afn>.
+// Pure: these instructions raise no FP exception flags and read no
+// control registers.
+
+def AIEVec_AIE4BiasedExp2Op:
+  AIEVec_Op<"aie4.biased_exp2", [Pure]>,
+  Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$source)>,
+  Results<(outs AnyTypeOf<[
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>]>:$result)> {
+  let summary = "AIE4 approximate biased base-2 exponential (vexp2)";
+  let description = [{
+    Approximates `2^t` per lane, where `t = floor((x - 895) * 2^11) / 2^11`.
+    Callers computing `2^x` add 895 + 2^-12 for an f32 result or the
+    `aie4_nlf.h` bias 895.001 for a bf16 result.
+
+    The result type selects the instruction form:
+    - `vector<32xbf16>`: VEXP2.bf16. Faithful rounding selects a bf16
+      neighbor bracketing `2^t`; it need not select the nearest one.
+    - `vector<32xf32>`: VEXP2.fp32 (`llvm.aie4.exp2.bf20`), an f32 with the
+      11 least significant bits cleared, error <= 1 fp16 ULP.
+
+    NaN inputs produce a fixed NaN. `t >= 128` produces +Inf;
+    `t <= -134` (bf16) or `t < -138` (f32) produces 0.
+  }];
+  let assemblyFormat =
+      "$source attr-dict `:` type($source) `,` type($result)";
+  let hasVerifier = 0;
+}
+
+def AIEVec_AIE4TanhOp:
+  AIEVec_Op<"aie4.tanh", [Pure]>,
+  Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$source)>,
+  Results<(outs FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$result)> {
+  let summary = "AIE4 approximate hyperbolic tangent (vtanh)";
+  let description = [{
+    Truncates each f32 lane to bf16, then approximates `tanh` with relative
+    error below 8.3%, measured after truncation. +/-Inf map
+    to +/-1. NaN maps to a sign-dependent NaN: 0x7F81 for a positive-sign
+    input, 0xFF81 for a negative-sign input.
+  }];
+  let assemblyFormat =
+      "$source attr-dict `:` type($source) `,` type($result)";
+  let hasVerifier = 0;
+}
+
 def AIEVec_SubElemOp:
   AIEVec_Op<"sub_elem", [
     Pure,

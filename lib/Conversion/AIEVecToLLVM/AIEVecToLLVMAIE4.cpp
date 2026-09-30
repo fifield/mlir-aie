@@ -728,6 +728,42 @@ struct AIE4ShuffleOpConversion
   }
 };
 
+//===----------------------------------------------------------------------===//
+// Approximate transcendentals
+//===----------------------------------------------------------------------===//
+//
+// The result type selects the VEXP2 form: bf16 -> llvm.aie4.exp2,
+// f32 -> llvm.aie4.exp2.bf20. The caller has already applied any input bias.
+struct AIE4BiasedExp2OpConversion
+    : mlir::ConvertOpToLLVMPattern<aievec::AIE4BiasedExp2Op> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(aievec::AIE4BiasedExp2Op op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto resTy = cast<VectorType>(op.getResult().getType());
+    if (resTy.getElementType().isF32())
+      rewriter.replaceOpWithNewOp<xllvm::Exp2Bf20AIE4IntrOp>(
+          op, resTy, adaptor.getSource());
+    else
+      rewriter.replaceOpWithNewOp<xllvm::Exp2AIE4IntrOp>(op, resTy,
+                                                         adaptor.getSource());
+    return success();
+  }
+};
+
+struct AIE4TanhOpConversion : mlir::ConvertOpToLLVMPattern<aievec::AIE4TanhOp> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(aievec::AIE4TanhOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    rewriter.replaceOpWithNewOp<xllvm::TanhAIE4IntrOp>(
+        op, op.getResult().getType(), adaptor.getSource());
+    return success();
+  }
+};
+
 void populateAIEVecToLLVMAIE4ConversionPatterns(
     mlir::LLVMTypeConverter &converter, mlir::RewritePatternSet &patterns) {
   patterns.add<AIE4MulEwiseF32OpConversion, AIE4MacEwiseF32OpConversion,
@@ -738,7 +774,8 @@ void populateAIEVecToLLVMAIE4ConversionPatterns(
                AIE4MinMaxOpConversion, AIE4CmpOpConversion,
                AIE4SelOpConversion, AIE4FMinMaxOpConversion,
                AIE4FCmpOpConversion, AIE4ReduceOpConversion,
-               AIE4ShuffleOpConversion>(converter);
+               AIE4ShuffleOpConversion, AIE4BiasedExp2OpConversion,
+               AIE4TanhOpConversion>(converter);
 }
 
 } // namespace xilinx::aievec

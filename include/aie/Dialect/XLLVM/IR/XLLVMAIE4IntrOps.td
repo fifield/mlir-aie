@@ -696,4 +696,40 @@ def ShuffleAIE4IntrOp :
   }];
 }
 
+//===----------------------------------------------------------------------===//
+// Approximate transcendentals (vexp2, vtanh)
+//===----------------------------------------------------------------------===//
+//
+// Pure: the intrinsics are IntrNoMem, raise no FP flags, and read no
+// control registers. Callers supply
+// VEXP2's input bias; see aievec.aie4.biased_exp2.
+
+// llvm.aie4.exp2
+//     <32 x bfloat> (<32 x float>)
+def Exp2AIE4IntrOp :
+    AIEVec4_IntrOp<"exp2",
+        [Pure, TypeIs<"res", FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>>]>,
+    Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$src)> {
+  let summary = "AIE4 biased base-2 exponential, bf16 result (vexp2.bf16)";
+}
+
+// llvm.aie4.exp2.bf20
+//     <32 x float> (<32 x float>)
+def Exp2Bf20AIE4IntrOp :
+    AIEVec4_IntrOp<"exp2.bf20",
+        [Pure, TypeIs<"res", FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>>]>,
+    Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$src)> {
+  let summary = "AIE4 biased base-2 exponential, f32 result with 11 LSBs "
+                "cleared (vexp2.fp32)";
+}
+
+// llvm.aie4.tanh
+//     <32 x bfloat> (<32 x float>)
+def TanhAIE4IntrOp :
+    AIEVec4_IntrOp<"tanh",
+        [Pure, TypeIs<"res", FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>>]>,
+    Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$src)> {
+  let summary = "AIE4 hyperbolic tangent, bf16-truncated input (vtanh)";
+}
+
 #endif // AIE_DIALECT_XLLVM_IR_XLLVMAIE4INTROPS_TD

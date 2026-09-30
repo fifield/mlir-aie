@@ -300,3 +300,32 @@ llvm.func @add_reduce_fp1024_scl(%src: vector<32xf32>, %seed: f32) -> f32 {
 // CHECK-LABEL: declare float @llvm.aie4.max.reduce.FP1024.scl(<32 x float>, float)
 // CHECK-LABEL: declare float @llvm.aie4.add.reduce.FP1024(<32 x float>)
 // CHECK-LABEL: declare float @llvm.aie4.add.reduce.FP1024.scl(<32 x float>, float)
+
+// -----
+
+// Check the names and signatures of the VEXP2 and VTANH intrinsics.
+
+// CHECK-LABEL: define <32 x bfloat> @exp2_bf16
+llvm.func @exp2_bf16(%src: vector<32xf32>) -> vector<32xbf16> {
+    // CHECK: call <32 x bfloat> @llvm.aie4.exp2(<32 x float> %{{[0-9]+}})
+    %0 = "xllvm.intr.aie4.exp2"(%src) : (vector<32xf32>) -> vector<32xbf16>
+    llvm.return %0 : vector<32xbf16>
+}
+
+// CHECK-LABEL: define <32 x float> @exp2_bf20
+llvm.func @exp2_bf20(%src: vector<32xf32>) -> vector<32xf32> {
+    // CHECK: call <32 x float> @llvm.aie4.exp2.bf20(<32 x float> %{{[0-9]+}})
+    %0 = "xllvm.intr.aie4.exp2.bf20"(%src) : (vector<32xf32>) -> vector<32xf32>
+    llvm.return %0 : vector<32xf32>
+}
+
+// CHECK-LABEL: define <32 x bfloat> @tanh
+llvm.func @tanh(%src: vector<32xf32>) -> vector<32xbf16> {
+    // CHECK: call <32 x bfloat> @llvm.aie4.tanh(<32 x float> %{{[0-9]+}})
+    %0 = "xllvm.intr.aie4.tanh"(%src) : (vector<32xf32>) -> vector<32xbf16>
+    llvm.return %0 : vector<32xbf16>
+}
+
+// CHECK-LABEL: declare <32 x bfloat> @llvm.aie4.exp2(<32 x float>)
+// CHECK-LABEL: declare <32 x float> @llvm.aie4.exp2.bf20(<32 x float>)
+// CHECK-LABEL: declare <32 x bfloat> @llvm.aie4.tanh(<32 x float>)

@@ -6635,6 +6635,115 @@ struct LowerVectorShuffleOpToAIE4ShuffleOpPattern
   }
 };
 
+//===----------------------------------------------------------------------===//
+// AIE4 approximate exp2 / tanh
+//===----------------------------------------------------------------------===//
+//
+// Approximation requires afn (also included in fast); nnan/ninf are not assumed.
+// Peano cannot legalize strict exp2/tanh, so diagnose them here. Supported
+// fixed 1-D f32/bf16 vectors split into 32-lane chunks and retain their type.
+
+static constexpr int64_t kAIE4NlfLanes = 32;
+// VEXP2 floors (x - 895) to a 2^-11 grid. For f32 results, the exact
+// 895 + 2^-12 bias compensates that truncation; see the NPU3 accuracy test
+// for measured error bounds under RNE vector addition.
+static constexpr float kAIE4Exp2BiasF32 = 895.000244140625f;
+// The bf16 form uses the vendor aie4_nlf.h bias (895 + 2^-10 in f32).
+static constexpr float kAIE4Exp2BiasBF16 = 895.001f;
+
+template <typename MathOpTy>
+struct LowerAIE4ApproxMathOp : OpConversionPattern<MathOpTy> {
+  using OpConversionPattern<MathOpTy>::OpConversionPattern;
+  using OpAdaptor = typename MathOpTy::Adaptor;
+  static constexpr bool isExp2 = std::is_same_v<MathOpTy, math::Exp2Op>;
+
+  LogicalResult
+  matchAndRewrite(MathOpTy op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    // Dialect conversion hides pattern-emitted errors; warnings retain the
+    // specific refusal reason alongside its legalization error.
+    StringRef opName = MathOpTy::getOperationName();
+    if (!arith::bitEnumContainsAll(op.getFastmath(),
+                                   arith::FastMathFlags::afn)) {
+      op.emitWarning() << "AIE4: " << opName
+                       << " requires fastmath<afn>; AIE4 has only the "
+                          "approximate "
+                       << (isExp2 ? "VEXP2" : "VTANH")
+                       << " lowering and no strict lowering";
+      return failure();
+    }
+
+    auto vecTy = dyn_cast<VectorType>(op.getType());
+    if (!vecTy || vecTy.isScalable() || vecTy.getRank() != 1) {
+      op.emitWarning() << "AIE4: afn " << opName
+                       << " is only supported on fixed 1-D vectors";
+      return failure();
+    }
+    Type elemTy = vecTy.getElementType();
+    if (!elemTy.isF32() && !elemTy.isBF16()) {
+      op.emitWarning() << "AIE4: afn " << opName
+                       << " only supports f32/bf16 elements, not " << elemTy;
+      return failure();
+    }
+    int64_t lanes = vecTy.getShape()[0];
+    if (lanes % kAIE4NlfLanes != 0) {
+      op.emitWarning() << "AIE4: afn " << opName
+                       << " requires a multiple of 32 lanes, not " << lanes;
+      return failure();
+    }
+
+    Location loc = op.getLoc();
+    auto f32ChunkTy = VectorType::get({kAIE4NlfLanes}, rewriter.getF32Type());
+    auto bf16ChunkTy = VectorType::get({kAIE4NlfLanes}, rewriter.getBF16Type());
+    auto chunkTy = VectorType::get({kAIE4NlfLanes}, elemTy);
+
+    Value bias;
+    if constexpr (isExp2) {
+      float biasValue = elemTy.isF32() ? kAIE4Exp2BiasF32 : kAIE4Exp2BiasBF16;
+      bias = arith::ConstantOp::create(
+          rewriter, loc, f32ChunkTy,
+          DenseElementsAttr::get(f32ChunkTy,
+                                 rewriter.getF32FloatAttr(biasValue)));
+    }
+
+    auto lowerChunk = [&](Value chunk) -> Value {
+      Value x = chunk;
+      if (elemTy.isBF16())
+        x = arith::ExtFOp::create(rewriter, loc, f32ChunkTy, x);
+      if constexpr (isExp2) {
+        // Strict add: no fastmath flags, so it cannot be reassociated away.
+        Value biased = arith::AddFOp::create(rewriter, loc, x, bias);
+        return aievec::AIE4BiasedExp2Op::create(rewriter, loc, chunkTy, biased);
+      } else {
+        Value r = aievec::AIE4TanhOp::create(rewriter, loc, bf16ChunkTy, x);
+        if (elemTy.isF32())
+          r = arith::ExtFOp::create(rewriter, loc, f32ChunkTy, r);
+        return r;
+      }
+    };
+
+    // Chunking supports any multiple of 32. Peano may still reject wide
+    // loads such as vector<128xf32> or vector<96xbf16> in the source.
+    Value src = adaptor.getOperand();
+    if (lanes == kAIE4NlfLanes) {
+      rewriter.replaceOp(op, lowerChunk(src));
+      return success();
+    }
+
+    Value result = ub::PoisonOp::create(rewriter, loc, vecTy);
+    for (int64_t off = 0; off < lanes; off += kAIE4NlfLanes) {
+      Value chunk = vector::ExtractStridedSliceOp::create(
+          rewriter, loc, src, ArrayRef<int64_t>{off},
+          ArrayRef<int64_t>{kAIE4NlfLanes}, ArrayRef<int64_t>{1});
+      result = vector::InsertStridedSliceOp::create(
+          rewriter, loc, lowerChunk(chunk), result, ArrayRef<int64_t>{off},
+          ArrayRef<int64_t>{1});
+    }
+    rewriter.replaceOp(op, result);
+    return success();
+  }
+};
+
 static void populateAIEVecV4ConversionPatterns(RewritePatternSet &patterns) {
   patterns
       .add<ConvertMulFToAIE4MulEwiseF32Pattern,
@@ -6649,7 +6758,9 @@ static void populateAIEVecV4ConversionPatterns(RewritePatternSet &patterns) {
            LowerAIE4MinimumFOp, LowerAIE4MaximumFOp, LowerAIE4CmpFOp,
            LowerAIE4MinNumFOp, LowerAIE4MaxNumFOp,
            LowerVectorTransposeOpToAIE4ShuffleOpPattern,
-           LowerVectorShuffleOpToAIE4ShuffleOpPattern>(
+           LowerVectorShuffleOpToAIE4ShuffleOpPattern,
+           LowerAIE4ApproxMathOp<math::Exp2Op>,
+           LowerAIE4ApproxMathOp<math::TanhOp>>(
            patterns.getContext());
 }
 
@@ -6768,6 +6879,12 @@ static void configureAIEVecV4Legalizations(ConversionTarget &target) {
     return !LowerVectorShuffleOpToAIE4ShuffleOpPattern::matchMode(shuffleOp)
                 .has_value();
   });
+
+  // exp2/tanh have only approximate afn lowerings; the pattern diagnoses
+  // strict ops and unsupported shapes. Wide vectors reassemble their 32-lane
+  // results with generic insert_strided_slice.
+  target.addIllegalOp<math::Exp2Op, math::TanhOp>();
+  target.addLegalOp<vector::InsertStridedSliceOp>();
 }
 
 // The lane counts at which the AIE2P lowering of `op` takes one op, smallest

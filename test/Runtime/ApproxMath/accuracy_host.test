@@ -1,0 +1,7 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// Exercise the NPU3 numerical validators without XRT or an NPU.
+// RUN: %host_clang -std=c++17 %S/accuracy_host.cpp %host_link_flags -o %t.exe
+// RUN: %t.exe | FileCheck %s
+// CHECK: approx_math_accuracy: all checks passed
