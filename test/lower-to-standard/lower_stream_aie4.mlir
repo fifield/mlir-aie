@@ -5,13 +5,8 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// AIE4 stream put/get lowering.
-//
-// Same class of bug as the cascade ops in lower_cascade_put_get_aie4.mlir:
-// the funcName selection for aie.put_stream / aie.get_stream ended in
-// `else -> "llvm.aie2p.put."`, so an AIE4 target asked for the AIE2P symbol.
-// The AIE4 intrinsic table did not declare either name, so the lookup failed.
-// These CHECKs name llvm.aie4.* explicitly.
+// Check architecture-specific stream intrinsic names and types.
+// Invalid reads are covered in lower_stream_aie4_invalid.mlir.
 //
 // RUN: aie-opt --aie-standard-lowering --split-input-file %s | FileCheck %s
 
@@ -32,15 +27,23 @@ module @aie4_put_stream {
 
 // -----
 
-// CHECK-LABEL: aie4_get_stream
-// CHECK: call @llvm.aie4.get.ss() : () -> (i32, i32)
-// CHECK-NOT: llvm.aie2p.
-module @aie4_get_stream {
+// CHECK-LABEL: aie4_put_stream_vectors
+// CHECK-DAG: func.func private @llvm.aie4.put.ms.v8(vector<8xi32>, i32)
+// CHECK-DAG: func.func private @llvm.aie4.put.ms.v16(vector<16xi32>, i32)
+// CHECK: arith.constant dense<2> : vector<16xi32>
+// CHECK: %[[LAST8:.*]] = arith.constant 0 : i32
+// CHECK-NEXT: call @llvm.aie4.put.ms.v8(%{{.*}}, %[[LAST8]]) : (vector<8xi32>, i32) -> ()
+// CHECK: %[[LAST16:.*]] = arith.constant 0 : i32
+// CHECK-NEXT: call @llvm.aie4.put.ms.v16(%{{.*}}, %[[LAST16]]) : (vector<16xi32>, i32) -> ()
+module @aie4_put_stream_vectors {
  aie.device(npu3) {
   %t02 = aie.tile(0, 2)
   aie.core(%t02) {
     %c0 = arith.constant 0 : i32
-    %0 = aie.get_stream(%c0 : i32) : i32
+    %v8 = arith.constant dense<1> : vector<8xi32>
+    %v16 = arith.constant dense<2> : vector<16xi32>
+    aie.put_stream(%c0 : i32, %v8 : vector<8xi32>)
+    aie.put_stream(%c0 : i32, %v16 : vector<16xi32>)
     aie.end
   }
  }
@@ -48,8 +51,32 @@ module @aie4_get_stream {
 
 // -----
 
-// AIE2P keeps its own symbol, so the AIE4 arm cannot be an unconditional
-// rename.
+// Check both read widths and zero-extension of an i8 stream index.
+// CHECK-LABEL: aie4_get_stream
+// CHECK-DAG: func.func private @llvm.aie4.get.ss(i32) -> vector<32xi32>
+// CHECK-DAG: func.func private @llvm.aie4.getl.wss(i32) -> vector<16xi32>
+// CHECK: %[[C0:.*]] = arith.constant 0 : i32
+// CHECK: call @llvm.aie4.get.ss(%[[C0]]) : (i32) -> vector<32xi32>
+// CHECK: %[[C1:.*]] = arith.constant 1 : i8
+// CHECK: %[[EXT:.*]] = arith.extui %[[C1]] : i8 to i32
+// CHECK: call @llvm.aie4.getl.wss(%[[EXT]]) : (i32) -> vector<16xi32>
+// CHECK-NOT: llvm.aie2p.
+module @aie4_get_stream {
+ aie.device(npu3) {
+  %t02 = aie.tile(0, 2)
+  aie.core(%t02) {
+    %c0 = arith.constant 0 : i32
+    %0 = aie.get_stream(%c0 : i32) : vector<32xi32>
+    %c1 = arith.constant 1 : i8
+    %1 = aie.get_stream(%c1 : i8) : vector<16xi32>
+    aie.end
+  }
+ }
+}
+
+// -----
+
+// Preserve AIE2P stream-write lowering.
 // CHECK-LABEL: aie2p_put_stream_unchanged
 // CHECK: call @llvm.aie2p.put.ms(%{{.*}}, %{{.*}}) : (i32, i32) -> ()
 // CHECK-NOT: llvm.aie4.

@@ -23,6 +23,7 @@
 
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallSet.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/CheckedArithmetic.h"
 #include "llvm/Support/MathExtras.h"
@@ -2948,6 +2949,65 @@ LogicalResult GetCascadeOp::verify() {
     return emitOpError("type must match architecture cascade width (")
            << archbits << " bits in "
            << stringifyAIEArch(targetModel.getTargetArch()) << ")";
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// GetStreamOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult GetStreamOp::verify() {
+  const auto &targetModel = getTargetModel(*this);
+  Type type = getStreamValue().getType();
+  bool isVector = isa<VectorType>(type);
+  if (targetModel.getTargetArch() == AIEArch::AIE4) {
+    if (!isVector)
+      return emitOpError(
+                 "AIE4 cores read streams in 512-bit or 1024-bit units; use "
+                 "a vector<16xi32> or vector<32xi32> result instead of ")
+             << type
+             << " (a 32-bit read has no AIE4 equivalent outside the "
+                "load-FIFO mode)";
+    auto vectorType = cast<VectorType>(type);
+    if (vectorType.getRank() != 1 || vectorType.isScalable())
+      return emitOpError("AIE4 stream reads require a fixed rank-1 "
+                         "vector<16xi32> or vector<32xi32> result; got ")
+             << type;
+    APInt channel;
+    if (matchPattern(getChannel(), m_ConstantInt(&channel)) &&
+        channel.ugt(1)) {
+      SmallString<40> channelStr;
+      channel.toString(channelStr, /*Radix=*/10, /*Signed=*/false);
+      return emitOpError("AIE4 cores have input streams 0 and 1 only; got ")
+             << channelStr;
+    }
+  } else if (isVector) {
+    return emitOpError("vector stream reads are only supported on AIE4");
+  }
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// PutStreamOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult PutStreamOp::verify() {
+  const auto &targetModel = getTargetModel(*this);
+  Type type = getStreamValue().getType();
+  auto vectorType = dyn_cast<VectorType>(type);
+  if (targetModel.getTargetArch() == AIEArch::AIE4) {
+    if (!type.isSignlessInteger(32) &&
+        (!vectorType || vectorType.getRank() != 1 || vectorType.isScalable()))
+      return emitOpError("AIE4 stream writes require i32 or a fixed rank-1 "
+                         "vector<8xi32> or vector<16xi32> value; got ")
+             << type;
+    APInt channel;
+    if (matchPattern(getChannel(), m_ConstantInt(&channel)) &&
+        !channel.isZero())
+      return emitOpError("AIE4 cores have output stream 0 only");
+  } else if (vectorType) {
+    return emitOpError("vector stream writes are only supported on AIE4");
+  }
   return success();
 }
 

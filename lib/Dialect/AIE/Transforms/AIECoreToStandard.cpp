@@ -24,6 +24,7 @@
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/IRMapping.h"
+#include "mlir/IR/Matchers.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Tools/mlir-translate/MlirTranslateMain.h"
@@ -176,7 +177,19 @@ static auto getAIE4Intrinsics(OpBuilder &builder) {
        {int32Type, int32Type},
        {}}, //(%lock_id, %lock_val) -> ()
       {"llvm.aie4.put.ms", {int32Type, int32Type}, {}}, //(%value, %tlast) -> ()
-      {"llvm.aie4.get.ss", {}, {int32Type, int32Type}}, //() -> (%value, %tlast)
+      {"llvm.aie4.put.ms.v8",
+       {VectorType::get({8}, int32Type), int32Type},
+       {}}, //(%value, %tlast) -> ()
+      {"llvm.aie4.put.ms.v16",
+       {VectorType::get({16}, int32Type), int32Type},
+       {}}, //(%value, %tlast) -> ()
+      // The operand selects input stream 0 or 1; TLAST is read separately.
+      {"llvm.aie4.get.ss",
+       {int32Type},
+       {VectorType::get({32}, int32Type)}}, //(%stream) -> (%value)
+      {"llvm.aie4.getl.wss",
+       {int32Type},
+       {VectorType::get({16}, int32Type)}}, //(%stream) -> (%value)
       {"llvm.aie4.mcd.write.vec",
        {accType, int32Type},
        {}}, // (%value, %enable) -> ()
@@ -300,7 +313,9 @@ struct AIEPutStreamToStdLowering : OpConversionPattern<PutStreamOp> {
     else
       funcName = "llvm.aie2p.put.";
 
-    if (op.isWideStream())
+    if (auto vectorType = dyn_cast<VectorType>(op.getStreamValue().getType()))
+      funcName += vectorType.getNumElements() == 8 ? "ms.v8" : "ms.v16";
+    else if (op.isWideStream())
       funcName += "wms";
     else if (op.isFloatStream())
       funcName += "fms";
@@ -342,13 +357,14 @@ struct AIEGetStreamToStdLowering : OpConversionPattern<GetStreamOp> {
       return failure();
     auto device = op->getParentOfType<DeviceOp>();
     const auto &targetModel = device.getTargetModel();
+    if (targetModel.getTargetArch() == AIEArch::AIE4)
+      return lowerAIE4(op, rewriter);
+    // The verifier restricts non-AIE4 results to scalar types.
     std::string funcName;
     if (targetModel.getTargetArch() == AIEArch::AIE1)
       funcName = "llvm.aie.get.";
     else if (targetModel.getTargetArch() == AIEArch::AIE2)
       funcName = "llvm.aie2.get.";
-    else if (targetModel.getTargetArch() == AIEArch::AIE4)
-      funcName = "llvm.aie4.get.";
     else
       funcName = "llvm.aie2p.get.";
 
@@ -370,6 +386,36 @@ struct AIEGetStreamToStdLowering : OpConversionPattern<GetStreamOp> {
         func::CallOp::create(rewriter, op.getLoc(), getSSFunc, args);
     rewriter.replaceOp(op, getSSCall.getResult(0));
     // Capture TLAST in AIEv2?
+    return success();
+  }
+
+  // The verifier guarantees fixed rank-1 vectors of 16 or 32 i32 elements
+  // and rejects constant stream indices outside 0 and 1.
+  LogicalResult lowerAIE4(GetStreamOp op,
+                          ConversionPatternRewriter &rewriter) const {
+    auto vecTy = cast<VectorType>(op.getStreamValue().getType());
+
+    StringRef funcName = vecTy.getNumElements() == 32 ? "llvm.aie4.get.ss"
+                                                      : "llvm.aie4.getl.wss";
+    auto getSSFunc = module.lookupSymbol<func::FuncOp>(funcName);
+    if (!getSSFunc)
+      return op.emitOpError("Could not find the intrinsic function ")
+             << funcName;
+
+    Location loc = op.getLoc();
+    Type i32Ty = rewriter.getI32Type();
+    Value stream = op.getChannel();
+    if (!stream.getType().isSignlessInteger())
+      return op.emitOpError("AIE4 stream index must be a signless integer");
+    unsigned width = stream.getType().getIntOrFloatBitWidth();
+    if (width < 32)
+      stream = arith::ExtUIOp::create(rewriter, loc, i32Ty, stream);
+    else if (width > 32)
+      stream = arith::TruncIOp::create(rewriter, loc, i32Ty, stream);
+
+    auto call =
+        func::CallOp::create(rewriter, loc, getSSFunc, ValueRange{stream});
+    rewriter.replaceOp(op, call.getResult(0));
     return success();
   }
 };

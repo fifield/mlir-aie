@@ -1,0 +1,14 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// AIE4 core stream reads (aie.get_stream -> llvm.aie4.get.ss / getl.wss).
+//
+// REQUIRES: ryzen_ai_npu3, peano
+//
+// RUN: %aiecc -j 4 --get-full-elf --full-elf-name=stream_read.elf %S/aie.mlir
+// RUN: llvm-objdump -d aie.mlir.prj/elfs_main_core_0_2/elfs_main_core_0_2.elf | FileCheck %s
+// CHECK: vmov{{[abx]?}} y{{[0-9]+}}, ss[p{{[0-9]+}}]
+// CHECK: vmov{{[abx]?}} x{{[0-9]+}}, ss[p{{[0-9]+}}]
+// CHECK: vmov{{[abx]?}} x{{[0-9]+}}, ss[p{{[0-9]+}}]
+// RUN: clang %S/test.cpp -o test.exe -std=c++17 -Wall %xrt_flags -lrt -lstdc++
+// RUN: %run_on_npu3% ./test.exe
