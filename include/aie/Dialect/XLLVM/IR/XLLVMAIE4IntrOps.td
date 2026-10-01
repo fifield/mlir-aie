@@ -460,6 +460,35 @@ def V32AccFloatToV32Bfloat16AIE4IntrOp :
 }
 
 //===----------------------------------------------------------------------===//
+// Float -> integer conversion
+//===----------------------------------------------------------------------===//
+//
+// `scale` is a binary exponent applied before the conversion; `sign` selects
+// the signed or unsigned form. Rounding of the discarded fraction comes from
+// `crRnd`, so a caller with a rounding contract to honour has to establish it.
+
+def V32FloatToV32Int32AIE4IntrOp :
+    AIEVec4_IntrOp<"v32float.to.v32int32",
+        [TypeIs<"res", FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>>]>,
+    Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$src,
+                   ConfinedAttr<I32Attr, [IntMinValue<-32>, IntMaxValue<31>]>:$scale,
+                   AIE4_SRSSign:$sign)> {
+  let summary = "AIE4 convert f32 vector -> i32 vector, ambient rounding";
+
+  let llvmBuilder = [{
+    auto *inst = ::xilinx::xllvm::createAIE4ConfIntrinsicCall(builder,
+                      moduleTranslation, &opInst,
+                      "llvm.aie4.v32float.to.v32int32",
+                      ::llvm::ArrayRef<uint32_t>{
+                          (uint32_t) op.getScale(),
+                          (uint32_t) op.getSign()});
+    (void) inst;
+    $res = inst;
+  }];
+}
+
+
+//===----------------------------------------------------------------------===//
 // Integer min/max/compare/select ("vadd" opsel multiplexer)
 //===----------------------------------------------------------------------===//
 //

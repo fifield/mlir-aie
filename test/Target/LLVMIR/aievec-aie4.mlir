@@ -357,3 +357,17 @@ llvm.func @inv(%src: f32) -> f32 {
 }
 
 // CHECK-LABEL: declare float @llvm.aie4.inv(float)
+
+// -----
+
+// -- FLOAT -> INT --
+
+// CHECK-LABEL: define <32 x i32> @v32float_to_v32int32
+llvm.func @v32float_to_v32int32(%src: vector<32xf32>) -> vector<32xi32> {
+    // CHECK: call <32 x i32> @llvm.aie4.v32float.to.v32int32(
+    // CHECK-SAME: <32 x float> %{{[0-9]+}}, i32 0, i32 1)
+    %0 = "xllvm.intr.aie4.v32float.to.v32int32"(%src) <{scale = 0 : i32, sign = 1 : i32}> : (vector<32xf32>) -> vector<32xi32>
+    llvm.return %0 : vector<32xi32>
+}
+
+// CHECK-LABEL: declare <32 x i32> @llvm.aie4.v32float.to.v32int32(<32 x float>, i32, i32)

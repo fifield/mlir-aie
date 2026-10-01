@@ -274,6 +274,25 @@ struct AIE4ConvF32BF16OpConversion
   }
 };
 
+// aievec.aie4.conv_f32_i32 -> llvm.aie4.v32float.to.v32int32
+//
+// One instruction and no control-register traffic: rounding comes from the
+// ambient crRnd, which AIECoreToStandard establishes at core entry.
+struct AIE4ConvF32I32OpConversion
+    : mlir::ConvertOpToLLVMPattern<aievec::AIE4ConvF32I32Op> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(aievec::AIE4ConvF32I32Op op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    rewriter.replaceOpWithNewOp<xllvm::V32FloatToV32Int32AIE4IntrOp>(
+        op, op.getResult().getType(), adaptor.getSource(), /*scale=*/0,
+        op.getIsSigned() ? xllvm::AIE4SRSSign::Signed
+                         : xllvm::AIE4SRSSign::Unsigned);
+    return success();
+  }
+};
+
 //===----------------------------------------------------------------------===//
 // Integer min/max/compare/select
 //===----------------------------------------------------------------------===//
@@ -911,6 +930,7 @@ void populateAIEVecToLLVMAIE4ConversionPatterns(
                AIE4SRSI32I16OpConversion, AIE4UPSI16I32OpConversion,
                AIE4UnpackI8I16OpConversion,
                AIE4ConvBF16F32OpConversion, AIE4ConvF32BF16OpConversion,
+               AIE4ConvF32I32OpConversion,
                AIE4MinMaxOpConversion, AIE4CmpOpConversion,
                AIE4SelOpConversion, AIE4FMinMaxOpConversion,
                AIE4FCmpOpConversion, AIE4ReduceOpConversion,

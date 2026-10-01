@@ -399,6 +399,29 @@ def AIEVec_AIE4ConvF32BF16Op:
   let hasVerifier = 0;
 }
 
+def AIEVec_AIE4ConvF32I32Op:
+  AIEVec_Op<"aie4.conv_f32_i32", []>,
+  Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$source,
+                 DefaultValuedAttr<BoolAttr, "true">:$isSigned)>,
+  Results<(outs FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>:$result)> {
+  let summary = "AIE4 convert an f32 vector to an i32 vector";
+  let description = [{
+    Converts `vector<32xf32>` to `vector<32xi32>`. `$isSigned` selects the
+    signed or unsigned form of the instruction.
+
+    Rounding of the discarded fraction comes from the ambient `crRnd`, as it
+    does for `aie4.conv_f32_bf16`. `AIECoreToStandard` establishes that mode
+    at core entry for any core holding this op, and sets it to 2
+    (`rnd_sym_floor`, always toward zero) to match `arith.fptosi` and
+    `arith.fptoui`. Emitting this op elsewhere inherits the same mode.
+
+    Lowers to `llvm.aie4.v32float.to.v32int32`, one instruction for 32 lanes.
+  }];
+  let assemblyFormat =
+      "$source attr-dict `:` type($source) `,` type($result)";
+  let hasVerifier = 0;
+}
+
 //===----------------------------------------------------------------------===//
 // AIE4 integer min/max/compare/select
 //===----------------------------------------------------------------------===//

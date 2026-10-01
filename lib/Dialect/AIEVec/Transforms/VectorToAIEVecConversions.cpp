@@ -6087,6 +6087,47 @@ struct ConvertExtFToAIE4ConvPattern : OpConversionPattern<arith::ExtFOp> {
   }
 };
 
+// arith.fptosi / arith.fptoui on <32xf32> -> <32xi32> becomes the native AIE4
+// conversion. The generic alternative is the scalarize pattern, which needs 32
+// extract/convert/insert triples for what the part does in one instruction.
+//
+// Both arith ops truncate toward zero. The conversion rounds by the ambient
+// crRnd, which AIECoreToStandard establishes; see the note there for why the
+// mode is set at core entry.
+template <typename FPToIntOp>
+struct ConvertFPToIntToAIE4ConvPattern : OpConversionPattern<FPToIntOp> {
+  using OpConversionPattern<FPToIntOp>::OpConversionPattern;
+  using OpAdaptor = typename FPToIntOp::Adaptor;
+
+  static bool matches(FPToIntOp op) {
+    auto srcTy = dyn_cast<VectorType>(op.getIn().getType());
+    auto dstTy = dyn_cast<VectorType>(op.getOut().getType());
+    if (!srcTy || !dstTy || srcTy.isScalable() || dstTy.isScalable())
+      return false;
+    return srcTy.getRank() == 1 && dstTy.getRank() == 1 &&
+           srcTy.getShape()[0] == 32 && dstTy.getShape()[0] == 32 &&
+           srcTy.getElementType().isF32() &&
+           dstTy.getElementType().isSignlessInteger(32);
+  }
+
+  LogicalResult
+  matchAndRewrite(FPToIntOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    if (!matches(op))
+      return failure();
+    rewriter.replaceOpWithNewOp<aievec::AIE4ConvF32I32Op>(
+        op, op.getType(), adaptor.getIn(),
+        /*isSigned=*/
+        rewriter.getBoolAttr(std::is_same_v<FPToIntOp, arith::FPToSIOp>));
+    return success();
+  }
+};
+
+using ConvertFPToSIToAIE4ConvPattern =
+    ConvertFPToIntToAIE4ConvPattern<arith::FPToSIOp>;
+using ConvertFPToUIToAIE4ConvPattern =
+    ConvertFPToIntToAIE4ConvPattern<arith::FPToUIOp>;
+
 //===----------------------------------------------------------------------===//
 // AIE4 integer min/max/compare/select
 //===----------------------------------------------------------------------===//
@@ -6985,6 +7026,13 @@ static void populateAIEVecV4ConversionPatterns(RewritePatternSet &patterns) {
            ConvertExtSIToAIE4UPSPattern, ConvertExtUIToAIE4UPSPattern,
            ConvertExtSIToAIE4UnpackPattern, ConvertExtUIToAIE4UnpackPattern,
            ConvertExtFToAIE4ConvPattern,
+           // Shapes the native float->int conversion does not cover, and both
+           // int->float directions, which AIE4 has no instruction for. The
+           // prohibition on these lives in configureAIEVecCommonLegalizations
+           // and applies to every target, so without a pattern here they would
+           // have nothing to satisfy it.
+           ScalarizeVectorSIToFPOpPattern, ScalarizeVectorUIToFPOpPattern,
+           ScalarizeVectorFPToSIOpPattern, ScalarizeVectorFPToUIOpPattern,
            LowerAIE4MinSIOp, LowerAIE4MaxSIOp, LowerAIE4MinUIOp,
            LowerAIE4MaxUIOp, LowerAIE4CmpIOp, LowerAIE4SelectOp,
            LowerAIE4MaskExtractOp, LowerAIE4VectorReductionOp,
@@ -6996,6 +7044,10 @@ static void populateAIEVecV4ConversionPatterns(RewritePatternSet &patterns) {
            LowerAIE4ApproxMathOp<math::TanhOp>,
            LowerAIE4ReciprocalOp>(
            patterns.getContext());
+  // Higher benefit than the scalarize patterns above, which also match
+  // fptosi/fptoui and would otherwise take the native shape.
+  patterns.add<ConvertFPToSIToAIE4ConvPattern, ConvertFPToUIToAIE4ConvPattern>(
+      patterns.getContext(), /*benefit=*/2);
 }
 
 static void configureAIEVecV4Legalizations(ConversionTarget &target) {
