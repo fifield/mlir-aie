@@ -1,0 +1,33 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// afn math.rsqrt, arcp+afn arith.divf and strict arith.divf on NPU3, against
+// a double-precision host reference. Bounds, in f32 ULPs of the exact result
+// over normal inputs with a normal result: rsqrt 1 (INVSQRT's specified
+// accuracy), a * INV(b) 2 for |b| <= 2^126, strict division 0.5. rsqrt must
+// not increase over an ascending sweep of every normal binade.
+//
+// Special values, checked bit for bit:
+//   INVSQRT reads a subnormal input as a zero of the same sign:
+//     +0, +denorm -> +Inf; -0, -denorm -> -Inf; negative, -Inf -> NaN;
+//     +Inf -> +0; 2^-126 -> 2^63.
+//   a * INV(b) reads a subnormal operand as zero, and the reciprocal of a
+//   finite |b| > 2^126 flushes to zero: 2^127 / 2^127 -> 0, 1 / 2^127 -> 0,
+//   1 / 2^126 -> 2^-126, 1 / denorm -> +Inf, denorm / 1 -> 0.
+//   The strict division is IEEE: 2^127 / 2^127 -> 1, 1 / 2^127 -> 2^-127.
+//
+// Recorded on NPU3 with Peano llvm_aie g663a9e74:
+//   rsqrt afn, 8183 points: max 0.877 ULP.
+//   divide arcp+afn, 8175 points: max 1.73 ULP.
+//   divide strict, 8176 points: max 0.5 ULP.
+//
+// The strict division calls compiler-rt's __divsf3, which carries no stack
+// size; with the default 1 KiB stack the core overran into the input buffer
+// placed after it, so nlf.py sets a larger one.
+//
+// REQUIRES: ryzen_ai_npu3, peano
+//
+// RUN: %run_on_npu3% python %S/nlf.py -o nlf.mlir
+// RUN: %aiecc --enable-aie4-vectorization --get-full-elf --full-elf-name=nlf.elf nlf.mlir
+// RUN: clang %S/test.cpp -o test.exe -std=c++17 -Wall %xrt_flags -lrt -lstdc++ -lm %test_utils_flags
+// RUN: %run_on_npu3% ./test.exe

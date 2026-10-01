@@ -15,7 +15,10 @@
 #include "aie/Dialect/AIEVec/IR/AIEVecOps.h"
 #include "aie/Dialect/XLLVM/XLLVMDialect.h"
 #include "mlir/Conversion/LLVMCommon/Pattern.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/Dialect/Math/IR/Math.h"
+#include "mlir/Dialect/Vector/IR/VectorOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/Support/LogicalResult.h"
 
@@ -816,9 +819,80 @@ struct AIE4TanhOpConversion : mlir::ConvertOpToLLVMPattern<aievec::AIE4TanhOp> {
   }
 };
 
+// math.rsqrt -> llvm.aie4.invsqrt
+//
+// Takes a `math` op rather than an `aievec` one because no earlier pass
+// rewrites math.rsqrt: this conversion is the whole lowering. AIE2p has the
+// equivalent pattern in AIEVecToLLVM.cpp.
+//
+// INVSQRT is approximate and reads a subnormal input as zero, so, like
+// exp2/tanh, it requires afn. There is no strict lowering.
+//
+// The vector case unrolls into scalar calls because the ISA has no vector
+// invsqrt. Expensive per lane, and the only form available.
+struct AIE4RsqrtOpConversion : mlir::ConvertOpToLLVMPattern<math::RsqrtOp> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(math::RsqrtOp rsqrtOp, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    Location loc = rsqrtOp.getLoc();
+    if (!arith::bitEnumContainsAll(rsqrtOp.getFastmath(),
+                                   arith::FastMathFlags::afn)) {
+      // Dialect conversion hides pattern-emitted errors; a warning keeps the
+      // reason next to the legalization error.
+      rsqrtOp.emitWarning()
+          << "AIE4: math.rsqrt requires fastmath<afn>; AIE4 has only the "
+             "approximate INVSQRT lowering and no strict lowering";
+      return failure();
+    }
+    Type f32Ty = rewriter.getF32Type();
+    Type operandType = adaptor.getOperand().getType();
+
+    if (operandType.isF32()) {
+      rewriter.replaceOpWithNewOp<xllvm::InvsqrtAIE4IntrOp>(
+          rsqrtOp, f32Ty, adaptor.getOperand());
+      return success();
+    }
+
+    auto vecTy = dyn_cast<VectorType>(operandType);
+    if (!vecTy || !vecTy.getElementType().isF32() || vecTy.isScalable())
+      return failure();
+
+    // The type converter keeps multidimensional vector types, but the LLVM
+    // operations below take only flat ones, so reshape around the unrolling.
+    VectorType flatTy =
+        vecTy.getRank() == 1
+            ? vecTy
+            : VectorType::get({vecTy.getNumElements()}, vecTy.getElementType());
+    Value source = adaptor.getOperand();
+    if (flatTy != vecTy)
+      source = vector::ShapeCastOp::create(rewriter, loc, flatTy, source);
+
+    Value result = LLVM::PoisonOp::create(rewriter, loc, flatTy);
+    for (int64_t i = 0, n = flatTy.getNumElements(); i < n; ++i) {
+      Value index = LLVM::ConstantOp::create(rewriter, loc, rewriter.getI64Type(),
+                                             rewriter.getI64IntegerAttr(i));
+      Value elem =
+          LLVM::ExtractElementOp::create(rewriter, loc, source, index);
+      Value inv =
+          xllvm::InvsqrtAIE4IntrOp::create(rewriter, loc, f32Ty, elem);
+      result = LLVM::InsertElementOp::create(rewriter, loc, flatTy, result, inv,
+                                             index);
+    }
+
+    if (flatTy != vecTy)
+      result = vector::ShapeCastOp::create(rewriter, loc, vecTy, result);
+
+    rewriter.replaceOp(rsqrtOp, result);
+    return success();
+  }
+};
+
 void populateAIEVecToLLVMAIE4ConversionPatterns(
     mlir::LLVMTypeConverter &converter, mlir::RewritePatternSet &patterns) {
-  patterns.add<AIE4MulEwiseF32OpConversion, AIE4MacEwiseF32OpConversion,
+  patterns.add<AIE4RsqrtOpConversion, AIE4MulEwiseF32OpConversion,
+               AIE4MacEwiseF32OpConversion,
                AIE4MacEwiseI16I32OpConversion,
                AIE4MulEwiseBf16F32OpConversion, AIE4MacEwiseBf16F32OpConversion,
                AIE4MscEwiseF32OpConversion, AIE4MscEwiseBf16F32OpConversion,

@@ -811,4 +811,22 @@ def TanhAIE4IntrOp :
   let summary = "AIE4 hyperbolic tangent, bf16-truncated input (vtanh)";
 }
 
+//===----------------------------------------------------------------------===//
+// Scalar reciprocal and reciprocal square root
+//===----------------------------------------------------------------------===//
+
+// Both read crFPNlfMask and write the srFPNlf status flags, so neither
+// wrapper is Pure. Neither has a vector form; callers unroll.
+def InvsqrtAIE4IntrOp :
+    AIEVec4_IntrOp<"invsqrt", [TypeIs<"res", F32>]>,
+    Arguments<(ins F32:$src)> {
+  let summary = "AIE4 scalar f32 reciprocal square root (invsqrt)";
+}
+
+def InvAIE4IntrOp :
+    AIEVec4_IntrOp<"inv", [TypeIs<"res", F32>]>,
+    Arguments<(ins F32:$src)> {
+  let summary = "AIE4 scalar f32 reciprocal (inv)";
+}
+
 #endif // AIE_DIALECT_XLLVM_IR_XLLVMAIE4INTROPS_TD

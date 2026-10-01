@@ -5359,10 +5359,34 @@ public:
     // Select device-specific body for the scalar helper function.
     // AIE2P: use inv(b) * a (hardware reciprocal intrinsic is reliable).
     // AIE2: use scalar fdiv directly.
+    //
+    // AIE4 uses a * INV(b) only when the division carries both `arcp`
+    // (a reciprocal may replace the division) and `afn` (an approximation is
+    // acceptable). INV is approximate, reads a subnormal b as zero, and
+    // flushes a subnormal reciprocal to zero, so for finite |b| > 2^126 it
+    // returns zero: 2^127 / 2^127 through INV is 0, not 1. Any other division
+    // keeps a real one.
+    bool useReciprocal = deviceName == "aie2p" ||
+                         (deviceName == "aie4" &&
+                          bitEnumContainsAll(divOp.getFastmath(),
+                                             arith::FastMathFlags::arcp |
+                                                 arith::FastMathFlags::afn));
+    StringRef helperName = useReciprocal && deviceName == "aie4"
+                               ? StringRef("fdiv_inv")
+                               : StringRef("fdiv");
+
     std::function<void(OpBuilder &, Location, ValueRange)> bodyBuilder;
     if (deviceName == "aie2p") {
       bodyBuilder = [](OpBuilder &builder, Location loc, ValueRange args) {
         auto invResult = xllvm::InvAIE2pIntrOp::create(
+            builder, loc, builder.getF32Type(), args[1]);
+        auto mulResult =
+            arith::MulFOp::create(builder, loc, args[0], invResult);
+        LLVM::ReturnOp::create(builder, loc, ValueRange{mulResult});
+      };
+    } else if (useReciprocal) {
+      bodyBuilder = [](OpBuilder &builder, Location loc, ValueRange args) {
+        auto invResult = xllvm::InvAIE4IntrOp::create(
             builder, loc, builder.getF32Type(), args[1]);
         auto mulResult =
             arith::MulFOp::create(builder, loc, args[0], invResult);
@@ -5378,7 +5402,7 @@ public:
     // Get or create the noinline scalar helper (acts as barrier to prevent
     // LLVM from re-vectorizing the scalar ops).
     auto helperFunc =
-        getOrCreateScalarHelperFunc(module, rewriter, "fdiv", deviceName,
+        getOrCreateScalarHelperFunc(module, rewriter, helperName, deviceName,
                                     /*argTypes=*/{f32Ty, f32Ty},
                                     /*resultType=*/f32Ty, bodyBuilder);
 
@@ -5565,6 +5589,11 @@ void populateAIEVecToLLVMConversionPatterns(
   // also skips the common patterns, which are AIE1/AIE2-specific.
   if (aieTarget.isAIE4()) {
     populateAIEVecToLLVMAIE4ConversionPatterns(converter, patterns);
+    // Paired with the vector-f32 arith.divf rule in
+    // configureAIEVecToLLVMLegalizations, which applies to every target.
+    // Registered here rather than in the AIE4 populate function, which sits in
+    // another file and cannot see the pattern class.
+    patterns.add<FdivOpConversion>(converter, "aie4");
     return;
   }
   populateAIEVecToLLVMCommonConversionPatterns(converter, patterns);
@@ -5656,6 +5685,13 @@ struct ConvertAIEVecToLLVMPass
 
     // Configure legalizations for AIE2/AIE2p
     configureAIEVecToLLVMLegalizations(target);
+    // f32 rsqrt has only the approximate INVSQRT lowering on AIE4, which the
+    // pattern refuses without afn. Marking it illegal turns that refusal into
+    // an error here rather than a G_FSQRT failure in Peano.
+    if (targetInfo.isAIE4())
+      target.addDynamicallyLegalOp<math::RsqrtOp>([](math::RsqrtOp op) {
+        return !getElementTypeOrSelf(op.getType()).isF32();
+      });
 
     if (failed(applyPartialConversion(getOperation(), target,
                                       std::move(patterns))))

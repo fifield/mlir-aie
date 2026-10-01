@@ -329,3 +329,31 @@ llvm.func @tanh(%src: vector<32xf32>) -> vector<32xbf16> {
 // CHECK-LABEL: declare <32 x bfloat> @llvm.aie4.exp2(<32 x float>)
 // CHECK-LABEL: declare <32 x float> @llvm.aie4.exp2.bf20(<32 x float>)
 // CHECK-LABEL: declare <32 x bfloat> @llvm.aie4.tanh(<32 x float>)
+
+// -----
+
+// -- INVSQRT --
+//
+// Scalar only; the ISA has no vector form.
+
+// CHECK-LABEL: define float @invsqrt
+llvm.func @invsqrt(%src: f32) -> f32 {
+    // CHECK: call float @llvm.aie4.invsqrt(float %{{[0-9]+}})
+    %0 = "xllvm.intr.aie4.invsqrt"(%src) : (f32) -> f32
+    llvm.return %0 : f32
+}
+
+// CHECK-LABEL: declare float @llvm.aie4.invsqrt(float)
+
+// -----
+
+// -- INV --
+
+// CHECK-LABEL: define float @inv
+llvm.func @inv(%src: f32) -> f32 {
+    // CHECK: call float @llvm.aie4.inv(float %{{[0-9]+}})
+    %0 = "xllvm.intr.aie4.inv"(%src) : (f32) -> f32
+    llvm.return %0 : f32
+}
+
+// CHECK-LABEL: declare float @llvm.aie4.inv(float)
