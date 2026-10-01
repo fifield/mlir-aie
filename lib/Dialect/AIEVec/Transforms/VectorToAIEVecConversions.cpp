@@ -6604,6 +6604,9 @@ struct LowerAIE4CmpFOp : OpConversionPattern<arith::CmpFOp> {
 // Only fixed 32-lane signed min/max, floating minimum/maximum, and
 // reassociable f32 add map to native reductions. Integer add wraps in MLIR
 // but saturates on AIE4; ordered f32 add may round differently on AIE4.
+//
+// AIE4 has no bf16 reduction. bf16 minimum/maximum widen to f32 and reduce
+// there: the result is one of the inputs, so narrowing it back is exact.
 struct LowerAIE4VectorReductionOp : OpConversionPattern<vector::ReductionOp> {
   using OpConversionPattern::OpConversionPattern;
 
@@ -6619,9 +6622,11 @@ struct LowerAIE4VectorReductionOp : OpConversionPattern<vector::ReductionOp> {
     }
 
     Type elemTy = vecTy.getElementType();
-    if (!elemTy.isInteger(32) && !elemTy.isF32()) {
+    bool isBF16 = elemTy.isBF16();
+    if (!elemTy.isInteger(32) && !elemTy.isF32() && !isBF16) {
       srcOp.emitWarning()
-          << "AIE4: vector.reduction only supports i32/f32 elements, not "
+          << "AIE4: vector.reduction only supports i32/f32 elements, and bf16 "
+             "minimum/maximum, not "
           << elemTy;
       return failure();
     }
@@ -6630,7 +6635,7 @@ struct LowerAIE4VectorReductionOp : OpConversionPattern<vector::ReductionOp> {
       srcOp.emitWarning()
           << "AIE4: vector.reduction requires a 1024-bit (32-lane) "
              "vector; no reduce instruction exists at "
-          << (lanes * elemTy.getIntOrFloatBitWidth())
+          << (lanes * (isBF16 ? 32 : elemTy.getIntOrFloatBitWidth()))
           << "-bit width (in particular, there is no 512-bit reduce "
              "instruction at all)";
       return failure();
@@ -6676,6 +6681,22 @@ struct LowerAIE4VectorReductionOp : OpConversionPattern<vector::ReductionOp> {
           << "AIE4 has no vector reduce instruction for this combining "
              "kind (only add/min/max are implemented in hardware)";
       return failure();
+    }
+
+    if (isBF16) {
+      assert(kind != aievec::AIE4ReduceKind::Add &&
+             "bf16 add reductions round and are left legal");
+      Location loc = srcOp.getLoc();
+      Type f32Ty = rewriter.getF32Type();
+      Value src = arith::ExtFOp::create(
+          rewriter, loc, VectorType::get({32}, f32Ty), adaptor.getVector());
+      Value acc = adaptor.getAcc();
+      if (acc)
+        acc = arith::ExtFOp::create(rewriter, loc, f32Ty, acc);
+      Value reduced =
+          aievec::AIE4ReduceOp::create(rewriter, loc, f32Ty, src, acc, kind);
+      rewriter.replaceOpWithNewOp<arith::TruncFOp>(srcOp, elemTy, reduced);
+      return success();
     }
 
     rewriter.replaceOpWithNewOp<aievec::AIE4ReduceOp>(

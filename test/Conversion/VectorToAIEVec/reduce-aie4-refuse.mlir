@@ -106,3 +106,31 @@ func.func @reduce_i16_refused(%a: vector<64xi16>) -> i16 {
   %0 = vector.reduction <minsi>, %a : vector<64xi16> into i16
   return %0 : i16
 }
+
+// -----
+
+// bf16 maxnumf is refused for the same NaN reason as f32.
+func.func @reduce_maxnumf_bf16_refused(%a: vector<32xbf16>) -> bf16 {
+  // expected-warning @+2 {{minnumf/maxnumf cannot be lowered}}
+  // expected-error @+1 {{failed to legalize operation 'vector.reduction' that was explicitly marked illegal}}
+  %0 = vector.reduction <maxnumf>, %a : vector<32xbf16> into bf16
+  return %0 : bf16
+}
+
+// -----
+
+func.func @reduce_maximumf_bf16_16_refused(%a: vector<16xbf16>) -> bf16 {
+  // expected-warning @+2 {{requires a 1024-bit (32-lane) vector}}
+  // expected-error @+1 {{failed to legalize operation 'vector.reduction' that was explicitly marked illegal}}
+  %0 = vector.reduction <maximumf>, %a : vector<16xbf16> into bf16
+  return %0 : bf16
+}
+
+// -----
+
+func.func @reduce_maximumf_bf16_64_refused(%a: vector<64xbf16>) -> bf16 {
+  // expected-warning @+2 {{requires a 1024-bit (32-lane) vector}}
+  // expected-error @+1 {{failed to legalize operation 'vector.reduction' that was explicitly marked illegal}}
+  %0 = vector.reduction <maximumf>, %a : vector<64xbf16> into bf16
+  return %0 : bf16
+}

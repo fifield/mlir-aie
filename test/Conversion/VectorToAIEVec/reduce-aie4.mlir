@@ -89,3 +89,44 @@ func.func @reduce_add_f32_scalable_reassoc(%a: vector<[32]xf32>) -> f32 {
   %0 = vector.reduction <add>, %a fastmath<reassoc> : vector<[32]xf32> into f32
   return %0 : f32
 }
+
+// -----
+
+// AIE4 has no bf16 reduction. minimum/maximum widen to f32 with the native
+// conversion, reduce there, and narrow the result, which is one of the
+// inputs, back exactly.
+// CHECK-LABEL: @reduce_maximumf_bf16
+// CHECK-SAME: (%[[A:.*]]: vector<32xbf16>)
+// CHECK: %[[W:.*]] = aievec.aie4.conv_bf16_f32 %[[A]]
+// CHECK: %[[R:.*]] = aievec.aie4.reduce <max> %[[W]] : vector<32xf32> -> f32
+// CHECK: %[[N:.*]] = arith.truncf %[[R]] : f32 to bf16
+// CHECK: return %[[N]]
+func.func @reduce_maximumf_bf16(%a: vector<32xbf16>) -> bf16 {
+  %0 = vector.reduction <maximumf>, %a : vector<32xbf16> into bf16
+  return %0 : bf16
+}
+
+// -----
+
+// The accumulator widens with it.
+// CHECK-LABEL: @reduce_minimumf_bf16_acc
+// CHECK-SAME: (%[[A:.*]]: vector<32xbf16>, %[[S:.*]]: bf16)
+// CHECK-DAG: %[[W:.*]] = aievec.aie4.conv_bf16_f32 %[[A]]
+// CHECK-DAG: %[[WS:.*]] = arith.extf %[[S]] : bf16 to f32
+// CHECK: %[[R:.*]] = aievec.aie4.reduce <min> %[[W]], %[[WS]] : vector<32xf32>, f32 -> f32
+// CHECK: arith.truncf %[[R]] : f32 to bf16
+func.func @reduce_minimumf_bf16_acc(%a: vector<32xbf16>, %s: bf16) -> bf16 {
+  %0 = vector.reduction <minimumf>, %a, %s : vector<32xbf16> into bf16
+  return %0 : bf16
+}
+
+// -----
+
+// A bf16 add reduction would round, so it is not widened and stays generic.
+// CHECK-LABEL: @reduce_add_bf16_unclaimed
+// CHECK: vector.reduction <add>, %{{.*}} : vector<32xbf16> into bf16
+// CHECK-NOT: aievec.aie4.reduce
+func.func @reduce_add_bf16_unclaimed(%a: vector<32xbf16>) -> bf16 {
+  %0 = vector.reduction <add>, %a : vector<32xbf16> into bf16
+  return %0 : bf16
+}
