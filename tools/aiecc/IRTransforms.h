@@ -113,7 +113,7 @@ inline std::string detectAIETarget(mlir::ModuleOp m,
   return "aie2";
 }
 
-// True if any device in `m` targets AIE4. AIE4's --generate-full-elf uses the
+// True if any device in `m` targets AIE4. AIE4's --get-full-elf uses the
 // cert pipeline (see getAie4CertPipeline) and the aie4_config JSON format
 // instead of the aie2_config path every other target uses.
 inline bool moduleHasAie4Device(mlir::ModuleOp m) {

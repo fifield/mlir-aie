@@ -33,7 +33,7 @@ project/scale.o: ${srcdir}/../vector_scalar_mul.cc
 
 project/mesim.sh: ${srcdir}/aie_trace.mlir ${srcdir}/test.cpp project/scale.o project/transaction.bin
 	cd project && aiecc --tmpdir=project1 --xchesscc --xbridge \
-		--no-compile-host --generate-full-elf --full-elf-name=aie4.elf \
+		--no-compile-host --get-full-elf --full-elf-name=aie4.elf \
 		--aiesim ${srcdir}/aie_trace.mlir \
 		${CFLAGS} ${srcdir}/test.cpp
 	ln -sf project1/mesim.sh project/mesim.sh

@@ -1238,7 +1238,7 @@ def compile_mlir_module(
     if elf_path:
         args.extend(["--get-elf", f"--elf-name={elf_path}"])
     if full_elf_path:
-        args.extend(["--generate-full-elf", f"--full-elf-name={full_elf_path}"])
+        args.extend(["--get-full-elf", f"--full-elf-name={full_elf_path}"])
     if work_dir:
         args.append(f"--tmpdir={work_dir}")
         # Emit input_with_addresses.mlir into work_dir; the JIT DMA-size

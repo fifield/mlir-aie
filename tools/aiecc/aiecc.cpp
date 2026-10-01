@@ -1791,7 +1791,7 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
   //   * --load-pdi-to-ctrl-pkt expands the configuration into control packets
   //     (via the same expand-load-pdi machinery), which likewise needs the
   //     compiled cores.
-  //   * AIE4's --generate-full-elf path runs the same
+  //   * AIE4's --get-full-elf path runs the same
   //     `convert-aie-to-transaction` pass (as part of the cert pipeline) to
   //     produce the control code, so it needs the same ELF-patched cores.
   bool npuTransactionsNeedCoresLowered =
