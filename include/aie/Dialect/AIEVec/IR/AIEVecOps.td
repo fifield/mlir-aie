@@ -134,6 +134,14 @@ def AIEVec_AIE4MacEwiseF32Op:
     multiply lowers to `aievec.aie4.mul_ewise_f32` and the add stays separate.
 
     Reads `crFPVMask` and `crVecRnd` and updates `srFPVFlags`; not `Pure`.
+    The VMAC unit is IEEE-compliant with two exceptions (AIE4 ISA v1.1
+    section 18.4): subnormal inputs are clamped to a signed zero for every
+    float type but fp8 and fp16, and subnormal results return zero. A
+    consequence worth knowing is that subnormal times infinity becomes zero
+    times infinity, which is NaN. `contract` permits contraction; it does
+    not authorize that flush-to-zero behavior, and this op does not
+    establish `crVecRnd` -- callers must arrange the rounding mode they
+    need. This is the same contract as the native MUL/MAC forms.
   }];
   let assemblyFormat =
       "$lhs `,` $rhs `,` $acc attr-dict `:` type($result)";
@@ -160,6 +168,14 @@ def AIEVec_AIE4MulEwiseBf16F32Op:
     bf16-to-f32 widening is exact, and the product is still rounded to f32.
 
     Reads `crFPVMask` and `crVecRnd` and updates `srFPVFlags`; not `Pure`.
+    The VMAC unit is IEEE-compliant with two exceptions (AIE4 ISA v1.1
+    section 18.4): subnormal inputs are clamped to a signed zero for every
+    float type but fp8 and fp16, and subnormal results return zero. A
+    consequence worth knowing is that subnormal times infinity becomes zero
+    times infinity, which is NaN. `contract` permits contraction; it does
+    not authorize that flush-to-zero behavior, and this op does not
+    establish `crVecRnd` -- callers must arrange the rounding mode they
+    need. This is the same contract as the native MUL/MAC forms.
   }];
   let assemblyFormat = "$lhs `,` $rhs attr-dict `:` type($lhs) `,` type($result)";
   let hasVerifier = 0;
@@ -184,6 +200,81 @@ def AIEVec_AIE4MacEwiseBf16F32Op:
     (or `fast`) on both the multiply and add, as for `aie4.mac_ewise_f32`.
 
     Reads `crFPVMask` and `crVecRnd` and updates `srFPVFlags`; not `Pure`.
+    The VMAC unit is IEEE-compliant with two exceptions (AIE4 ISA v1.1
+    section 18.4): subnormal inputs are clamped to a signed zero for every
+    float type but fp8 and fp16, and subnormal results return zero. A
+    consequence worth knowing is that subnormal times infinity becomes zero
+    times infinity, which is NaN. `contract` permits contraction; it does
+    not authorize that flush-to-zero behavior, and this op does not
+    establish `crVecRnd` -- callers must arrange the rounding mode they
+    need. This is the same contract as the native MUL/MAC forms.
+  }];
+  let assemblyFormat =
+      "$lhs `,` $rhs `,` $acc attr-dict `:` type($lhs) `,` type($result)";
+  let hasVerifier = 0;
+}
+
+def AIEVec_AIE4MscEwiseF32Op:
+  AIEVec_Op<"aie4.msc_ewise_f32", [
+    AllTypesMatch<["lhs", "rhs", "acc", "result"]>
+  ]>,
+  Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$lhs,
+                 FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$rhs,
+                 FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$acc)>,
+  Results<(outs FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$result)> {
+  let summary = "AIE4 elementwise f32 vector multiply-subtract";
+  let description = [{
+    Computes `$acc - ($lhs * $rhs)` with one rounding, using fixed
+    `vector<32xf32>` operands and result. Lowers to `vmsc.f`.
+
+    Fusion of `arith.mulf` and `arith.subf` requires `contract` (or `fast`)
+    on both operations because it can change rounding. Subtraction does not
+    commute, so only a product on the right-hand side fuses: `%acc - %a * %b`
+    is a multiply-subtract, while `%a * %b - %acc` is not.
+
+    Reads `crFPVMask` and `crVecRnd` and updates `srFPVFlags`; not `Pure`.
+    The VMAC unit is IEEE-compliant with two exceptions (AIE4 ISA v1.1
+    section 18.4): subnormal inputs are clamped to a signed zero for every
+    float type but fp8 and fp16, and subnormal results return zero. A
+    consequence worth knowing is that subnormal times infinity becomes zero
+    times infinity, which is NaN. `contract` permits contraction; it does
+    not authorize that flush-to-zero behavior, and this op does not
+    establish `crVecRnd` -- callers must arrange the rounding mode they
+    need. This is the same contract as the native MUL/MAC forms.
+  }];
+  let assemblyFormat =
+      "$lhs `,` $rhs `,` $acc attr-dict `:` type($result)";
+  let hasVerifier = 0;
+}
+
+def AIEVec_AIE4MscEwiseBf16F32Op:
+  AIEVec_Op<"aie4.msc_ewise_bf16_f32", [
+    AllTypesMatch<["lhs", "rhs"]>,
+    AllTypesMatch<["acc", "result"]>
+  ]>,
+  Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$lhs,
+                 FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$rhs,
+                 FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$acc)>,
+  Results<(outs FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$result)> {
+  let summary = "AIE4 elementwise bf16 x bf16 -> f32 vector multiply-subtract";
+  let description = [{
+    Computes `$acc - ($lhs * $rhs)` with one rounding. Inputs are fixed
+    `vector<32xbf16>`; the accumulator and result are `vector<32xf32>`.
+    Lowers to `vmsc.f`.
+
+    Fusion of a widened bf16 product with `arith.subf` requires `contract`
+    (or `fast`) on both the multiply and subtract, and only fuses a product
+    on the right-hand side, as for `aie4.msc_ewise_f32`.
+
+    Reads `crFPVMask` and `crVecRnd` and updates `srFPVFlags`; not `Pure`.
+    The VMAC unit is IEEE-compliant with two exceptions (AIE4 ISA v1.1
+    section 18.4): subnormal inputs are clamped to a signed zero for every
+    float type but fp8 and fp16, and subnormal results return zero. A
+    consequence worth knowing is that subnormal times infinity becomes zero
+    times infinity, which is NaN. `contract` permits contraction; it does
+    not authorize that flush-to-zero behavior, and this op does not
+    establish `crVecRnd` -- callers must arrange the rounding mode they
+    need. This is the same contract as the native MUL/MAC forms.
   }];
   let assemblyFormat =
       "$lhs `,` $rhs `,` $acc attr-dict `:` type($lhs) `,` type($result)";

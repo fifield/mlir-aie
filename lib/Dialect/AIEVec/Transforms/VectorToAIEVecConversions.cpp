@@ -5658,6 +5658,24 @@ static std::optional<FloatMacMatch> matchFloatMacChain(arith::AddFOp addOp) {
   return tryOperand(addOp.getLhs(), addOp.getRhs());
 }
 
+/// Select the product of a contract-enabled f32 or widened-bf16 multiply-
+/// subtract. Subtraction does not commute, so only the right-hand operand is
+/// a candidate: `%acc - %a * %b` is a multiply-subtract, `%a * %b - %acc` is
+/// not.
+static std::optional<FloatMacMatch> matchFloatMscChain(arith::SubFOp subOp) {
+  if (!isVecF32x32(subOp.getType()) || !hasContract(subOp.getFastmathAttr()))
+    return std::nullopt;
+  auto mulOp = subOp.getRhs().getDefiningOp<arith::MulFOp>();
+  if (!mulOp || !isVecF32x32(mulOp.getType()) ||
+      !hasContract(mulOp.getFastmathAttr()))
+    return std::nullopt;
+  Value a, b;
+  if (matchBf16Product(mulOp, a, b))
+    return FloatMacMatch{mulOp, subOp.getLhs(), a, b, true};
+  return FloatMacMatch{mulOp, subOp.getLhs(), mulOp.getLhs(), mulOp.getRhs(),
+                       false};
+}
+
 /// Defer a multiply only if every use disappears through MAC fusion. Native
 /// float multiplies are not Pure, so eagerly lowering a product that fusion
 /// eliminates would leave an unnecessary, non-eliminable instruction.
@@ -5667,10 +5685,13 @@ static bool feedsFusableFloatMacChain(arith::MulFOp mulOp) {
   if (mulOp.getResult().use_empty())
     return false;
   return llvm::all_of(mulOp.getResult().getUsers(), [&](Operation *user) {
-    auto addOp = dyn_cast<arith::AddFOp>(user);
-    if (!addOp)
+    std::optional<FloatMacMatch> match;
+    if (auto addOp = dyn_cast<arith::AddFOp>(user))
+      match = matchFloatMacChain(addOp);
+    else if (auto subOp = dyn_cast<arith::SubFOp>(user))
+      match = matchFloatMscChain(subOp);
+    else
       return false;
-    auto match = matchFloatMacChain(addOp);
     // For addf %m, %m, fusion still needs %m as its accumulator.
     return match && match->product == mulOp && match->acc != mulOp.getResult();
   });
@@ -5753,6 +5774,44 @@ struct ConvertMacFToAIE4MacEwiseBf16Pattern
 
     rewriter.replaceOpWithNewOp<aievec::AIE4MacEwiseBf16F32Op>(
         addOp, addOp.getType(), match->lhs, match->rhs, match->acc);
+    return success();
+  }
+};
+
+// arith.subf(acc, arith.mulf(a, b)) : vector<32xf32>, contract/fast on both
+//     -> aievec.aie4.msc_ewise_f32
+struct ConvertMscFToAIE4MscEwiseF32Pattern
+    : OpConversionPattern<arith::SubFOp> {
+  using OpConversionPattern::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(arith::SubFOp subOp, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto match = matchFloatMscChain(subOp);
+    if (!match || match->isBf16)
+      return failure();
+
+    rewriter.replaceOpWithNewOp<aievec::AIE4MscEwiseF32Op>(
+        subOp, subOp.getType(), match->lhs, match->rhs, match->acc);
+    return success();
+  }
+};
+
+// arith.subf(acc, arith.mulf(extf(a: bf16), extf(b: bf16))) : vector<32xf32>,
+// contract/fast on both -> aievec.aie4.msc_ewise_bf16_f32
+struct ConvertMscFToAIE4MscEwiseBf16Pattern
+    : OpConversionPattern<arith::SubFOp> {
+  using OpConversionPattern::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(arith::SubFOp subOp, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto match = matchFloatMscChain(subOp);
+    if (!match || !match->isBf16)
+      return failure();
+
+    rewriter.replaceOpWithNewOp<aievec::AIE4MscEwiseBf16F32Op>(
+        subOp, subOp.getType(), match->lhs, match->rhs, match->acc);
     return success();
   }
 };
@@ -6857,7 +6916,9 @@ static void populateAIEVecV4ConversionPatterns(RewritePatternSet &patterns) {
       .add<ConvertMulFToAIE4MulEwiseF32Pattern,
            ConvertMulFToAIE4MulEwiseBf16Pattern,
            ConvertMacFToAIE4MacEwiseF32Pattern,
-           ConvertMacFToAIE4MacEwiseBf16Pattern, ConvertIntMacToAIE4MacPattern,
+           ConvertMacFToAIE4MacEwiseBf16Pattern,
+           ConvertMscFToAIE4MscEwiseF32Pattern,
+           ConvertMscFToAIE4MscEwiseBf16Pattern, ConvertIntMacToAIE4MacPattern,
            ConvertExtSIToAIE4UPSPattern, ConvertExtUIToAIE4UPSPattern,
            ConvertExtSIToAIE4UnpackPattern, ConvertExtUIToAIE4UnpackPattern,
            ConvertExtFToAIE4ConvPattern,
@@ -6934,9 +6995,10 @@ static void configureAIEVecV4Legalizations(ConversionTarget &target) {
   // generic until lowering can establish its requested modes and restore them.
   target.addLegalOp<arith::TruncFOp>();
 
-  // No AIE4 pattern rewrites arith.subf, and the shared legalizations mark
-  // every vector subf illegal, so it has to be put back explicitly.
-  target.addLegalOp<arith::SubFOp>();
+  // Fuse matching MSC roots. matchFloatMscChain applies its own shape and
+  // fastmath conditions; every subtract it does not match stays legal.
+  target.addDynamicallyLegalOp<arith::SubFOp>(
+      [](arith::SubFOp op) { return !matchFloatMscChain(op); });
   // Fuse matching MAC roots. matchFloatMacChain applies its own shape and
   // fastmath conditions; every add it does not match stays legal.
   target.addDynamicallyLegalOp<arith::AddFOp>(

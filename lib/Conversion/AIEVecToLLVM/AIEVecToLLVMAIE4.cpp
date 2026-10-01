@@ -150,6 +150,42 @@ struct AIE4MacEwiseBf16F32OpConversion
   }
 };
 
+struct AIE4MscEwiseF32OpConversion
+    : mlir::ConvertOpToLLVMPattern<aievec::AIE4MscEwiseF32Op> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(aievec::AIE4MscEwiseF32Op op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    rewriter.replaceOpWithNewOp<xllvm::MscEwiseFpConfAIE4IntrOp>(
+        op, op.getResult().getType(), adaptor.getLhs(), adaptor.getRhs(),
+        adaptor.getAcc(),
+        /*zeroAcc=*/false,
+        /*amode=*/xllvm::AIE4AMode::Float,
+        /*bmode=*/xllvm::AIE4BMode::Mode32x32);
+    return success();
+  }
+};
+
+struct AIE4MscEwiseBf16F32OpConversion
+    : mlir::ConvertOpToLLVMPattern<aievec::AIE4MscEwiseBf16F32Op> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(aievec::AIE4MscEwiseBf16F32Op op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    rewriter.replaceOpWithNewOp<xllvm::MscEwiseBf16ConfAIE4IntrOp>(
+        op, op.getResult().getType(), adaptor.getLhs(), adaptor.getRhs(),
+        adaptor.getAcc(),
+        /*zeroAcc=*/false,
+        /*amode=*/xllvm::AIE4AMode::Float,
+        /*bmode=*/xllvm::AIE4BMode::Mode16x16,
+        /*xIsBf16=*/true,
+        /*yIsBf16=*/true);
+    return success();
+  }
+};
+
 // aievec.aie4.srs_i32_i16 -> llvm.aie4.I512.v32.acc32.srs
 //
 // XLLVM materializes the verified shift and sign attributes as separate
@@ -785,6 +821,7 @@ void populateAIEVecToLLVMAIE4ConversionPatterns(
   patterns.add<AIE4MulEwiseF32OpConversion, AIE4MacEwiseF32OpConversion,
                AIE4MacEwiseI16I32OpConversion,
                AIE4MulEwiseBf16F32OpConversion, AIE4MacEwiseBf16F32OpConversion,
+               AIE4MscEwiseF32OpConversion, AIE4MscEwiseBf16F32OpConversion,
                AIE4SRSI32I16OpConversion, AIE4UPSI16I32OpConversion,
                AIE4UnpackI8I16OpConversion,
                AIE4ConvBF16F32OpConversion, AIE4ConvF32BF16OpConversion,

@@ -208,6 +208,32 @@ def MacEwiseFpConfAIE4IntrOp :
   }];
 }
 
+// llvm.aie4.I1024.I1024.ACC1024.fp.msc.ewise.conf
+//     <32 x float> (<32 x float>, <32 x float>, <32 x float>, i32)
+//
+// Fused f32 multiply-subtract; LLVM argument order is (lhs, rhs, acc, conf).
+def MscEwiseFpConfAIE4IntrOp :
+    AIEVec4_IntrOp<"I1024.I1024.ACC1024.fp.msc.ewise.conf",
+        [TypeIs<"res", FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>>]>,
+    Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$lhs,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$rhs,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$acc,
+                   UnitAttr:$zeroAcc,
+                   AIE4_AMode:$amode,
+                   AIE4_BMode:$bmode)> {
+  let summary = "AIE4 elementwise f32 vector multiply-subtract (vmsc.f)";
+
+  let llvmBuilder = [{
+    auto *inst = ::xilinx::xllvm::createAIE4ConfIntrinsicCall(builder,
+                      moduleTranslation, &opInst,
+                      "llvm.aie4.I1024.I1024.ACC1024.fp.msc.ewise.conf",
+                      ::xilinx::xllvm::encodeAIE4MulConf(
+                          op.getZeroAcc(), op.getAmode(), op.getBmode()));
+    (void) inst;
+    $res = inst;
+  }];
+}
+
 //===----------------------------------------------------------------------===//
 // bf16 x bf16 -> f32 accumulator MUL/MAC
 //===----------------------------------------------------------------------===//
@@ -263,6 +289,33 @@ def MacEwiseBf16ConfAIE4IntrOp :
     auto *inst = ::xilinx::xllvm::createAIE4ConfIntrinsicCall(builder,
                       moduleTranslation, &opInst,
                       "llvm.aie4.bf16.I512.bf16.I512.ACC1024.fp.mac.ewise.conf",
+                      ::xilinx::xllvm::encodeAIE4Bf16FpConf(
+                          op.getZeroAcc(), op.getAmode(), op.getBmode(),
+                          op.getXIsBf16(), op.getYIsBf16()));
+    (void) inst;
+    $res = inst;
+  }];
+}
+
+// llvm.aie4.bf16.I512.bf16.I512.ACC1024.fp.msc.ewise.conf
+//     <32 x float> (<32 x bfloat>, <32 x bfloat>, <32 x float>, i32)
+def MscEwiseBf16ConfAIE4IntrOp :
+    AIEVec4_IntrOp<"bf16.I512.bf16.I512.ACC1024.fp.msc.ewise.conf",
+        [TypeIs<"res", FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>>]>,
+    Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$lhs,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$rhs,
+                   FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$acc,
+                   UnitAttr:$zeroAcc,
+                   AIE4_AMode:$amode,
+                   AIE4_BMode:$bmode,
+                   UnitAttr:$xIsBf16,
+                   UnitAttr:$yIsBf16)> {
+  let summary = "AIE4 elementwise bf16 x bf16 -> f32 vector multiply-subtract (vmsc.f)";
+
+  let llvmBuilder = [{
+    auto *inst = ::xilinx::xllvm::createAIE4ConfIntrinsicCall(builder,
+                      moduleTranslation, &opInst,
+                      "llvm.aie4.bf16.I512.bf16.I512.ACC1024.fp.msc.ewise.conf",
                       ::xilinx::xllvm::encodeAIE4Bf16FpConf(
                           op.getZeroAcc(), op.getAmode(), op.getBmode(),
                           op.getXIsBf16(), op.getYIsBf16()));
