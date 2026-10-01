@@ -21,14 +21,14 @@
 // CHECK-LABEL: aie.runtime_sequence @configure()
 // CHECK: aiex.npu.blockwrite(%{{.*}}) {address = 6995968 : ui32} : memref<6xi32>
 // CHECK: aiex.npu.blockwrite(%{{.*}}) {address = 6996000 : ui32} : memref<6xi32>
-// CHECK: %[[V0:.*]] = arith.constant 0 : i32
 // CHECK: %[[A0:.*]] = arith.constant 6999556 : i32
+// CHECK: %[[V0:.*]] = arith.constant 0 : i32
 // CHECK: aiex.npu.write32(%[[A0]], %[[V0]]) : i32, i32
 // CHECK: aiex.npu.blockwrite(%{{.*}}) {address = 98304 : ui32} : memref<9xi32>
 // CHECK: aiex.npu.blockwrite(%{{.*}}) {address = 98352 : ui32} : memref<9xi32>
-// CHECK: %[[V1:.*]] = arith.constant 0 : i32
+// The zero value constant is shared by both writes.
 // CHECK: %[[A1:.*]] = arith.constant 99668 : i32
-// CHECK: aiex.npu.write32(%[[A1]], %[[V1]]) : i32, i32
+// CHECK: aiex.npu.write32(%[[A1]], %[[V0]]) : i32, i32
 //
 module @test_dma_to_txn {
   aie.device(npu3) {

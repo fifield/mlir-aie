@@ -10,7 +10,7 @@
 // RUN: mkdir -p project0
 // RUN: cp %aie_obj_root/third_party/cert/main/cert_medusa.elf project0/cert_medusa.elf
 // RUN: aiecc --tmpdir=project0 --alloc-scheme=basic-sequential --xchesscc --xbridge --no-compile --aie-generate-txn --txn-name=transaction.bin --no-compile-host --aiesim %s %test_utils_flags %S/test.cpp
-// RUN: aiecc --tmpdir=project1 --alloc-scheme=basic-sequential --xchesscc --xbridge --no-compile --generate-full-elf --full-elf-name=aie4.elf %S/cert.mlir
+// RUN: aiecc --tmpdir=project1 --alloc-scheme=basic-sequential --xchesscc --xbridge --no-compile --get-full-elf --full-elf-name=aie4.elf %S/cert.mlir
 // RUN: project0/mesim.sh | FileCheck %s
 //
 // CHECK: PASS!

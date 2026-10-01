@@ -70,7 +70,11 @@ def test_no_kernel_source_is_unreachable(monkeypatch):
     # Probe this checkout even when lit imports the package from a staged build.
     monkeypatch.setenv("MLIR_AIE_KERNEL_SOURCES", str(_KERNELS.parent))
     built = _built_by_a_factory()
-    sources = sorted(_KERNELS.rglob("*.cc"))
+    # aie4/ kernels are built by programming_examples Makefiles (see its
+    # README), which no factory models.
+    sources = sorted(
+        p for p in _KERNELS.rglob("*.cc") if p.relative_to(_KERNELS).parts[0] != "aie4"
+    )
     assert built & {p.resolve() for p in sources}, (
         f"no factory resolved to a source under {_KERNELS}, so this cannot tell "
         "a reachable kernel from an orphaned one. Point MLIR_AIE_KERNEL_SOURCES "

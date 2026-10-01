@@ -455,7 +455,9 @@ def _device_generation() -> str | None:
         arch = resolve_target_arch(device)
     except Exception:  # noqa: BLE001 - unrecognized device: nothing to skip on
         return None
-    return ARCH_TRAITS[arch].device
+    # Architectures without IRON kernels (aie4) have no generation to skip on.
+    traits = ARCH_TRAITS.get(arch)
+    return traits.device if traits else None
 
 
 def _shard(config, items):
