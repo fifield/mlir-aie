@@ -1,0 +1,23 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// Accuracy and special values of afn math.exp on NPU3, against a
+// double-precision host reference. In the normal-result range the relative
+// error must be within 2^-10 (f32 result) or 2^-7 (bf16 result). Past the
+// largest finite result the answer is +Inf; below FLT_MIN it lies in
+// [0, FLT_MIN]. NaN stays NaN, exp(+-0) is exactly 1, and results do not
+// decrease over the ascending sweeps.
+//
+// Recorded on NPU3 with Peano llvm_aie g663a9e74:
+//   f32, 15110 normal-range points: max relative error 6.54e-4 (x = 54.78),
+//     mean 9.7e-6.
+//   bf16, 15106 points: max relative error 4.38e-3 (x = 73.5), mean 6.2e-4.
+// The exp2 figures recorded in npu3_approx_math_aie4 are 6.62e-4 and
+// 4.43e-3, so the f32 multiply by log2(e) adds no visible error.
+//
+// REQUIRES: ryzen_ai_npu3, peano
+//
+// RUN: %run_on_npu3% python %S/approx_exp.py -o approx_exp.mlir
+// RUN: %aiecc --enable-aie4-vectorization --get-full-elf --full-elf-name=approx_exp.elf approx_exp.mlir
+// RUN: clang %S/test.cpp -o test.exe -std=c++17 -Wall %xrt_flags -lrt -lstdc++ -lm %test_utils_flags
+// RUN: %run_on_npu3% ./test.exe

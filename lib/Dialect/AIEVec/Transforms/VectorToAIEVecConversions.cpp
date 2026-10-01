@@ -36,6 +36,7 @@
 #include "mlir/Transforms/DialectConversion.h"
 #include "mlir/Transforms/Passes.h"
 #include "llvm/ADT/SmallSet.h"
+#include "llvm/Support/MathExtras.h"
 #include <bitset>
 #include <optional>
 #include <tuple>
@@ -6822,6 +6823,9 @@ struct LowerAIE4ApproxMathOp : OpConversionPattern<MathOpTy> {
   using OpConversionPattern<MathOpTy>::OpConversionPattern;
   using OpAdaptor = typename MathOpTy::Adaptor;
   static constexpr bool isExp2 = std::is_same_v<MathOpTy, math::Exp2Op>;
+  // exp has no instruction of its own: exp(x) = exp2(x * log2(e)), with the
+  // product formed in f32 so that a bf16 input does not also round log2(e).
+  static constexpr bool isExp = std::is_same_v<MathOpTy, math::ExpOp>;
 
   LogicalResult
   matchAndRewrite(MathOpTy op, OpAdaptor adaptor,
@@ -6834,7 +6838,7 @@ struct LowerAIE4ApproxMathOp : OpConversionPattern<MathOpTy> {
       op.emitWarning() << "AIE4: " << opName
                        << " requires fastmath<afn>; AIE4 has only the "
                           "approximate "
-                       << (isExp2 ? "VEXP2" : "VTANH")
+                       << (isExp2 || isExp ? "VEXP2" : "VTANH")
                        << " lowering and no strict lowering";
       return failure();
     }
@@ -6864,7 +6868,7 @@ struct LowerAIE4ApproxMathOp : OpConversionPattern<MathOpTy> {
     auto chunkTy = VectorType::get({kAIE4NlfLanes}, elemTy);
 
     Value bias;
-    if constexpr (isExp2) {
+    if constexpr (isExp2 || isExp) {
       float biasValue = elemTy.isF32() ? kAIE4Exp2BiasF32 : kAIE4Exp2BiasBF16;
       bias = arith::ConstantOp::create(
           rewriter, loc, f32ChunkTy,
@@ -6876,7 +6880,14 @@ struct LowerAIE4ApproxMathOp : OpConversionPattern<MathOpTy> {
       Value x = chunk;
       if (elemTy.isBF16())
         x = arith::ExtFOp::create(rewriter, loc, f32ChunkTy, x);
-      if constexpr (isExp2) {
+      if constexpr (isExp) {
+        Value log2e = arith::ConstantOp::create(
+            rewriter, loc, f32ChunkTy,
+            DenseElementsAttr::get(
+                f32ChunkTy, rewriter.getF32FloatAttr(llvm::numbers::log2ef)));
+        x = arith::MulFOp::create(rewriter, loc, x, log2e);
+      }
+      if constexpr (isExp2 || isExp) {
         // Strict add: no fastmath flags, so it cannot be reassociated away.
         Value biased = arith::AddFOp::create(rewriter, loc, x, bias);
         return aievec::AIE4BiasedExp2Op::create(rewriter, loc, chunkTy, biased);
@@ -6912,6 +6923,7 @@ struct LowerAIE4ApproxMathOp : OpConversionPattern<MathOpTy> {
 
 static void populateAIEVecV4ConversionPatterns(RewritePatternSet &patterns) {
   patterns.add<ConvertIntMulToAIE4MacPattern>(patterns.getContext());
+  patterns.add<LowerAIE4ApproxMathOp<math::ExpOp>>(patterns.getContext());
   patterns
       .add<ConvertMulFToAIE4MulEwiseF32Pattern,
            ConvertMulFToAIE4MulEwiseBf16Pattern,
@@ -7063,6 +7075,10 @@ static void configureAIEVecV4Legalizations(ConversionTarget &target) {
   // strict ops and unsupported shapes. Wide vectors reassemble their 32-lane
   // results with generic insert_strided_slice.
   target.addIllegalOp<math::Exp2Op, math::TanhOp>();
+  // The same holds for vector exp. Scalar exp was never claimed and is left to
+  // generic lowering.
+  target.addDynamicallyLegalOp<math::ExpOp>(
+      [](math::ExpOp op) { return !isa<VectorType>(op.getType()); });
   target.addLegalOp<vector::InsertStridedSliceOp>();
 }
 
