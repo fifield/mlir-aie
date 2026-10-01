@@ -1,0 +1,31 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// Masked tail predication on NPU3: c = a + b over N = 1000 f32 elements in
+// the vector.mask form linalg vectorization emits, plus a masked maximumf
+// reduction, with guard words around the output.
+//
+// REQUIRES: ryzen_ai_npu3, peano
+//
+// RUN: %run_on_npu3% python %S/tail_mask.py -o tail_mask.mlir
+// RUN: %aiecc --enable-aie4-vectorization --get-full-elf --full-elf-name=tail_mask.elf tail_mask.mlir
+//
+// Full chunks use whole-vector loads/stores; the 8-lane tail uses scalar
+// loads and stores. The masked reduction's VSEL fuses with VMAXR.f into
+// VSELMAXR.f.
+// RUN: llvm-objdump -dr tail_mask.mlir.prj/elfs_main_core_0_2/elfs_main_core_0_2.elf > dis.txt
+// RUN: FileCheck %s --check-prefix=MNEMONIC --input-file=dis.txt
+// MNEMONIC-DAG: vadd.f
+// MNEMONIC-DAG: vst{{[[:space:]]+}}y{{[0-9]+}}, [p{{[0-9]+}}, dj{{[0-9]+}}]
+// MNEMONIC-DAG: {{[[:space:]]}}st{{[[:space:]]+}}r{{[0-9]+}}, [p{{[0-9]+}}, dj{{[0-9]+}}]
+// MNEMONIC-DAG: {{[[:space:]]}}lda{{[[:space:]]+}}r{{[0-9]+}}, [p{{[0-9]+}}, dj{{[0-9]+}}]
+// MNEMONIC-DAG: vselmaxr.f
+// MNEMONIC-NOT: R_AIE{{.*}}{{llvm|masked}}
+//
+// RUN: clang %S/test.cpp -o test.exe -std=c++17 -Wall %xrt_flags -lrt -lstdc++ -lm %test_utils_flags
+// RUN: %run_on_npu3% ./test.exe
+//
+// The host checks the add, masked maximum, and unaligned copy bit for bit,
+// plus all 119 guard words. Input cases are defined in test.cpp.
+// Inactive reads are checked by the lowering tests; the host cannot observe
+// reads beyond the input buffers.

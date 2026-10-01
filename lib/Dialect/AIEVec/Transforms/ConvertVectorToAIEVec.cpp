@@ -9,6 +9,7 @@
 // dialect to AIEVec, compatible with the AIE vector architecture.
 //===----------------------------------------------------------------------===//
 
+#include "AIE4MaskLowering.h"
 #include "aie/Dialect/AIEVec/Pipelines/Passes.h"
 
 #include "mlir/Dialect/Vector/Transforms/VectorTransforms.h"
@@ -103,6 +104,11 @@ createRedundantLoadStoreOptimizationPass() {
 void xilinx::aievec::buildConvertVectorToAIEVec(
     OpPassManager &pm, const ConvertVectorToAIEVecOptions &options) {
 
+  // Lower AIE4 masked operations before canonicalization, which would
+  // otherwise mark masked transfers in bounds or rewrite ops inside
+  // vector.mask regions.
+  pm.addPass(createAIE4LowerVectorMasksPass(options.aieTarget));
+
   // Pre-conversion passes.
   pm.addPass(createCanonicalizerPass());
   pm.addPass(createRedundantLoadStoreOptimizationPass());
@@ -142,6 +148,8 @@ void xilinx::aievec::buildConvertVectorToAIEVec(
 // Pipeline registration
 //===---------------------------------------------------------------------------
 void xilinx::aievec::registerAIEVecPipelines() {
+  registerAIE4LowerVectorMasksPass();
+
   PassPipelineRegistration<ConvertVectorToAIEVecOptions>(
       "convert-vector-to-aievec",
       "This pass pipeline takes standard \"Vector\" code and converts it to "

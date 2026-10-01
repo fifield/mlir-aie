@@ -11,6 +11,7 @@
 
 #include "AIE2PShufflePlanner.h"
 
+#include "AIE4MaskLowering.h"
 #include "aie/Dialect/AIE/IR/AIEDialect.h"
 #include "aie/Dialect/AIEVec/AIE1/IR/AIEVecAIE1Ops.h"
 #include "aie/Dialect/AIEVec/AIEVecUtils.h"
@@ -8448,6 +8449,9 @@ struct LowerVectorToAIEVec : PassWrapper<LowerVectorToAIEVec, OperationPass<>> {
       // Last, as it overrides the predicates above for the ops it rewrites.
       AIE2PElementwise::markIllegal(target, &getContext());
     } else if (targetInfo.isAIE4()) {
+      // Make masked operations tail-safe before the target lowering.
+      if (failed(lowerAIE4Masks(op)))
+        return signalPassFailure();
       populateAIEVecV4ConversionPatterns(patterns);
       configureAIEVecV4Legalizations(target);
     } else {
