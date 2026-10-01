@@ -6942,6 +6942,36 @@ struct LowerAIE4ApproxMathOp : OpConversionPattern<MathOpTy> {
   }
 };
 
+//===----------------------------------------------------------------------===//
+// AIE4 approximate scalar reciprocal
+//===----------------------------------------------------------------------===//
+//
+// INV approximates 1/x within 1 ULP for normal inputs and results, and
+// flushes denormals. Like exp2/tanh, it requires `fastmath<afn>`. Strict divf
+// keeps its generic lowering, which Peano compiles to a __divsf3 call.
+struct LowerAIE4ReciprocalOp : OpConversionPattern<arith::DivFOp> {
+  using OpConversionPattern::OpConversionPattern;
+
+  static bool matches(arith::DivFOp op) {
+    if (!op.getType().isF32() ||
+        !arith::bitEnumContainsAll(op.getFastmath(), arith::FastMathFlags::afn))
+      return false;
+    FloatAttr one;
+    return matchPattern(op.getLhs(), m_Constant(&one)) &&
+           one.getValue().isExactlyValue(1.0);
+  }
+
+  LogicalResult
+  matchAndRewrite(arith::DivFOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    if (!matches(op))
+      return failure();
+    rewriter.replaceOpWithNewOp<aievec::AIE4InvOp>(op, op.getType(),
+                                                   adaptor.getRhs());
+    return success();
+  }
+};
+
 static void populateAIEVecV4ConversionPatterns(RewritePatternSet &patterns) {
   patterns.add<ConvertIntMulToAIE4MacPattern>(patterns.getContext());
   patterns.add<LowerAIE4ApproxMathOp<math::ExpOp>>(patterns.getContext());
@@ -6963,7 +6993,8 @@ static void populateAIEVecV4ConversionPatterns(RewritePatternSet &patterns) {
            LowerVectorTransposeOpToAIE4ShuffleOpPattern,
            LowerVectorShuffleOpToAIE4ShuffleOpPattern,
            LowerAIE4ApproxMathOp<math::Exp2Op>,
-           LowerAIE4ApproxMathOp<math::TanhOp>>(
+           LowerAIE4ApproxMathOp<math::TanhOp>,
+           LowerAIE4ReciprocalOp>(
            patterns.getContext());
 }
 
@@ -7101,6 +7132,10 @@ static void configureAIEVecV4Legalizations(ConversionTarget &target) {
   target.addDynamicallyLegalOp<math::ExpOp>(
       [](math::ExpOp op) { return !isa<VectorType>(op.getType()); });
   target.addLegalOp<vector::InsertStridedSliceOp>();
+
+  // Only afn scalar 1.0 / x uses INV; other divisions stay generic.
+  target.addDynamicallyLegalOp<arith::DivFOp>(
+      [](arith::DivFOp op) { return !LowerAIE4ReciprocalOp::matches(op); });
 }
 
 // The lane counts at which the AIE2P lowering of `op` takes one op, smallest

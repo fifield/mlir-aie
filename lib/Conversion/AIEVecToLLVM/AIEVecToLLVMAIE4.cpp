@@ -889,6 +889,18 @@ struct AIE4RsqrtOpConversion : mlir::ConvertOpToLLVMPattern<math::RsqrtOp> {
   }
 };
 
+struct AIE4InvOpConversion : mlir::ConvertOpToLLVMPattern<aievec::AIE4InvOp> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(aievec::AIE4InvOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    rewriter.replaceOpWithNewOp<xllvm::InvAIE4IntrOp>(
+        op, op.getResult().getType(), adaptor.getSource());
+    return success();
+  }
+};
+
 void populateAIEVecToLLVMAIE4ConversionPatterns(
     mlir::LLVMTypeConverter &converter, mlir::RewritePatternSet &patterns) {
   patterns.add<AIE4RsqrtOpConversion, AIE4MulEwiseF32OpConversion,
@@ -903,7 +915,7 @@ void populateAIEVecToLLVMAIE4ConversionPatterns(
                AIE4SelOpConversion, AIE4FMinMaxOpConversion,
                AIE4FCmpOpConversion, AIE4ReduceOpConversion,
                AIE4ShuffleOpConversion, AIE4BiasedExp2OpConversion,
-               AIE4TanhOpConversion>(converter);
+               AIE4TanhOpConversion, AIE4InvOpConversion>(converter);
 }
 
 } // namespace xilinx::aievec

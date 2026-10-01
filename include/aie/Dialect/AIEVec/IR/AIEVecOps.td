@@ -722,6 +722,23 @@ def AIEVec_AIE4TanhOp:
   let hasVerifier = 0;
 }
 
+// Not Pure: INV writes the srFPNlf exception status flags.
+def AIEVec_AIE4InvOp:
+  AIEVec_Op<"aie4.inv", []>,
+  Arguments<(ins F32:$source)>,
+  Results<(outs F32:$result)> {
+  let summary = "AIE4 approximate scalar f32 reciprocal (inv)";
+  let description = [{
+    Approximates `1.0 / x` with the scalar INV instruction. For normal inputs
+    and results, the error is at most 1 ULP. Denormal inputs are treated as
+    zero and denormal results are flushed to zero. Vector-to-AIEVec creates
+    this op only from `arith.divf` carrying `fastmath<afn>` with a constant
+    1.0 numerator.
+  }];
+  let assemblyFormat = "$source attr-dict `:` type($result)";
+  let hasVerifier = 0;
+}
+
 def AIEVec_SubElemOp:
   AIEVec_Op<"sub_elem", [
     Pure,

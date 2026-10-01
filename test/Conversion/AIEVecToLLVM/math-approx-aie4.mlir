@@ -32,3 +32,12 @@ func.func @tanh(%x: vector<32xf32>) -> vector<32xbf16> {
   %0 = aievec.aie4.tanh %x : vector<32xf32>, vector<32xbf16>
   return %0 : vector<32xbf16>
 }
+
+// CHECK-LABEL: @inv
+// CHECK-SAME: (%[[X:.*]]: f32)
+// CHECK-NEXT: %[[R:.*]] = "xllvm.intr.aie4.inv"(%[[X]]) : (f32) -> f32
+// CHECK-NEXT: return %[[R]]
+func.func @inv(%x: f32) -> f32 {
+  %0 = aievec.aie4.inv %x : f32
+  return %0 : f32
+}

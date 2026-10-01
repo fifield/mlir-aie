@@ -66,3 +66,19 @@ func.func @xllvm_tanh_bf16_source(%x: vector<32xbf16>) -> vector<32xbf16> {
   %0 = "xllvm.intr.aie4.tanh"(%x) : (vector<32xbf16>) -> vector<32xbf16>
   return %0 : vector<32xbf16>
 }
+
+// -----
+
+func.func @inv_vector(%x: vector<32xf32>) -> vector<32xf32> {
+  // expected-error @+1 {{operand #0 must be 32-bit float}}
+  %0 = "aievec.aie4.inv"(%x) : (vector<32xf32>) -> vector<32xf32>
+  return %0 : vector<32xf32>
+}
+
+// -----
+
+func.func @xllvm_inv_bf16(%x: bf16) -> bf16 {
+  // expected-error @+1 {{operand #0 must be 32-bit float}}
+  %0 = "xllvm.intr.aie4.inv"(%x) : (bf16) -> bf16
+  return %0 : bf16
+}

@@ -1,0 +1,29 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// Row softmax (rows of 32, 64, 96, 160 and 256) from vector/arith/math with
+// fast-math flags, on NPU3, against a double-precision host softmax.
+//
+// REQUIRES: ryzen_ai_npu3, peano
+//
+// RUN: %run_on_npu3% python %S/softmax.py -o softmax.mlir
+// RUN: %aiecc -j 4 --enable-aie4-vectorization --get-full-elf --full-elf-name=softmax.elf softmax.mlir
+//
+// Check seeded VMAXR.f, fused exp2 + sum (VEXP2.ADDR.f), and scalar INV.
+// The exp2 + sum fusion requires a seeded reassoc reduction.
+// RUN: llvm-objdump -dr softmax.mlir.prj/elfs_main_core_0_2/elfs_main_core_0_2.elf > dis.txt
+// RUN: FileCheck %s --check-prefix=MNEMONIC --input-file=dis.txt
+// MNEMONIC-DAG: vmaxr.f{{[[:space:]]+}}r{{[0-9]+}}, y{{[0-9]+}}, r{{[0-9]+}}
+// MNEMONIC-DAG: vexp2.addr.f{{[[:space:]]+}}y{{[0-9]+}}, r[[ACC:[0-9]+]], y{{[0-9]+}}, r[[ACC]]
+// MNEMONIC-DAG: {{[[:space:]]}}inv{{[[:space:]]+}}r{{[0-9]+}}, r{{[0-9]+}}
+// RUN: FileCheck %s --check-prefix=UNFUSED --input-file=dis.txt
+// UNFUSED-NOT: vexp2.fp32
+// UNFUSED-NOT: vaddr.f
+// UNFUSED-NOT: __divsf3
+//
+// RUN: clang %S/test.cpp -o test.exe -std=c++17 -Wall %xrt_flags -lrt -lstdc++ -lm %test_utils_flags
+// RUN: %run_on_npu3% ./test.exe
+//
+// test.cpp checks end-to-end accuracy, exponential and normalization errors,
+// exponential bias, the VADDR.f sum model, and special values.
+// VADD.f and VSUB.f use crVecRnd; the loader must initialize it to 12 (RNE).
