@@ -5688,10 +5688,12 @@ struct ConvertAIEVecToLLVMPass
     // f32 rsqrt has only the approximate INVSQRT lowering on AIE4, which the
     // pattern refuses without afn. Marking it illegal turns that refusal into
     // an error here rather than a G_FSQRT failure in Peano.
-    if (targetInfo.isAIE4())
+    if (targetInfo.isAIE4()) {
       target.addDynamicallyLegalOp<math::RsqrtOp>([](math::RsqrtOp op) {
         return !getElementTypeOrSelf(op.getType()).isF32();
       });
+      configureAIEVecToLLVMAIE4Legalizations(target);
+    }
 
     if (failed(applyPartialConversion(getOperation(), target,
                                       std::move(patterns))))

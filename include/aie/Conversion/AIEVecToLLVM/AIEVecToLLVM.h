@@ -15,6 +15,7 @@
 #include <memory>
 
 namespace mlir {
+class ConversionTarget;
 class LLVMTypeConverter;
 class RewritePatternSet;
 class ModuleOp;
@@ -40,6 +41,8 @@ void populateAIEVecToLLVMAIE2pConversionPatterns(
 
 void populateAIEVecToLLVMAIE4ConversionPatterns(
     mlir::LLVMTypeConverter &converter, mlir::RewritePatternSet &patterns);
+
+void configureAIEVecToLLVMAIE4Legalizations(mlir::ConversionTarget &target);
 
 std::unique_ptr<mlir::OperationPass<mlir::ModuleOp>>
 createConvertAIEVecToLLVMPass();

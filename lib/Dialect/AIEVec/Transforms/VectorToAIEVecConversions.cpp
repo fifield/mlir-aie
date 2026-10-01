@@ -6123,10 +6123,119 @@ struct ConvertFPToIntToAIE4ConvPattern : OpConversionPattern<FPToIntOp> {
   }
 };
 
+// AIE4 has no bf16 add or subtract, so these run in the f32 unit: widen both
+// operands, operate in f32, truncate. f32 carries more than twice bf16's
+// precision, so rounding the f32 result to nearest even gives the correctly
+// rounded bf16 result. The truncf stays generic here, and AIEVecToLLVM lowers
+// it to the native narrowing conversion.
+template <typename SrcOpTy>
+struct ConvertBF16ArithToAIE4F32Pattern : OpConversionPattern<SrcOpTy> {
+  using OpConversionPattern<SrcOpTy>::OpConversionPattern;
+  using OpAdaptor = typename SrcOpTy::Adaptor;
+
+  static bool matches(SrcOpTy op) {
+    auto vecTy = dyn_cast<VectorType>(op.getType());
+    return vecTy && !vecTy.isScalable() && vecTy.getRank() == 1 &&
+           vecTy.getShape()[0] == 32 && vecTy.getElementType().isBF16();
+  }
+
+  LogicalResult
+  matchAndRewrite(SrcOpTy op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    if (!matches(op))
+      return failure();
+    Location loc = op.getLoc();
+    auto f32Ty = VectorType::get({32}, rewriter.getF32Type());
+    Value lhs = arith::ExtFOp::create(rewriter, loc, f32Ty, adaptor.getLhs());
+    Value rhs = arith::ExtFOp::create(rewriter, loc, f32Ty, adaptor.getRhs());
+    Value wide = SrcOpTy::create(rewriter, loc, lhs, rhs, op.getFastmathAttr());
+    rewriter.replaceOpWithNewOp<arith::TruncFOp>(op, op.getType(), wide);
+    return success();
+  }
+};
+
 using ConvertFPToSIToAIE4ConvPattern =
     ConvertFPToIntToAIE4ConvPattern<arith::FPToSIOp>;
 using ConvertFPToUIToAIE4ConvPattern =
     ConvertFPToIntToAIE4ConvPattern<arith::FPToUIOp>;
+
+using ConvertBF16AddFToAIE4F32Pattern =
+    ConvertBF16ArithToAIE4F32Pattern<arith::AddFOp>;
+using ConvertBF16SubFToAIE4F32Pattern =
+    ConvertBF16ArithToAIE4F32Pattern<arith::SubFOp>;
+
+// A bf16 vector.fma rounds once. Computing a * b + c in f32 and then
+// narrowing rounds twice, and the f32 rounding can land exactly on a bf16
+// midpoint that the exact result is not on. Instead, round the f32 sum to
+// odd: an inexact result is moved to the f32 value with an odd last bit on
+// the exact result's side. f32 has at least two more bits than bf16, so
+// narrowing a round-to-odd f32 to nearest even rounds correctly.
+//
+// a * b is exact in f32. The sum and its exact error come from TwoSum, which
+// needs the f32 adds to round to nearest even.
+struct ConvertBF16FMAToAIE4F32Pattern : OpConversionPattern<vector::FMAOp> {
+  using OpConversionPattern::OpConversionPattern;
+
+  static bool matches(vector::FMAOp op) {
+    VectorType vecTy = op.getVectorType();
+    return !vecTy.isScalable() && vecTy.getRank() == 1 &&
+           vecTy.getShape()[0] == 32 && vecTy.getElementType().isBF16();
+  }
+
+  LogicalResult
+  matchAndRewrite(vector::FMAOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    if (!matches(op))
+      return failure();
+    Location loc = op.getLoc();
+    auto f32Ty = VectorType::get({32}, rewriter.getF32Type());
+    auto i32Ty = VectorType::get({32}, rewriter.getI32Type());
+    auto widen = [&](Value v) {
+      return arith::ExtFOp::create(rewriter, loc, f32Ty, v).getResult();
+    };
+    auto i32Splat = [&](int32_t v) {
+      return arith::ConstantOp::create(
+                 rewriter, loc, i32Ty,
+                 DenseElementsAttr::get(i32Ty, rewriter.getI32IntegerAttr(v)))
+          .getResult();
+    };
+
+    Value p = arith::MulFOp::create(rewriter, loc, widen(adaptor.getLhs()),
+                                    widen(adaptor.getRhs()));
+    Value c = widen(adaptor.getAcc());
+    Value s = arith::AddFOp::create(rewriter, loc, p, c);
+    // TwoSum: e = (p + c) - s exactly.
+    Value bv = arith::SubFOp::create(rewriter, loc, s, p);
+    Value av = arith::SubFOp::create(rewriter, loc, s, bv);
+    Value br = arith::SubFOp::create(rewriter, loc, c, bv);
+    Value ar = arith::SubFOp::create(rewriter, loc, p, av);
+    Value e = arith::AddFOp::create(rewriter, loc, ar, br);
+
+    // The sum is inexact when e is finite and nonzero. When s overflows, e is
+    // NaN and s is kept. When s is further from zero than the exact result,
+    // step its magnitude down one f32 ulp before setting the last bit.
+    Value sBits = arith::BitcastOp::create(rewriter, loc, i32Ty, s);
+    Value eBits = arith::BitcastOp::create(rewriter, loc, i32Ty, e);
+    Value eMag =
+        arith::AndIOp::create(rewriter, loc, eBits, i32Splat(0x7fffffff));
+    Value inexact = arith::CmpIOp::create(
+        rewriter, loc, arith::CmpIPredicate::ult,
+        arith::SubIOp::create(rewriter, loc, eMag, i32Splat(1)),
+        i32Splat(0x7f7fffff));
+    Value signsDiffer = arith::CmpIOp::create(
+        rewriter, loc, arith::CmpIPredicate::slt,
+        arith::XOrIOp::create(rewriter, loc, sBits, eBits), i32Splat(0));
+    Value down = arith::SelectOp::create(rewriter, loc, signsDiffer,
+                                         i32Splat(1), i32Splat(0));
+    Value odd = arith::OrIOp::create(
+        rewriter, loc, arith::SubIOp::create(rewriter, loc, sBits, down),
+        i32Splat(1));
+    Value rBits = arith::SelectOp::create(rewriter, loc, inexact, odd, sBits);
+    Value r = arith::BitcastOp::create(rewriter, loc, f32Ty, rBits);
+    rewriter.replaceOpWithNewOp<arith::TruncFOp>(op, op.getType(), r);
+    return success();
+  }
+};
 
 //===----------------------------------------------------------------------===//
 // AIE4 integer min/max/compare/select
@@ -7016,6 +7125,8 @@ struct LowerAIE4ReciprocalOp : OpConversionPattern<arith::DivFOp> {
 static void populateAIEVecV4ConversionPatterns(RewritePatternSet &patterns) {
   patterns.add<ConvertIntMulToAIE4MacPattern>(patterns.getContext());
   patterns.add<LowerAIE4ApproxMathOp<math::ExpOp>>(patterns.getContext());
+  patterns.add<ConvertBF16AddFToAIE4F32Pattern, ConvertBF16SubFToAIE4F32Pattern,
+               ConvertBF16FMAToAIE4F32Pattern>(patterns.getContext());
   patterns
       .add<ConvertMulFToAIE4MulEwiseF32Pattern,
            ConvertMulFToAIE4MulEwiseBf16Pattern,
@@ -7112,13 +7223,22 @@ static void configureAIEVecV4Legalizations(ConversionTarget &target) {
   target.addLegalOp<arith::TruncFOp>();
 
   // Fuse matching MSC roots. matchFloatMscChain applies its own shape and
-  // fastmath conditions; every subtract it does not match stays legal.
-  target.addDynamicallyLegalOp<arith::SubFOp>(
-      [](arith::SubFOp op) { return !matchFloatMscChain(op); });
+  // fastmath conditions; every other subtract stays legal except bf16, which
+  // is computed in f32.
+  target.addDynamicallyLegalOp<arith::SubFOp>([](arith::SubFOp op) {
+    return !matchFloatMscChain(op) &&
+           !ConvertBF16SubFToAIE4F32Pattern::matches(op);
+  });
   // Fuse matching MAC roots. matchFloatMacChain applies its own shape and
-  // fastmath conditions; every add it does not match stays legal.
-  target.addDynamicallyLegalOp<arith::AddFOp>(
-      [](arith::AddFOp op) { return !matchFloatMacChain(op); });
+  // fastmath conditions; every other add stays legal except bf16, which is
+  // computed in f32.
+  target.addDynamicallyLegalOp<arith::AddFOp>([](arith::AddFOp op) {
+    return !matchFloatMacChain(op) &&
+           !ConvertBF16AddFToAIE4F32Pattern::matches(op);
+  });
+  target.addDynamicallyLegalOp<vector::FMAOp>([](vector::FMAOp op) {
+    return !ConvertBF16FMAToAIE4F32Pattern::matches(op);
+  });
 
   // Require native lowering only for supported integer vector shapes.
   target.addDynamicallyLegalOp<arith::MinSIOp, arith::MaxSIOp, arith::MinUIOp,

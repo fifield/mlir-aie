@@ -1,0 +1,30 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// bf16 vector add, sub and fma on NPU3, against a double-precision host
+// reference. Every result must be the round-to-nearest-even of the exact
+// result; the float unit reads a subnormal operand as zero, so the reference
+// does too, and a subnormal result may flush to zero.
+//
+// poison.o's main() sets crVecRnd and crRnd to floor before entering the
+// core, so the results depend only on the compiler's own mode setup, and the
+// core reports the crRnd it runs with. The inputs include two cases where
+// rounding twice gives the wrong neighbour: 1 + 3/256 under floor, and
+// 1.5 * 1.0078125 - 2^-25 through an f32 fma.
+//
+// Recorded on NPU3 with Peano llvm_aie g663a9e74 (32768 points per op, 259
+// with a subnormal operand): add and sub 32698 RNE and 70 NaN; fma 32646 RNE,
+// 121 NaN and 1 flushed subnormal. Nothing else.
+//
+// The fma reference rounds the double sum to odd before narrowing:
+// std::fma's double result can itself land on a bf16 midpoint. A product in
+// the f32 subnormal range flushes to zero on the part, and the reference
+// accepts that result too.
+//
+// REQUIRES: ryzen_ai_npu3, peano
+//
+// RUN: %PEANO_INSTALL_DIR/bin/clang --target=aie4-none-unknown-elf -O2 -fstack-size-section -c %S/poison.c -o poison.o
+// RUN: %run_on_npu3% python %S/bf16_arith.py -o bf16_arith.mlir
+// RUN: %aiecc --enable-aie4-vectorization --get-full-elf --full-elf-name=bf16_arith.elf bf16_arith.mlir
+// RUN: clang %S/test.cpp -o test.exe -std=c++17 -Wall %xrt_flags -lrt -lstdc++ -lm %test_utils_flags
+// RUN: %run_on_npu3% ./test.exe

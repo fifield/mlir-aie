@@ -15,11 +15,11 @@ func.func @addf_f32_16(%a: vector<16xf32>, %b: vector<16xf32>) -> vector<16xf32>
 
 // -----
 
-// CHECK-LABEL: @addf_bf16_32
-// CHECK: arith.addf {{.*}} : vector<32xbf16>
-func.func @addf_bf16_32(%a: vector<32xbf16>, %b: vector<32xbf16>) -> vector<32xbf16> {
-  %r = arith.addf %a, %b : vector<32xbf16>
-  return %r : vector<32xbf16>
+// CHECK-LABEL: @addf_bf16_16
+// CHECK: arith.addf {{.*}} : vector<16xbf16>
+func.func @addf_bf16_16(%a: vector<16xbf16>, %b: vector<16xbf16>) -> vector<16xbf16> {
+  %r = arith.addf %a, %b : vector<16xbf16>
+  return %r : vector<16xbf16>
 }
 
 // -----
@@ -44,11 +44,11 @@ func.func @subf_f32_16(%a: vector<16xf32>, %b: vector<16xf32>) -> vector<16xf32>
 
 // -----
 
-// CHECK-LABEL: @subf_bf16_32
-// CHECK: arith.subf {{.*}} : vector<32xbf16>
-func.func @subf_bf16_32(%a: vector<32xbf16>, %b: vector<32xbf16>) -> vector<32xbf16> {
-  %r = arith.subf %a, %b : vector<32xbf16>
-  return %r : vector<32xbf16>
+// CHECK-LABEL: @subf_bf16_16
+// CHECK: arith.subf {{.*}} : vector<16xbf16>
+func.func @subf_bf16_16(%a: vector<16xbf16>, %b: vector<16xbf16>) -> vector<16xbf16> {
+  %r = arith.subf %a, %b : vector<16xbf16>
+  return %r : vector<16xbf16>
 }
 
 // -----

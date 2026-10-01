@@ -293,6 +293,36 @@ struct AIE4ConvF32I32OpConversion
   }
 };
 
+// arith.truncf <32xf32> -> <32xbf16> -> llvm.aie4.v32accfloat.to.v32bfloat16
+//
+// The conversion rounds by the ambient crRnd; arith.truncf asks for round to
+// nearest even.
+struct AIE4TruncFBF16Conversion
+    : mlir::ConvertOpToLLVMPattern<arith::TruncFOp> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+
+  static bool matches(arith::TruncFOp op) {
+    auto srcTy = dyn_cast<VectorType>(op.getIn().getType());
+    auto dstTy = dyn_cast<VectorType>(op.getType());
+    if (!srcTy || !dstTy || srcTy.isScalable() || srcTy.getRank() != 1 ||
+        srcTy.getShape()[0] != 32 || !srcTy.getElementType().isF32() ||
+        !dstTy.getElementType().isBF16())
+      return false;
+    auto mode = op.getRoundingmode();
+    return !mode || *mode == arith::RoundingMode::to_nearest_even;
+  }
+
+  LogicalResult
+  matchAndRewrite(arith::TruncFOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    if (!matches(op))
+      return failure();
+    rewriter.replaceOpWithNewOp<xllvm::V32AccFloatToV32Bfloat16AIE4IntrOp>(
+        op, op.getType(), adaptor.getIn());
+    return success();
+  }
+};
+
 //===----------------------------------------------------------------------===//
 // Integer min/max/compare/select
 //===----------------------------------------------------------------------===//
@@ -936,6 +966,13 @@ void populateAIEVecToLLVMAIE4ConversionPatterns(
                AIE4FCmpOpConversion, AIE4ReduceOpConversion,
                AIE4ShuffleOpConversion, AIE4BiasedExp2OpConversion,
                AIE4TanhOpConversion, AIE4InvOpConversion>(converter);
+  patterns.add<AIE4TruncFBF16Conversion>(converter);
+}
+
+void configureAIEVecToLLVMAIE4Legalizations(ConversionTarget &target) {
+  target.addDynamicallyLegalOp<arith::TruncFOp>([](arith::TruncFOp op) {
+    return !AIE4TruncFBF16Conversion::matches(op);
+  });
 }
 
 } // namespace xilinx::aievec
