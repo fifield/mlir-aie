@@ -10,6 +10,7 @@
 #include "aie/Dialect/AIE/IR/AIEDialect.h"
 #include "aie/Dialect/AIE/Transforms/AIEPasses.h"
 #include "aie/Dialect/AIEVec/IR/AIEVecDialect.h"
+#include "aie/Dialect/AIEVec/IR/AIEVecOps.h"
 
 #include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVM.h"
 #include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVMPass.h"
@@ -653,6 +654,162 @@ struct AIEBufferToStandard : OpConversionPattern<BufferOp> {
   }
 };
 
+//===----------------------------------------------------------------------===//
+// AIE4 core-entry control writes (decision D19)
+//===----------------------------------------------------------------------===//
+//
+// Control-register ids for llvm.aie4.set.ctrl.reg, from Peano's
+// aie4/aie4_defines.h; reset values and encodings from ISA 2.10 (pp. 39-44).
+constexpr int32_t kAIE4CrVecRnd = 24;     // VMAC-unit rounding, reset 0 (floor)
+constexpr int32_t kAIE4CrRnd = 46;        // SRS/conversion rounding, reset 0
+constexpr int32_t kAIE4CrF2BConvSat = 53; // MX conversion saturation, reset 3
+constexpr int32_t kAIE4RndConvEven = 12;  // convergent rounding to even (RNE)
+constexpr int32_t kAIE4F2BConvSatMax = 3; // Inf and Huge -> max representable
+
+struct AIE4CoreEntryModes {
+  // crRnd = 12, unless the core reads the ambient crRnd through an explicit
+  // op (see scanAIE4CoreEntryModes).
+  bool rnd = true;
+  // crF2BConvSat = 3: the core has an MX conversion. No op in the tree
+  // reads it yet; aie4-r2-mx-backend adds the readers.
+  bool f2bConvSat = false;
+};
+
+// Does `op` round a result to bf16 or f16 through a crRnd reader? Peano
+// computes scalar and vector bf16/f16 arithmetic, int -> bf16/f16
+// conversions and f32 -> bf16/f16 truncations in f32 or integer, then
+// narrows with VCONV, which rounds with crRnd.
+static bool isGenericAIE4RndReader(Operation *op) {
+  if (op->getNumResults() != 1)
+    return false;
+  Type elemTy = getElementTypeOrSelf(op->getResult(0).getType());
+  if (!elemTy.isBF16() && !elemTy.isF16())
+    return false;
+  if (isa<arith::AddFOp, arith::SubFOp, arith::MulFOp, arith::DivFOp,
+          arith::RemFOp, arith::SIToFPOp, arith::UIToFPOp, arith::TruncFOp>(op))
+    return true;
+  return isa<math::MathDialect>(op->getDialect());
+}
+
+// Walk `root` and every function body it calls, transitively. aiecc inlines
+// device-level helpers into the core, so their readers count as the core's.
+static void walkAIE4CoreAndCallees(Operation *root,
+                                   function_ref<WalkResult(Operation *)> fn) {
+  SmallVector<Operation *> worklist{root};
+  llvm::SmallPtrSet<Operation *, 8> visited{root};
+  while (!worklist.empty()) {
+    Operation *region = worklist.pop_back_val();
+    WalkResult r = region->walk([&](Operation *op) -> WalkResult {
+      if (auto call = dyn_cast<func::CallOp>(op)) {
+        auto callee = SymbolTable::lookupNearestSymbolFrom<func::FuncOp>(
+            call, call.getCalleeAttr());
+        if (callee && !callee.isExternal() && visited.insert(callee).second)
+          worklist.push_back(callee);
+      }
+      return fn(op);
+    });
+    if (r.wasInterrupted())
+      return;
+  }
+}
+
+// D19's per-core modes for an AIE4 core (crVecRnd = 12 always).
+//
+// crRnd = 12 by default: every generic bf16/f16 rounding op (arith
+// arithmetic, int -> float, f32 truncation, math) assumes round to nearest
+// even, and the loader leaves crRnd at its reset value, 0 (floor). The
+// explicit aievec.aie4.srs_i32_i16 and aievec.aie4.conv_f32_bf16 ops are
+// defined to read the ambient crRnd (release-1 references assume floor), so a
+// core containing one keeps the ambient mode. A core that has both kinds is
+// rejected: no single crRnd serves both.
+static FailureOr<AIE4CoreEntryModes> scanAIE4CoreEntryModes(CoreOp core) {
+  AIE4CoreEntryModes modes;
+  Operation *genericRnd = nullptr;
+  Operation *ambientRnd = nullptr;
+  bool failedScan = false;
+  walkAIE4CoreAndCallees(core, [&](Operation *op) -> WalkResult {
+    if (auto truncOp = dyn_cast<arith::TruncFOp>(op)) {
+      if (auto mode = truncOp.getRoundingmode();
+          mode && *mode != arith::RoundingMode::to_nearest_even &&
+          isGenericAIE4RndReader(op)) {
+        truncOp.emitOpError(
+            "requests a rounding mode other than to_nearest_even; AIE4 "
+            "cores fix conversion rounding (crRnd) to round-to-nearest-even "
+            "at core entry");
+        failedScan = true;
+        return WalkResult::interrupt();
+      }
+    }
+    if (!genericRnd && isGenericAIE4RndReader(op))
+      genericRnd = op;
+    if (!ambientRnd &&
+        isa<aievec::AIE4SRSI32I16Op, aievec::AIE4ConvF32BF16Op>(op))
+      ambientRnd = op;
+    return WalkResult::advance();
+  });
+  if (failedScan)
+    return failure();
+  if (genericRnd && ambientRnd) {
+    auto diag = core.emitOpError(
+        "mixes ops that need round-to-nearest-even (crRnd = 12) with an "
+        "explicit op that reads the ambient crRnd; setting crRnd for one "
+        "would change the other's numerics");
+    diag.attachNote(genericRnd->getLoc()) << "needs crRnd = 12";
+    diag.attachNote(ambientRnd->getLoc()) << "reads the ambient crRnd";
+    diag.attachNote()
+        << "split them into separate cores, or use "
+           "aievec.aie4.conv_f32_bf16 if floor rounding is acceptable; "
+           "explicit ops will get a rounding attribute (bead "
+           "aie4-r2-explicit-rnd)";
+    return failure();
+  }
+  modes.rnd = ambientRnd == nullptr;
+  return modes;
+}
+
+// Write the modes at the start of the core function, as the AIE2/AIE2P setup
+// does. Readers of these registers carry implicit uses of them in Peano's
+// MIR, so the writes stay ahead of every reader that needs them.
+static void emitAIE4CoreEntryModes(func::FuncOp coreFunc,
+                                   const AIE4CoreEntryModes &modes,
+                                   ModuleOp module,
+                                   ConversionPatternRewriter &rewriter) {
+  auto setCtrlReg = module.lookupSymbol<func::FuncOp>("llvm.aie4.set.ctrl.reg");
+  assert(setCtrlReg && "AIE4 intrinsics are declared before outlining");
+  Location loc = coreFunc.getLoc();
+
+  OpBuilder::InsertionGuard guard(rewriter);
+  rewriter.setInsertionPointToStart(&coreFunc.getBody().front());
+  auto write = [&](int32_t reg, int32_t value) {
+    Value r = arith::ConstantOp::create(rewriter, loc,
+                                        rewriter.getI32IntegerAttr(reg));
+    Value v = arith::ConstantOp::create(rewriter, loc,
+                                        rewriter.getI32IntegerAttr(value));
+    func::CallOp::create(rewriter, loc, setCtrlReg, ValueRange{r, v});
+  };
+  write(kAIE4CrVecRnd, kAIE4RndConvEven);
+  if (modes.rnd)
+    write(kAIE4CrRnd, kAIE4RndConvEven);
+  if (modes.f2bConvSat)
+    write(kAIE4CrF2BConvSat, kAIE4F2BConvSatMax);
+}
+
+// With crRnd = 12 guaranteed, an explicit to_nearest_even on arith.truncf is
+// what the hardware does anyway. Drop it in the core and its callees: the
+// attributed form lowers to llvm.experimental.constrained.fptrunc, which
+// Peano cannot select.
+static void dropAIE4RNETruncAttrs(CoreOp core,
+                                  ConversionPatternRewriter &rewriter) {
+  walkAIE4CoreAndCallees(core, [&](Operation *op) -> WalkResult {
+    if (auto truncOp = dyn_cast<arith::TruncFOp>(op))
+      if (truncOp.getRoundingmode() == arith::RoundingMode::to_nearest_even)
+        rewriter.modifyOpInPlace(truncOp, [&] {
+          truncOp->removeAttr(truncOp.getRoundingmodeAttrName());
+        });
+    return WalkResult::advance();
+  });
+}
+
 struct AIECoreToStandardFunc : OpConversionPattern<CoreOp> {
   using OpConversionPattern::OpConversionPattern;
   ModuleOp &module;
@@ -680,6 +837,21 @@ struct AIECoreToStandardFunc : OpConversionPattern<CoreOp> {
         (tileCol != col && tileCol != -1)) {
       rewriter.eraseOp(op);
       return success();
+    }
+
+    // AIE4 cores get D19's control writes at entry; check first that the
+    // core's crRnd requirements are consistent.
+    auto coreDevice = op->getParentOfType<DeviceOp>();
+    bool isAIE4 = coreDevice &&
+                  coreDevice.getTargetModel().getTargetArch() == AIEArch::AIE4;
+    AIE4CoreEntryModes aie4Modes;
+    if (isAIE4) {
+      FailureOr<AIE4CoreEntryModes> scanned = scanAIE4CoreEntryModes(op);
+      if (failed(scanned))
+        return failure();
+      aie4Modes = *scanned;
+      if (aie4Modes.rnd)
+        dropAIE4RNETruncAttrs(op, rewriter);
     }
 
     // The parent should be an AIE.device op.
@@ -806,6 +978,9 @@ struct AIECoreToStandardFunc : OpConversionPattern<CoreOp> {
         }
       }
     }
+
+    if (isAIE4)
+      emitAIE4CoreEntryModes(coreFunc, aie4Modes, module, rewriter);
 
     // Rewrite the AIE.end() op
     coreFunc.getBody().walk([&](Operation *childOp) {
@@ -982,13 +1157,16 @@ struct AIECoreToStandardPass
     if (failed(applyPartialConversion(deviceOp, target, std::move(patterns))))
       return signalPassFailure();
 
+    // Core-entry validation can reject a core during outlining. Make that
+    // failure fail the pass instead of leaving the core for device removal.
+    ConversionTarget outlineTarget(target);
+    outlineTarget.addIllegalOp<CoreOp>();
+
     RewritePatternSet outlinePatterns(&getContext());
     outlinePatterns.add<AIECoreToStandardFunc>(m.getContext(), m, mapper,
                                                tileToBuffers, /*benefit*/ 1,
                                                tileCol, tileRow);
-    // Otherwise a core whose outlined body does not legalize is dropped.
-    target.addIllegalOp<CoreOp>();
-    if (failed(applyPartialConversion(deviceOp, target,
+    if (failed(applyPartialConversion(deviceOp, outlineTarget,
                                       std::move(outlinePatterns))))
       return signalPassFailure();
 

@@ -1,0 +1,34 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// D19 core-entry rounding controls on NPU3. modes.o's main() poisons crVecRnd
+// and crRnd to 0 (floor) before calling the core, so the results depend only
+// on the compiler's entry writes, not on the loader. entry.elf must read
+// crVecRnd = crRnd = 12 after entry and round its vector f32 adds, scalar
+// f32 -> bf16 truncations and scalar bf16 adds to nearest even. clobber.elf
+// resets both controls through a linked call after entry and must floor,
+// which shows the modes are live and later writes are clobbers.
+//
+// REQUIRES: ryzen_ai_npu3, peano
+//
+// RUN: cp %S/entry.mlir %S/clobber.mlir .
+// RUN: %PEANO_INSTALL_DIR/bin/clang --target=aie4-none-unknown-elf -O2 -fstack-size-section -c %S/modes.c -o modes.o
+// RUN: %aiecc -j 4 --get-full-elf --full-elf-name=entry.elf entry.mlir
+// RUN: %aiecc -j 4 --get-full-elf --full-elf-name=clobber.elf clobber.mlir
+// RUN: llvm-objdump -dr --no-show-raw-insn entry.mlir.prj/elfs_main_core_0_2/elfs_main_core_0_2.elf | FileCheck %s
+// main comes from modes.o; the core function keeps its own name.
+// CHECK-LABEL: <core_0_2>:
+// CHECK-DAG:   movx crvecrnd, #0xc
+// CHECK-DAG:   movx crrnd, #0xc
+//
+// The ELF's main is the poisoning wrapper: it zeroes both controls in the
+// delay slots of its call to core_0_2.
+// RUN: llvm-objdump -dr --no-show-raw-insn entry.mlir.prj/elfs_main_core_0_2/elfs_main_core_0_2.elf | FileCheck %s --check-prefix=MAIN
+// MAIN-LABEL: <main>:
+// MAIN:       jl
+// MAIN-NEXT:  R_AIE_{{[0-9]+}} core_0_2
+// MAIN-DAG:   movx crvecrnd, #0x0
+// MAIN-DAG:   movx crrnd, #0x0
+//
+// RUN: clang %S/test.cpp -o test.exe -std=c++17 -Wall %xrt_flags -lrt -lstdc++ -lm
+// RUN: %run_on_npu3% ./test.exe entry.elf rne clobber.elf floor entry.elf rne

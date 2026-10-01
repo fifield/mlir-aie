@@ -27,3 +27,22 @@ extern "C" void llvm___aie4___release(unsigned id, unsigned val) {
 }
 extern "C" void llvm___aie___event0() { event0(); }
 extern "C" void llvm___aie___event1() { event1(); }
+
+// Core-entry control writes (aie-standard-lowering, decision D19) call
+// llvm.aie4.set.ctrl.reg with the Peano register ids (aie4/aie4_defines.h).
+// Map the ids the compiler emits onto the Chess setters (me_set_mode.h).
+extern "C" void llvm___aie4___set___ctrl___reg(int reg, int val) {
+  switch (reg) {
+  case 24: // crVecRnd
+    set_vec_rnd(val);
+    break;
+  case 46: // crRnd
+    set_rnd(val);
+    break;
+  case 53: // crF2BConvSat
+    set_fp2bfp_conv_sat_conf(val);
+    break;
+  default:
+    break;
+  }
+}
