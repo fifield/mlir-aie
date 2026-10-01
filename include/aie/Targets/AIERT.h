@@ -60,6 +60,7 @@ struct AIERTControl {
                                           bool outOfOrder = false);
   mlir::LogicalResult initLocks(DeviceOp &targetOp);
   mlir::LogicalResult initBuffers(DeviceOp &targetOp);
+  mlir::LogicalResult disableOtherDeviceSwitches(DeviceOp &targetOp);
   mlir::LogicalResult configureSwitches(DeviceOp &targetOp,
                                         bool skipCtrlPktOverlay = false);
   mlir::LogicalResult addInitConfig(DeviceOp &targetOp,

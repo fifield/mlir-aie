@@ -803,10 +803,90 @@ LogicalResult xilinx::AIE::AIERTControl::initBuffers(DeviceOp &targetOp) {
   return success();
 }
 
+// An AIE4 device's configuration is applied over whatever stream switch
+// connections the previous device left. A connection only another device uses
+// would fork this device's streams into a port nothing drains, so disable the
+// connections of the other devices with the same target first. Control packet
+// overlay connections stay: a caller that skips the overlay does not enable
+// them again.
+LogicalResult
+xilinx::AIE::AIERTControl::disableOtherDeviceSwitches(DeviceOp &targetOp) {
+  AIEDialect::IsCtrlPktOverlayAttrHelper overlay(targetOp.getContext());
+  auto moduleOp = targetOp->getParentOfType<ModuleOp>();
+  if (!moduleOp)
+    return success();
+  for (auto otherOp : moduleOp.getOps<DeviceOp>()) {
+    if (otherOp == targetOp || otherOp.getDevice() != targetOp.getDevice())
+      continue;
+    for (auto switchboxOp : otherOp.getOps<SwitchboxOp>()) {
+      int32_t col = switchboxOp.colIndex();
+      int32_t row = switchboxOp.rowIndex();
+      XAie_LocType tileLoc = XAie_TileLoc(col, row);
+      Block &b = switchboxOp.getConnections().front();
+      for (auto connectOp : b.getOps<ConnectOp>()) {
+        if (overlay.isAttrPresent(connectOp))
+          continue;
+        TxnLocBracket bracket(*this, connectOp.getLoc());
+        TRY_XAIE_API_EMIT_ERROR(
+            switchboxOp, XAie_StrmConnCctDisable, &aiert->devInst, tileLoc,
+            getStrmSwPortType(targetModel, col, row,
+                              connectOp.getSourceBundle(),
+                              /*isSourcePort=*/true),
+            connectOp.sourceIndex(),
+            getStrmSwPortType(targetModel, col, row, connectOp.getDestBundle(),
+                              /*isSourcePort=*/false),
+            connectOp.destIndex());
+      }
+      for (auto masterSetOp : b.getOps<MasterSetOp>()) {
+        if (overlay.isAttrPresent(masterSetOp))
+          continue;
+        TxnLocBracket bracket(*this, masterSetOp.getLoc());
+        TRY_XAIE_API_EMIT_ERROR(
+            masterSetOp, XAie_StrmPktSwMstrPortDisable, &aiert->devInst,
+            tileLoc,
+            WIRE_BUNDLE_TO_STRM_SW_PORT_TYPE.at(masterSetOp.getDestBundle()),
+            masterSetOp.destIndex());
+      }
+      for (auto packetRulesOp : b.getOps<PacketRulesOp>()) {
+        if (overlay.isAttrPresent(packetRulesOp))
+          continue;
+        TxnLocBracket bracket(*this, packetRulesOp.getLoc());
+        auto rules = packetRulesOp.getRules().front().getOps<PacketRuleOp>();
+        if (llvm::any_of(rules, [&](PacketRuleOp rule) {
+              return overlay.isAttrPresent(rule);
+            })) {
+          // A shared slave stays enabled for the installed overlay. Retire
+          // only application slots, keeping every rule's physical slot index.
+          int slot = 0;
+          for (PacketRuleOp rule : rules) {
+            if (!overlay.isAttrPresent(rule))
+              TRY_XAIE_API_EMIT_ERROR(rule, XAie_StrmPktSwSlaveSlotDisable,
+                                      &aiert->devInst, tileLoc,
+                                      WIRE_BUNDLE_TO_STRM_SW_PORT_TYPE.at(
+                                          packetRulesOp.getSourceBundle()),
+                                      packetRulesOp.sourceIndex(), slot);
+            ++slot;
+          }
+          continue;
+        }
+        TRY_XAIE_API_EMIT_ERROR(packetRulesOp, XAie_StrmPktSwSlavePortDisable,
+                                &aiert->devInst, tileLoc,
+                                WIRE_BUNDLE_TO_STRM_SW_PORT_TYPE.at(
+                                    packetRulesOp.getSourceBundle()),
+                                packetRulesOp.sourceIndex());
+      }
+    }
+  }
+  return success();
+}
+
 LogicalResult
 xilinx::AIE::AIERTControl::configureSwitches(DeviceOp &targetOp,
                                              bool skipCtrlPktOverlay) {
   AIEDialect::IsCtrlPktOverlayAttrHelper overlay(targetOp.getContext());
+  if (isa<AIE4TargetModel>(targetModel) &&
+      failed(disableOtherDeviceSwitches(targetOp)))
+    return failure();
 
   // StreamSwitch (switchbox) configuration
   for (auto switchboxOp : targetOp.getOps<SwitchboxOp>()) {
