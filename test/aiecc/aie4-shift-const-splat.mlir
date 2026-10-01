@@ -4,7 +4,7 @@
 // Shifting every lane left by 3 lowers through vector addition on AIE4.
 //
 // REQUIRES: peano
-// RUN: %aiecc -j 4 --get-core-elfs --tmpdir %t.prj --output-dir %t.out %s
+// RUN: %aiecc --get-core-elfs --tmpdir %t.prj --output-dir %t.out %s
 // RUN: llvm-objdump -dr %t.out/elfs_main_core_0_2/elfs_main_core_0_2.elf | FileCheck %s
 
 // CHECK: vadd.32

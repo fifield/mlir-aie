@@ -13,8 +13,8 @@
 //
 // RUN: cp %S/entry.mlir %S/clobber.mlir .
 // RUN: %PEANO_INSTALL_DIR/bin/clang --target=aie4-none-unknown-elf -O2 -fstack-size-section -c %S/modes.c -o modes.o
-// RUN: %aiecc -j 4 --get-full-elf --full-elf-name=entry.elf entry.mlir
-// RUN: %aiecc -j 4 --get-full-elf --full-elf-name=clobber.elf clobber.mlir
+// RUN: %aiecc --get-full-elf --full-elf-name=entry.elf entry.mlir
+// RUN: %aiecc --get-full-elf --full-elf-name=clobber.elf clobber.mlir
 // RUN: llvm-objdump -dr --no-show-raw-insn entry.mlir.prj/elfs_main_core_0_2/elfs_main_core_0_2.elf | FileCheck %s
 // main comes from modes.o; the core function keeps its own name.
 // CHECK-LABEL: <core_0_2>:

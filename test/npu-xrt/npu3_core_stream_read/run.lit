@@ -5,7 +5,7 @@
 //
 // REQUIRES: ryzen_ai_npu3, peano
 //
-// RUN: %aiecc -j 4 --get-full-elf --full-elf-name=stream_read.elf %S/aie.mlir
+// RUN: %aiecc --get-full-elf --full-elf-name=stream_read.elf %S/aie.mlir
 // RUN: llvm-objdump -d aie.mlir.prj/elfs_main_core_0_2/elfs_main_core_0_2.elf | FileCheck %s
 // CHECK: vmov{{[abx]?}} y{{[0-9]+}}, ss[p{{[0-9]+}}]
 // CHECK: vmov{{[abx]?}} x{{[0-9]+}}, ss[p{{[0-9]+}}]

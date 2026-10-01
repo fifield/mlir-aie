@@ -6,7 +6,7 @@
 // REQUIRES: ryzen_ai_npu3, peano
 //
 // RUN: %run_on_npu3% python %S/bf16_conv_roundtrip.py -o bf16_conv_roundtrip.mlir
-// RUN: %aiecc -j 4 --enable-aie4-vectorization --get-full-elf --full-elf-name=bf16_conv_roundtrip.elf bf16_conv_roundtrip.mlir
+// RUN: %aiecc --enable-aie4-vectorization --get-full-elf --full-elf-name=bf16_conv_roundtrip.elf bf16_conv_roundtrip.mlir
 //
 // Confirm native instruction selection.
 // RUN: llvm-objdump -dr bf16_conv_roundtrip.mlir.prj/elfs_main_core_0_2/elfs_main_core_0_2.elf | FileCheck %s --check-prefix=VCONV

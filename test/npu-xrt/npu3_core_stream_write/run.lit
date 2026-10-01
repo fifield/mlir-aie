@@ -3,7 +3,7 @@
 //
 // REQUIRES: ryzen_ai_npu3, peano
 //
-// RUN: %aiecc -j 4 --get-full-elf --full-elf-name=stream_write.elf %S/aie.mlir
+// RUN: %aiecc --get-full-elf --full-elf-name=stream_write.elf %S/aie.mlir
 // RUN: llvm-objdump -d aie.mlir.prj/elfs_main_core_0_2/elfs_main_core_0_2.elf | FileCheck %s
 // CHECK-DAG: mov ms, r{{[0-9]+}}
 // CHECK-DAG: vmov ms, w{{[lh][0-9]+}}

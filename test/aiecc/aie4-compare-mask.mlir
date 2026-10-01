@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 // REQUIRES: peano
-// RUN: %aiecc -j 4 --enable-aie4-vectorization --get-core-elfs --tmpdir %t.prj --output-dir %t.out %s
+// RUN: %aiecc --enable-aie4-vectorization --get-core-elfs --tmpdir %t.prj --output-dir %t.out %s
 // RUN: FileCheck %s --check-prefix=I32 --input-file=%t.prj/opted_main_core_0_2.ll
 // RUN: FileCheck %s --check-prefix=I8 --input-file=%t.prj/opted_main_core_0_3.ll
 // RUN: FileCheck %s --check-prefix=I16 --input-file=%t.prj/opted_main_core_0_4.ll

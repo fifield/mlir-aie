@@ -7,7 +7,7 @@
 // REQUIRES: ryzen_ai_npu3, peano
 //
 // RUN: %run_on_npu3% python %S/approx_math.py -o approx_math.mlir
-// RUN: %aiecc -j 4 --enable-aie4-vectorization --get-full-elf --full-elf-name=approx_math.elf approx_math.mlir
+// RUN: %aiecc --enable-aie4-vectorization --get-full-elf --full-elf-name=approx_math.elf approx_math.mlir
 //
 // Check actual mnemonics; an unknown intrinsic can compile as an external call.
 // RUN: llvm-objdump -dr approx_math.mlir.prj/elfs_main_core_0_2/elfs_main_core_0_2.elf > dis.txt

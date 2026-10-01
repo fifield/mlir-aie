@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 // REQUIRES: peano
-// RUN: %aiecc -j 4 --get-core-elfs --tmpdir %t.prj --output-dir %t.out %s
+// RUN: %aiecc --get-core-elfs --tmpdir %t.prj --output-dir %t.out %s
 // RUN: FileCheck %s --check-prefix=LLVM --input-file=%t.prj/opted_main_core_0_2.ll
 // RUN: llvm-objdump -d %t.out/elfs_main_core_0_2/elfs_main_core_0_2.elf | FileCheck %s
 

@@ -12,9 +12,9 @@
 // kept, it lowers to llvm.experimental.constrained.fptrunc and llc aborts.
 //
 // REQUIRES: peano
-// RUN: %aiecc -j 4 --get-core-elfs --tmpdir %t.prj --output-dir %t.out %s
+// RUN: %aiecc --get-core-elfs --tmpdir %t.prj --output-dir %t.out %s
 // RUN: llvm-objdump -dr --no-show-raw-insn %t.out/elfs_main_core_0_2/elfs_main_core_0_2.elf | FileCheck %s
-// RUN: %aiecc -j 4 --unified --get-core-elfs --tmpdir %t.uprj --output-dir %t.uout %s
+// RUN: %aiecc --unified --get-core-elfs --tmpdir %t.uprj --output-dir %t.uout %s
 // RUN: llvm-objdump -dr --no-show-raw-insn %t.uout/elfs_main_core_0_2/elfs_main_core_0_2.elf | FileCheck %s
 
 // The core function is aliased to main in the ELF.

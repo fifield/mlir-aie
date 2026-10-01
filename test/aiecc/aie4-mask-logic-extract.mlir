@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 // REQUIRES: peano
-// RUN: %aiecc -j 4 --enable-aie4-vectorization --get-core-elfs --tmpdir %t.prj --output-dir %t.out %s
+// RUN: %aiecc --enable-aie4-vectorization --get-core-elfs --tmpdir %t.prj --output-dir %t.out %s
 // RUN: FileCheck %s --check-prefixes=CHECK,I8 --implicit-check-not='extractelement <64 x i1>' --input-file=%t.prj/peano-compat_main_core_0_2.ll
 // RUN: FileCheck %s --check-prefixes=CHECK,I16 --implicit-check-not='extractelement <64 x i1>' --input-file=%t.prj/peano-compat_main_core_0_3.ll
 

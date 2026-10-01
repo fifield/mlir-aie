@@ -9,7 +9,7 @@
 //
 // REQUIRES: peano
 //
-// RUN: not %aiecc -j 4 --get-core-elfs --tmpdir %t.prj --output-dir %t.out %s 2>&1 | FileCheck %s
+// RUN: not %aiecc --get-core-elfs --tmpdir %t.prj --output-dir %t.out %s 2>&1 | FileCheck %s
 
 // CHECK: LLVM ERROR: unable to legalize instruction:{{.*}}G_SHL
 

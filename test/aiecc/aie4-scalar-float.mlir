@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 // REQUIRES: peano
-// RUN: %aiecc -j 4 --enable-aie4-vectorization --get-core-elfs --tmpdir %t.prj --output-dir %t.out %s
+// RUN: %aiecc --enable-aie4-vectorization --get-core-elfs --tmpdir %t.prj --output-dir %t.out %s
 // RUN: FileCheck %s --input-file=%t.prj/peano-compat_main_core_0_2.ll
 // CHECK-DAG: fadd float
 // CHECK-DAG: fsub float
