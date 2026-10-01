@@ -11,6 +11,7 @@
 // --timeout bounds ctest itself; each test also carries its own TIMEOUT.
 //
 // REQUIRES: ryzen_ai, peano, cmake_examples
+// UNSUPPORTED: ryzen_ai_npu3
 //
 // RUN: cmake -G Ninja -S %S -B %t.cmake -DAIE_DEVICE=%aie_cmake_device% -DTARGET_NAME=vector_reduce_min -DPython3_EXECUTABLE=%python
 // RUN: cmake --build %t.cmake
