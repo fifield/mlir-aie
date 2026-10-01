@@ -18,7 +18,7 @@
 srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 
 include ${srcdir}/../../makefile-common
-VPATH := ${srcdir}/../../../aie_kernels/generic
+VPATH := ${srcdir}/../../../aie_kernels/eltwise
 
 SHELL := /bin/bash
 

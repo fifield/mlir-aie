@@ -34,6 +34,14 @@
 #define AIE_HAS_BFP16 1
 #define AIE_HAS_CTZ_POPCOUNT 1
 #define AIE_LUT_16B_RUN 16
+#elif __AIE_ARCH__ == 42
+// AIE4 (npu3). Only the arch flags: the capability macros above are left
+// undefined until they are known for AIE4, so a kernel that queries one fails
+// to build instead of silently assuming another architecture's value. The
+// kernels built for it (aie_kernels/aie4, passThrough) use none. It is not in
+// ARCH_TRAITS (no IRON factories), so test_arch_traits does not check this row.
+#define AIE_ARCH_AIE2 0
+#define AIE_ARCH_AIE2P 0
 #else
 #error "aie_kernels: no row for this __AIE_ARCH__ in aie_arch.h"
 #endif

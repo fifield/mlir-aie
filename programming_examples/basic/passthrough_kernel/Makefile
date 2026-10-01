@@ -19,7 +19,7 @@
 srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 
 include ${srcdir}/../../makefile-common
-VPATH := ${srcdir}/../../../aie_kernels/generic
+VPATH := ${srcdir}/../../../aie_kernels/eltwise
 
 targetname = passthrough_kernel
 in1_size = 4096 # in bytes (also element count, since the kernel is uint8)
