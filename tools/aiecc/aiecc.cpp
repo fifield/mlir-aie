@@ -2456,8 +2456,15 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
   //
   // If the control packet lowering is not enabled, the empty `noCtrlPktSeqs`
   // edge is fed into the full ELF assembly bundle.
+  //
+  // Hand-written packets are lowered to DMA by `ctrlpkt_to_dma`, so reading
+  // them off `npuExpanded` (which is past that lowering here) would find none.
+  // Extract from the module just before it, where the sequence still has the
+  // `aiex.control_packet` ops and its pre-lowering argument count.
+  EdgeWithTypedOutput<ModRef> &ctrlPktSource =
+      userCtrlPkt ? npuMaterialized : npuExpanded;
   auto &ctrlPktExpandedPerSeq =
-      npuExpanded.split<OpInModule<RuntimeSequenceOp>>(
+      ctrlPktSource.split<OpInModule<RuntimeSequenceOp>>(
           "ctrlpkt_expanded_seq_{0}.mlir",
           SplitIRAction<RuntimeSequenceOp>([](RuntimeSequenceOp s) {
             return npuSeqKey(s->getParentOfType<DeviceOp>().getSymName(),
