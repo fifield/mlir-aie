@@ -41,10 +41,15 @@ jobs:
       XDG_CACHE_HOME: /scratch/github/actions-runner/_work/_temp/xdg-cache
       PIP_CACHE_DIR: /scratch/github/actions-runner/_work/_temp/pip-cache
       CCACHE_DIR: /scratch/github/actions-runner/_cache/ccache
+      # The workspace is on the runner's local /scratch volume. Checkout
+      # cleans this cache between runs instead of reusing the NFS home cache.
+      NPU_CACHE_HOME: ${{ github.workspace }}/.npu-cache
+      IRON_CACHE_HOME: ${{ github.workspace }}/.npu-cache
 
     steps:
       - uses: actions/checkout@v4
         with:
+          clean: true
           submodules: recursive
 
       - name: Install and Pull Git LFS
@@ -55,7 +60,7 @@ jobs:
 
       - name: Setup Python venv and dependencies
         run: |
-          mkdir -p "$TMPDIR" "$PIP_CACHE_DIR"
+          mkdir -p "$TMPDIR" "$PIP_CACHE_DIR" "$NPU_CACHE_HOME"
           python3.12 -m venv aie-venv
           source aie-venv/bin/activate
           python -m pip install --upgrade pip

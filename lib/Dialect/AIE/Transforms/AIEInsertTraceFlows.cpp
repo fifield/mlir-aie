@@ -1281,6 +1281,12 @@ private:
       }
     });
 
+    // Object FIFOs use ordinary S2MM channels, not the dedicated trace DMA
+    // engine. Keep the trace-engine claims collected above, but do not add
+    // ordinary object-FIFO channel reservations to them.
+    if (direction != DMAChannelDir::S2MM)
+      return used;
+
     // This pass runs before objectFifo lowering, so an objectFifo that ends
     // at a shim has no flow yet. Claim what its lowering will: every
     // consumer pin first, then the lowest free S2MM channel for each
