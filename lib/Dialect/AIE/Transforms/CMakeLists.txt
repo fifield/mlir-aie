@@ -75,4 +75,5 @@ add_mlir_dialect_library(
   MLIRSCFTransforms
   MLIRTransformUtils
   MLIRFuncDialect
-  MLIRMemRefUtils)
+  MLIRMemRefUtils
+  MLIRAIEVecDialect)
