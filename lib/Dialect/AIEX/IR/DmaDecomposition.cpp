@@ -59,12 +59,19 @@ int64_t maxLegalInputSizeForDim(const AIE::AIETargetModel &tm, int col, int row,
 bool strideFitsStepField(const AIE::AIETargetModel &tm, Operation *forOp,
                          BaseMemRefType bufType, int col, int row,
                          const NdDmaPattern &pattern, unsigned d) {
-  SmallVector<int64_t, kNdDmaDims> hwSizes(kNdDmaDims);
-  SmallVector<int64_t, kNdDmaDims> hwStrides(kNdDmaDims);
-  getHardwareStridesWraps(tm, forOp, bufType, pattern.sizes, pattern.strides,
-                          hwSizes, hwStrides);
+  // Map the 4-slot [d0, d1, d2, iteration] pattern onto the 5-slot
+  // [d0, d1, d2, d3, iteration] layout, as in patternPassesVerification.
+  SmallVector<int64_t, 5> sizes = {pattern.sizes[0], pattern.sizes[1],
+                                   pattern.sizes[2], 1, pattern.sizes[3]};
+  SmallVector<int64_t, 5> strides = {pattern.strides[0], pattern.strides[1],
+                                     pattern.strides[2], 0,
+                                     pattern.strides[3]};
+  SmallVector<int64_t, 5> hwSizes(5);
+  SmallVector<int64_t, 5> hwStrides(5);
+  getHardwareStridesWraps(tm, forOp, bufType, sizes, strides, hwSizes,
+                          hwStrides);
   uint32_t stepBits = tm.getDmaBdStepBits(col, row);
-  return hwStrides[d] <= (1LL << stepBits) - 1;
+  return hwStrides[d == 3 ? 4 : d] <= (1LL << stepBits) - 1;
 }
 
 /// Enumerate divisors b of n in descending order (largest inner factor first).
