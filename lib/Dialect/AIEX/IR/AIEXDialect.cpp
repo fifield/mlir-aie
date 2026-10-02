@@ -139,10 +139,10 @@ void AIEX::normalizeMemcpyNdDimVector(llvm::SmallVectorImpl<int64_t> &values,
   where addressGranularity == transfer granularity in hardware, which is
                               4 bytes for all current hardware
 
-  Note: before AIE4, strides are expressed offset by one from user input strides,
-  because the hardware does not support a 0 stride (repeat). AIE4 programmable
-  step fields are actual values. AIE4 has no D0_Stepsize field; D0 is implied
-  contiguous.
+  Note: before AIE4, strides are expressed offset by one from user input
+  strides, because the hardware does not support a 0 stride (repeat). AIE4
+  programmable step fields are actual values. AIE4 has no D0_Stepsize field; D0
+  is implied contiguous.
   */
 void AIEX::getHardwareStridesWraps(const AIE::AIETargetModel &targetModel,
                                    mlir::Operation *op,
@@ -174,31 +174,10 @@ void AIEX::getHardwareStridesWraps(const AIE::AIETargetModel &targetModel,
 
   // d0_size, d0_stride
   sizes[0] = inputSizes[0] * elemWidth / addressGranularity;
-  if (isAIE4) {
-    // AIE4 has no D0_Stepsize field; hardware always uses contiguous D0
-    // accesses. Verification rejects any non-contiguous D0 stride that would
-    // actually be applied.
-    strides[0] = 0;
-  } else if (inputStrides[0] * elemWidth < addressGranularity ||
-      (elemWidth > addressGranularity)) {
-    // First check:
-    // While the hardware cannot transfer less than addressGranularity bits at
-    // a time, the user may expresses a contiguous transfer of multiple
-    // elements with a stride smaller than addressGranularity. We can thus set
-    // the stride to 1 (encoded in hardware as 0) here to allow such transfers.
-    // The verification function should ensure that
-    //    inputStrides[0] * elemWidth < addressGranularity
-    //    iff. inputSize[0] * elemWidth > addressGranularity.
-    // Second check:
-    // If the element width is larger than addressGranularity, we need to make
-    // sure that all bytes are properly copied and therefore the stride must be
-    // set to 1 (encoded in hardware as 0).
-    // The verification function should ensure that
-    //     inputStrides[0] * elemWidth % addressGranularity == 0
-    //     && inputStrides[0] == 1 if elemWidth > addressGranularity
-    // This makes it impossible to have a stride greater than 1 for
-    // elemWidths bigger than addressGranularity, even if they are a multiple of
-    // it. Such operations should make use of an additional dimension instead.
+  // AIE4 implies contiguous D0 addressing. Earlier hardware also uses its
+  // zero encoding for sub-granule strides and elements wider than a granule.
+  if (isAIE4 || inputStrides[0] * elemWidth < addressGranularity ||
+      elemWidth > addressGranularity) {
     strides[0] = 0;
   } else {
     strides[0] =
@@ -746,43 +725,75 @@ LogicalResult AIEX::NpuDmaMemcpyNdOp::verifyDynamicSizesStrides(
   DataLayout dataLayout = DataLayout::closest(getOperation());
   uint64_t elemWidth = dataLayout.getTypeSizeInBits(buffer.getElementType());
   uint32_t gran = targetModel.getAddressGenGranularity();
-  llvm::SmallVector<mlir::OpFoldResult, 4> sizesRev(llvm::reverse(sizes));
-  auto checkSize = [&](mlir::OpFoldResult ofr, int64_t hwVal, int64_t hi,
+  bool isAIE4 = isa<AIE::AIE4TargetModel>(targetModel);
+  llvm::SmallVector<mlir::OpFoldResult, 5> sizesRev(llvm::reverse(sizes));
+  llvm::SmallVector<mlir::OpFoldResult, 5> stridesRev(llvm::reverse(strides));
+  Builder builder(getContext());
+  normalizeMixedBdDimVector(sizesRev, builder.getI64IntegerAttr(1));
+  normalizeMixedBdDimVector(stridesRev, builder.getI64IntegerAttr(0));
+  auto checkSize = [&](int dim, int64_t hwVal, int64_t hi,
                        llvm::StringRef what) -> LogicalResult {
-    if (!getConstantIntValue(ofr))
+    if (!getConstantIntValue(sizesRev[dim]))
       return success();
     if (hwVal < 0 || hwVal > hi)
       return emitOpError(what) << " hardware value " << hwVal
                                << " exceeds hardware range [0:" << hi << "].";
     return success();
   };
-  auto hwSize = [&](mlir::OpFoldResult ofr) {
-    return getConstantIntValue(ofr).value_or(0);
+  auto hwSize = [&](int dim) {
+    return getConstantIntValue(sizesRev[dim]).value_or(0);
   };
-  int64_t d0Hw = (int64_t)(hwSize(sizesRev[0]) * elemWidth / gran);
-  int64_t d1Hw = hwSize(sizesRev[1]);
-  int64_t iterRaw = hwSize(sizesRev[3]);
-  int64_t iterHw = iterRaw > 1 ? iterRaw - 1 : 0;
-  std::optional<int64_t> outerStride = getConstantIntValue(strides.front());
+  if (!isAIE4 && sizes.size() == 5 &&
+      (!getConstantIntValue(sizesRev[3]) || hwSize(3) > 1))
+    return emitOpError("D3 addressing is not supported on this shim tile.");
+  if (isAIE4)
+    if (auto d0Stride = getConstantIntValue(stridesRev[0]);
+        d0Stride && *d0Stride != 1)
+      return emitOpError("AIE4 D0 stride is fixed by hardware and must be 1.");
+  bool knownLinear = false;
+  if (llvm::all_of(
+          sizesRev,
+          [](OpFoldResult v) { return getConstantIntValue(v).has_value(); }) &&
+      llvm::all_of(stridesRev, [](OpFoldResult v) {
+        return getConstantIntValue(v).has_value();
+      })) {
+    auto constantSizes = llvm::map_to_vector(
+        sizesRev, [](OpFoldResult v) { return *getConstantIntValue(v); });
+    auto constantStrides = llvm::map_to_vector(
+        stridesRev, [](OpFoldResult v) { return *getConstantIntValue(v); });
+    knownLinear = isContiguousTransfer(constantSizes, constantStrides);
+  }
+  std::optional<int64_t> outerStride = getConstantIntValue(stridesRev[4]);
   bool pureRepeat = outerStride && *outerStride == 0;
   AIE::AIETileType tileType =
       targetModel.getTileType(tile.getCol(), tile.getRow());
   int64_t wrapMax = (1LL << targetModel.getDmaBdWrapBits(tileType)) - 1;
+  int64_t stepMax = (1LL << targetModel.getDmaBdStepBits(tileType)) - 1;
   int64_t maxCount = pureRepeat ? targetModel.getMaxRepeatCount() + 1
                                 : 1LL << targetModel.getDmaBdIterBits(tileType);
-  if (failed(checkSize(sizesRev[0], d0Hw, wrapMax, "d0 size")) ||
-      failed(checkSize(sizesRev[1], d1Hw, wrapMax, "d1 size")) ||
-      failed(checkSize(sizesRev[3], iterHw, maxCount - 1,
+  int64_t iterRaw = hwSize(4);
+  if ((!knownLinear && failed(checkSize(0, hwSize(0) * elemWidth / gran,
+                                        wrapMax, "d0 size"))) ||
+      (!knownLinear && failed(checkSize(1, hwSize(1), wrapMax, "d1 size"))) ||
+      (!knownLinear && isAIE4 && sizes.size() == 5 &&
+       failed(checkSize(2, hwSize(2), wrapMax, "d2 size"))) ||
+      failed(checkSize(4, iterRaw > 1 ? iterRaw - 1 : 0, maxCount - 1,
                        pureRepeat ? "repeat count" : "iteration size")))
     return failure();
-
-  // Realizability of the CONSTANT size/stride operands (divisibility +
-  // positivity, innermost-first). Runtime operands get a host-side check at
-  // lowering time. Shared with the dma_task path.
-  llvm::SmallVector<mlir::OpFoldResult, 4> stridesRev(llvm::reverse(strides));
   if (failed(verifyConstBdRealizability(getOperation(), sizesRev, stridesRev,
                                         elemWidth, gran)))
     return failure();
+  for (int i = 0; i < 5; ++i) {
+    auto stride = getConstantIntValue(stridesRev[i]);
+    auto size = getConstantIntValue(sizesRev[i]);
+    if (!stride || !size || *size <= 1 || (i == 4 && *stride == 0) ||
+        (isAIE4 && i == 0))
+      continue;
+    int64_t step = *stride * elemWidth / gran - (isAIE4 ? 0 : 1);
+    if (step > stepMax)
+      return emitOpError("stride ")
+             << i << " exceeds the hardware field range.";
+  }
 
   // Runtime fields are checked at dispatch instead; see buildBdWords.
 
@@ -1122,7 +1133,8 @@ LogicalResult AIEX::NpuWriteBdOp::verify() {
   // encoded range for a B-bit field is [0, 2^B - 1]. The widths are per tile
   // class and per generation, so take them from the target model rather than
   // a flat per-arch constant: an AIE2 core tile has an 8-bit wrap where the
-  // mem tile has 10, and AIE4 widens both according to the architecture specification.
+  // mem tile has 10, and AIE4 widens both according to the architecture
+  // specification.
   AIE::AIETileType tileType = targetModel.getTileType(getColumn(), getRow());
   uint32_t wrapBits = targetModel.getDmaBdWrapBits(tileType);
   uint32_t stepBits = targetModel.getDmaBdStepBits(tileType);

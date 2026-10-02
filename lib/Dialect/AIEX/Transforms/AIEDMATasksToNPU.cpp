@@ -606,6 +606,161 @@ struct AIEDMATasksToNPUPass
     return f;
   }
 
+  // The dynamic (runtime-valued) lowering of one BD on an AIE4 shim tile.
+  // Five-entry layouts are [iteration, d3, d2, d1, d0]; the legacy four-entry
+  // convention is [iteration, d2, d1, d0], and smaller task patterns describe
+  // the lowest addressing dimensions.
+  LogicalResult rewriteSingleBDDynamicAIE4(OpBuilder &builder,
+                                           AIE::DMABDOp bd_op,
+                                           AIE::TileOp &tile, int channel,
+                                           AIE::DMAChannelDir channelDir,
+                                           const BdTemplateFields &f,
+                                           OpFoldResult bdIdOfr) {
+    const auto &target_model = AIE::getTargetModel(bd_op);
+    Location loc = bd_op.getLoc();
+    int col = tile.getCol();
+    int row = tile.getRow();
+    if (!target_model.isShimNOCTile(col, row))
+      return bd_op->emitOpError(
+          "runtime-valued BDs are only supported on AIE4 shim NOC tiles.");
+    auto i32ty = builder.getIntegerType(32);
+
+    SmallVector<OpFoldResult> sizes(bd_op.getMixedSizes());
+    SmallVector<OpFoldResult> strides(bd_op.getMixedStrides());
+    if (sizes.size() > 5 || strides.size() > 5)
+      return bd_op->emitOpError("At most five data layout transformation "
+                                "dimensions may be provided.");
+    OpFoldResult one = builder.getI64IntegerAttr(1);
+    OpFoldResult zeroOfr = builder.getI64IntegerAttr(0);
+    size_t rank = sizes.size() == 5 ? 5 : 4;
+    SmallVector<OpFoldResult> sizesN(rank, one), stridesN(rank, zeroOfr);
+    for (size_t i = 0; i < sizes.size(); i++) {
+      sizesN[rank - sizes.size() + i] = sizes[i];
+      stridesN[rank - strides.size() + i] = strides[i];
+    }
+    if (std::optional<AIE::BDIterationAttr> iter = bd_op.getIteration()) {
+      sizesN.front() = builder.getI64IntegerAttr(iter->getSize());
+      stridesN.front() = builder.getI64IntegerAttr(iter->getStride());
+    }
+
+    // buffer_length = len (elements) * elemWidth / addressGranularity.
+    uint64_t elemWidth =
+        static_cast<uint64_t>(bd_op.getBufferElementTypeWidthInBytes()) * 8;
+    uint32_t gran = target_model.getAddressGenGranularity();
+    OpFoldResult lenOfr;
+    if (Value lenOperand = bd_op.getLen())
+      lenOfr = lenOperand;
+    else if (std::optional<int32_t> constLen = bd_op.getConstantLen())
+      lenOfr = builder.getI32IntegerAttr(*constLen);
+    else
+      return bd_op->emitOpError(
+          "runtime-valued BD requires an explicit transfer length; provide a "
+          "`len` for this buffer descriptor.");
+    if (auto len = getConstantIntValue(lenOfr)) {
+      if (*len <= 0 || !isConstMultipleOfGranule(*len, elemWidth, gran))
+        return bd_op->emitOpError("transfer length must be positive and a "
+                                  "multiple of the address-gen granule.");
+    }
+    Value len64 = getAsI64(builder, loc, lenOfr);
+    if (!len64)
+      return failure();
+    auto cst64 = [&](uint64_t c) {
+      return arith::ConstantOp::create(builder, loc,
+                                       builder.getI64IntegerAttr((int64_t)c));
+    };
+    auto cmp = [&](arith::CmpIPredicate pred, Value a, Value b) {
+      return builder.createOrFold<arith::CmpIOp>(loc, pred, a, b);
+    };
+    int64_t scaleGcd = std::gcd(elemWidth, (uint64_t)gran);
+    int64_t lengthScale = elemWidth / scaleGcd;
+    if (failed(emitRuntimeCheck(
+            builder, loc,
+            builder.createOrFold<arith::AndIOp>(
+                loc, cmp(arith::CmpIPredicate::ugt, len64, cst64(0)),
+                cmp(arith::CmpIPredicate::ule, len64,
+                    cst64(UINT32_MAX / lengthScale))),
+            "a runtime DMA length must be positive and fit the BD "
+            "buffer_length")))
+      return failure();
+    if (int64_t divisor = bdGranuleDivisor(elemWidth, gran); divisor > 1)
+      if (failed(
+              emitRuntimeCheck(builder, loc,
+                               cmp(arith::CmpIPredicate::eq,
+                                   builder.createOrFold<arith::RemUIOp>(
+                                       loc, len64, cst64(divisor)),
+                                   cst64(0)),
+                               "a runtime DMA length must be a multiple of " +
+                                   Twine(divisor) + " elements")))
+        return failure();
+    Value bufLen = builder.createOrFold<arith::TruncIOp>(
+        loc, i32ty,
+        builder.createOrFold<arith::DivUIOp>(
+            loc,
+            builder.createOrFold<arith::MulIOp>(loc, len64, cst64(lengthScale)),
+            cst64(gran / scaleGcd)));
+
+    if (!sizes.empty()) {
+      // The addressing extent must equal the length. The leading entry is
+      // iteration only for the four/five-entry forms.
+      size_t addressRank = sizes.size() >= 4 ? sizes.size() - 1 : sizes.size();
+      Value extent = cst64(1);
+      for (size_t i = sizes.size() - addressRank; i < sizes.size(); ++i) {
+        Value size = getAsI64(builder, loc, sizes[i]);
+        if (!size)
+          return failure();
+        Value safeSize = builder.createOrFold<arith::SelectOp>(
+            loc, cmp(arith::CmpIPredicate::ugt, size, cst64(0)), size,
+            cst64(1));
+        Value limit = builder.createOrFold<arith::DivUIOp>(
+            loc, cst64(INT32_MAX), safeSize);
+        if (failed(emitRuntimeCheck(
+                builder, loc, cmp(arith::CmpIPredicate::ule, extent, limit),
+                "BD addressing extent exceeds the transfer length range")))
+          return failure();
+        extent = builder.createOrFold<arith::MulIOp>(loc, extent, size);
+      }
+      if (failed(emitRuntimeCheck(builder, loc,
+                                  cmp(arith::CmpIPredicate::eq, extent, len64),
+                                  "BD length does not match the addressing "
+                                  "extent")))
+        return failure();
+    } else {
+      sizesN.clear();
+      stridesN.clear();
+    }
+
+    // The BD-level repeat_count (encoder output) is unused here: the dma_task
+    // queue push is emitted separately by DMAStartTaskOpPattern from the task
+    // op's repeat_count, not the BD's outer dim.
+    SmallVector<Value> bdWords;
+    Value bdRepeatCount;
+    if (failed(buildAIE4ShimBdWords(builder, loc, target_model, f, sizesN,
+                                    stridesN, elemWidth, bd_op.getBurstLength(),
+                                    bufLen, bdRepeatCount, bdWords,
+                                    /*emitD2Wrap=*/rank == 5)))
+      return failure();
+
+    // The walk must stay inside the host buffer it reads or writes.
+    if (auto trace = traceSubviewToBlockArgument(bd_op.getBuffer())) {
+      OpFoldResult offsetOfr =
+          bd_op.getOffset() ? OpFoldResult(bd_op.getOffset())
+                            : OpFoldResult(builder.getI32IntegerAttr(
+                                  bd_op.getConstantOffset().value_or(0)));
+      if (failed(guardWithinHostBuffer(
+              builder, loc, cast<BaseMemRefType>(trace->rootArg.getType()),
+              trace->offsetInBytes, elemWidth / 8, {offsetOfr}, {one}, sizesN,
+              stridesN)))
+        return failure();
+    }
+
+    // One blockwrite carries the whole register block for BD configuration.
+    Value bdBase = getBdRegisterBase(builder, loc, target_model, col, row,
+                                     bdIdOfr, channel, channelDir);
+    NpuBlockWriteValuesOp::create(builder, loc, bdBase, bdWords);
+    return setAddressForSingleBD(builder, bd_op, tile, channel, channelDir,
+                                 bdIdOfr);
+  }
+
   // Dynamic (runtime SSA size/stride/len/bd_id) BD lowering, the dma_task
   // sibling of DmaToNpuPattern::lowerDynamic. Reaching this function at all
   // means the design targets the EmitC (C++ TXN) builder, never the static
@@ -645,6 +800,12 @@ struct AIEDMATasksToNPUPass
                            "verifyBdInBlock before lowering)");
       bdIdOfr = builder.getI32IntegerAttr(*staticBdId);
     }
+
+    // AIE4 has no modeled DmaBdLayout, so its shim BDs (with their D3
+    // addressing dimension) are encoded by a dedicated builder.
+    if (isa<AIE::AIE4TargetModel>(target_model))
+      return rewriteSingleBDDynamicAIE4(builder, bd_op, tile, channel,
+                                        channelDir, f, bdIdOfr);
 
     // Normalize sizes/strides to a 4-element outermost-first mixed list (the
     // shared emitter's contract, matching memcpy_nd's always-4D operands),
@@ -984,12 +1145,18 @@ struct AIEDMATasksToNPUPass
         if (AIE::isMM2S(channelDir)) {
           for (size_t i = 0; i < padDims->size(); i++) {
             int j = padDims->size() - i - 1;
+            // Only D0..D2 have padding registers. A five-entry task layout
+            // also contains D3 and iteration; accept their zero placeholders
+            // without indexing the fixed hardware padding arrays.
+            if (i >= 3) {
+              if ((*padDims)[j].getConstPadBefore() != 0 ||
+                  (*padDims)[j].getConstPadAfter() != 0)
+                return bd_op->emitOpError(
+                    "Padding is only supported for D0, D1 and D2.");
+              continue;
+            }
             padBefore[i] = (*padDims)[j].getConstPadBefore();
             padAfter[i] = (*padDims)[j].getConstPadAfter();
-          }
-          for (size_t i = padDims->size(); i < dims->size(); i++) {
-            padBefore[i] = 0;
-            padAfter[i] = 0;
           }
         } else
           return bd_op->emitOpError()

@@ -743,12 +743,35 @@ public:
     // encoder returns the hw repeat_count for the queue push.
     SmallVector<Value> words;
     Value repeatCount;
-    if (failed(buildBdWords(rewriter, loc, targetModel, tileCol, tileRow,
-                            fields, op.getMixedSizes(), op.getMixedStrides(),
-                            op.getElementTypeBitwidth(), op.getBurstLength(),
-                            op.getAxcacheOrDefault(),
-                            /*lenElems=*/OpFoldResult(), repeatCount, words)))
-      return failure();
+    if (isa<AIE::AIE4TargetModel>(targetModel)) {
+      // AIE4 has no modeled DmaBdLayout; its shim BD (with a D3 addressing
+      // dimension) has a dedicated builder that takes the variadic pattern.
+      if (failed(buildAIE4ShimBdWords(
+              rewriter, loc, targetModel, fields, op.getMixedSizes(),
+              op.getMixedStrides(), op.getElementTypeBitwidth(),
+              op.getBurstLength(), /*bufLenOverride=*/Value(), repeatCount,
+              words)))
+        return failure();
+    } else {
+      // The layout-driven encoder takes the 4-entry [iteration, d2, d1, d0]
+      // form. Pad a shorter pattern, and drop the D3 slot of a 5-entry one,
+      // which the verifier has already required to be a no-op here.
+      SmallVector<OpFoldResult, 5> sizesRev(llvm::reverse(op.getMixedSizes()));
+      SmallVector<OpFoldResult, 5> stridesRev(
+          llvm::reverse(op.getMixedStrides()));
+      normalizeMixedBdDimVector(sizesRev, rewriter.getI64IntegerAttr(1));
+      normalizeMixedBdDimVector(stridesRev, rewriter.getI64IntegerAttr(0));
+      SmallVector<OpFoldResult, 4> sizes4 = {sizesRev[4], sizesRev[2],
+                                             sizesRev[1], sizesRev[0]};
+      SmallVector<OpFoldResult, 4> strides4 = {stridesRev[4], stridesRev[2],
+                                               stridesRev[1], stridesRev[0]};
+      if (failed(buildBdWords(rewriter, loc, targetModel, tileCol, tileRow,
+                              fields, sizes4, strides4,
+                              op.getElementTypeBitwidth(), op.getBurstLength(),
+                              op.getAxcacheOrDefault(),
+                              /*lenElems=*/OpFoldResult(), repeatCount, words)))
+        return failure();
+    }
     Value bdBase =
         getBdRegisterBase(rewriter, loc, targetModel, tileCol, tileRow,
                           rewriter.getI32IntegerAttr(op.getId()),

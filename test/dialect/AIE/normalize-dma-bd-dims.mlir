@@ -6,8 +6,9 @@
 //===----------------------------------------------------------------------===//
 //
 // Tests for AIENormalizeDmaBdDims: strips size-1 degenerate dimensions from
-// DMABDOp and, when the result is contiguous, linearizes the BD to scalar
-// (len-only) form.
+// static tile DMABDOp layouts and, when the result is contiguous, linearizes
+// the BD to scalar (len-only) form. Runtime task/chain layouts are covered by
+// normalize-runtime-dma-bd-dims.mlir.
 //
 //===----------------------------------------------------------------------===//
 

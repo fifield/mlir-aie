@@ -665,4 +665,233 @@ buildBdWords(OpBuilder &builder, Location loc,
   return success();
 }
 
+LogicalResult buildAIE4ShimBdWords(
+    OpBuilder &builder, Location loc, const AIE::AIETargetModel &targetModel,
+    const BdTemplateFields &f, ArrayRef<OpFoldResult> mixedSizes,
+    ArrayRef<OpFoldResult> mixedStrides, uint64_t elemWidth,
+    uint32_t burstLength, Value bufLenOverride, Value &repeatCountOut,
+    SmallVectorImpl<Value> &wordsOut, bool emitD2Wrap) {
+  assert(isa<AIE::AIE4TargetModel>(targetModel) &&
+         "buildAIE4ShimBdWords called for a non-AIE4 target");
+  auto i32ty = builder.getIntegerType(32);
+  if (f.next_bd_id_val || f.lock_rel_val_val || f.lock_acq_val_val)
+    return emitError(loc, "runtime next_bd and lock values are not supported "
+                          "on AIE4 shim BDs.");
+
+  // AIE4 shim BD field widths: 12-bit D0..D2 wraps, 22-bit steps, 6-bit
+  // iteration wrap.
+  constexpr uint64_t kWrapMax = 4095, kStepMax = 0x3fffff, kIterWrapMax = 63;
+  uint32_t gran = targetModel.getAddressGenGranularity();
+  uint64_t ew = elemWidth;
+  GuardBuilder g{builder, loc};
+
+  SmallVector<OpFoldResult, 5> sizesRev(llvm::reverse(mixedSizes));
+  SmallVector<OpFoldResult, 5> stridesRev(llvm::reverse(mixedStrides));
+  normalizeMixedBdDimVector(sizesRev, builder.getI64IntegerAttr(1));
+  normalizeMixedBdDimVector(stridesRev, builder.getI64IntegerAttr(0));
+
+  Value inS[5], inT[5];
+  for (int i = 0; i < 5; i++) {
+    inS[i] = getAsI64(builder, loc, sizesRev[i]);
+    inT[i] = getAsI64(builder, loc, stridesRev[i]);
+    if (!inS[i] || !inT[i])
+      return failure();
+  }
+
+  // Every operand must stay inside the range the scaled 32-bit fields can
+  // represent, so an out-of-range value never aliases a small hardware field.
+  // A stride is only checked where its size > 1 (it is never applied
+  // otherwise).
+  uint64_t scale = ew / std::gcd(ew, (uint64_t)gran);
+  uint64_t operandMax = (uint64_t)UINT32_MAX / scale;
+  for (int i = 0; i < 5; ++i) {
+    if (failed(g.check(g.inRange1(inS[i], operandMax),
+                       "a runtime AIE4 shim DMA d" + Twine(i) +
+                           " size must be in [1:" + Twine(operandMax) + "]")))
+      return failure();
+    Value strideOk = g.ule(inT[i], operandMax);
+    if (i != 0)
+      strideOk = g.either(g.ule(inS[i], 1), strideOk);
+    if (failed(g.check(strideOk, "a runtime AIE4 shim DMA d" + Twine(i) +
+                                     " stride exceeds the hardware range")))
+      return failure();
+  }
+
+  // AIE4 has no D0_Stepsize field: D0 is always contiguous.
+  if (!mixedSizes.empty() &&
+      failed(g.check(g.eq(inT[0], 1),
+                     "AIE4 D0 stride is fixed by hardware and must be 1.")))
+    return failure();
+
+  // Linear mode: a contiguous transfer (each outer stride == product of inner
+  // sizes) folds D0..D3 into buffer_length, dodging the 12-bit wrap limits. A
+  // runtime operand needed for the test falls back to ND mode.
+  auto knownContiguous = [&]() -> bool {
+    auto s0 = getConstantIntValue(stridesRev[0]);
+    if (!s0 || *s0 != 1)
+      return false;
+    std::optional<int64_t> innerProduct = 1;
+    for (int i = 0; i < 4; ++i) {
+      auto sz = getConstantIntValue(sizesRev[i]);
+      auto st = getConstantIntValue(stridesRev[i]);
+      if (i > 0 && (!sz || *sz != 1) &&
+          (!innerProduct || !st || *st != *innerProduct))
+        return false;
+      if (sz && innerProduct)
+        *innerProduct *= *sz;
+      else
+        innerProduct.reset();
+    }
+    return true;
+  };
+  bool isLinear = mixedSizes.empty() || knownContiguous();
+
+  // A stride must be positive where its size > 1; the iteration stride may be
+  // zero (a pure repeat).
+  for (int i = 1; i < 4; ++i)
+    if (failed(g.check(g.either(g.ule(inS[i], 1), g.inRange1(inT[i], ~0ULL)),
+                       "a runtime AIE4 shim DMA d" + Twine(i) +
+                           " stride must be positive when its size > 1")))
+      return failure();
+
+  // A size or stride whose byte extent is not a whole number of granules is
+  // unrealizable (mirrors verifyStridesWraps).
+  int64_t divisor = bdGranuleDivisor(elemWidth, gran);
+  if (divisor > 1) {
+    auto checkMultiple = [&](Value v, const Twine &what) {
+      return g.check(g.multipleOf(v, divisor),
+                     "a runtime DMA " + what + " must be a multiple of " +
+                         Twine(divisor) + " elements (whole " +
+                         Twine(gran / 8) + "-byte granules)");
+    };
+    if (failed(checkMultiple(inS[0], "d0 size")))
+      return failure();
+    for (int i = 1; i < 5; i++)
+      if (failed(checkMultiple(inT[i], i == 4 ? Twine("iteration stride")
+                                              : "d" + Twine(i) + " stride")))
+        return failure();
+  }
+
+  // Compute the hardware sizes/strides via the shared D3 encoder.
+  Value hwS[5], hwT[5];
+  SsaStridePolicy policy(builder, loc);
+  encodeHardwareStridesWrapsD3(policy, elemWidth, gran, /*isAIE4=*/true, inS,
+                               inT, hwS, hwT);
+
+  // Every encoded field must fit. The iteration wrap only matters for an
+  // advancing iteration; a pure repeat is carried by the queue push.
+  for (int i = 0; i < 3; ++i) {
+    bool hasWrap = !isLinear && (i < 2 || emitD2Wrap);
+    if (hasWrap && failed(g.check(g.ule(hwS[i], kWrapMax),
+                                  "a runtime AIE4 shim DMA d" + Twine(i) +
+                                      " size exceeds its 12-bit BD field")))
+      return failure();
+  }
+  uint64_t maxRepeats = targetModel.getMaxRepeatCount() + 1;
+  if (failed(
+          g.check(g.either(g.both(g.eq(inT[4], 0), g.ule(inS[4], maxRepeats)),
+                           g.ule(hwS[4], kIterWrapMax)),
+                  "a runtime AIE4 shim DMA iteration count exceeds the "
+                  "hardware range")))
+    return failure();
+  for (int i = 1; i < 5; ++i) {
+    if (i != 4 && isLinear)
+      continue;
+    if (failed(g.check(g.ule(hwT[i], kStepMax),
+                       "a runtime AIE4 shim DMA d" + Twine(i) +
+                           " stride exceeds its 22-bit BD field")))
+      return failure();
+  }
+
+  // buffer_length is the full D0..D3 extent in granules, computed in i64 with
+  // each step bounded so a runtime product cannot wrap around to a valid BD.
+  Value bufLen = bufLenOverride;
+  if (!bufLen) {
+    uint64_t maxElems = (uint64_t)UINT32_MAX * gran / ew;
+    Value extent = g.cst(1);
+    for (int i = 0; i < 4; ++i) {
+      Value size = inS[i];
+      Value safeSize = builder.createOrFold<arith::SelectOp>(loc, g.eq(size, 0),
+                                                             g.cst(1), size);
+      Value limit =
+          builder.createOrFold<arith::DivUIOp>(loc, g.cst(maxElems), safeSize);
+      if (failed(g.check(g.cmp(arith::CmpIPredicate::ule, extent, limit),
+                         "a runtime AIE4 shim DMA transfer exceeds the "
+                         "32-bit BD buffer_length")))
+        return failure();
+      extent = g.mul(extent, size);
+    }
+    int64_t scaleGcd = std::gcd(ew, (uint64_t)gran);
+    extent = g.mul(extent, g.cst(ew / scaleGcd));
+    extent = builder.createOrFold<arith::DivUIOp>(loc, extent,
+                                                  g.cst(gran / scaleGcd));
+    bufLen = builder.createOrFold<arith::TruncIOp>(loc, i32ty, extent);
+  }
+
+  auto asI32 = [&](Value v) {
+    return builder.createOrFold<arith::TruncIOp>(loc, i32ty, v);
+  };
+  Value zero = createConstantI32(builder, loc, 0);
+  Value d0 = isLinear ? zero : asI32(hwS[0]);
+  Value d1 = isLinear ? zero : asI32(hwS[1]);
+  Value d2 = !isLinear && emitD2Wrap ? asI32(hwS[2]) : zero;
+  auto orConst = [&](Value word, uint32_t c) {
+    return builder.createOrFold<arith::OrIOp>(
+        loc, word, createConstantI32(builder, loc, c));
+  };
+
+  wordsOut.assign(9, zero);
+  // word[1] buffer_offset stays 0 (the address patch supplies the pointer).
+  // word[2] buffer_length.
+  wordsOut[2] = bufLen;
+  // word[3] Lock_Acq_ID [31:27], Lock_Acq_Enable [26], Burst_Length [25:24],
+  // D1_Wrap [23:12], D2_Wrap [11:0].
+  wordsOut[3] = orConst(
+      buildBdWord(builder, loc, {{d1, 0xfff, 12}, {d2, 0xfff, 0}}),
+      ((f.lock_acq_id & 0x1f) << 27) | ((f.lock_acq_enable & 1) << 26) |
+          ((AIE::getShimBurstLengthEncoding(targetModel, burstLength) & 3)
+           << 24));
+  // word[4] D0_Wrap [30:19], Lock_Rel_Value [18:12], Lock_Rel_ID [11:7],
+  // Lock_Acq_Value [6:0].
+  wordsOut[4] =
+      orConst(buildBdWord(builder, loc, {{d0, 0xfff, 19}}),
+              ((f.lock_rel_val & 0x7f) << 12) | ((f.lock_rel_id & 0x1f) << 7) |
+                  (f.lock_acq_val & 0x7f));
+  // word[5] Enable_Packet [31], Next_BD [30:27], Use_Next_BD [26],
+  // D1_Stepsize [21:0].
+  wordsOut[5] =
+      orConst(buildBdWord(builder, loc,
+                          {{isLinear ? zero : asI32(hwT[1]), kStepMax, 0}}),
+              ((f.enable_packet & 1u) << 31) | ((f.next_bd_id & 0xf) << 27) |
+                  ((f.use_next_bd & 1) << 26));
+  // word[6] Iteration_Current [29:24], D2_Stepsize [21:0].
+  wordsOut[6] =
+      orConst(buildBdWord(builder, loc,
+                          {{isLinear ? zero : asI32(hwT[2]), kStepMax, 0}}),
+              (f.iteration_current & 0x3f) << 24);
+  // word[7] Iteration_Wrap [27:22], Iteration_Stepsize [21:0]. A zero outer
+  // stride is a pure repeat (carried by repeat_count), so the wrap is gated on
+  // the stride; hwT[4] already collapses to 0.
+  Value iterSize = asI32(policy.selectGT0(inT[4], hwS[4], policy.cst(0)));
+  wordsOut[7] = buildBdWord(
+      builder, loc, {{iterSize, 0x3f, 22}, {asI32(hwT[4]), kStepMax, 0}});
+  // word[8] D3_Stepsize [31:10], Out_Of_Order_BD_ID [8:5], Packet_ID [4:0].
+  wordsOut[8] =
+      orConst(buildBdWord(builder, loc,
+                          {{isLinear ? zero : asI32(hwT[3]), kStepMax, 10}}),
+              ((f.out_of_order_id & 0xf) << 5) | (f.packet_id & 0x1f));
+
+  // repeat_count for the queue push is the biased outer size (N > 1 ? N - 1 :
+  // 0), matching the static path. A constant folds so the static push_queue
+  // lowering can consume it; a runtime size yields the SSA hwS[4].
+  if (auto outerConst = getConstantIntValue(sizesRev[4])) {
+    int64_t r = *outerConst > 1 ? *outerConst - 1 : 0;
+    repeatCountOut =
+        arith::ConstantOp::create(builder, loc, IntegerAttr::get(i32ty, r));
+  } else {
+    repeatCountOut = asI32(hwS[4]);
+  }
+  return success();
+}
+
 } // namespace xilinx::AIEX

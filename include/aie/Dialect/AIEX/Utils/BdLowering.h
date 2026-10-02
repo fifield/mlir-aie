@@ -114,13 +114,13 @@ verifyConstBdRealizability(mlir::Operation *op,
   // there is the pure-repeat case (the BD wraps every iteration, repeat carried
   // by the queue push), matching verifyStridesWraps' dim-3 `< 0` rule. Lists
   // are innermost-first, so d3 is index 3 (present only for a full 4D
-  // descriptor).
+  // descriptor), or index 4 in the five-slot D0..D3 + iteration form.
   //
   // A RUNTIME size does not excuse the stride: the encoder would scale a zero
   // stride to -1, an all-ones step field, so such a stride is only legal when
   // the size is a compile-time 1, the one case where it is never applied. It
   // is rejected here rather than by a host-side check at every dispatch.
-  constexpr int kIterDim = 3;
+  const int kIterDim = sizes.size() == 5 ? 4 : 3;
   for (int i = 0; i < (int)sizes.size() && i < (int)strides.size(); i++) {
     auto sz = mlir::getConstantIntValue(sizes[i]);
     auto st = mlir::getConstantIntValue(strides[i]);
@@ -191,6 +191,59 @@ void encodeHardwareStridesWraps(Policy &p, uint64_t elemWidth,
       inputSizes[3],
       p.selectGT0(inputStrides[3], biasedStride(inputStrides[3]), p.cst(0)),
       p.cst(0));
+}
+
+// Normalize an innermost-first mixed memcpy pattern to D0..D3 + iteration.
+// Four entries retain their historical D0,D1,D2,iteration interpretation.
+inline void
+normalizeMixedBdDimVector(llvm::SmallVectorImpl<mlir::OpFoldResult> &values,
+                          mlir::OpFoldResult padValue) {
+  if (values.size() >= 5)
+    return;
+  if (values.size() <= 1) {
+    values.resize(5, padValue);
+    return;
+  }
+  auto iteration = values.back();
+  values.pop_back();
+  values.resize(4, padValue);
+  values.push_back(iteration);
+}
+
+// Five-slot variant of encodeHardwareStridesWraps for BDs with a D3 addressing
+// dimension, innermost-first D0,D1,D2,D3,iteration. AIE4 steps are actual
+// granule counts; earlier architectures bias them by -1.
+template <typename Policy>
+void encodeHardwareStridesWrapsD3(Policy &p, uint64_t elemWidth,
+                                  uint32_t addressGranularity, bool isAIE4,
+                                  typename Policy::V inputSizes[5],
+                                  typename Policy::V inputStrides[5],
+                                  typename Policy::V sizes[5],
+                                  typename Policy::V strides[5]) {
+  using V = typename Policy::V;
+  auto step = [&](V inStride) -> V {
+    int64_t divisor = std::gcd(elemWidth, (uint64_t)addressGranularity);
+    return p.sub(p.div(p.mul(inStride, elemWidth / divisor),
+                       addressGranularity / divisor),
+                 isAIE4 ? 0 : 1);
+  };
+  int64_t divisor = std::gcd(elemWidth, (uint64_t)addressGranularity);
+  sizes[0] = p.div(p.mul(inputSizes[0], elemWidth / divisor),
+                   addressGranularity / divisor);
+  if (isAIE4 || elemWidth > addressGranularity)
+    strides[0] = p.cst(0);
+  else
+    strides[0] =
+        p.selectLt(inputStrides[0], p.cst(addressGranularity / elemWidth),
+                   p.cst(0), step(inputStrides[0]));
+  for (int i = 1; i < 4; ++i) {
+    sizes[i] = inputSizes[i];
+    strides[i] = p.selectGT1(inputSizes[i], step(inputStrides[i]), p.cst(0));
+  }
+  sizes[4] = p.selectGT1(inputSizes[4], p.sub(inputSizes[4], 1), p.cst(0));
+  strides[4] = p.selectGT1(
+      inputSizes[4],
+      p.selectGT0(inputStrides[4], step(inputStrides[4]), p.cst(0)), p.cst(0));
 }
 
 // Constant (compile-time int64) policy: plain integer arithmetic.
@@ -345,6 +398,32 @@ buildBdWords(mlir::OpBuilder &builder, mlir::Location loc,
              uint64_t elemWidth, uint32_t burstLength, uint32_t axcache,
              mlir::OpFoldResult lenElems, mlir::Value &repeatCountOut,
              llvm::SmallVectorImpl<mlir::Value> &wordsOut);
+
+// Build an AIE4 shim-NOC BD's 9-word register block as i32 SSA values, for the
+// dynamic lowering shared by dma_memcpy_nd and dma_task. AIE4 has no modeled
+// DmaBdLayout, so buildBdWords does not cover it. Every word is written (unset
+// slots are zero), so a BD slot reused from the runtime pool cannot inherit a
+// stale field.
+//
+// `mixedSizes`/`mixedStrides` are outermost-first (iteration, optional D3, D2,
+// D1, D0), matching NpuDmaMemcpyNdOp::getMixedSizes and
+// AIE::DMABDOp::getMixedSizes. `bufLenOverride`, if non-null, becomes
+// buffer_length (word 2). dma_task passes its runtime `len`; dma_memcpy_nd
+// passes null, so buffer_length is the D0*D1*D2*D3 hardware-unit size-product.
+// Runtime values a constant would have had verified at compile time get a
+// host-side check (emitRuntimeCheck). `repeatCountOut` receives the outer-dim
+// hardware repeat for the caller's queue push. `emitD2Wrap` preserves the
+// legacy task convention that omits the shim D2 wrap for four-entry layouts.
+mlir::LogicalResult
+buildAIE4ShimBdWords(mlir::OpBuilder &builder, mlir::Location loc,
+                     const xilinx::AIE::AIETargetModel &targetModel,
+                     const BdTemplateFields &fields,
+                     llvm::ArrayRef<mlir::OpFoldResult> mixedSizes,
+                     llvm::ArrayRef<mlir::OpFoldResult> mixedStrides,
+                     uint64_t elemWidth, uint32_t burstLength,
+                     mlir::Value bufLenOverride, mlir::Value &repeatCountOut,
+                     llvm::SmallVectorImpl<mlir::Value> &wordsOut,
+                     bool emitD2Wrap = true);
 
 } // namespace xilinx::AIEX
 

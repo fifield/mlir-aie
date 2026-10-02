@@ -32,6 +32,15 @@ struct AIENormalizeDmaBdDimsPass
     DeviceOp device = getOperation();
 
     device.walk([&](DMABDOp op) {
+      // Runtime tasks encode iteration in the outermost entry of a four- or
+      // five-entry layout; five entries also select D3 addressing. Removing
+      // singleton entries changes those meanings even when len equals the
+      // product of all sizes. Abstract BD chains use the same convention when
+      // materialized into tasks. Leave both layouts to runtime task lowering.
+      if (op->getParentOfType<RuntimeSequenceOp>() ||
+          op->getParentOfType<BDChainOp>())
+        return;
+
       if (op.getMixedSizes().empty())
         return;
 

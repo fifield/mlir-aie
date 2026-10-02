@@ -420,7 +420,8 @@ def shim_dma_single_bd_task(
         mem: Reference to a host buffer, given as an argument to the sequence function, that this transfer will read from or write to.
         tap (optional): A TensorAccessPattern is an alternative method of specifying offset/sizes/strides for determining an access pattern over the mem buffer.
         offset (optional): Starting point for the data transfer. Default values is 0.
-        sizes: The extent of data to be transferred across each dimension. The dimensions before the last three are iteration dimensions, one execution of the BD per index; past four in all, which must then be constant, the compiler splits the transfer into several BDs.
+        sizes: The extent of data to be transferred across each dimension. The dimensions before the last three are iteration dimensions, one execution of the BD per index; past four in all, which must then be constant, the compiler splits the transfer into several BDs. On an
+            AIE4 shim a five-entry pattern is [iteration, d3, d2, d1, d0].
         strides (optional): Interval steps between data points in each dimension, useful for striding-across and reshaping data.
         issue_token (optional): If a token is issued, one may call dma_await_task on the returned task. Default is False.
         burst_length (optional): The configuration of the burst length for the DMA task. If 0, defaults to the highest available value.
@@ -478,6 +479,10 @@ def shim_dma_single_bd_task(
         # aie-decompose-large-dma-bd splits the ones a BD cannot hold into separate
         # tasks, which it can only do for constant sizes and strides.
         if sizes is not None:
+            if _shim_has_d3(sizes[:5]) and len(sizes) > 5:
+                raise ValueError(
+                    f"AIE4 shim DMA BD supports at most 5 dimensions, got {len(sizes)}"
+                )
             while len(sizes) < 4:
                 sizes = [1] + list(sizes)
                 if strides is not None:
