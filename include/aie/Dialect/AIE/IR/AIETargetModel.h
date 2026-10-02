@@ -1470,6 +1470,9 @@ public:
   /// Repeat count is bits [27:16] of the DMA task word -- 12 bits, widened
   /// from AIE2's 8, as defined by the architecture specification.
   uint32_t getMaxRepeatCount() const override { return 4095; }
+  /// Task-queue depth tracking is not modeled for AIE4 yet (no occupancy
+  /// register via getDmaTaskQueueSizeMask), so report "unsupported".
+  uint32_t getDmaTaskQueueDepth() const override { return 0; }
 
   /// Iteration_Wrap is a 6-bit field, as on AIE1/AIE2.
   uint32_t getDmaBdIterBits(AIETileType tileType) const override { return 6; }

@@ -62,16 +62,6 @@ void emitMaskWrite32(CertMaskWrite32Op op, std::string &text) {
   text += ss.str();
 }
 
-void emitMaskPoll32(CertMaskPoll32Op op, std::string &text) {
-  std::string s;
-  llvm::raw_string_ostream ss(s);
-  ss << "  MASK_POLL_32           ";
-  ss << llvm::format("0x%08x, ", op.getAddress());
-  ss << llvm::format("0x%08x, ", op.getMask());
-  ss << llvm::format("0x%08x\n", op.getValue());
-  text += ss.str();
-}
-
 // WRITE_32               0x01A0634, 0x80000004
 void emitWrite32(CertWrite32Op op, std::string &text) {
   std::string s;
@@ -288,7 +278,6 @@ LogicalResult emitJob(CertJobOp jobOp, std::string &text, std::string &data) {
             [&](auto op) { emitRemoteBarrier(op, text); })
         .Case<CertRelAcqSyncOp>([&](auto op) { emitRelAcqSync(op, text); })
         .Case<CertMaskWrite32Op>([&](auto op) { emitMaskWrite32(op, text); })
-        .Case<CertMaskPoll32Op>([&](auto op) { emitMaskPoll32(op, text); })
         .Case<CertNopOp>([&](auto op) { emitNop(op, text); })
         .Case<CertUcDmaWriteDesSyncOp>(
             [&](auto op) { emitUcDmaWriteDesSync(op, text); })
