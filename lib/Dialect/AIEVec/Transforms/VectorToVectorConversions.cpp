@@ -10,6 +10,7 @@
 
 #include "aie/Dialect/AIEVec/AIEVecUtils.h"
 #include "aie/Dialect/AIEVec/Pipelines/Passes.h"
+#include "aie/Dialect/AIEVec/Transforms/Passes.h"
 #include "aie/Dialect/AIEVec/Utils/TargetInfo.h"
 #include "aie/Dialect/AIEVec/Utils/Utils.h"
 #include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
@@ -1204,6 +1205,31 @@ static std::unique_ptr<::mlir::Pass> createReorderOperationsPass() {
   return std::make_unique<ReorderOperationsPass>();
 }
 
+/// Add `afn` to every vector.contract with a floating-point accumulator. See
+/// the `aievec-grant-contract-afn` description in Passes.td.
+struct GrantContractAfnPass
+    : public PassWrapper<GrantContractAfnPass, OperationPass<>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(GrantContractAfnPass)
+
+  StringRef getArgument() const final { return "aievec-grant-contract-afn"; }
+  StringRef getDescription() const final {
+    return "Add `afn` to the fastmath flags of floating-point vector.contract "
+           "ops";
+  }
+
+  void runOnOperation() override {
+    getOperation()->walk([](vector::ContractionOp op) {
+      if (!isa<FloatType>(getElementTypeOrSelf(op.getAccType())))
+        return;
+      op.setFastmath(op.getFastmath() | arith::FastMathFlags::afn);
+    });
+  }
+};
+
+std::unique_ptr<::mlir::Pass> xilinx::aievec::createGrantContractAfnPass() {
+  return std::make_unique<GrantContractAfnPass>();
+}
+
 //============================================================================//
 //=============== Main Vector2Vector Pipeline Configuration ==================//
 //============================================================================//
@@ -1228,6 +1254,11 @@ void xilinx::aievec::buildCanonicalizeVectorForAIEVec(
   bool isAIE4 = targetInfo && targetInfo->isAIE4();
   if (options.enableBF16Emulation && !isAIE4)
     pm.addPass(createBF16EmulationPass());
+
+  // Pass-level opt-in for AIE4 MMAC numerics: write `afn` into the IR before
+  // anything rewrites the contractions.
+  if (options.contractAfn)
+    pm.addPass(createGrantContractAfnPass());
 
   pm.addPass(createReorderOperationsPass());
   pm.addPass(createCopyRemovalPass());

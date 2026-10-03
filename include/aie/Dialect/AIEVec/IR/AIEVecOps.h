@@ -27,4 +27,12 @@
 #define GET_OP_CLASSES
 #include "aie/Dialect/AIEVec/IR/AIEVecOps.h.inc"
 
+namespace xilinx::aievec {
+/// Row limit for the unrolled matmul lowering, which keeps M accumulator
+/// rows live. Bounds register pressure against 64 2048-bit accumulator
+/// registers; surrounding live values can still cause spills. Larger
+/// contractions remain generic, and larger explicit matmuls are rejected.
+inline constexpr int64_t kAIE4MatMulMaxRows = 64;
+} // namespace xilinx::aievec
+
 #endif // AIE_DIALECT_AIEVEC_IR_AIEVECOPS_H

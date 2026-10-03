@@ -1,0 +1,124 @@
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// MMAC smoke test on NPU3: aievec.aie4.matmul and matrix_region lowered
+// to staging, commit and MMAC, for bf16, int8, int4 and fp8. For each
+// format the host compares three results bit-exactly with a reference:
+//   R1  one B tile with an accumulator input
+//   R2  a second K tile with the partial C carried
+//   R3  row MMACs without an accumulator (hardware zero_acc)
+// This checks the column-major B staging layout, the int4 nibble order,
+// the staging modes (bf16 mode 2), signedness and zero_acc.
+// fp8 restages B0 for R3, which relies on aiecc's -disable-machine-cse
+// workaround for a Peano miscompile (aiecc/aie4-mmac-fp8-cse-guard.mlir).
+//
+// REQUIRES: ryzen_ai_npu3, peano
+//
+// RUN: clang %S/test.cpp -o test.exe -std=c++17 -Wall %xrt_flags -lrt -lstdc++ -lm
+//
+// RUN: %python %S/../../aiecc/Inputs/aie4_mmac_design.py bf16 -o bf16.mlir
+// RUN: %aiecc --get-full-elf --full-elf-name=bf16.elf bf16.mlir
+// RUN: %run_on_npu3% ./test.exe bf16.elf bf16 0 | FileCheck %s --check-prefix=BF16
+// BF16: bf16 R1 (1 tile, acc): 256/256 exact
+// BF16: bf16 R2 (2 tiles, C carried): 256/256 exact
+// BF16: bf16 R3 (zero_acc): 256/256 exact
+// BF16: PASS
+//
+// RUN: %python %S/../../aiecc/Inputs/aie4_mmac_design.py int8 -o int8.mlir
+// RUN: %aiecc --get-full-elf --full-elf-name=int8.elf int8.mlir
+// RUN: %run_on_npu3% ./test.exe int8.elf int8 0 | FileCheck %s --check-prefix=INT8
+// INT8: int8 R1 (1 tile, acc): 256/256 exact
+// INT8: int8 R2 (2 tiles, C carried): 256/256 exact
+// INT8: int8 R3 (zero_acc): 256/256 exact
+// INT8: PASS
+//
+// The integer MMAC accumulator wraps modulo 2^32 like arith.addi; it does
+// not saturate. X = 255 and B = +127/-128 push C0 near INT32_MAX/INT32_MIN
+// past the i32 range in both directions, for one tile (R1) and two (R2).
+// RUN: %run_on_npu3% ./test.exe int8.elf int8 0 overflow | FileCheck %s --check-prefix=WRAP
+// WRAP: int8 R1 (1 tile, acc): 256/256 exact
+// WRAP-NEXT: [0][0] exact 2149556287, wrapped -2145411009, saturated 2147483647, hardware -2145411009
+// WRAP-NEXT: [0][1] exact -2149572607, wrapped 2145394689, saturated -2147483648, hardware 2145394689
+// WRAP-NEXT: overflowing sums: 256, wrapping matches: 256, saturating matches: 0
+// WRAP: int8 R2 (2 tiles, C carried): 256/256 exact
+// WRAP-NEXT: [0][0] exact 2151628927, wrapped -2143338369, saturated 2147483647, hardware -2143338369
+// WRAP-NEXT: [0][1] exact -2151661567, wrapped 2143305729, saturated -2147483648, hardware 2143305729
+// WRAP-NEXT: overflowing sums: 256, wrapping matches: 256, saturating matches: 0
+// WRAP: PASS
+//
+// RUN: %python %S/../../aiecc/Inputs/aie4_mmac_design.py int4 -o int4.mlir
+// RUN: %aiecc --get-full-elf --full-elf-name=int4.elf int4.mlir
+// RUN: %run_on_npu3% ./test.exe int4.elf int4 0 | FileCheck %s --check-prefix=INT4
+// INT4: int4 R1 (1 tile, acc): 256/256 exact
+// INT4: int4 R2 (2 tiles, C carried): 256/256 exact
+// INT4: int4 R3 (zero_acc): 256/256 exact
+// INT4: PASS
+//
+// Other integer signedness combinations. For int4 the staging mode
+// (crIntMMode) and the MMAC Z sign must agree; both come
+// from rhs_signed.
+// RUN: %python %S/../../aiecc/Inputs/aie4_mmac_design.py int4 --signs uu -o int4-uu.mlir
+// RUN: %aiecc --get-full-elf --full-elf-name=int4-uu.elf int4-uu.mlir
+// RUN: %run_on_npu3% ./test.exe int4-uu.elf int4 0 signs=uu | FileCheck %s --check-prefix=SIGNS
+// RUN: %python %S/../../aiecc/Inputs/aie4_mmac_design.py int4 --signs su -o int4-su.mlir
+// RUN: %aiecc --get-full-elf --full-elf-name=int4-su.elf int4-su.mlir
+// RUN: %run_on_npu3% ./test.exe int4-su.elf int4 0 signs=su | FileCheck %s --check-prefix=SIGNS
+// RUN: %python %S/../../aiecc/Inputs/aie4_mmac_design.py int8 --signs ss -o int8-ss.mlir
+// RUN: %aiecc --get-full-elf --full-elf-name=int8-ss.elf int8-ss.mlir
+// RUN: %run_on_npu3% ./test.exe int8-ss.elf int8 0 signs=ss | FileCheck %s --check-prefix=SIGNS
+// RUN: %python %S/../../aiecc/Inputs/aie4_mmac_design.py int4 --signs us -o int4-us.mlir
+// RUN: %aiecc --get-full-elf --full-elf-name=int4-us.elf int4-us.mlir
+// RUN: %run_on_npu3% ./test.exe int4-us.elf int4 0 signs=us | FileCheck %s --check-prefix=SIGNS
+// RUN: %python %S/../../aiecc/Inputs/aie4_mmac_design.py int8 --signs uu -o int8-uu.mlir
+// RUN: %aiecc --get-full-elf --full-elf-name=int8-uu.elf int8-uu.mlir
+// RUN: %run_on_npu3% ./test.exe int8-uu.elf int8 0 signs=uu | FileCheck %s --check-prefix=SIGNS
+// RUN: %python %S/../../aiecc/Inputs/aie4_mmac_design.py int8 --signs su -o int8-su.mlir
+// RUN: %aiecc --get-full-elf --full-elf-name=int8-su.elf int8-su.mlir
+// RUN: %run_on_npu3% ./test.exe int8-su.elf int8 0 signs=su | FileCheck %s --check-prefix=SIGNS
+// SIGNS: R1 (1 tile, acc): 256/256 exact
+// SIGNS: R2 (2 tiles, C carried): 256/256 exact
+// SIGNS: R3 (zero_acc): 256/256 exact
+// SIGNS: PASS
+//
+// RUN: %python %S/../../aiecc/Inputs/aie4_mmac_design.py fp8 -o fp8.mlir
+// RUN: %aiecc --get-full-elf --full-elf-name=fp8.elf fp8.mlir
+// RUN: %run_on_npu3% ./test.exe fp8.elf fp8 0 | FileCheck %s --check-prefix=FP8
+// FP8: fp8 R1 (1 tile, acc): 256/256 exact
+// FP8: fp8 R2 (2 tiles, C carried): 256/256 exact
+// FP8: fp8 R3 (zero_acc): 256/256 exact
+// FP8: PASS
+//
+// Reuse the same compiled kernels for targeted numerical behavior.
+// RUN: %run_on_npu3% ./test.exe bf16.elf bf16 0 bf16-edge | FileCheck %s --check-prefix=BF16-EDGE
+// BF16-EDGE: bf16 R1 (1 tile, acc): 256/256 matched
+// BF16-EDGE: bf16 R2 (2 tiles, C carried): 256/256 matched
+// BF16-EDGE: bf16 R3 (zero_acc): 256/256 matched
+// BF16-EDGE: PASS
+// RUN: %run_on_npu3% ./test.exe fp8.elf fp8 0 fp8-nan | FileCheck %s --check-prefix=FP8-NAN
+// FP8-NAN: fp8 R1 (1 tile, acc): 256/256 matched
+// FP8-NAN: fp8 R2 (2 tiles, C carried): 256/256 matched
+// FP8-NAN: fp8 R3 (zero_acc): 256/256 matched
+// FP8-NAN: PASS
+//
+// Four distinct A/B tiles in an actual K loop: check address advances,
+// iteration count, staging contents and accumulator carry on hardware.
+// RUN: %python %S/../../aiecc/Inputs/aie4_mmac_kloop.py --runtime -o kloop.mlir
+// RUN: %aiecc --get-full-elf --full-elf-name=kloop.elf kloop.mlir
+// RUN: %run_on_npu3% ./test.exe kloop.elf bf16 0 kloop | FileCheck %s --check-prefix=KLOOP
+// KLOOP: K loop (4 tiles): 256/256 exact
+// KLOOP: PASS
+//
+// Paired-column B loads fold back to direct 1024-bit loads after lowering.
+// Verify that the staging-load workaround preserves all three results.
+// RUN: %python %S/../../aiecc/Inputs/aie4_mmac_design.py bf16 --pair-b-loads -o bf16-pair.mlir
+// RUN: %aiecc --get-full-elf --full-elf-name=bf16-pair.elf bf16-pair.mlir
+// RUN: %run_on_npu3% ./test.exe bf16-pair.elf bf16 0 | FileCheck %s --check-prefix=BF16
+// RUN: %python %S/../../aiecc/Inputs/aie4_mmac_design.py int8 --pair-b-loads -o int8-pair.mlir
+// RUN: %aiecc --get-full-elf --full-elf-name=int8-pair.elf int8-pair.mlir
+// RUN: %run_on_npu3% ./test.exe int8-pair.elf int8 0 | FileCheck %s --check-prefix=INT8
+// RUN: %python %S/../../aiecc/Inputs/aie4_mmac_design.py int4 --pair-b-loads -o int4-pair.mlir
+// RUN: %aiecc --get-full-elf --full-elf-name=int4-pair.elf int4-pair.mlir
+// RUN: %run_on_npu3% ./test.exe int4-pair.elf int4 0 | FileCheck %s --check-prefix=INT4
+// RUN: %python %S/../../aiecc/Inputs/aie4_mmac_design.py fp8 --pair-b-loads -o fp8-pair.mlir
+// RUN: %aiecc --get-full-elf --full-elf-name=fp8-pair.elf fp8-pair.mlir
+// RUN: %run_on_npu3% ./test.exe fp8-pair.elf fp8 0 | FileCheck %s --check-prefix=FP8

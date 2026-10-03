@@ -1,0 +1,78 @@
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// Self-test of Inputs/check_aie4_mmac_schedule.py on synthetic schedules
+// (one insert and one MMAC per tile, one bundle per line). good.dis sits on
+// all four timing boundaries:
+// reads one cycle after the write they depend on (R = W + 1), and writes in
+// the same cycle as the read of the old value (W = R). Each other input
+// moves one instruction one cycle past a boundary.
+//
+// RUN: %python %S/Inputs/check_aie4_mmac_schedule.py %S/Inputs/aie4_mmac_schedule/good.dis --inserts-per-tile 1 --mmacs-per-tile 1,1 | FileCheck %s --check-prefix=GOOD
+// GOOD: ORDER OK: 2 tiles, 2 inserts, 2 MMACs, no accumulator spills
+//
+// RUN: not %python %S/Inputs/check_aie4_mmac_schedule.py %S/Inputs/aie4_mmac_schedule/raw_insert.dis --inserts-per-tile 1 --mmacs-per-tile 1,1 2>&1 | FileCheck %s --check-prefix=RAW-INSERT
+// RAW-INSERT: error: tile 1: an insert writes za at 9, not before the commit reads it at 9
+//
+// RUN: not %python %S/Inputs/check_aie4_mmac_schedule.py %S/Inputs/aie4_mmac_schedule/war_insert.dis --inserts-per-tile 1 --mmacs-per-tile 1,1 2>&1 | FileCheck %s --check-prefix=WAR-INSERT
+// WAR-INSERT: error: tile 1: an insert writes za at 7, before commit 0 reads it at 8
+//
+// RUN: not %python %S/Inputs/check_aie4_mmac_schedule.py %S/Inputs/aie4_mmac_schedule/raw_mmac.dis --inserts-per-tile 1 --mmacs-per-tile 1,1 2>&1 | FileCheck %s --check-prefix=RAW-MMAC
+// RAW-MMAC: error: tile 0: an MMAC reads zb at 8, not after the commit writes it at 8
+//
+// RUN: not %python %S/Inputs/check_aie4_mmac_schedule.py %S/Inputs/aie4_mmac_schedule/war_mmac.dis --inserts-per-tile 1 --mmacs-per-tile 1,1 2>&1 | FileCheck %s --check-prefix=WAR-MMAC
+// WAR-MMAC: error: tile 0: commit 1 writes zb at 9, before an MMAC reads it at 10
+//
+// RUN: not %python %S/Inputs/check_aie4_mmac_schedule.py %S/Inputs/aie4_mmac_schedule/spill.dis --inserts-per-tile 1 --mmacs-per-tile 1,1 2>&1 | FileCheck %s --check-prefix=SPILL
+// SPILL: error: accumulator spill/fill at cycle 9: vst{{.*}}cmal0, [sp, #-0x40]
+//
+// RUN: not %python %S/Inputs/check_aie4_mmac_schedule.py %S/Inputs/aie4_mmac_schedule/good.dis --inserts-per-tile 1 --mmacs-per-tile 1,1,1 2>&1 | FileCheck %s --check-prefix=COUNT
+// COUNT: error: expected 3 commits, found 2
+//
+// Loops: the path runs through local .L labels, and a single backward
+// jump is modelled as the body executed twice, delay slots included. Each
+// input ends in another function whose insert must not be counted.
+// RUN: %python %S/Inputs/check_aie4_mmac_schedule.py %S/Inputs/aie4_mmac_schedule/loop_good.dis --inserts-per-tile 1 --mmacs-per-tile 0,0 | FileCheck %s --check-prefix=LOOP-GOOD
+// LOOP-GOOD: ORDER OK: 2 tiles, 2 inserts, 0 MMACs, no accumulator spills (loop body checked twice)
+//
+// The back edge: iteration 2's insert writes before iteration 1's commit reads.
+// RUN: not %python %S/Inputs/check_aie4_mmac_schedule.py %S/Inputs/aie4_mmac_schedule/loop_war.dis --inserts-per-tile 1 --mmacs-per-tile 0,0 2>&1 | FileCheck %s --check-prefix=LOOP-WAR
+// LOOP-WAR: error: tile 1: an insert writes za at 13, before commit 0 reads it at 14
+//
+// A commit in the last delay slot belongs to the body (two commits found).
+// RUN: not %python %S/Inputs/check_aie4_mmac_schedule.py %S/Inputs/aie4_mmac_schedule/loop_delay_slot.dis --inserts-per-tile 1 --mmacs-per-tile 0,0 2>&1 | FileCheck %s --check-prefix=LOOP-DELAY
+// LOOP-DELAY: error: tile 1: an insert writes za at 13, before commit 0 reads it at 16
+//
+// Other control flow is rejected.
+// RUN: not %python %S/Inputs/check_aie4_mmac_schedule.py %S/Inputs/aie4_mmac_schedule/forward_jump.dis --inserts-per-tile 1 --mmacs-per-tile 1 2>&1 | FileCheck %s --check-prefix=FORWARD
+// FORWARD: error: unsupported control flow at bundle 1 (jnz{{.*}}#0xc): not a backward jump to a bundle of this function; the check is straight-line or single-loop only
+// A zero-overhead loop needs one write each of ls, le and lc.
+// RUN: not %python %S/Inputs/check_aie4_mmac_schedule.py %S/Inputs/aie4_mmac_schedule/hw_loop.dis --inserts-per-tile 1 --mmacs-per-tile 1 2>&1 | FileCheck %s --check-prefix=HWLOOP
+// HWLOOP: error: zero-overhead loop: expected one write of le, found 0
+//
+// Immediate-index inserts (vmov za<n>, y and f_za<n>) are inserts.
+// RUN: %python %S/Inputs/check_aie4_mmac_schedule.py %S/Inputs/aie4_mmac_schedule/imm_index.dis --inserts-per-tile 1 --mmacs-per-tile 1,1 | FileCheck %s --check-prefix=IMM
+// IMM: ORDER OK: 2 tiles, 2 inserts, 2 MMACs, no accumulator spills
+
+//
+// Zero-overhead loops: the body is [ls, le] with no delay slots,
+// checked twice. zol_good sits on the WAR boundary across the back edge;
+// zol_war is one bundle shorter, so iteration 2's insert writes too early.
+// RUN: %python %S/Inputs/check_aie4_mmac_schedule.py %S/Inputs/aie4_mmac_schedule/zol_good.dis --inserts-per-tile 1 --mmacs-per-tile 0,0 | FileCheck %s --check-prefix=ZOL-GOOD
+// ZOL-GOOD: ORDER OK: 2 tiles, 2 inserts, 0 MMACs, no accumulator spills (loop body checked twice)
+// RUN: not %python %S/Inputs/check_aie4_mmac_schedule.py %S/Inputs/aie4_mmac_schedule/zol_war.dis --inserts-per-tile 1 --mmacs-per-tile 0,0 2>&1 | FileCheck %s --check-prefix=ZOL-WAR
+// ZOL-WAR: error: tile 1: an insert writes za at 16, before commit 0 reads it at 17
+//
+// Validate loop bounds, alignment, setup order and minimum distance.
+// RUN: not %python %S/Inputs/check_aie4_mmac_schedule.py %S/Inputs/aie4_mmac_schedule/zol_unaligned.dis --inserts-per-tile 1 --mmacs-per-tile 0,0 2>&1 | FileCheck %s --check-prefix=ZOL-ALIGN
+// ZOL-ALIGN: error: zero-overhead loop: ls = 0x104 is not 256-bit aligned
+// RUN: not %python %S/Inputs/check_aie4_mmac_schedule.py %S/Inputs/aie4_mmac_schedule/zol_lc_first.dis --inserts-per-tile 1 --mmacs-per-tile 0,0 2>&1 | FileCheck %s --check-prefix=ZOL-ORDER
+// ZOL-ORDER: error: zero-overhead loop: ls and le must be written before lc
+// RUN: not %python %S/Inputs/check_aie4_mmac_schedule.py %S/Inputs/aie4_mmac_schedule/zol_short.dis --inserts-per-tile 1 --mmacs-per-tile 0,0 2>&1 | FileCheck %s --check-prefix=ZOL-SHORT
+// ZOL-SHORT: error: zero-overhead loop: the loop ends 3 bundle(s) after the last ls/le/lc write; at least 4 are required
+// RUN: not %python %S/Inputs/check_aie4_mmac_schedule.py %S/Inputs/aie4_mmac_schedule/zol_compressed_le.dis --inserts-per-tile 1 --mmacs-per-tile 0,0 2>&1 | FileCheck %s --check-prefix=ZOL-LE
+// ZOL-LE: error: zero-overhead loop: the bundle at le = 0x1a0 is not a full 256-bit instruction
+//
+// A real zero-overhead K loop from Peano (see the header of kloop_zol.dis).
+// RUN: %python %S/Inputs/check_aie4_mmac_schedule.py %S/Inputs/aie4_mmac_schedule/kloop_zol.dis --mmacs-per-tile 4,4 | FileCheck %s --check-prefix=ZOL-REAL
+// ZOL-REAL: ORDER OK: 2 tiles, 64 inserts, 8 MMACs, no accumulator spills (loop body checked twice)

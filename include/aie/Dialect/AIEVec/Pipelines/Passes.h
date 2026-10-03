@@ -36,6 +36,14 @@ struct CanonicalizeVectorForAIEVecOptions
           "Run f32 vector arithmetic on the bf16 datapath: multiplies and "
           "transcendentals take inputs rounded to bf16, sums stay f32."),
       llvm::cl::init(false)};
+  PassOptions::Option<bool> contractAfn{
+      *this, "contract-afn",
+      llvm::cl::desc(
+          "Add `afn` to every floating-point vector.contract before "
+          "matching. On AIE4 this lets bf16 and fp8 contractions use the "
+          "MMAC, which flushes subnormal f32 accumulators and accumulates in "
+          "hardware order. Off by default."),
+      llvm::cl::init(false)};
 };
 
 /// Options for the "lower-vector-to-aievec" pipeline.
@@ -98,6 +106,14 @@ struct ConvertVectorToAIEVecOptions
           "Run f32 vector arithmetic on the bf16 datapath: multiplies and "
           "transcendentals take inputs rounded to bf16, sums stay f32."),
       llvm::cl::init(false)};
+  PassOptions::Option<bool> contractAfn{
+      *this, "contract-afn",
+      llvm::cl::desc(
+          "Add `afn` to every floating-point vector.contract before "
+          "matching. On AIE4 this lets bf16 and fp8 contractions use the "
+          "MMAC, which flushes subnormal f32 accumulators and accumulates in "
+          "hardware order. Off by default."),
+      llvm::cl::init(false)};
 
   mlir::LogicalResult parseFromString(mlir::StringRef options) {
     auto res = PassPipelineOptions::parseFromString(options);
@@ -105,6 +121,7 @@ struct ConvertVectorToAIEVecOptions
       lowerOptions.aieTarget = aieTarget;
       canonicalizeOptions.aieTarget = aieTarget;
       canonicalizeOptions.enableBF16Emulation = enableBF16Emulation;
+      canonicalizeOptions.contractAfn = contractAfn;
       optimizeOptions.aieTarget = aieTarget;
       optimizeOptions.shiftParam = shiftParam;
     }

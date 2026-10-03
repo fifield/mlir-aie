@@ -1,0 +1,16 @@
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// MachineCSE can remove repeated fp8 staging inserts after an intervening
+// tile overwrites staging. The int8/int4/bf16 inserts read crIntMMode and
+// are unaffected. This reduced B0/B1/B0 case requires all six inserts.
+//
+// Run llc without aiecc's -disable-machine-cse workaround to expose the
+// backend defect. aie4-mmac-fp8-cse-guard.mlir checks the driver's flags.
+//
+// REQUIRES: peano
+// XFAIL: *
+//
+// RUN: llc -O2 --mtriple=aie4 --mcpu=aie4b %S/Inputs/aie4_fp8_restage_cse.ll -o %t.s
+// RUN: grep -c "f_za\[" %t.s | FileCheck %s --check-prefix=REDUCED
+// REDUCED: {{^}}6{{$}}

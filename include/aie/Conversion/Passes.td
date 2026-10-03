@@ -50,6 +50,19 @@ def ConvertAIEVecToLLVM : Pass<"convert-aievec-to-llvm", "mlir::ModuleOp"> {
               )}]>];
 }
 
+def AIEVecAIE4ExpandMatMul : Pass<"aievec-aie4-expand-matmul"> {
+  let summary = "Expand aievec.aie4.matmul into a matrix region of row MMACs";
+  let description = [{
+    Rewrites each `aievec.aie4.matmul` into an `aievec.aie4.matrix_region`
+    that holds the B tile and issues one `aievec.aie4.mmac` per output row.
+    `convert-aievec-to-llvm` runs the same expansion for AIE4 before
+    lowering; this pass exposes the intermediate form.
+  }];
+  let constructor = "xilinx::aievec::createAIEVecAIE4ExpandMatMulPass()";
+  let dependentDialects = ["mlir::vector::VectorDialect",
+                           "xilinx::aievec::AIEVecDialect"];
+}
+
 //===----------------------------------------------------------------------===//
 // AIEToTransaction
 //===----------------------------------------------------------------------===//

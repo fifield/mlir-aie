@@ -200,4 +200,27 @@ def AIE4ShuffleMode : I32EnumAttr<"AIE4ShuffleMode",
 def AIEVec_AIE4ShuffleModeAttr :
     EnumAttr<AIEVec_Dialect, AIE4ShuffleMode, "aie4_shuffle_mode">;
 
+//===----------------------------------------------------------------------===//
+// AIE4 dense matrix MAC formats
+//===----------------------------------------------------------------------===//
+
+// Operand format of a dense MMAC tile. Each format fixes the A row width, the
+// B tile shape, and the accumulator element type (see aievec.aie4.mmac).
+def AIE4_MatrixFormat_Bf16 : I32EnumAttrCase<"Bf16", 0, "bf16">;
+def AIE4_MatrixFormat_Int8 : I32EnumAttrCase<"Int8", 1, "int8">;
+def AIE4_MatrixFormat_Int4 : I32EnumAttrCase<"Int4", 2, "int4">;
+def AIE4_MatrixFormat_Fp8  : I32EnumAttrCase<"Fp8",  3, "fp8">;
+def AIE4MatrixFormat : I32EnumAttr<"AIE4MatrixFormat",
+    "AIE4 dense MMAC operand format",
+    [AIE4_MatrixFormat_Bf16, AIE4_MatrixFormat_Int8, AIE4_MatrixFormat_Int4,
+     AIE4_MatrixFormat_Fp8]> {
+  let cppNamespace = "::xilinx::aievec";
+  let genSpecializedAttr = 0;
+}
+
+def AIEVec_AIE4MatrixFormatAttr :
+    EnumAttr<AIEVec_Dialect, AIE4MatrixFormat, "aie4_matrix_format"> {
+  let assemblyFormat = "$value";
+}
+
 #endif // AIE_DIALECT_AIEVEC_IR_AIEVECATTRIBUTES_TD

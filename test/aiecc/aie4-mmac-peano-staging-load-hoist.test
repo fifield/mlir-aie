@@ -1,0 +1,16 @@
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// combine_staging_upd_load can move an insert to its source load across
+// another tile's commit. This schedule check detects tile 1 writing staging
+// before tile 0's commit reads it.
+//
+// Run llc without aiecc's workaround to expose the backend defect. Guarded
+// reduced and paired-load cases are in aie4-mmac-staging-load-guard.test.
+//
+// REQUIRES: peano
+// XFAIL: *
+//
+// RUN: llc -O2 --mtriple=aie4 --mcpu=aie4b -filetype=obj %S/Inputs/aie4_staging_load_hoist.ll -o %t.o
+// RUN: llvm-objdump -d %t.o > %t.dis
+// RUN: %python %S/Inputs/check_aie4_mmac_schedule.py %t.dis --inserts-per-tile 1 --mmacs-per-tile 1,1,1

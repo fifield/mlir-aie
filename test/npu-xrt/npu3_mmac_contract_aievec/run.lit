@@ -1,0 +1,37 @@
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// MMAC on NPU3 end to end from vector.contract: R1 and R2 are native-tile
+// contractions that the AIE4 Vector-to-AIEVec matcher turns into
+// aievec.aie4.matmul; R3 is a matrix_region with zero_acc MMACs. Same
+// design and host as npu3_mmac_aievec, compared bit-exactly.
+//
+// REQUIRES: ryzen_ai_npu3, peano
+//
+// RUN: clang %S/../npu3_mmac_aievec/test.cpp -o test.exe -std=c++17 -Wall %xrt_flags -lrt -lstdc++ -lm
+//
+// RUN: %python %S/../../aiecc/Inputs/aie4_mmac_design.py int8 --contract -o int8.mlir
+// RUN: %aiecc --enable-aie4-vectorization --get-full-elf --full-elf-name=int8.elf int8.mlir
+// RUN: %run_on_npu3% ./test.exe int8.elf int8 0 | FileCheck %s
+// RUN: %python %S/../../aiecc/Inputs/aie4_mmac_design.py int4 --contract -o int4.mlir
+// RUN: %aiecc --enable-aie4-vectorization --get-full-elf --full-elf-name=int4.elf int4.mlir
+// RUN: %run_on_npu3% ./test.exe int4.elf int4 0 | FileCheck %s
+// RUN: %python %S/../../aiecc/Inputs/aie4_mmac_design.py bf16 --contract -o bf16.mlir
+// RUN: %aiecc --enable-aie4-vectorization --get-full-elf --full-elf-name=bf16.elf bf16.mlir
+// RUN: %run_on_npu3% ./test.exe bf16.elf bf16 0 | FileCheck %s
+// RUN: %python %S/../../aiecc/Inputs/aie4_mmac_design.py fp8 --contract --r3-tile 2 -o fp8.mlir
+// RUN: %aiecc --enable-aie4-vectorization --get-full-elf --full-elf-name=fp8.elf fp8.mlir
+// RUN: %run_on_npu3% ./test.exe fp8.elf fp8 2 | FileCheck %s
+//
+// Exercise the same numerical permissions through the contraction matcher.
+// RUN: %run_on_npu3% ./test.exe bf16.elf bf16 0 bf16-edge | FileCheck %s --check-prefix=EDGE
+// RUN: %run_on_npu3% ./test.exe fp8.elf fp8 2 fp8-nan | FileCheck %s --check-prefix=EDGE
+// EDGE: R1 (1 tile, acc): 256/256 matched
+// EDGE: R2 (2 tiles, C carried): 256/256 matched
+// EDGE: R3 (zero_acc): 256/256 matched
+// EDGE: PASS
+//
+// CHECK: R1 (1 tile, acc): 256/256 exact
+// CHECK: R2 (2 tiles, C carried): 256/256 exact
+// CHECK: R3 (zero_acc): 256/256 exact
+// CHECK: PASS

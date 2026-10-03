@@ -5604,7 +5604,7 @@ static bool isVecBf16x32(Type ty) {
 
 static bool hasContract(arith::FastMathFlagsAttr fmf) {
   return fmf && arith::bitEnumContainsAll(fmf.getValue(),
-                                           arith::FastMathFlags::contract);
+                                          arith::FastMathFlags::contract);
 }
 
 /// Return the bf16 source of a fixed vector<32xbf16> -> vector<32xf32> extf.
@@ -5707,8 +5707,7 @@ struct ConvertMulFToAIE4MulEwiseF32Pattern
                   ConversionPatternRewriter &rewriter) const override {
     auto vecTy = dyn_cast<VectorType>(mulOp.getType());
     if (!vecTy || vecTy.isScalable() || vecTy.getRank() != 1 ||
-        !vecTy.getElementType().isF32() ||
-        vecTy.getShape()[0] != 32)
+        !vecTy.getElementType().isF32() || vecTy.getShape()[0] != 32)
       return failure();
 
     // Let the bf16 pattern use the operands before widening.
@@ -6332,13 +6331,13 @@ struct LowerAIE4MaskExtractOp : OpConversionPattern<vector::ExtractOp> {
     // Apply Boolean logic to the extracted bits. Peano cannot lower bitwise
     // operations on the vector<2xi32> carrier used by 64-bit masks.
     Operation *logic = adaptor.getSource().getDefiningOp();
-    if (logic && isa<arith::AndIOp, arith::OrIOp, arith::XOrIOp>(logic)) {
+    if (isa_and_nonnull<arith::AndIOp, arith::OrIOp, arith::XOrIOp>(logic)) {
       Value lhs = vector::ExtractOp::create(rewriter, loc, logic->getOperand(0),
-                                           adaptor.getDynamicPosition(),
-                                           op.getStaticPosition());
+                                            adaptor.getDynamicPosition(),
+                                            op.getStaticPosition());
       Value rhs = vector::ExtractOp::create(rewriter, loc, logic->getOperand(1),
-                                           adaptor.getDynamicPosition(),
-                                           op.getStaticPosition());
+                                            adaptor.getDynamicPosition(),
+                                            op.getStaticPosition());
       if (isa<arith::AndIOp>(logic))
         rewriter.replaceOpWithNewOp<arith::AndIOp>(op, lhs, rhs);
       else if (isa<arith::OrIOp>(logic))
@@ -6353,10 +6352,10 @@ struct LowerAIE4MaskExtractOp : OpConversionPattern<vector::ExtractOp> {
     Value index;
     if (adaptor.getDynamicPosition().empty())
       index = arith::ConstantIntOp::create(rewriter, loc, scalarType,
-                                          op.getStaticPosition()[0]);
+                                           op.getStaticPosition()[0]);
     else
       index = arith::IndexCastUIOp::create(rewriter, loc, scalarType,
-                                         adaptor.getDynamicPosition()[0]);
+                                           adaptor.getDynamicPosition()[0]);
 
     Value mask;
     if (lanes == 64) {
@@ -6375,11 +6374,12 @@ struct LowerAIE4MaskExtractOp : OpConversionPattern<vector::ExtractOp> {
       Value bitMask = arith::ConstantIntOp::create(rewriter, loc, 31, 32);
       index = arith::AndIOp::create(rewriter, loc, index, bitMask);
     } else {
-      mask = packAIE4Mask(loc, adaptor.getSource(), scalarType, lanes, rewriter);
+      mask =
+          packAIE4Mask(loc, adaptor.getSource(), scalarType, lanes, rewriter);
     }
     Value shifted = arith::ShRUIOp::create(rewriter, loc, mask, index);
     rewriter.replaceOpWithNewOp<arith::TruncIOp>(op, rewriter.getI1Type(),
-                                               shifted);
+                                                 shifted);
     return success();
   }
 };
@@ -6399,7 +6399,7 @@ static bool isAIE4VFCmpShape(VectorType vecTy) {
 // Preserve each lane's bits in a signless integer vector for native integer
 // comparisons and selects. The caller must check isAIE4VFCmpShape first.
 static Value bitcastToAIE4SelIntType(ConversionPatternRewriter &rewriter,
-                                      Location loc, Value v) {
+                                     Location loc, Value v) {
   auto vecTy = cast<VectorType>(v.getType());
   Type intElemTy =
       rewriter.getIntegerType(vecTy.getElementType().getIntOrFloatBitWidth());
@@ -6533,14 +6533,14 @@ struct LowerAIE4SelectOp : OpConversionPattern<arith::SelectOp> {
       return success();
     }
 
-    // AIE4SelOp accepts integers; bitcast float lanes before and after selection.
+    // AIE4SelOp accepts integers; bitcast float lanes before and after
+    // selection.
     Value falseInt =
         bitcastToAIE4SelIntType(rewriter, loc, adaptor.getFalseValue());
     Value trueInt =
         bitcastToAIE4SelIntType(rewriter, loc, adaptor.getTrueValue());
     Value selInt = aievec::AIE4SelOp::create(rewriter, loc, falseInt.getType(),
-                                             falseInt, trueInt,
-                                             mask);
+                                             falseInt, trueInt, mask);
     rewriter.replaceOpWithNewOp<vector::BitCastOp>(srcOp, resultType, selInt);
     return success();
   }
@@ -6839,10 +6839,12 @@ struct LowerAIE4VectorReductionOp : OpConversionPattern<vector::ReductionOp> {
       Location loc = srcOp.getLoc();
       Type f32Ty = rewriter.getF32Type();
       Value src = arith::ExtFOp::create(
-          rewriter, loc, VectorType::get({32}, f32Ty), adaptor.getVector());
+          rewriter, loc, VectorType::get({32}, f32Ty), adaptor.getVector(),
+          arith::FastMathFlagsAttr{});
       Value acc = adaptor.getAcc();
       if (acc)
-        acc = arith::ExtFOp::create(rewriter, loc, f32Ty, acc);
+        acc = arith::ExtFOp::create(rewriter, loc, f32Ty, acc,
+                                    arith::FastMathFlagsAttr{});
       Value reduced =
           aievec::AIE4ReduceOp::create(rewriter, loc, f32Ty, src, acc, kind);
       rewriter.replaceOpWithNewOp<arith::TruncFOp>(srcOp, elemTy, reduced);
@@ -6977,9 +6979,10 @@ struct LowerVectorShuffleOpToAIE4ShuffleOpPattern
 // AIE4 approximate exp2 / tanh
 //===----------------------------------------------------------------------===//
 //
-// Approximation requires afn (also included in fast); nnan/ninf are not assumed.
-// Peano cannot legalize strict exp2/tanh, so diagnose them here. Supported
-// fixed 1-D f32/bf16 vectors split into 32-lane chunks and retain their type.
+// Approximation requires afn (also included in fast); nnan/ninf are not
+// assumed. Peano cannot legalize strict exp2/tanh, so diagnose them here.
+// Supported fixed 1-D f32/bf16 vectors split into 32-lane chunks and retain
+// their type.
 
 static constexpr int64_t kAIE4NlfLanes = 32;
 // VEXP2 floors (x - 895) to a 2^-11 grid. For f32 results, the exact
@@ -7050,7 +7053,8 @@ struct LowerAIE4ApproxMathOp : OpConversionPattern<MathOpTy> {
     auto lowerChunk = [&](Value chunk) -> Value {
       Value x = chunk;
       if (elemTy.isBF16())
-        x = arith::ExtFOp::create(rewriter, loc, f32ChunkTy, x);
+        x = arith::ExtFOp::create(rewriter, loc, f32ChunkTy, x,
+                                  arith::FastMathFlagsAttr{});
       if constexpr (isExp) {
         Value log2e = arith::ConstantOp::create(
             rewriter, loc, f32ChunkTy,
@@ -7065,7 +7069,8 @@ struct LowerAIE4ApproxMathOp : OpConversionPattern<MathOpTy> {
       } else {
         Value r = aievec::AIE4TanhOp::create(rewriter, loc, bf16ChunkTy, x);
         if (elemTy.isF32())
-          r = arith::ExtFOp::create(rewriter, loc, f32ChunkTy, r);
+          r = arith::ExtFOp::create(rewriter, loc, f32ChunkTy, r,
+                                    arith::FastMathFlagsAttr{});
         return r;
       }
     };
@@ -7122,39 +7127,172 @@ struct LowerAIE4ReciprocalOp : OpConversionPattern<arith::DivFOp> {
   }
 };
 
+//===----------------------------------------------------------------------===//
+// AIE4 dense matrix multiplication
+//===----------------------------------------------------------------------===//
+
+/// A vector.contract that computes exactly one aievec.aie4.matmul.
+struct AIE4MatMulContractMatch {
+  Value lhs; // narrow A, vector<M x K x elem>
+  Value rhs; // narrow B tile, vector<K x 64 x elem>
+  std::optional<bool> lhsSigned, rhsSigned; // set for integer formats only
+};
+
+/// Native dense MMAC formats: the narrow element type,
+/// K, and the accumulator element type.
+static std::optional<std::pair<int64_t, Type>>
+getAIE4MatMulFormat(Type narrowElemTy) {
+  MLIRContext *ctx = narrowElemTy.getContext();
+  if (narrowElemTy.isBF16())
+    return std::make_pair(int64_t(32), Type(Float32Type::get(ctx)));
+  if (isa<Float8E4M3FNType>(narrowElemTy))
+    return std::make_pair(int64_t(64), Type(Float32Type::get(ctx)));
+  if (narrowElemTy.isSignlessInteger(8))
+    return std::make_pair(int64_t(64), Type(IntegerType::get(ctx, 32)));
+  if (narrowElemTy.isSignlessInteger(4))
+    return std::make_pair(int64_t(128), Type(IntegerType::get(ctx, 32)));
+  return std::nullopt;
+}
+
+/// Peel the widening op that produced a contraction operand. Returns the
+/// narrow value and, for integer extensions, its signedness. Only exact
+/// widenings qualify: extf (bf16 and f8E4M3FN to f32 are exact), extsi and
+/// extui.
+static std::optional<std::pair<Value, std::optional<bool>>>
+peelAIE4MatMulWidening(Value wide) {
+  if (auto ext = wide.getDefiningOp<arith::ExtFOp>())
+    return std::make_pair(ext.getIn(), std::optional<bool>());
+  if (auto ext = wide.getDefiningOp<arith::ExtSIOp>())
+    return std::make_pair(ext.getIn(), std::optional<bool>(true));
+  if (auto ext = wide.getDefiningOp<arith::ExtUIOp>())
+    return std::make_pair(ext.getIn(), std::optional<bool>(false));
+  return std::nullopt;
+}
+
+/// Match an unmasked MxK * Kx64 contraction over directly widened native
+/// operands. Transposed maps must first be canonicalized to explicit
+/// transposes; larger shapes must be tiled by the producer.
+///
+/// Floating formats require the contraction's `afn` flag for hardware
+/// rounding and subnormal behavior. Integer widening supplies signedness,
+/// and exact products with i32 wraparound match contraction semantics.
+/// Contractions inside a matrix_region stay generic because a matmul would
+/// replace its active B tile.
+static std::optional<AIE4MatMulContractMatch>
+matchAIE4MatMulContract(vector::ContractionOp op) {
+  if (op->getParentOfType<aievec::AIE4MatrixRegionOp>())
+    return std::nullopt;
+  if (op.getKind() != vector::CombiningKind::ADD)
+    return std::nullopt;
+  if (cast<vector::MaskableOpInterface>(op.getOperation()).isMasked())
+    return std::nullopt;
+
+  auto accTy = dyn_cast<VectorType>(op.getAccType());
+  VectorType lhsTy = op.getLhsType(), rhsTy = op.getRhsType();
+  if (!accTy || lhsTy.isScalable() || rhsTy.isScalable() ||
+      accTy.isScalable() || lhsTy.getRank() != 2 || rhsTy.getRank() != 2 ||
+      accTy.getRank() != 2)
+    return std::nullopt;
+
+  // Plain row-major matmul: A(m,k) * B(k,n) -> C(m,n). With these maps the
+  // contraction verifier already makes k the only reduction dimension and
+  // ties the shared M, K and N sizes of lhs, rhs and acc together.
+  MLIRContext *ctx = op.getContext();
+  AffineExpr m, n, k;
+  bindDims(ctx, m, n, k);
+  using MapList = ArrayRef<ArrayRef<AffineExpr>>;
+  SmallVector<AffineMap> matmulMaps =
+      AffineMap::inferFromExprList(MapList{{m, k}, {k, n}, {m, n}}, ctx);
+  if (op.getIndexingMapsArray() != ArrayRef<AffineMap>(matmulMaps))
+    return std::nullopt;
+
+  auto lhsPeel = peelAIE4MatMulWidening(op.getLhs());
+  auto rhsPeel = peelAIE4MatMulWidening(op.getRhs());
+  if (!lhsPeel || !rhsPeel)
+    return std::nullopt;
+  auto [lhs, lhsSigned] = *lhsPeel;
+  auto [rhs, rhsSigned] = *rhsPeel;
+  auto narrowLhsTy = cast<VectorType>(lhs.getType());
+  auto narrowRhsTy = cast<VectorType>(rhs.getType());
+  Type narrowTy = narrowLhsTy.getElementType();
+  if (narrowRhsTy.getElementType() != narrowTy)
+    return std::nullopt;
+
+  auto format = getAIE4MatMulFormat(narrowTy);
+  if (!format)
+    return std::nullopt;
+  auto [kDim, wideTy] = *format;
+  // The contraction must compute in the native accumulator type.
+  if (lhsTy.getElementType() != wideTy || accTy.getElementType() != wideTy)
+    return std::nullopt;
+  bool isInteger = isa<IntegerType>(narrowTy);
+
+  if (lhsTy.getDimSize(1) != kDim || accTy.getDimSize(1) != 64 ||
+      lhsTy.getDimSize(0) > aievec::kAIE4MatMulMaxRows)
+    return std::nullopt;
+
+  if (!isInteger &&
+      !arith::bitEnumContainsAll(op.getFastmath(), arith::FastMathFlags::afn))
+    return std::nullopt;
+
+  return AIE4MatMulContractMatch{lhs, rhs, lhsSigned, rhsSigned};
+}
+
+// vector.contract (one native B tile, see matchAIE4MatMulContract)
+//     -> aievec.aie4.matmul
+struct LowerAIE4ContractToMatMulPattern
+    : OpConversionPattern<vector::ContractionOp> {
+  using OpConversionPattern::OpConversionPattern;
+
+  static bool matches(vector::ContractionOp op) {
+    return matchAIE4MatMulContract(op).has_value();
+  }
+
+  LogicalResult
+  matchAndRewrite(vector::ContractionOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto match = matchAIE4MatMulContract(op);
+    if (!match)
+      return rewriter.notifyMatchFailure(op, "not one native AIE4 matmul");
+    auto boolAttr = [&](std::optional<bool> v) -> BoolAttr {
+      return v ? rewriter.getBoolAttr(*v) : BoolAttr();
+    };
+    rewriter.replaceOpWithNewOp<aievec::AIE4MatMulOp>(
+        op, adaptor.getAcc().getType(), rewriter.getRemappedValue(match->lhs),
+        rewriter.getRemappedValue(match->rhs), adaptor.getAcc(),
+        boolAttr(match->lhsSigned), boolAttr(match->rhsSigned));
+    return success();
+  }
+};
+
 static void populateAIEVecV4ConversionPatterns(RewritePatternSet &patterns) {
   patterns.add<ConvertIntMulToAIE4MacPattern>(patterns.getContext());
   patterns.add<LowerAIE4ApproxMathOp<math::ExpOp>>(patterns.getContext());
   patterns.add<ConvertBF16AddFToAIE4F32Pattern, ConvertBF16SubFToAIE4F32Pattern,
                ConvertBF16FMAToAIE4F32Pattern>(patterns.getContext());
-  patterns
-      .add<ConvertMulFToAIE4MulEwiseF32Pattern,
-           ConvertMulFToAIE4MulEwiseBf16Pattern,
-           ConvertMacFToAIE4MacEwiseF32Pattern,
-           ConvertMacFToAIE4MacEwiseBf16Pattern,
-           ConvertMscFToAIE4MscEwiseF32Pattern,
-           ConvertMscFToAIE4MscEwiseBf16Pattern, ConvertIntMacToAIE4MacPattern,
-           ConvertExtSIToAIE4UPSPattern, ConvertExtUIToAIE4UPSPattern,
-           ConvertExtSIToAIE4UnpackPattern, ConvertExtUIToAIE4UnpackPattern,
-           ConvertExtFToAIE4ConvPattern,
-           // Shapes the native float->int conversion does not cover, and both
-           // int->float directions, which AIE4 has no instruction for. The
-           // prohibition on these lives in configureAIEVecCommonLegalizations
-           // and applies to every target, so without a pattern here they would
-           // have nothing to satisfy it.
-           ScalarizeVectorSIToFPOpPattern, ScalarizeVectorUIToFPOpPattern,
-           ScalarizeVectorFPToSIOpPattern, ScalarizeVectorFPToUIOpPattern,
-           LowerAIE4MinSIOp, LowerAIE4MaxSIOp, LowerAIE4MinUIOp,
-           LowerAIE4MaxUIOp, LowerAIE4CmpIOp, LowerAIE4SelectOp,
-           LowerAIE4MaskExtractOp, LowerAIE4VectorReductionOp,
-           LowerAIE4MinimumFOp, LowerAIE4MaximumFOp, LowerAIE4CmpFOp,
-           LowerAIE4MinNumFOp, LowerAIE4MaxNumFOp,
-           LowerVectorTransposeOpToAIE4ShuffleOpPattern,
-           LowerVectorShuffleOpToAIE4ShuffleOpPattern,
-           LowerAIE4ApproxMathOp<math::Exp2Op>,
-           LowerAIE4ApproxMathOp<math::TanhOp>,
-           LowerAIE4ReciprocalOp>(
-           patterns.getContext());
+  patterns.add<
+      ConvertMulFToAIE4MulEwiseF32Pattern, ConvertMulFToAIE4MulEwiseBf16Pattern,
+      ConvertMacFToAIE4MacEwiseF32Pattern, ConvertMacFToAIE4MacEwiseBf16Pattern,
+      ConvertMscFToAIE4MscEwiseF32Pattern, ConvertMscFToAIE4MscEwiseBf16Pattern,
+      ConvertIntMacToAIE4MacPattern, ConvertExtSIToAIE4UPSPattern,
+      ConvertExtUIToAIE4UPSPattern, ConvertExtSIToAIE4UnpackPattern,
+      ConvertExtUIToAIE4UnpackPattern, ConvertExtFToAIE4ConvPattern,
+      // Shapes the native float->int conversion does not cover, and both
+      // int->float directions, which AIE4 has no instruction for. The
+      // prohibition on these lives in configureAIEVecCommonLegalizations
+      // and applies to every target, so without a pattern here they would
+      // have nothing to satisfy it.
+      ScalarizeVectorSIToFPOpPattern, ScalarizeVectorUIToFPOpPattern,
+      ScalarizeVectorFPToSIOpPattern, ScalarizeVectorFPToUIOpPattern,
+      LowerAIE4MinSIOp, LowerAIE4MaxSIOp, LowerAIE4MinUIOp, LowerAIE4MaxUIOp,
+      LowerAIE4CmpIOp, LowerAIE4SelectOp, LowerAIE4MaskExtractOp,
+      LowerAIE4VectorReductionOp, LowerAIE4MinimumFOp, LowerAIE4MaximumFOp,
+      LowerAIE4CmpFOp, LowerAIE4MinNumFOp, LowerAIE4MaxNumFOp,
+      LowerVectorTransposeOpToAIE4ShuffleOpPattern,
+      LowerVectorShuffleOpToAIE4ShuffleOpPattern,
+      LowerAIE4ApproxMathOp<math::Exp2Op>, LowerAIE4ApproxMathOp<math::TanhOp>,
+      LowerAIE4ReciprocalOp, LowerAIE4ContractToMatMulPattern>(
+      patterns.getContext());
   // Higher benefit than the scalarize patterns above, which also match
   // fptosi/fptoui and would otherwise take the native shape.
   patterns.add<ConvertFPToSIToAIE4ConvPattern, ConvertFPToUIToAIE4ConvPattern>(
@@ -7167,9 +7305,8 @@ static void configureAIEVecV4Legalizations(ConversionTarget &target) {
   // Mask materialization uses generic vector operations. LLVM conversion
   // erases signedness from the unsigned mask carriers.
   target.addLegalOp<UnrealizedConversionCastOp, vector::BroadcastOp>();
-  target.addDynamicallyLegalOp<vector::ExtractOp>([](vector::ExtractOp op) {
-    return !isAIE4MaskExtract(op);
-  });
+  target.addDynamicallyLegalOp<vector::ExtractOp>(
+      [](vector::ExtractOp op) { return !isAIE4MaskExtract(op); });
 
   // Transpose lowering uses shape casts around the flat AIE4 shuffle.
   target.addLegalOp<vector::ShapeCastOp>();
@@ -7197,7 +7334,8 @@ static void configureAIEVecV4Legalizations(ConversionTarget &target) {
            feedsFusableIntMacChain(mulOp);
   });
 
-  // Use the same predicate as the rewrite so only supported MAC roots are illegal.
+  // Use the same predicate as the rewrite so only supported MAC roots are
+  // illegal.
   target.addDynamicallyLegalOp<arith::AddIOp>(
       [](arith::AddIOp addOp) { return !matchIntMacChain(addOp); });
 
@@ -7273,6 +7411,13 @@ static void configureAIEVecV4Legalizations(ConversionTarget &target) {
            cmpOp.getPredicate() == arith::CmpIPredicate::ne;
   });
 
+  // Only contractions that are exactly one native MMAC matmul, with the
+  // required numerical permission, are converted; the rest stay generic.
+  target.addDynamicallyLegalOp<vector::ContractionOp>(
+      [](vector::ContractionOp op) {
+        return !LowerAIE4ContractToMatMulPattern::matches(op);
+      });
+
   // Keep add reductions generic unless native f32 reassociation is allowed.
   target.addDynamicallyLegalOp<vector::ReductionOp>([](vector::ReductionOp op) {
     if (op.getKind() != vector::CombiningKind::ADD)
@@ -7290,10 +7435,11 @@ static void configureAIEVecV4Legalizations(ConversionTarget &target) {
                     transpOp)
                     .has_value();
       });
-  target.addDynamicallyLegalOp<vector::ShuffleOp>([](vector::ShuffleOp shuffleOp) {
-    return !LowerVectorShuffleOpToAIE4ShuffleOpPattern::matchMode(shuffleOp)
-                .has_value();
-  });
+  target.addDynamicallyLegalOp<vector::ShuffleOp>(
+      [](vector::ShuffleOp shuffleOp) {
+        return !LowerVectorShuffleOpToAIE4ShuffleOpPattern::matchMode(shuffleOp)
+                    .has_value();
+      });
 
   // exp2/tanh have only approximate afn lowerings; the pattern diagnoses
   // strict ops and unsupported shapes. Wide vectors reassemble their 32-lane
@@ -8727,9 +8873,9 @@ struct LowerVectorToAIEVec : PassWrapper<LowerVectorToAIEVec, OperationPass<>> {
     target.addLegalOp<xilinx::AIE::RuntimeSequenceOp>();
     target.markOpRecursivelyLegal<xilinx::AIE::RuntimeSequenceOp>();
 
-    FailureOr<AIEVecTargetInfo> maybeTargetInfo =
+    std::optional<AIEVecTargetInfo> maybeTargetInfo =
         parseAIEVecTarget(aieTarget, op);
-    if (failed(maybeTargetInfo))
+    if (!maybeTargetInfo.has_value())
       return signalPassFailure();
     AIEVecTargetInfo targetInfo = *maybeTargetInfo;
 

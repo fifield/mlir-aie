@@ -1,0 +1,26 @@
+# Copyright (C) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+syn.o:	file format elf32-aie
+
+Disassembly of section .text:
+
+00000000 <main>:
+       0: 00 00 00 00      	vmov	za[i0], y0
+       4: 00 00 00 00      	jnz	r0, #0xc
+       8: 00 00 00 00      	nop
+       c: 00 00 00 00      	nop
+      10: 00 00 00 00      	nop
+      14: 00 00 00 00      	nop
+      18: 00 00 00 00      	nop
+      1c: 00 00 00 00      	vmov	zb, za
+      20: 00 00 00 00      	mmac.f	dma0, dma0, x0, zb, r8
+      24: 00 00 00 00      	ret	lr
+      28: 00 00 00 00      	nop
+      2c: 00 00 00 00      	nop
+      30: 00 00 00 00      	nop
+      34: 00 00 00 00      	nop
+      38: 00 00 00 00      	nop
+
+0000003c <other>:
+      3c: 00 00 00 00      	vmov	za[i0], y0

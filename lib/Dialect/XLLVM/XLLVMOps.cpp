@@ -45,7 +45,7 @@ getNamedIntrinsicDeclaration(llvm::Module *M, llvm::StringRef fullName,
 llvm::CallInst *createExternalLLVMIntrinsicCall(
     llvm::IRBuilderBase &builder, LLVM::ModuleTranslation &moduleTranslation,
     Operation *intrOp, llvm::StringRef intrinsicName) {
-  llvm::Type *resTy = nullptr;
+  llvm::Type *resTy = builder.getVoidTy();
   unsigned numResults = intrOp->getNumResults();
   if (numResults == 1)
     resTy = moduleTranslation.convertType(*(intrOp->getResultTypes().begin()));
@@ -83,6 +83,17 @@ uint32_t encodeAIE4Bf16FpConf(bool zeroAcc, AIE4AMode amode, AIE4BMode bmode,
          (xIsBf16 ? 1u << 5 : 0u) | (yIsBf16 ? 1u << 6 : 0u);
 }
 
+uint32_t encodeAIE4MmacIntConf(bool zeroAcc, AIE4MmacIntPrecision bmode,
+                               AIE4OperandSign xSign, AIE4OperandSign zSign) {
+  return (zeroAcc ? 1u : 0u) | (static_cast<uint32_t>(bmode) << 3) |
+         (static_cast<uint32_t>(zSign) << 8) |
+         (static_cast<uint32_t>(xSign) << 9);
+}
+
+uint32_t encodeAIE4MmacFp8Conf(bool zeroAcc, AIE4MmacFp8EMode emode) {
+  return (zeroAcc ? 1u : 0u) | (static_cast<uint32_t>(emode) << 10);
+}
+
 llvm::CallInst *createAIE4ConfIntrinsicCall(
     llvm::IRBuilderBase &builder, LLVM::ModuleTranslation &moduleTranslation,
     Operation *intrOp, llvm::StringRef intrinsicName, uint32_t conf) {
@@ -95,10 +106,12 @@ createAIE4ConfIntrinsicCall(llvm::IRBuilderBase &builder,
                             LLVM::ModuleTranslation &moduleTranslation,
                             Operation *intrOp, llvm::StringRef intrinsicName,
                             ArrayRef<uint32_t> trailingArgs) {
-  assert(intrOp->getNumResults() == 1 &&
-         "AIE4 conf intrinsics have exactly one result");
+  assert(intrOp->getNumResults() <= 1 &&
+         "AIE4 conf intrinsics have at most one result");
   llvm::Type *resTy =
-      moduleTranslation.convertType(*(intrOp->getResultTypes().begin()));
+      intrOp->getNumResults() == 0
+          ? builder.getVoidTy()
+          : moduleTranslation.convertType(intrOp->getResultTypes().front());
 
   auto operands = moduleTranslation.lookupValues(intrOp->getOperands());
   // Materialize attributes as trailing i32 arguments in intrinsic order.

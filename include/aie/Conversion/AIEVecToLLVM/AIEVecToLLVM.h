@@ -44,6 +44,16 @@ void populateAIEVecToLLVMAIE4ConversionPatterns(
 
 void configureAIEVecToLLVMAIE4Legalizations(mlir::ConversionTarget &target);
 
+/// AIE4 MMAC: aievec.aie4.matrix_region and aievec.aie4.mmac to XLLVM.
+void populateAIEVecToLLVMAIE4MmacPatterns(mlir::LLVMTypeConverter &converter,
+                                          mlir::RewritePatternSet &patterns);
+
+/// Rewrite every aievec.aie4.matmul under `root` into an
+/// aievec.aie4.matrix_region of row MMACs.
+mlir::LogicalResult expandAIE4MatMulOps(mlir::Operation *root);
+
+std::unique_ptr<mlir::Pass> createAIEVecAIE4ExpandMatMulPass();
+
 std::unique_ptr<mlir::OperationPass<mlir::ModuleOp>>
 createConvertAIEVecToLLVMPass();
 } // namespace aievec

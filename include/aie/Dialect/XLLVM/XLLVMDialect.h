@@ -41,6 +41,7 @@
 #include "aie/Dialect/XLLVM/IR/XLLVMEnums.h.inc"
 
 #include "aie/Dialect/XLLVM/AIE4CtrlRegResources.h"
+#include "aie/Dialect/XLLVM/AIE4MatrixState.h"
 
 #define GET_OP_CLASSES
 #include "aie/Dialect/XLLVM/IR/XLLVMOps.h.inc"
@@ -97,6 +98,22 @@ uint32_t encodeAIE4MacConf(bool zeroAcc, AIE4AMode amode, AIE4BMode bmode,
 uint32_t encodeAIE4Bf16FpConf(bool zeroAcc, AIE4AMode amode, AIE4BMode bmode,
                               bool xIsBf16, bool yIsBf16);
 
+/// Pack a dense integer MMAC configuration word:
+///   bit  0  zero_acc
+///   bit  3  bmode (0: int4 x int4, 1: int8 x int8)
+///   bit  8  Z (matrix) operand signed
+///   bit  9  X (activation) operand signed
+/// zeroAcc=false, int4x4, both signed encodes 0x300; int8x8 encodes 0x308.
+uint32_t encodeAIE4MmacIntConf(bool zeroAcc, AIE4MmacIntPrecision bmode,
+                               AIE4OperandSign xSign, AIE4OperandSign zSign);
+
+/// Pack a dense fp8 MMAC configuration word: bit 0 zero_acc and bits 11:10
+/// emode (fp8 X-operand NaN processing).
+uint32_t encodeAIE4MmacFp8Conf(bool zeroAcc, AIE4MmacFp8EMode emode);
+
+/// bf16 staging uses int8/bf16 data mode with the signedness bit clear.
+inline constexpr uint32_t kAIE4IntMModeBf16 = 2;
+
 /// Like `createExternalLLVMIntrinsicCall`, but appends `conf` as a trailing
 /// i32 argument. AIE4 config words live in MLIR *attributes* (so their fields
 /// can be range-verified) rather than in operands, so they are not picked up
@@ -108,18 +125,20 @@ createAIE4ConfIntrinsicCall(llvm::IRBuilderBase &builder,
                             llvm::StringRef intrinsicName, uint32_t conf);
 
 /// Append attributes as trailing i32 arguments, e.g. SRS shift then sign.
+/// Operations with no result produce a void call.
 llvm::CallInst *createAIE4ConfIntrinsicCall(
     llvm::IRBuilderBase &builder,
     mlir::LLVM::ModuleTranslation &moduleTranslation, mlir::Operation *intrOp,
     llvm::StringRef intrinsicName, llvm::ArrayRef<uint32_t> trailingArgs);
 
-/// Calls native float min/max or comparison through an opaque helper so reads of
-/// crFPOrder survive LLVM optimization and instruction scheduling. Peano's
+/// Calls native float min/max or comparison through an opaque helper so reads
+/// of crFPOrder survive LLVM optimization and instruction scheduling. Peano's
 /// vaddfloat-family intrinsics currently omit this control-register dependency.
-llvm::Value *createAIE4FPOrderIntrinsicCall(
-    llvm::IRBuilderBase &builder,
-    mlir::LLVM::ModuleTranslation &moduleTranslation, mlir::Operation *intrOp,
-    llvm::StringRef intrinsicName, uint32_t opsel);
+llvm::Value *
+createAIE4FPOrderIntrinsicCall(llvm::IRBuilderBase &builder,
+                               mlir::LLVM::ModuleTranslation &moduleTranslation,
+                               mlir::Operation *intrOp,
+                               llvm::StringRef intrinsicName, uint32_t opsel);
 
 /// Builds a lane-select call with operands (lhs, rhs, sign, 2, sel, 0).
 /// `intrOp` supplies (lhs, rhs, sel); the literals encode VSEL and fporder.

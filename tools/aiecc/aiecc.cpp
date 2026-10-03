@@ -387,11 +387,56 @@ buildObjectSubgraph(EdgeWithTypedOutput<ModRef> &lowered,
           .threadSafe();
   // Per core only for --check-lut-banks, which reads each core's own names.
   auto &opted = peanoLinked.map<File>("opted_{0}.ll", optCmd).threadSafe();
+  // Inspect each core after linking and optimization so merged kernels
+  // receive the required Peano workarounds:
+  // - MachineCSE can delete fp8 inserts when a tile is restaged.
+  // - combine_staging_upd_load can move inserts across another tile's commit.
+  // - combine_indexed_to_autoinc can replace an unrelated loop increment
+  //   with a constant staging index + 1, corrupting operand addresses.
+  // The unguarded regressions in test/aiecc/aie4-mmac-peano-*.test track
+  // the first two defects; aie4-mmac-codegen.test checks loop increments.
+  // The corresponding *-guard tests check flag scoping.
+  auto &llcWorkaroundFlags =
+      opted
+          .map<std::vector<std::string>>(
+              "llcWorkarounds_{0}.txt",
+              [](const Item<File> &ir,
+                 Item<std::vector<std::string>> &out) -> mlir::LogicalResult {
+                std::vector<std::string> flags;
+                if (!dryRun) {
+                  auto buf = llvm::MemoryBuffer::getFile(ir.asFile());
+                  if (!buf) {
+                    llvm::errs() << "aiecc: cannot read '" << ir.asFile()
+                                 << "': " << buf.getError().message() << "\n";
+                    return mlir::failure();
+                  }
+                  llvm::StringRef contents = (*buf)->getBuffer();
+                  bool hasFp8Staging =
+                      contents.contains("@llvm.aie4.insert.staging.fp8.");
+                  if (hasFp8Staging)
+                    flags.emplace_back("-disable-machine-cse");
+                  if (hasFp8Staging ||
+                      contents.contains("@llvm.aie4.insert.staging.int.") ||
+                      contents.contains("@llvm.aie4.insert.staging.bf16.")) {
+                    // Both combiner passes run the faulty auto-increment rule.
+                    flags.emplace_back(
+                        "-aie4postlegalizergenericcombiner-disable-rule="
+                        "combine_indexed_to_autoinc");
+                    flags.emplace_back(
+                        "-aie4postlegalizercustomcombiner-disable-rule="
+                        "combine_staging_upd_load,combine_indexed_to_autoinc");
+                  }
+                }
+                out.value = std::move(flags);
+                return mlir::success();
+              })
+          .threadSafe();
   ShellCommand llcCmd{"llc"};
   llcCmd.input()
       .arg("-O" + std::to_string(optLevel.getValue()))
       .value("--march=")
       .inputs("--mcpu=")
+      .inputs()
       .arg("--function-sections")
       .arg("-stack-size-section")
       .value("-aie-stack-addrspace=", "", /*omitIfEmpty=*/true)
@@ -416,12 +461,13 @@ buildObjectSubgraph(EdgeWithTypedOutput<ModRef> &lowered,
   auto shared = std::make_shared<SharedObjects>();
   bool share = !noShareCoreObjects;
   EdgeWithTypedOutput<Directory> &peanoObject =
-      bundle(peanoLinked.out, arches.out, llcMcpuFlags.out, stackSpaces.out)
+      bundle(peanoLinked.out, arches.out, llcMcpuFlags.out, llcWorkaroundFlags.out, stackSpaces.out)
           .map<Directory>(
               objName,
               [optCmd, llcCmd, shared, share](
                   const Item<std::string> &ir, const Item<std::string> &arch,
                   const Item<std::vector<std::string>> &mcpu,
+                  const Item<std::vector<std::string>> &workarounds,
                   const Item<std::string> &stack,
                   Item<Directory> &out) -> mlir::LogicalResult {
                 std::string workDir =
@@ -436,7 +482,7 @@ buildObjectSubgraph(EdgeWithTypedOutput<ModRef> &lowered,
                   if (mlir::failed(optCmd(input, optimized))) {
                     return mlir::failure();
                   }
-                  return llcCmd(optimized, arch, mcpu, stack, object);
+                  return llcCmd(optimized, arch, mcpu, workarounds, stack, object);
                 };
                 if (ShellCommand::dryRun || !share) {
                   return compile(ir, out.key, out);
@@ -451,6 +497,10 @@ buildObjectSubgraph(EdgeWithTypedOutput<ModRef> &lowered,
                 std::string key = canonical->text + '\0' + arch.asString() +
                                   '\0' + stack.asString();
                 for (const auto &flag : mcpu.get()) {
+                  key += '\0';
+                  key += flag;
+                }
+                for (const auto &flag : workarounds.get()) {
                   key += '\0';
                   key += flag;
                 }
@@ -2579,8 +2629,8 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
   // and unused, since fullElfConfig only reads it under moduleHasAie4Device.
   auto &certAsm = npuLowered.map<std::string>(
       "full_elf_cert.mlir.asm",
-      [&context, workDirStr](const Item<ModRef> &item,
-                             Item<std::string> &out) -> mlir::LogicalResult {
+      [workDirStr](const Item<ModRef> &item,
+                   Item<std::string> &out) -> mlir::LogicalResult {
         mlir::ModuleOp mod = item.get().get();
         if (!moduleHasAie4Device(mod)) {
           out.value = std::string{};
@@ -2743,8 +2793,11 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
                          .output()](const Node<std::string> &configType,
                                     const Node<llvm::json::Value> &config,
                                     Item<File> &out) -> mlir::LogicalResult {
-                if (configType.items.empty() || config.items.empty())
+                if (configType.items.empty() || config.items.empty()) {
+                  llvm::errs() << "aiecc: full-elf: missing config type or "
+                                  "config JSON\n";
                   return mlir::failure();
+                }
                 return cmd(configType.items.front(), config.items.front(), out);
               });
 #endif // AIECC_HAS_AIEBU_CONFIG_ELF

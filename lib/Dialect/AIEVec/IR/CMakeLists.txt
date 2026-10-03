@@ -6,6 +6,7 @@
 
 add_mlir_dialect_library(MLIRAIEVecDialect
   AIEVecOps.cpp
+  AIEVecAIE4Ops.cpp
   AIEVecTypes.cpp
 
   ADDITIONAL_HEADER_DIRS
@@ -23,6 +24,7 @@ add_mlir_dialect_library(MLIRAIEVecDialect
 
   LINK_LIBS PUBLIC
   AIE
+  MLIRCallInterfaces
   MLIRIR
   MLIRLLVMDialect
   MLIRPass

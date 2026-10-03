@@ -1,0 +1,47 @@
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// End to end from vector.contract: the AIE4 Vector-to-AIEVec matcher turns
+// each native-tile contraction into aievec.aie4.matmul, and the
+// lowering takes it through matrix_region, XLLVM, LLVM and Peano. R1 and R2
+// of Inputs/aie4_mmac_design.py are vector.contract over extended operands
+// (--contract); R3 is a hand-written matrix_region with zero_acc MMACs.
+//
+// REQUIRES: peano
+//
+// int8, X unsigned (extui) and Z signed (extsi): conf 0x108 (264), and
+// 0x109 (265) for R3.
+// RUN: %python %S/Inputs/aie4_mmac_design.py int8 --contract -o %t.int8.mlir
+// RUN: %aiecc --enable-aie4-vectorization --get-core-elfs --tmpdir %t.int8.prj --output-dir %t.int8.out %t.int8.mlir
+// RUN: FileCheck %s --check-prefix=INT8 --input-file %t.int8.prj/opted_main_core_0_2.ll
+// RUN: llvm-objdump -d %t.int8.out/elfs_main_core_0_2/elfs_main_core_0_2.elf > %t.int8.dis
+// RUN: %python %S/Inputs/check_aie4_mmac_schedule.py %t.int8.dis --mmacs-per-tile 4,4,4 | FileCheck %s --check-prefix=ORDER
+// INT8-COUNT-32: call void @llvm.aie4.insert.staging.int.I1024({{.*}}, i32 3)
+// INT8: call void @llvm.aie4.staging.to.matrix.I32768()
+// INT8-COUNT-4: call <64 x i32> @llvm.aie4.I512.ACC2048.mmac({{.*}}, i32 264)
+// INT8-COUNT-32: call void @llvm.aie4.insert.staging.int.I1024({{.*}}, i32 3)
+// INT8: call void @llvm.aie4.staging.to.matrix.I32768()
+// INT8-COUNT-4: call <64 x i32> @llvm.aie4.I512.ACC2048.mmac({{.*}}, i32 264)
+// INT8-COUNT-4: call <64 x i32> @llvm.aie4.I512.ACC2048.mmac({{.*}}, i32 265)
+//
+// int4, both signed: staging mode int4 (1), I4 commit, conf 0x300 (768).
+// RUN: %python %S/Inputs/aie4_mmac_design.py int4 --contract -o %t.int4.mlir
+// RUN: %aiecc --enable-aie4-vectorization --get-core-elfs --tmpdir %t.int4.prj --output-dir %t.int4.out %t.int4.mlir
+// RUN: FileCheck %s --check-prefix=INT4 --input-file %t.int4.prj/opted_main_core_0_2.ll
+// RUN: llvm-objdump -d %t.int4.out/elfs_main_core_0_2/elfs_main_core_0_2.elf > %t.int4.dis
+// RUN: %python %S/Inputs/check_aie4_mmac_schedule.py %t.int4.dis --mmacs-per-tile 4,4,4 | FileCheck %s --check-prefix=ORDER
+// INT4-COUNT-32: call void @llvm.aie4.insert.staging.int.I1024({{.*}}, i32 1)
+// INT4: call void @llvm.aie4.staging.to.matrix.I4.I32768()
+// INT4-COUNT-4: call <64 x i32> @llvm.aie4.I512.ACC2048.mmac({{.*}}, i32 768)
+//
+// bf16 with fastmath<afn> on the contraction.
+// RUN: %python %S/Inputs/aie4_mmac_design.py bf16 --contract -o %t.bf16.mlir
+// RUN: %aiecc --enable-aie4-vectorization --get-core-elfs --tmpdir %t.bf16.prj --output-dir %t.bf16.out %t.bf16.mlir
+// RUN: FileCheck %s --check-prefix=BF16 --input-file %t.bf16.prj/opted_main_core_0_2.ll
+// RUN: llvm-objdump -d %t.bf16.out/elfs_main_core_0_2/elfs_main_core_0_2.elf > %t.bf16.dis
+// RUN: %python %S/Inputs/check_aie4_mmac_schedule.py %t.bf16.dis --mmacs-per-tile 4,4,4 | FileCheck %s --check-prefix=ORDER
+// BF16-COUNT-32: call void @llvm.aie4.insert.staging.bf16.I1024(
+// BF16: call void @llvm.aie4.staging.to.matrix.I32768()
+// BF16-COUNT-4: call <64 x float> @llvm.aie4.bf16.I512.ACC2048.mmac({{.*}}, i32 0)
+//
+// ORDER: ORDER OK: 3 tiles, 96 inserts, 12 MMACs, no accumulator spills

@@ -4,6 +4,7 @@
 add_mlir_conversion_library(MLIRAIEVecToLLVM
   AIEVecToLLVM.cpp
   AIEVecToLLVMAIE4.cpp
+  AIEVecToLLVMAIE4Mmac.cpp
 
   ADDITIONAL_HEADER_DIRS
   $(CMAKE_CURRENT_SRC_DIR)/../../../../include/aie/Conversion/AIEVecToLLVM

@@ -172,3 +172,35 @@ func.func @vector_contract_permuted_b(%A : vector<1x1x4x8xbf16>,
               vector<1x1x4x8xf32>, vector<1x1x4x8xf32> into vector<1x1x4x4xf32>
   return %res : vector<1x1x4x4xf32>
 }
+
+//
+// -----
+//
+
+// Retaining B's stored layout preserves the contraction's fastmath flags.
+
+// CHECK-LABEL: func.func @vector_contract_permuted_b_fastmath(
+// CHECK-NOT: vector.transpose
+// CHECK: arith.extf
+// CHECK: %[[RHS:.*]] = arith.extf
+// CHECK-NOT: vector.transpose
+// CHECK: vector.contract {
+// CHECK-SAME:    fastmath = #arith.fastmath<contract,afn>
+// CHECK-SAME:    kind = #vector.kind<add>}
+// CHECK-SAME:    %{{.*}}, %[[RHS]], %{{.*}} :
+func.func @vector_contract_permuted_b_fastmath(%A : vector<4x32xbf16>,
+                                               %B : vector<64x32xbf16>,
+                                               %C : vector<4x64xf32>)
+                                             -> vector<4x64xf32> {
+  %lhs = arith.extf %A : vector<4x32xbf16> to vector<4x32xf32>
+  %rhs = arith.extf %B : vector<64x32xbf16> to vector<64x32xf32>
+  %res = vector.contract {
+              indexing_maps = [affine_map<(m, n, k) -> (m, k)>,
+                               affine_map<(m, n, k) -> (n, k)>,
+                               affine_map<(m, n, k) -> (m, n)>],
+              iterator_types = ["parallel", "parallel", "reduction"],
+              kind = #vector.kind<add>,
+              fastmath = #arith.fastmath<afn,contract>} %lhs, %rhs, %C :
+              vector<4x32xf32>, vector<64x32xf32> into vector<4x64xf32>
+  return %res : vector<4x64xf32>
+}

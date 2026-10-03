@@ -34,4 +34,26 @@ def SplitVectorLoadUpsChains : Pass<"aievec-split-load-ups-chains"> {
                            "xilinx::aievec::AIEVecDialect"];
 }
 
+def AIEVecGrantContractAfn : Pass<"aievec-grant-contract-afn"> {
+  let summary =
+      "Add `afn` to the fastmath flags of floating-point vector.contract ops";
+  let description = [{
+    Adds `afn` to the fastmath flags of every `vector.contract` whose
+    accumulator has a floating-point element type, keeping the flags it
+    already has. Integer contractions are left alone.
+
+    `afn` permits AIE4 MMAC numerics (`aievec.aie4.matmul`), including
+    hardware accumulation order, rounding, and subnormal handling. This
+    pass records that permission in the IR for sources that cannot
+    annotate their contractions directly.
+
+    Off by default. The `contract-afn` option of the
+    `canonicalize-vector-for-aievec` and `convert-vector-to-aievec`
+    pipelines runs it first.
+  }];
+  let constructor = "xilinx::aievec::createGrantContractAfnPass()";
+  let dependentDialects = ["mlir::arith::ArithDialect",
+                           "mlir::vector::VectorDialect"];
+}
+
 #endif // AIE_DIALECT_AIEVEC_TRANSFORMS_PASSES

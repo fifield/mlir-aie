@@ -45,7 +45,6 @@ def AIEVec_AddElemOp
   let hasVerifier = 0;
 }
 
-
 // AIE4-specific. Deliberately a separate op from `aievec.mul_elem`, which
 // carries the AIE2-only `isOperandResultTypePairValidForAIE2MulElem` type
 // constraint (its legal lhs/rhs/acc combinations are AIE2 accumulator shapes,
@@ -56,13 +55,13 @@ def AIEVec_AddElemOp
 // definition carries no `IntrNoMem`, so LLVM itself treats it as potentially
 // side-effecting. Modelling it as pure here would let MLIR hoist/CSE it more
 // aggressively than the backend will.
-def AIEVec_AIE4MulEwiseF32Op:
-  AIEVec_Op<"aie4.mul_ewise_f32", [
-    AllTypesMatch<["lhs", "rhs", "result"]>
-  ]>,
-  Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$lhs,
-                 FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$rhs)>,
-  Results<(outs FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$result)> {
+def AIEVec_AIE4MulEwiseF32Op
+    : AIEVec_Op<
+          "aie4.mul_ewise_f32", [AllTypesMatch<["lhs", "rhs", "result"]>]>,
+      Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$lhs,
+          FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$rhs)>,
+      Results<(
+          outs FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$result)> {
   let summary = "AIE4 elementwise f32 vector multiply";
   let description = [{
     AIE4-specific elementwise multiply of two 1024-bit (`vector<32xf32>`)
@@ -81,23 +80,22 @@ def AIEVec_AIE4MulEwiseF32Op:
 //===----------------------------------------------------------------------===//
 //
 // Share the MAC resource identity with XLLVM through AIE4CtrlRegResources.h.
-def AIEVec_AIE4CRVecSatRes :
-    Resource<"::xilinx::xllvm::AIE4CRVecSatResource">;
+def AIEVec_AIE4CRVecSatRes : Resource<"::xilinx::xllvm::AIE4CRVecSatResource">;
 
 //===----------------------------------------------------------------------===//
 // AIE4 integer MAC
 //===----------------------------------------------------------------------===//
 
-def AIEVec_AIE4MacEwiseI16I32Op:
-  AIEVec_Op<"aie4.mac_ewise_i16_i32", [
-    AllTypesMatch<["lhs", "rhs"]>,
-    AllTypesMatch<["acc", "result"]>,
-    MemoryEffects<[MemRead<AIEVec_AIE4CRVecSatRes>]>
-  ]>,
-  Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>:$lhs,
-                 FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>:$rhs,
-                 FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>:$acc)>,
-  Results<(outs FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>:$result)> {
+def AIEVec_AIE4MacEwiseI16I32Op
+    : AIEVec_Op<"aie4.mac_ewise_i16_i32",
+                [AllTypesMatch<["lhs", "rhs"]>,
+                 AllTypesMatch<["acc", "result"]>,
+                 MemoryEffects<[MemRead<AIEVec_AIE4CRVecSatRes>]>]>,
+      Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>:$lhs,
+          FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>:$rhs,
+          FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>:$acc)>,
+      Results<(
+          outs FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>:$result)> {
   let summary = "AIE4 elementwise integer multiply-accumulate";
   let description = [{
     Elementwise signed i16 x i16 multiply-accumulate. The multiplier widens
@@ -116,14 +114,14 @@ def AIEVec_AIE4MacEwiseI16I32Op:
 // AIE4 f32 MAC
 //===----------------------------------------------------------------------===//
 
-def AIEVec_AIE4MacEwiseF32Op:
-  AIEVec_Op<"aie4.mac_ewise_f32", [
-    AllTypesMatch<["lhs", "rhs", "acc", "result"]>
-  ]>,
-  Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$lhs,
-                 FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$rhs,
-                 FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$acc)>,
-  Results<(outs FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$result)> {
+def AIEVec_AIE4MacEwiseF32Op
+    : AIEVec_Op<"aie4.mac_ewise_f32", [AllTypesMatch<["lhs", "rhs", "acc",
+                                                      "result"]>]>,
+      Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$lhs,
+          FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$rhs,
+          FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$acc)>,
+      Results<(
+          outs FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$result)> {
   let summary = "AIE4 elementwise f32 vector multiply-accumulate";
   let description = [{
     Computes `$acc + ($lhs * $rhs)` with one rounding, using fixed
@@ -143,8 +141,7 @@ def AIEVec_AIE4MacEwiseF32Op:
     establish `crVecRnd` -- callers must arrange the rounding mode they
     need. This is the same contract as the native MUL/MAC forms.
   }];
-  let assemblyFormat =
-      "$lhs `,` $rhs `,` $acc attr-dict `:` type($result)";
+  let assemblyFormat = "$lhs `,` $rhs `,` $acc attr-dict `:` type($result)";
   let hasVerifier = 0;
 }
 
@@ -152,13 +149,12 @@ def AIEVec_AIE4MacEwiseF32Op:
 // AIE4 bf16 x bf16 -> f32 MUL/MAC
 //===----------------------------------------------------------------------===//
 
-def AIEVec_AIE4MulEwiseBf16F32Op:
-  AIEVec_Op<"aie4.mul_ewise_bf16_f32", [
-    AllTypesMatch<["lhs", "rhs"]>
-  ]>,
-  Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$lhs,
-                 FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$rhs)>,
-  Results<(outs FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$result)> {
+def AIEVec_AIE4MulEwiseBf16F32Op
+    : AIEVec_Op<"aie4.mul_ewise_bf16_f32", [AllTypesMatch<["lhs", "rhs"]>]>,
+      Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$lhs,
+          FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$rhs)>,
+      Results<(
+          outs FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$result)> {
   let summary = "AIE4 elementwise bf16 x bf16 -> f32 vector multiply";
   let description = [{
     Multiplies fixed `vector<32xbf16>` operands and rounds the product to
@@ -177,20 +173,21 @@ def AIEVec_AIE4MulEwiseBf16F32Op:
     establish `crVecRnd` -- callers must arrange the rounding mode they
     need. This is the same contract as the native MUL/MAC forms.
   }];
-  let assemblyFormat = "$lhs `,` $rhs attr-dict `:` type($lhs) `,` type($result)";
+  let assemblyFormat =
+      "$lhs `,` $rhs attr-dict `:` type($lhs) `,` type($result)";
   let hasVerifier = 0;
 }
 
-def AIEVec_AIE4MacEwiseBf16F32Op:
-  AIEVec_Op<"aie4.mac_ewise_bf16_f32", [
-    AllTypesMatch<["lhs", "rhs"]>,
-    AllTypesMatch<["acc", "result"]>
-  ]>,
-  Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$lhs,
-                 FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$rhs,
-                 FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$acc)>,
-  Results<(outs FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$result)> {
-  let summary = "AIE4 elementwise bf16 x bf16 -> f32 vector multiply-accumulate";
+def AIEVec_AIE4MacEwiseBf16F32Op
+    : AIEVec_Op<"aie4.mac_ewise_bf16_f32", [AllTypesMatch<["lhs", "rhs"]>,
+                                            AllTypesMatch<["acc", "result"]>]>,
+      Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$lhs,
+          FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$rhs,
+          FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$acc)>,
+      Results<(
+          outs FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$result)> {
+  let summary =
+      "AIE4 elementwise bf16 x bf16 -> f32 vector multiply-accumulate";
   let description = [{
     Computes `$acc + ($lhs * $rhs)` with one rounding. Inputs are fixed
     `vector<32xbf16>`; the accumulator and result are `vector<32xf32>`.
@@ -214,14 +211,14 @@ def AIEVec_AIE4MacEwiseBf16F32Op:
   let hasVerifier = 0;
 }
 
-def AIEVec_AIE4MscEwiseF32Op:
-  AIEVec_Op<"aie4.msc_ewise_f32", [
-    AllTypesMatch<["lhs", "rhs", "acc", "result"]>
-  ]>,
-  Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$lhs,
-                 FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$rhs,
-                 FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$acc)>,
-  Results<(outs FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$result)> {
+def AIEVec_AIE4MscEwiseF32Op
+    : AIEVec_Op<"aie4.msc_ewise_f32", [AllTypesMatch<["lhs", "rhs", "acc",
+                                                      "result"]>]>,
+      Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$lhs,
+          FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$rhs,
+          FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$acc)>,
+      Results<(
+          outs FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$result)> {
   let summary = "AIE4 elementwise f32 vector multiply-subtract";
   let description = [{
     Computes `$acc - ($lhs * $rhs)` with one rounding, using fixed
@@ -242,20 +239,18 @@ def AIEVec_AIE4MscEwiseF32Op:
     establish `crVecRnd` -- callers must arrange the rounding mode they
     need. This is the same contract as the native MUL/MAC forms.
   }];
-  let assemblyFormat =
-      "$lhs `,` $rhs `,` $acc attr-dict `:` type($result)";
+  let assemblyFormat = "$lhs `,` $rhs `,` $acc attr-dict `:` type($result)";
   let hasVerifier = 0;
 }
 
-def AIEVec_AIE4MscEwiseBf16F32Op:
-  AIEVec_Op<"aie4.msc_ewise_bf16_f32", [
-    AllTypesMatch<["lhs", "rhs"]>,
-    AllTypesMatch<["acc", "result"]>
-  ]>,
-  Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$lhs,
-                 FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$rhs,
-                 FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$acc)>,
-  Results<(outs FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$result)> {
+def AIEVec_AIE4MscEwiseBf16F32Op
+    : AIEVec_Op<"aie4.msc_ewise_bf16_f32", [AllTypesMatch<["lhs", "rhs"]>,
+                                            AllTypesMatch<["acc", "result"]>]>,
+      Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$lhs,
+          FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$rhs,
+          FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$acc)>,
+      Results<(
+          outs FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$result)> {
   let summary = "AIE4 elementwise bf16 x bf16 -> f32 vector multiply-subtract";
   let description = [{
     Computes `$acc - ($lhs * $rhs)` with one rounding. Inputs are fixed
@@ -285,12 +280,14 @@ def AIEVec_AIE4MscEwiseBf16F32Op:
 // AIE4 SRS
 //===----------------------------------------------------------------------===//
 
-def AIEVec_AIE4SRSI32I16Op:
-  AIEVec_Op<"aie4.srs_i32_i16", []>,
-  Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>:$source,
-                 ConfinedAttr<I32Attr, [IntMinValue<0>, IntMaxValue<31>]>:$shift,
-                 DefaultValuedAttr<BoolAttr, "true">:$isSigned)>,
-  Results<(outs FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>:$result)> {
+def AIEVec_AIE4SRSI32I16Op
+    : AIEVec_Op<"aie4.srs_i32_i16", []>,
+      Arguments<(
+          ins FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>:$source,
+          ConfinedAttr<I32Attr, [IntMinValue<0>, IntMaxValue<31>]>:$shift,
+          DefaultValuedAttr<BoolAttr, "true">:$isSigned)>,
+      Results<(
+          outs FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>:$result)> {
   let summary = "AIE4 shift-round-saturate: i32 accumulator -> i16 vector";
   let description = [{
     Narrows a `vector<32xi32>` accumulator to `vector<32xi16>` using the AIE4
@@ -310,8 +307,7 @@ def AIEVec_AIE4SRSI32I16Op:
     The op reads the mode registers and writes the SRS overflow status flag;
     it must not be treated as pure.
   }];
-  let assemblyFormat =
-      "$source attr-dict `:` type($source) `,` type($result)";
+  let assemblyFormat = "$source attr-dict `:` type($source) `,` type($result)";
   let hasVerifier = 0;
 }
 
@@ -319,12 +315,14 @@ def AIEVec_AIE4SRSI32I16Op:
 // AIE4 UPS
 //===----------------------------------------------------------------------===//
 
-def AIEVec_AIE4UPSI16I32Op:
-  AIEVec_Op<"aie4.ups_i16_i32", []>,
-  Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>:$source,
-                 ConfinedAttr<I32Attr, [IntMinValue<0>, IntMaxValue<31>]>:$shift,
-                 DefaultValuedAttr<BoolAttr, "true">:$isSigned)>,
-  Results<(outs FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>:$result)> {
+def AIEVec_AIE4UPSI16I32Op
+    : AIEVec_Op<"aie4.ups_i16_i32", []>,
+      Arguments<(
+          ins FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>:$source,
+          ConfinedAttr<I32Attr, [IntMinValue<0>, IntMaxValue<31>]>:$shift,
+          DefaultValuedAttr<BoolAttr, "true">:$isSigned)>,
+      Results<(
+          outs FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>:$result)> {
   let summary = "AIE4 up-shift: i16 vector -> i32 accumulator";
   let description = [{
     Sign- or zero-extends `vector<32xi16>` to `vector<32xi32>`, then
@@ -336,8 +334,7 @@ def AIEVec_AIE4UPSI16I32Op:
     saturation depends on the ambient modes. Lowers to `vups.2x` or the
     load-fused `vlda.ups.2x`.
   }];
-  let assemblyFormat =
-      "$source attr-dict `:` type($source) `,` type($result)";
+  let assemblyFormat = "$source attr-dict `:` type($source) `,` type($result)";
   let hasVerifier = 0;
 }
 
@@ -345,11 +342,12 @@ def AIEVec_AIE4UPSI16I32Op:
 // AIE4 i8 -> i16 unpack
 //===----------------------------------------------------------------------===//
 
-def AIEVec_AIE4UnpackI8I16Op:
-  AIEVec_Op<"aie4.unpack_i8_i16", [Pure]>,
-  Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [I8]>:$source,
-                 DefaultValuedAttr<BoolAttr, "true">:$isSigned)>,
-  Results<(outs FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>:$result)> {
+def AIEVec_AIE4UnpackI8I16Op
+    : AIEVec_Op<"aie4.unpack_i8_i16", [Pure]>,
+      Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [I8]>:$source,
+          DefaultValuedAttr<BoolAttr, "true">:$isSigned)>,
+      Results<(
+          outs FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>:$result)> {
   let summary = "AIE4 widen i8 vector -> i16 vector, exact";
   let description = [{
     Sign-extends `vector<32xi8>` to `vector<32xi16>` when `isSigned` is true
@@ -357,33 +355,35 @@ def AIEVec_AIE4UnpackI8I16Op:
     independent of caller-controlled mode state; the backend sets the unpack
     size. Lowers to `vunpack` or the load-fused `vldb.unpack.2x`.
   }];
-  let assemblyFormat =
-      "$source attr-dict `:` type($source) `,` type($result)";
+  let assemblyFormat = "$source attr-dict `:` type($source) `,` type($result)";
   let hasVerifier = 0;
 }
 
 //===----------------------------------------------------------------------===//
 // AIE4 bf16 <-> f32 accumulator conversion
 //===----------------------------------------------------------------------===//
-def AIEVec_AIE4ConvBF16F32Op:
-  AIEVec_Op<"aie4.conv_bf16_f32", [Pure]>,
-  Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$source)>,
-  Results<(outs FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$result)> {
+def AIEVec_AIE4ConvBF16F32Op
+    : AIEVec_Op<"aie4.conv_bf16_f32", [Pure]>,
+      Arguments<(
+          ins FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$source)>,
+      Results<(
+          outs FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$result)> {
   let summary = "AIE4 widen bf16 vector -> f32 accumulator, exact";
   let description = [{
     Exactly widens `vector<32xbf16>` to `vector<32xf32>` without reading or
     updating control registers. Lowers to `vconv.fp32.bf16` or the
     load-fused `vlda.conv.fp32.bf16`.
   }];
-  let assemblyFormat =
-      "$source attr-dict `:` type($source) `,` type($result)";
+  let assemblyFormat = "$source attr-dict `:` type($source) `,` type($result)";
   let hasVerifier = 0;
 }
 
-def AIEVec_AIE4ConvF32BF16Op:
-  AIEVec_Op<"aie4.conv_f32_bf16", []>,
-  Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$source)>,
-  Results<(outs FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$result)> {
+def AIEVec_AIE4ConvF32BF16Op
+    : AIEVec_Op<"aie4.conv_f32_bf16", []>,
+      Arguments<(
+          ins FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$source)>,
+      Results<(
+          outs FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$result)> {
   let summary = "AIE4 narrow f32 accumulator -> bf16 vector, ambient rounding";
   let description = [{
     Narrows `vector<32xf32>` to `vector<32xbf16>` using the ambient rounding
@@ -394,16 +394,17 @@ def AIEVec_AIE4ConvF32BF16Op:
 
     Lowers to `vconv.bf16.fp32` or the store-fused `vst.conv.bf16.fp32`.
   }];
-  let assemblyFormat =
-      "$source attr-dict `:` type($source) `,` type($result)";
+  let assemblyFormat = "$source attr-dict `:` type($source) `,` type($result)";
   let hasVerifier = 0;
 }
 
-def AIEVec_AIE4ConvF32I32Op:
-  AIEVec_Op<"aie4.conv_f32_i32", []>,
-  Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$source,
-                 DefaultValuedAttr<BoolAttr, "true">:$isSigned)>,
-  Results<(outs FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>:$result)> {
+def AIEVec_AIE4ConvF32I32Op
+    : AIEVec_Op<"aie4.conv_f32_i32", []>,
+      Arguments<(
+          ins FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$source,
+          DefaultValuedAttr<BoolAttr, "true">:$isSigned)>,
+      Results<(
+          outs FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>:$result)> {
   let summary = "AIE4 convert an f32 vector to an i32 vector";
   let description = [{
     Converts `vector<32xf32>` to `vector<32xi32>`. `$isSigned` selects the
@@ -417,8 +418,7 @@ def AIEVec_AIE4ConvF32I32Op:
 
     Lowers to `llvm.aie4.v32float.to.v32int32`, one instruction for 32 lanes.
   }];
-  let assemblyFormat =
-      "$source attr-dict `:` type($source) `,` type($result)";
+  let assemblyFormat = "$source attr-dict `:` type($source) `,` type($result)";
   let hasVerifier = 0;
 }
 
@@ -430,62 +430,56 @@ def AIEVec_AIE4ConvF32I32Op:
 // unsigned comparison and vaddSign1 selects signed comparison. These ops model
 // fixed signedness and rely on those control bits retaining their ABI values.
 // The supported shapes use at most 64 mask bits; vector<128xi8> is unsupported.
-def AIEVec_AIE4MinMaxOp:
-  AIEVec_Op<"aie4.minmax", [
-    Pure,
-    AllTypesMatch<["lhs", "rhs", "result"]>
-  ]>,
-  Arguments<(ins AnyTypeOf<[
-                   FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [64], [I16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [16], [I32]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>]>:$lhs,
-                 AnyTypeOf<[
-                   FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [64], [I16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [16], [I32]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>]>:$rhs,
-                 AIEVec_AIE4MinMaxKindAttr:$kind,
-                 DefaultValuedAttr<BoolAttr, "true">:$isSigned)>,
-  Results<(outs AnyTypeOf<[
-                   FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [64], [I16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [16], [I32]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>]>:$result)> {
+def AIEVec_AIE4MinMaxOp
+    : AIEVec_Op<"aie4.minmax", [Pure, AllTypesMatch<["lhs", "rhs", "result"]>]>,
+      Arguments<(
+          ins AnyTypeOf<
+              [FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>,
+               FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>,
+               FixedVectorOfRankAndLengthAndType<[1], [64], [I16]>,
+               FixedVectorOfRankAndLengthAndType<[1], [16], [I32]>,
+               FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>]>:$lhs,
+          AnyTypeOf<[FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>,
+                     FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>,
+                     FixedVectorOfRankAndLengthAndType<[1], [64], [I16]>,
+                     FixedVectorOfRankAndLengthAndType<[1], [16], [I32]>,
+                     FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>]>:$rhs,
+          AIEVec_AIE4MinMaxKindAttr:$kind,
+          DefaultValuedAttr<BoolAttr, "true">:$isSigned)>,
+      Results<(outs AnyTypeOf<
+          [FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>,
+           FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>,
+           FixedVectorOfRankAndLengthAndType<[1], [64], [I16]>,
+           FixedVectorOfRankAndLengthAndType<[1], [16], [I32]>,
+           FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>]>:$result)> {
   let summary = "AIE4 native signed/unsigned vector min/max";
   let description = [{
     Computes per-lane minimum or maximum, selected by `$kind`, with signed
     or unsigned comparison selected by `$isSigned`. Lowers to `vmin_ge` or
     `vmax_lt`.
   }];
-  let assemblyFormat =
-      "$lhs `,` $rhs `` `[` `kind` `=` $kind `,` `signed` `=` $isSigned `]` attr-dict `:` type($result)";
+  let assemblyFormat = "$lhs `,` $rhs `` `[` `kind` `=` $kind `,` `signed` `=` "
+                       "$isSigned `]` attr-dict `:` type($result)";
   let hasVerifier = 0;
 }
 
-def AIEVec_AIE4CmpOp:
-  AIEVec_Op<"aie4.cmp", [
-    Pure,
-    AllTypesMatch<["lhs", "rhs"]>
-  ]>,
-  Arguments<(ins AnyTypeOf<[
-                   FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [64], [I16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [16], [I32]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>]>:$lhs,
-                 AnyTypeOf<[
-                   FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [64], [I16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [16], [I32]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>]>:$rhs,
-                 AIEVec_AIE4CmpPredicateAttr:$predicate,
-                 DefaultValuedAttr<BoolAttr, "true">:$isSigned)>,
-  Results<(outs AnyUnsignedInteger:$result)> {
+def AIEVec_AIE4CmpOp
+    : AIEVec_Op<"aie4.cmp", [Pure, AllTypesMatch<["lhs", "rhs"]>]>,
+      Arguments<(
+          ins AnyTypeOf<
+              [FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>,
+               FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>,
+               FixedVectorOfRankAndLengthAndType<[1], [64], [I16]>,
+               FixedVectorOfRankAndLengthAndType<[1], [16], [I32]>,
+               FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>]>:$lhs,
+          AnyTypeOf<[FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>,
+                     FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>,
+                     FixedVectorOfRankAndLengthAndType<[1], [64], [I16]>,
+                     FixedVectorOfRankAndLengthAndType<[1], [16], [I32]>,
+                     FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>]>:$rhs,
+          AIEVec_AIE4CmpPredicateAttr:$predicate,
+          DefaultValuedAttr<BoolAttr, "true">:$isSigned)>,
+      Results<(outs AnyUnsignedInteger:$result)> {
   let summary = "AIE4 native vector compare, mask result";
   let description = [{
     Compares each lane using `lhs < rhs` (`lt`) or `lhs >= rhs` (`ge`),
@@ -499,42 +493,40 @@ def AIEVec_AIE4CmpOp:
     as `vector<2xi32>` register pairs.
   }];
   let assemblyFormat =
-      "$lhs `,` $rhs `` `[` `pred` `=` $predicate `,` `signed` `=` $isSigned `]` attr-dict `:` type($lhs) `,` type($result)";
+      "$lhs `,` $rhs `` `[` `pred` `=` $predicate `,` `signed` `=` $isSigned "
+      "`]` attr-dict `:` type($lhs) `,` type($result)";
   let hasVerifier = 1;
 }
 
-def AIEVec_AIE4SelOp:
-  AIEVec_Op<"aie4.sel", [
-    Pure,
-    AllTypesMatch<["lhs", "rhs", "result"]>
-  ]>,
-  Arguments<(ins AnyTypeOf<[
-                   FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [64], [I16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [16], [I32]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>]>:$lhs,
-                 AnyTypeOf<[
-                   FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [64], [I16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [16], [I32]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>]>:$rhs,
-                 AnyUnsignedInteger:$sel)>,
-  Results<(outs AnyTypeOf<[
-                   FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [64], [I16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [16], [I32]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>]>:$result)> {
+def AIEVec_AIE4SelOp
+    : AIEVec_Op<"aie4.sel", [Pure, AllTypesMatch<["lhs", "rhs", "result"]>]>,
+      Arguments<(
+          ins AnyTypeOf<
+              [FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>,
+               FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>,
+               FixedVectorOfRankAndLengthAndType<[1], [64], [I16]>,
+               FixedVectorOfRankAndLengthAndType<[1], [16], [I32]>,
+               FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>]>:$lhs,
+          AnyTypeOf<[FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>,
+                     FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>,
+                     FixedVectorOfRankAndLengthAndType<[1], [64], [I16]>,
+                     FixedVectorOfRankAndLengthAndType<[1], [16], [I32]>,
+                     FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>]>:$rhs,
+          AnyUnsignedInteger:$sel)>,
+      Results<(outs AnyTypeOf<
+          [FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>,
+           FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>,
+           FixedVectorOfRankAndLengthAndType<[1], [64], [I16]>,
+           FixedVectorOfRankAndLengthAndType<[1], [16], [I32]>,
+           FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>]>:$result)> {
   let summary = "AIE4 native lane-wise select with a packed mask";
   let description = [{
     Selects `$rhs[i]` when bit i of `$sel` is set, and `$lhs[i]` otherwise.
     The mask type follows the same vector-shape rules as `aievec.aie4.cmp`;
     bits above the lane count are ignored. Lowers to `vsel`.
   }];
-  let assemblyFormat =
-      "$lhs `,` $rhs `,` $sel attr-dict `:` type($lhs) `,` type($sel) `,` type($result)";
+  let assemblyFormat = "$lhs `,` $rhs `,` $sel attr-dict `:` type($lhs) `,` "
+                       "type($sel) `,` type($result)";
   let hasVerifier = 1;
 }
 
@@ -544,36 +536,35 @@ def AIEVec_AIE4SelOp:
 //
 // Native operations read ambient crFPOrder. Source IEEE arithmetic compares
 // integer encodings to remain independent of the mode.
-def AIEVec_AIE4CRFPOrderRes :
-    Resource<"::xilinx::xllvm::AIE4CRFPOrderResource">;
+def AIEVec_AIE4CRFPOrderRes
+    : Resource<"::xilinx::xllvm::AIE4CRFPOrderResource">;
 
-def AIEVec_AIE4FMinMaxOp:
-  AIEVec_Op<"aie4.fminmax", [
-    MemoryEffects<[MemRead<AIEVec_AIE4CRFPOrderRes>]>,
-    AllTypesMatch<["lhs", "rhs", "result"]>
-  ]>,
-  Arguments<(ins AnyTypeOf<[
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [64], [BF16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [F16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [64], [F16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [16], [F32]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>]>:$lhs,
-                 AnyTypeOf<[
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [64], [BF16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [F16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [64], [F16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [16], [F32]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>]>:$rhs,
-                 AIEVec_AIE4MinMaxKindAttr:$kind)>,
-  Results<(outs AnyTypeOf<[
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [64], [BF16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [F16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [64], [F16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [16], [F32]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>]>:$result)> {
+def AIEVec_AIE4FMinMaxOp
+    : AIEVec_Op<
+          "aie4.fminmax", [MemoryEffects<[MemRead<AIEVec_AIE4CRFPOrderRes>]>,
+                           AllTypesMatch<["lhs", "rhs", "result"]>]>,
+      Arguments<(
+          ins AnyTypeOf<
+              [FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>,
+               FixedVectorOfRankAndLengthAndType<[1], [64], [BF16]>,
+               FixedVectorOfRankAndLengthAndType<[1], [32], [F16]>,
+               FixedVectorOfRankAndLengthAndType<[1], [64], [F16]>,
+               FixedVectorOfRankAndLengthAndType<[1], [16], [F32]>,
+               FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>]>:$lhs,
+          AnyTypeOf<[FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>,
+                     FixedVectorOfRankAndLengthAndType<[1], [64], [BF16]>,
+                     FixedVectorOfRankAndLengthAndType<[1], [32], [F16]>,
+                     FixedVectorOfRankAndLengthAndType<[1], [64], [F16]>,
+                     FixedVectorOfRankAndLengthAndType<[1], [16], [F32]>,
+                     FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>]>:$rhs,
+          AIEVec_AIE4MinMaxKindAttr:$kind)>,
+      Results<(outs AnyTypeOf<
+          [FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>,
+           FixedVectorOfRankAndLengthAndType<[1], [64], [BF16]>,
+           FixedVectorOfRankAndLengthAndType<[1], [32], [F16]>,
+           FixedVectorOfRankAndLengthAndType<[1], [64], [F16]>,
+           FixedVectorOfRankAndLengthAndType<[1], [16], [F32]>,
+           FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>]>:$result)> {
   let summary = "AIE4 native float vector min/max using ambient crFPOrder";
   let description = [{
     Computes per-lane native minimum or maximum. At `crFPOrder = 0`, NaNs
@@ -588,27 +579,25 @@ def AIEVec_AIE4FMinMaxOp:
   let hasVerifier = 0;
 }
 
-def AIEVec_AIE4FCmpOp:
-  AIEVec_Op<"aie4.fcmp", [
-    MemoryEffects<[MemRead<AIEVec_AIE4CRFPOrderRes>]>,
-    AllTypesMatch<["lhs", "rhs"]>
-  ]>,
-  Arguments<(ins AnyTypeOf<[
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [64], [BF16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [F16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [64], [F16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [16], [F32]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>]>:$lhs,
-                 AnyTypeOf<[
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [64], [BF16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [F16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [64], [F16]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [16], [F32]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>]>:$rhs,
-                 AIEVec_AIE4CmpPredicateAttr:$predicate)>,
-  Results<(outs AnyUnsignedInteger:$result)> {
+def AIEVec_AIE4FCmpOp
+    : AIEVec_Op<"aie4.fcmp", [MemoryEffects<[MemRead<AIEVec_AIE4CRFPOrderRes>]>,
+                              AllTypesMatch<["lhs", "rhs"]>]>,
+      Arguments<(
+          ins AnyTypeOf<
+              [FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>,
+               FixedVectorOfRankAndLengthAndType<[1], [64], [BF16]>,
+               FixedVectorOfRankAndLengthAndType<[1], [32], [F16]>,
+               FixedVectorOfRankAndLengthAndType<[1], [64], [F16]>,
+               FixedVectorOfRankAndLengthAndType<[1], [16], [F32]>,
+               FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>]>:$lhs,
+          AnyTypeOf<[FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>,
+                     FixedVectorOfRankAndLengthAndType<[1], [64], [BF16]>,
+                     FixedVectorOfRankAndLengthAndType<[1], [32], [F16]>,
+                     FixedVectorOfRankAndLengthAndType<[1], [64], [F16]>,
+                     FixedVectorOfRankAndLengthAndType<[1], [16], [F32]>,
+                     FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>]>:$rhs,
+          AIEVec_AIE4CmpPredicateAttr:$predicate)>,
+      Results<(outs AnyUnsignedInteger:$result)> {
   let summary = "AIE4 native float vector compare using ambient crFPOrder";
   let description = [{
     Computes per-lane native `lhs < rhs` (`lt`) or `lhs >= rhs` (`ge`). At
@@ -622,22 +611,23 @@ def AIEVec_AIE4FCmpOp:
     Lowering uses a helper call to preserve ordering across mode changes until
     Peano models the intrinsic's FPOrder dependency. This adds call overhead.
   }];
-  let assemblyFormat =
-      "$lhs `,` $rhs `` `[` `pred` `=` $predicate `]` attr-dict `:` type($lhs) `,` type($result)";
+  let assemblyFormat = "$lhs `,` $rhs `` `[` `pred` `=` $predicate `]` "
+                       "attr-dict `:` type($lhs) `,` type($result)";
   let hasVerifier = 1;
 }
 
 //===----------------------------------------------------------------------===//
 // AIE4 1024-bit vector reductions
 //===----------------------------------------------------------------------===//
-def AIEVec_AIE4ReduceOp:
-  AIEVec_Op<"aie4.reduce", [Pure]>,
-  Arguments<(ins AnyTypeOf<[
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>]>:$source,
-                 Optional<AnyTypeOf<[I32, F32]>>:$seed,
-                 AIEVec_AIE4ReduceKindAttr:$kind)>,
-  Results<(outs AnyTypeOf<[I32, F32]>:$result)> {
+def AIEVec_AIE4ReduceOp
+    : AIEVec_Op<"aie4.reduce", [Pure]>,
+      Arguments<(
+          ins AnyTypeOf<
+              [FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>,
+               FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>]>:$source,
+          Optional<AnyTypeOf<[I32, F32]>>:$seed,
+          AIEVec_AIE4ReduceKindAttr:$kind)>,
+      Results<(outs AnyTypeOf<[I32, F32]>:$result)> {
   let summary = "AIE4 native 1024-bit vector reduction (vminr/vmaxr/vaddr[.f])";
   let description = [{
     Reduces a fixed 32-lane i32 or f32 vector. An optional scalar seed
@@ -649,8 +639,8 @@ def AIEVec_AIE4ReduceOp:
     `vector.reduction<add>` wraps. Native f32 `add` accumulates in a wider
     adder and rounds once, so it may differ from an ordered f32 reduction.
   }];
-  let assemblyFormat =
-      "$kind $source (`,` $seed^)? attr-dict `:` type($source) (`,` type($seed)^)? `->` type($result)";
+  let assemblyFormat = "$kind $source (`,` $seed^)? attr-dict `:` "
+                       "type($source) (`,` type($seed)^)? `->` type($result)";
   let hasVerifier = 1;
 }
 
@@ -660,22 +650,22 @@ def AIEVec_AIE4ReduceOp:
 //
 // VSHUFFLE takes 512-bit operands. Two-operand modes transpose their
 // logical 1024-bit concatenation and return one 512-bit half.
-def AIEVec_AIE4ShuffleVector : AllOfType<[
-    FixedVectorOfRank<[1]>,
-    VectorOfBitWidthAndElementTypes<512, [I8, I16, I32, BF16, F32]>],
-    "fixed one-dimensional 512-bit vector of i8, i16, i32, bf16 or f32">;
+def AIEVec_AIE4ShuffleVector
+    : AllOfType<
+          [FixedVectorOfRank<[1]>,
+           VectorOfBitWidthAndElementTypes<512, [I8, I16, I32, BF16, F32]>],
+          "fixed one-dimensional 512-bit vector of i8, i16, i32, bf16 or f32">;
 
-def AIEVec_AIE4ShuffleOp:
-  AIEVec_Op<"aie4.shuffle", [
-    Pure,
-    AllTypesMatch<["lhs", "result"]>,
-    OptionalTypesMatchWith<"result and rhs have the same type", "result",
-                           "rhs", "::llvm::cast<Type>($_self)">
-  ]>,
-  Arguments<(ins AIEVec_AIE4ShuffleVector:$lhs,
-                 Optional<AIEVec_AIE4ShuffleVector>:$rhs,
-                 AIEVec_AIE4ShuffleModeAttr:$mode)>,
-  Results<(outs AIEVec_AIE4ShuffleVector:$result)> {
+def AIEVec_AIE4ShuffleOp
+    : AIEVec_Op<
+          "aie4.shuffle", [Pure, AllTypesMatch<["lhs", "result"]>,
+                           OptionalTypesMatchWith<
+                               "result and rhs have the same type", "result",
+                               "rhs", "::llvm::cast<Type>($_self)">]>,
+      Arguments<(ins AIEVec_AIE4ShuffleVector:$lhs,
+          Optional<AIEVec_AIE4ShuffleVector>:$rhs,
+          AIEVec_AIE4ShuffleModeAttr:$mode)>,
+      Results<(outs AIEVec_AIE4ShuffleVector:$result)> {
   let summary = "AIE4 512-bit vector shuffle/transpose (vshuffle)";
   let description = [{
     Shuffles fixed, one-dimensional 512-bit vectors using `llvm.aie4.vshuffle`.
@@ -690,8 +680,8 @@ def AIEVec_AIE4ShuffleOp:
     The operation is pure: the intrinsic has no memory effects, and the
     instruction neither reads nor writes status or control registers.
   }];
-  let assemblyFormat =
-      "$lhs (`,` $rhs^)? `` `[` `mode` `=` $mode `]` attr-dict `:` type($result)";
+  let assemblyFormat = "$lhs (`,` $rhs^)? `` `[` `mode` `=` $mode `]` "
+                       "attr-dict `:` type($result)";
   let hasVerifier = 1;
 }
 
@@ -703,12 +693,13 @@ def AIEVec_AIE4ShuffleOp:
 // Pure: these instructions raise no FP exception flags and read no
 // control registers.
 
-def AIEVec_AIE4BiasedExp2Op:
-  AIEVec_Op<"aie4.biased_exp2", [Pure]>,
-  Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$source)>,
-  Results<(outs AnyTypeOf<[
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>,
-                   FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>]>:$result)> {
+def AIEVec_AIE4BiasedExp2Op
+    : AIEVec_Op<"aie4.biased_exp2", [Pure]>,
+      Arguments<(
+          ins FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$source)>,
+      Results<(outs AnyTypeOf<
+          [FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>,
+           FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>]>:$result)> {
   let summary = "AIE4 approximate biased base-2 exponential (vexp2)";
   let description = [{
     Approximates `2^t` per lane, where `t = floor((x - 895) * 2^11) / 2^11`.
@@ -724,15 +715,16 @@ def AIEVec_AIE4BiasedExp2Op:
     NaN inputs produce a fixed NaN. `t >= 128` produces +Inf;
     `t <= -134` (bf16) or `t < -138` (f32) produces 0.
   }];
-  let assemblyFormat =
-      "$source attr-dict `:` type($source) `,` type($result)";
+  let assemblyFormat = "$source attr-dict `:` type($source) `,` type($result)";
   let hasVerifier = 0;
 }
 
-def AIEVec_AIE4TanhOp:
-  AIEVec_Op<"aie4.tanh", [Pure]>,
-  Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$source)>,
-  Results<(outs FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$result)> {
+def AIEVec_AIE4TanhOp
+    : AIEVec_Op<"aie4.tanh", [Pure]>,
+      Arguments<(
+          ins FixedVectorOfRankAndLengthAndType<[1], [32], [F32]>:$source)>,
+      Results<(
+          outs FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$result)> {
   let summary = "AIE4 approximate hyperbolic tangent (vtanh)";
   let description = [{
     Truncates each f32 lane to bf16, then approximates `tanh` with relative
@@ -740,16 +732,14 @@ def AIEVec_AIE4TanhOp:
     to +/-1. NaN maps to a sign-dependent NaN: 0x7F81 for a positive-sign
     input, 0xFF81 for a negative-sign input.
   }];
-  let assemblyFormat =
-      "$source attr-dict `:` type($source) `,` type($result)";
+  let assemblyFormat = "$source attr-dict `:` type($source) `,` type($result)";
   let hasVerifier = 0;
 }
 
 // Not Pure: INV writes the srFPNlf exception status flags.
-def AIEVec_AIE4InvOp:
-  AIEVec_Op<"aie4.inv", []>,
-  Arguments<(ins F32:$source)>,
-  Results<(outs F32:$result)> {
+def AIEVec_AIE4InvOp : AIEVec_Op<"aie4.inv", []>,
+                       Arguments<(ins F32:$source)>,
+                       Results<(outs F32:$result)> {
   let summary = "AIE4 approximate scalar f32 reciprocal (inv)";
   let description = [{
     Approximates `1.0 / x` with the scalar INV instruction. For normal inputs
@@ -762,13 +752,10 @@ def AIEVec_AIE4InvOp:
   let hasVerifier = 0;
 }
 
-def AIEVec_SubElemOp:
-  AIEVec_Op<"sub_elem", [
-    Pure,
-    AllTypesMatch<["lhs", "rhs", "result"]>
-  ]>,
-  Arguments<(ins AnyVectorOfNonZeroRank:$lhs, AnyVectorOfNonZeroRank:$rhs)>,
-  Results<(outs AnyVectorOfNonZeroRank:$result)> {
+def AIEVec_SubElemOp
+    : AIEVec_Op<"sub_elem", [Pure, AllTypesMatch<["lhs", "rhs", "result"]>]>,
+      Arguments<(ins AnyVectorOfNonZeroRank:$lhs, AnyVectorOfNonZeroRank:$rhs)>,
+      Results<(outs AnyVectorOfNonZeroRank:$result)> {
   let summary = "AIE vector sub elem";
   let description = [{
     AMD-specific AIE2 intrinsic that allows you to perform substraction operation
@@ -1680,5 +1667,8 @@ def AIEVec_ShuffleOp
   let assemblyFormat = [{$lhs (`,` $rhs^)? $mode attr-dict `:` type($result)}];
   let hasVerifier = 1;
 }
+
+// AIE4 matrix MAC operations.
+include "aie/Dialect/AIEVec/IR/AIEVecAIE4Ops.td"
 
 #endif // AIEVEC_OPS

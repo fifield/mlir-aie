@@ -967,6 +967,7 @@ void populateAIEVecToLLVMAIE4ConversionPatterns(
                AIE4ShuffleOpConversion, AIE4BiasedExp2OpConversion,
                AIE4TanhOpConversion, AIE4InvOpConversion>(converter);
   patterns.add<AIE4TruncFBF16Conversion>(converter);
+  populateAIEVecToLLVMAIE4MmacPatterns(converter, patterns);
 }
 
 void configureAIEVecToLLVMAIE4Legalizations(ConversionTarget &target) {

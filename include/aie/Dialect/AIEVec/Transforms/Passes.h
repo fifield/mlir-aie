@@ -67,6 +67,10 @@ std::unique_ptr<mlir::Pass> createSplitVectorLoadUpsChainsPass();
 std::unique_ptr<mlir::Pass>
 createSplitVectorLoadUpsChainsPass(bool chains, bool wideAccesses);
 
+/// Add `afn` to every floating-point vector.contract (pass-level opt-in for
+/// AIE4 MMAC numerics).
+std::unique_ptr<mlir::Pass> createGrantContractAfnPass();
+
 /// Generate the code for registering passes.
 #define GEN_PASS_REGISTRATION
 #include "aie/Dialect/AIEVec/Transforms/Passes.h.inc"
