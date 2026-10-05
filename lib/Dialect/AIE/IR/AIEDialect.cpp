@@ -565,8 +565,16 @@ LogicalResult HasValidBDs<ConcreteType>::verifyTrait(Operation *op) {
   if (col && row) {
     for (auto &block : element.getBody()) {
       for (auto dmaStart : block.template getOps<DMAStartOp>()) {
+        // A start naming a route endpoint has no channel index until
+        // --aie-objectfifo-allocate resolves it; its pool is checked then.
+        if (dmaStart.getEndpoint())
+          continue;
         DMAChannel chan = {dmaStart.getChannelDir(),
                            dmaStart.getChannelIndex()};
+        // A negative index is the dma_start's own attribute constraint to
+        // report; the parent's traits run first.
+        if (chan.channel < 0)
+          continue;
         // This trait runs before HasValidDMAChannels. Validate the channel
         // before any BD-pool query, which requires a supported DMA engine.
         if (failed(
@@ -725,6 +733,10 @@ LogicalResult HasValidDMAChannels<ConcreteType>::verifyTrait(Operation *op) {
       }
       DMAChannel dmaChan = {dmaStart.getChannelDir(),
                             dmaStart.getChannelIndex()};
+      // A negative index is the dma_start's own attribute constraint to
+      // report.
+      if (dmaChan.channel < 0)
+        continue;
       if (failed(verifyDMAChannel(dmaStart, tile, dmaChan.direction,
                                   dmaChan.channel)))
         return failure();

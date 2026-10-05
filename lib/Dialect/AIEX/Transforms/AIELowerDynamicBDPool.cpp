@@ -94,7 +94,7 @@ struct AIELowerDynamicBDPoolPass
   static std::pair<uint32_t, uint32_t> bdPartition(DMAConfigureTaskOp cfg) {
     AIE::TileOp tile = cfg.getTileOp();
     return AIE::getTargetModel(cfg).getBdIdRangeForChannel(
-        tile.getCol(), tile.getRow(), cfg.getChannel());
+        tile.getCol(), tile.getRow(), cfg.getChannel(), cfg.getDirection());
   }
 
   // The BDs of a configure's body, in block order: the order their ids are

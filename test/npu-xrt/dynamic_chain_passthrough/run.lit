@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 // REQUIRES: ryzen_ai, peano
+// UNSUPPORTED: ryzen_ai_npu3
 //
 // Runtime-n loop whose input tasks are 2-BD next_bd chains drawn from the
 // dynamic BD pool. One xclbin serves any n; the generated C++ TXN builder

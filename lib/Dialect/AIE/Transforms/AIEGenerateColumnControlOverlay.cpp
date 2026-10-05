@@ -152,6 +152,8 @@ struct AIEGenerateColumnControlOverlayPass
       }
       builder.setInsertionPointToStart(overlay.getBody());
       TileOp shim = TileOp::getOrCreate(builder, overlay, col, 0);
+      // AIE4 task-complete return wiring is provided by tile placement.
+      if (!isa<AIE4TargetModel>(model)) {
       flow(shim, {WireBundle::TileControl, 0}, shim, {WireBundle::South, 0},
            shim);
       for (TileID tile : tokenTiles)
@@ -161,6 +163,7 @@ struct AIEGenerateColumnControlOverlayPass
           flow(source, {WireBundle::TileControl, 0}, shim,
                {WireBundle::South, 0}, source);
         }
+      }
       if (!configuration)
         continue;
       bool aie4 = isa<AIE4TargetModel>(model);

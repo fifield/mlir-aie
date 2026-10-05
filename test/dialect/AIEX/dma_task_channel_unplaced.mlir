@@ -42,10 +42,6 @@ module {
         aie.end
       }
       %t4 = aiex.dma_start_bd_chain @chain(%arg0) : (memref<64xi32>) on (%unknown, ControlMM2S, 0)
-      %t5 = aiex.dma_configure_task_for @unresolved {
-        aie.dma_bd(%arg0 : memref<64xi32> offset = 0 len = 64)
-        aie.end
-      }
     }
   }
 }

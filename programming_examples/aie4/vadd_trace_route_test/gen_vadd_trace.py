@@ -25,6 +25,7 @@ import sys
 
 import numpy as np
 
+from aie.helpers.taplib import TensorAccessPattern
 from aie.iron import ObjectFifo, Program, Runtime, Worker
 from aie.iron.controlflow import range_
 from aie.iron.device import NPU3, Tile
@@ -86,10 +87,12 @@ def gen(row: int, trace_col: int):
 
     def sequence(a, b, c, inputs_a, inputs_b, outputs_c):
         for col in range(NCOLS):
-            offset = col * COL_ELEMS
-            inputs_a[col].fill(a, offset=offset, sizes=[COL_ELEMS], wait=True)
-            inputs_b[col].fill(b, offset=offset, sizes=[COL_ELEMS], wait=True)
-            outputs_c[col].drain(c, offset=offset, sizes=[COL_ELEMS], wait=True)
+            tap = TensorAccessPattern(
+                (NCOLS * COL_ELEMS,), col * COL_ELEMS, [COL_ELEMS], [1]
+            )
+            inputs_a[col].fill(a, tap, wait=True)
+            inputs_b[col].fill(b, tap, wait=True)
+            outputs_c[col].drain(c, tap, wait=True)
 
     rt = Runtime(sequence, [host_ty, host_ty, host_ty, inputs_a, inputs_b, outputs_c])
     prog = Program(NPU3(), rt, workers=workers)

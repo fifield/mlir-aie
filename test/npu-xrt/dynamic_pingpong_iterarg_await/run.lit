@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 // REQUIRES: ryzen_ai, peano
+// UNSUPPORTED: ryzen_ai_npu3
 //
 // Depth-2 software-pipelined variant of dynamic_pingpong_passthrough: the
 // runtime sequence awaits the loop's own iter_arg (the previous iteration's

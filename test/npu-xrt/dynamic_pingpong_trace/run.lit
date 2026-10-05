@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 // REQUIRES: ryzen_ai, peano
+// UNSUPPORTED: ryzen_ai_npu3
 //
 // Dynamic ping-pong passthrough with hardware tracing via a SEPARATE trace
 // buffer -- the correct trace path for a runtime-sized (dynamic) sequence.

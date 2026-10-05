@@ -273,5 +273,11 @@ def test_it_reads_the_real_kernel_library(contribution):
     assert not [n for n, f in found.items() if f.contract == "no" and n not in judged]
     table = contribution.cases(tree)
     assert not [n for n in found if n not in table and n not in judged]
-    units = [p for p in tree.ls("aie_kernels/") if p.endswith(".cc")]
+    # aie4/ kernels are built by programming_examples Makefiles (see its
+    # README), which no factory models.
+    units = [
+        p
+        for p in tree.ls("aie_kernels/")
+        if p.endswith(".cc") and not p.startswith("aie_kernels/aie4/")
+    ]
     assert not [p for p in units if not contribution._attributed(found, p)]

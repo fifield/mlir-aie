@@ -1083,8 +1083,9 @@ public:
       set(layout->d1Size, op.getD1Size());
       set(layout->d1Stride, op.getD1Stride());
       set(layout->d2Stride, op.getD2Stride());
-      // D2_Wrap and D3_Stepsize only matter when D3 addressing is in use.
-      if (op.getD3Size() != 0) {
+      // D2_Wrap and D3_Stepsize only matter when D3 addressing is in use;
+      // otherwise buffer_length ends the transfer before D2 wraps.
+      if (op.getD3Size() > 1) {
         set(layout->d2Size, op.getD2Size());
         set(layout->d3Stride, op.getD3Stride());
       }

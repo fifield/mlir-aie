@@ -590,15 +590,18 @@ public:
   }
 
   /// Return the half-open range [first, last) of buffer descriptor ids that
-  /// channel `channel` of the tile at (`col`, `row`) can submit.
-  std::pair<uint32_t, uint32_t> getBdIdRangeForChannel(int col, int row,
-                                                       int channel) const {
+  /// channel `channel` with direction `dir` of the tile at (`col`, `row`) can
+  /// submit.
+  std::pair<uint32_t, uint32_t>
+  getBdIdRangeForChannel(int col, int row, int channel,
+                         DMAChannelDir dir) const {
     uint32_t numBds = getNumBDs(col, row);
     uint32_t first = 0;
-    while (first < numBds && !isBdChannelAccessible(col, row, first, channel))
+    while (first < numBds &&
+           !isBdChannelAccessible(col, row, first, channel, dir))
       ++first;
     uint32_t last = first;
-    while (last < numBds && isBdChannelAccessible(col, row, last, channel))
+    while (last < numBds && isBdChannelAccessible(col, row, last, channel, dir))
       ++last;
     return {first, last};
   }

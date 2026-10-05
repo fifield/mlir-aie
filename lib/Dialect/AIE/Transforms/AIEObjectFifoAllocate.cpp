@@ -830,6 +830,7 @@ struct AIEObjectFifoAllocatePass
   /// over, counting every channel whose BD ids overlap its own. Negative when
   /// overcommitted.
   int64_t bdRoom(TileLike tile, int col, int row, int channel,
+                 DMAChannelDir dir,
                  const DenseMap<std::tuple<int, int, int>, int64_t> &demand) {
     const AIETargetModel &target = device.getTargetModel();
     uint32_t numBDs = target.getNumBDs(col, row);
@@ -837,12 +838,12 @@ struct AIEObjectFifoAllocatePass
                                tile.getNumDestConnections(WireBundle::DMA));
     auto sharesBDs = [&](int other) {
       for (uint32_t bd = 0; bd < numBDs; ++bd)
-        if (target.isBdChannelAccessible(col, row, bd, channel) &&
-            target.isBdChannelAccessible(col, row, bd, other))
+        if (target.isBdChannelAccessible(col, row, bd, channel, dir) &&
+            target.isBdChannelAccessible(col, row, bd, other, dir))
           return true;
       return false;
     };
-    int64_t room = target.getNumBDsForChannel(col, row, channel);
+    int64_t room = target.getNumBDsForChannel(col, row, channel, dir);
     for (int other = 0; other < numChannels; ++other)
       if (sharesBDs(other))
         if (auto it = demand.find({col, row, other}); it != demand.end())
@@ -869,7 +870,7 @@ struct AIEObjectFifoAllocatePass
     for (int channel = 0; channel < limit; ++channel) {
       if (!channels.isChannelFree(tile, dir, channel))
         continue;
-      int64_t room = bdRoom(tile, *col, *row, channel, demand);
+      int64_t room = bdRoom(tile, *col, *row, channel, dir, demand);
       if (best < 0 || room > bestRoom) {
         best = channel;
         bestRoom = room;
@@ -1617,10 +1618,11 @@ struct AIEObjectFifoAllocatePass
           !row)
         continue;
       int channel = it->second;
-      int64_t room = bdRoom(tile, *col, *row, channel, channelDemand);
+      DMAChannelDir dir = endpoint.getRouteDirection();
+      int64_t room = bdRoom(tile, *col, *row, channel, dir, channelDemand);
       if (room >= 0)
         continue;
-      int64_t numBDs = target.getNumBDsForChannel(*col, *row, channel);
+      int64_t numBDs = target.getNumBDsForChannel(*col, *row, channel, dir);
       endpoint->emitWarning("channel ")
           << channel << " can use " << numBDs
           << " BDs, but it and the channels sharing them need " << numBDs - room

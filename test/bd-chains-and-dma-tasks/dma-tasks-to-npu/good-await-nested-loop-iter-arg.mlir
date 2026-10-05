@@ -37,17 +37,23 @@
 // CHECK: %[[INIT_ID:.*]] = aiex.dma_bd_pool_pop
 // CHECK: scf.for {{.*}} iter_args(%[[OUTER_ID:.*]] = %[[INIT_ID]]) -> (i32) {
 // CHECK:   scf.for {{.*}} iter_args(%[[INNER_ID:.*]] = %[[OUTER_ID]]) -> (i32) {
-// sync operands: column=2, row=0, direction=0, channel=1, column_num=1, row_num=1
-// CHECK-DAG:     %[[COL:.*]] = arith.constant 2 : i32
-// CHECK-DAG:     %[[CHAN:.*]] = arith.constant 1 : i32
-// CHECK:     aiex.npu.sync(%[[COL]], %{{.*}}, %{{.*}}, %[[CHAN]], %{{.*}}, %{{.*}}) : i32, i32, i32, i32, i32, i32
+// CHECK:     %[[ROWS:.*]] = arith.constant 1 : i32
+// CHECK-NEXT:     %[[COLS:.*]] = arith.constant 1 : i32
+// CHECK-NEXT:     %[[CHAN:.*]] = arith.constant 1 : i32
+// CHECK-NEXT:     %[[DIR:.*]] = arith.constant 0 : i32
+// CHECK-NEXT:     %[[ROW:.*]] = arith.constant 0 : i32
+// CHECK-NEXT:     %[[COL:.*]] = arith.constant 2 : i32
+// CHECK:     aiex.npu.sync(%[[COL]], %[[ROW]], %[[DIR]], %[[CHAN]], %[[COLS]], %[[ROWS]]) : i32, i32, i32, i32, i32, i32
 // CHECK:     aiex.dma_bd_pool_push({{.*}}) partition {{.*}} bd_id %[[INNER_ID]] : i32
 // CHECK:   }
 // CHECK: }
-// sync operands: column=2, row=0, direction=0, channel=1, column_num=1, row_num=1
-// CHECK-DAG: %[[COL2:.*]] = arith.constant 2 : i32
-// CHECK-DAG: %[[CHAN2:.*]] = arith.constant 1 : i32
-// CHECK: aiex.npu.sync(%[[COL2]], %{{.*}}, %{{.*}}, %[[CHAN2]], %{{.*}}, %{{.*}}) : i32, i32, i32, i32, i32, i32
+// CHECK: %[[ROWS2:.*]] = arith.constant 1 : i32
+// CHECK-NEXT: %[[COLS2:.*]] = arith.constant 1 : i32
+// CHECK-NEXT: %[[CHAN2:.*]] = arith.constant 1 : i32
+// CHECK-NEXT: %[[DIR2:.*]] = arith.constant 0 : i32
+// CHECK-NEXT: %[[ROW2:.*]] = arith.constant 0 : i32
+// CHECK-NEXT: %[[COL2:.*]] = arith.constant 2 : i32
+// CHECK: aiex.npu.sync(%[[COL2]], %[[ROW2]], %[[DIR2]], %[[CHAN2]], %[[COLS2]], %[[ROWS2]]) : i32, i32, i32, i32, i32, i32
 
 module {
   aie.device(npu1) {

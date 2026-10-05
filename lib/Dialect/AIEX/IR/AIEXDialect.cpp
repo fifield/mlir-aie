@@ -503,9 +503,12 @@ bool AIEX::isContiguousTransfer(llvm::ArrayRef<int64_t> sizes,
     return false;
   if (sizes[2] > 1 && strides[2] != sizes[0] * sizes[1])
     return false;
-  // Only the 5-slot form has a d3 at index 3; in the 4-slot
-  // [d0, d1, d2, iteration] form index 3 is the repeat.
-  if (sizes.size() >= 5 && sizes[3] > 1 &&
+  // Index 3 is d3 in the 5-slot form. In the 4-slot [d0, d1, d2, iteration]
+  // form a strided iteration that does not continue the scan is likewise not
+  // contiguous, which lets aie-decompose-large-dma-bd split it; a zero-stride
+  // iteration is a pure repeat and leaves the scan contiguous.
+  if (sizes.size() >= 4 && sizes[3] > 1 &&
+      (sizes.size() >= 5 || strides[3] != 0) &&
       strides[3] != sizes[0] * sizes[1] * sizes[2])
     return false;
   return true;

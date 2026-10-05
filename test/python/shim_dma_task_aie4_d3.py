@@ -144,9 +144,7 @@ def reject(dev, sizes, strides):
         raise AssertionError(f"invalid pattern accepted on {dev}")
 
 
-# CHECK: REJECTED: shim DMA BD supports at most 4 dimensions, got 5
-reject(AIEDevice.npu1, [1, 2, 2, 3, 4], [0, 30, 12, 4, 1])
-# CHECK: REJECTED: shim DMA BD supports at most 4 dimensions, got 5
-reject(AIEDevice.npu2, [1, 2, 2, 3, 4], [0, 30, 12, 4, 1])
-# CHECK: REJECTED: shim DMA BD supports at most 5 dimensions, got 6
+# Before AIE4 a fifth entry is another iteration dimension, which
+# aie-decompose-large-dma-bd splits off, so only AIE4 bounds the rank here.
+# CHECK: REJECTED: AIE4 shim DMA BD supports at most 5 dimensions, got 6
 reject(AIEDevice.npu3, [1, 1, 2, 2, 3, 4], [0, 0, 30, 12, 4, 1])

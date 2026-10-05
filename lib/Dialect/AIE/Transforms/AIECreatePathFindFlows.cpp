@@ -1675,8 +1675,9 @@ void PacketFlowRouting::findCircuitHops() {
   for (auto &[tileId, connects] : switchboxes) {
     std::set<Port> injected;
     for (const auto &[conn, flowID] : connects)
-      if (conn.src.bundle == WireBundle::TileControl ||
-          conn.src.bundle == WireBundle::DMAControl)
+      if (isa<AIE4TargetModel>(targetModel) &&
+          (conn.src.bundle == WireBundle::TileControl ||
+           conn.src.bundle == WireBundle::DMAControl))
         injected.insert(conn.src);
     for (Port slave : injected) {
       std::set<Port> reached;

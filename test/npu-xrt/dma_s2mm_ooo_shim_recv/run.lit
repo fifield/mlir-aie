@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 // REQUIRES: ryzen_ai, peano
+// UNSUPPORTED: ryzen_ai_npu3
 //
 // RUN: mkdir -p %t.prj
 // RUN: cp %S/aie.mlir aie_arch.mlir

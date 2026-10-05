@@ -67,12 +67,12 @@ module @ctrl_plus_all_data_mm2s {
   ^n1:
     %m2 = aie.dma_start(MM2S, 2, ^bd2, ^n2)
   ^bd2:
-    aie.dma_bd(%buffer : memref<64xi32> offset = 16 len = 64)
+    aie.dma_bd(%buffer : memref<64xi32> offset = 0 len = 64)
     aie.next_bd ^bd2
   ^n2:
     %m3 = aie.dma_start(MM2S, 3, ^bd3, ^n3)
   ^bd3:
-    aie.dma_bd(%buffer : memref<64xi32> offset = 16 len = 64)
+    aie.dma_bd(%buffer : memref<64xi32> offset = 0 len = 64)
     aie.next_bd ^bd3
   ^n3:
     %c0 = aie.dma_start(ControlMM2S, 0, ^bd4, ^n4)

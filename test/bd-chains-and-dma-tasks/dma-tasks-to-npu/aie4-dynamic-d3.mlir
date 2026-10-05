@@ -5,8 +5,8 @@
 
 // Runtime size independently selects the shared MDS encoder.
 // CHECK-LABEL: @size
-// CHECK: aiex.npu.assert_bd_field({{.*}}) {max = 0 : i32}
-// CHECK: aiex.npu.assert_bd_field({{.*}}) {max = 4095 : i32}
+// CHECK: cf.assert %{{.*}}, "a runtime AIE4 shim DMA d1 size must be in [1:4294967295]"
+// CHECK: cf.assert %{{.*}}, "a runtime AIE4 shim DMA d1 size exceeds its 12-bit BD field"
 // CHECK: aiex.npu.blockwrite_values({{.*}}) values {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}} : i32
 module {
  aie.device(npu3) {
@@ -25,7 +25,7 @@ module {
 // -----
 // Runtime stride independently selects the shared MDS encoder.
 // CHECK-LABEL: @stride
-// CHECK: aiex.npu.assert_bd_field({{.*}}) {max = 4194303 : i32}
+// CHECK: cf.assert %{{.*}}, "a runtime AIE4 shim DMA d3 stride exceeds its 22-bit BD field"
 // CHECK: aiex.npu.blockwrite_values({{.*}}) values {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}} : i32
 module {
  aie.device(npu3) {
@@ -44,7 +44,7 @@ module {
 // -----
 // Runtime length independently selects the shared MDS encoder.
 // CHECK-LABEL: @length
-// CHECK: aiex.npu.assert_bd_field({{.*}}) {max = 0 : i32}
+// CHECK: cf.assert %{{.*}}, "a runtime DMA length must be positive and fit the BD buffer_length"
 // CHECK: aiex.npu.blockwrite_values({{.*}}) values {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}}, {{[^,]+}} : i32
 module {
  aie.device(npu3) {

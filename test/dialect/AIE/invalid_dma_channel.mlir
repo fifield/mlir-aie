@@ -56,7 +56,7 @@ aie.device(npu2) {
   %shim = aie.tile(0, 0)
   %buffer = aie.external_buffer : memref<64xi32>
   aie.shim_dma(%shim) {
-    // expected-error@+1 {{unsupported DMA channel (S2MM, -1) on tile (0, 0)}}
+    // expected-error@+1 {{attribute 'channel' failed to satisfy constraint}}
     %start = aie.dma_start(S2MM, -1, ^bd, ^end)
   ^bd:
     aie.dma_bd(%buffer : memref<64xi32> offset = 0 len = 64)
@@ -72,7 +72,7 @@ aie.device(npu3) {
   %shim = aie.tile(0, 0)
   %buffer = aie.external_buffer : memref<64xi32>
   aie.shim_dma(%shim) {
-    // expected-error@+1 {{unsupported DMA channel (ControlMM2S, -1) on tile (0, 0)}}
+    // expected-error@+1 {{attribute 'channel' failed to satisfy constraint}}
     %start = aie.dma_start(ControlMM2S, -1, ^bd, ^end)
   ^bd:
     aie.dma_bd(%buffer : memref<64xi32> offset = 0 len = 64)

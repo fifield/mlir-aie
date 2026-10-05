@@ -400,8 +400,8 @@ struct AIEAssignRuntimeSequenceBDIDsPass
     WalkResult result = op.walk<WalkOrder::PreOrder>([&](AIE::DMABDOp bd_op) {
       if (bd_op.getBdId().has_value()) {
         if (!targetModel.isBdChannelAccessible(tile.getCol(), tile.getRow(),
-                                               bd_op.getBdId().value(),
-                                               channel)) {
+                                               bd_op.getBdId().value(), channel,
+                                               dir)) {
           bd_op.emitOpError("Buffer descriptor ID ")
               << bd_op.getBdId().value() << " cannot be submitted on channel "
               << channel << " of tile (" << tile.getCol() << ","
@@ -803,7 +803,8 @@ struct AIEAssignRuntimeSequenceBDIDsPass
       task.walk([&](AIE::DMABDOp bd) {
         usable |= bd.getBdId() &&
                   tm.isBdChannelAccessible(tile.getCol(), tile.getRow(),
-                                           *bd.getBdId(), op.getChannel());
+                                           *bd.getBdId(), op.getChannel(),
+                                           op.getDirection());
       });
       return usable;
     };

@@ -226,8 +226,8 @@ class NpuDmaMemcpyNd(NpuDmaMemcpyNdOp):
                 "NpuDmaMemcpyNd can take either a TileAccessPattern OR (sizes and/or strides and/or offsets), but not both."
             )
         if tap:
-            offset, sizes, strides = shim_dims(tap)
-            offsets = [0] * 3 + [offset]
+            offset, sizes, strides = _shim_tap_dims(tap)
+            offsets = [0] * (len(sizes) - 1) + [offset]
         else:
             if offsets is None:
                 offsets = [0] * 4
@@ -321,6 +321,12 @@ def dma_start_bd_chain_for(symbol, args, alloc, *pyargs, **kwargs):
     )
 
 
+def _is_aie4_target() -> bool:
+    dev = find_parent_of_type(lambda op: isinstance(op.opview, aie.DeviceOp))
+    arch = aie.get_target_model(dev.opview.device.value).get_target_arch()
+    return arch == aie.AIEArch.AIE4
+
+
 def _shim_has_d3(sizes) -> bool:
     """True when a 5-dim shim access pattern is [iteration, d3, d2, d1, d0].
 
@@ -329,9 +335,14 @@ def _shim_has_d3(sizes) -> bool:
     """
     if sizes is None or len(sizes) != 5:
         return False
-    dev = find_parent_of_type(lambda op: isinstance(op.opview, aie.DeviceOp))
-    arch = aie.get_target_model(dev.opview.device.value).get_target_arch()
-    return arch == aie.AIEArch.AIE4
+    return _is_aie4_target()
+
+
+def _shim_tap_dims(tap: TensorAccessPattern):
+    """`shim_dims` for the target: an AIE4 shim keeps a five-dimension walk
+    as [iteration, d3, d2, d1, d0]; shallower ones keep the 4-entry form."""
+    ndims = 5 if tap.rank >= 5 and _is_aie4_target() else 4
+    return shim_dims(tap, ndims)
 
 
 def shim_dma_bd(
@@ -356,7 +367,7 @@ def shim_dma_bd(
         )
 
     if tap:
-        offset, sizes, strides = shim_dims(tap)
+        offset, sizes, strides = _shim_tap_dims(tap)
 
     if offset is None:
         offset = 0
@@ -451,7 +462,7 @@ def shim_dma_single_bd_task(
         )
 
     if tap:
-        offset, sizes, strides = shim_dims(tap)
+        offset, sizes, strides = _shim_tap_dims(tap)
 
     # The iteration attribute (when set) claims the shim's single iteration/repeat
     # slot, so the BD carries ONLY its access dimensions (<=3) and does NOT also

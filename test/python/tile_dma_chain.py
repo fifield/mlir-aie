@@ -60,7 +60,7 @@ def emit_ring(bad=None):
             bds[0].next = "self"
         elif bad == "iteration":
             bds[1].tap = TensorAccessPattern(
-                (SLOTS * SLOT,), 0, [2, 2, 2, 8], [1, 16, 64, 128]
+                (SLOTS * SLOT,), 0, [2, 2, 2, 2, 8], [256, 1, 16, 64, 128]
             )
             bds[1].iteration = BdIteration(size=2, stride=SLOT)
         elif bad == "tile":
@@ -118,6 +118,6 @@ for bad in ("next", "iteration", "tile", "empty"):
     except Exception as e:
         print(f"// {bad}: {type(e).__name__}: {e}".replace("\n", " "))
 # CHECK: // next: ValueError: Bd 0 of a task on S2MM channel 0 on {{.*}} sets next='self'; a task runs its Bds in order and ends after the last.
-# CHECK: // iteration: {{.*}}Cannot give more than 3 dimensions for step sizes and wraps alongside the iteration attribute on this tile (got 4 dimensions).
+# CHECK: // iteration: {{.*}}Cannot give more than 4 dimensions for step sizes and wraps alongside the iteration attribute on this tile (got 5 dimensions).
 # CHECK: // tile: ValueError: A task on S2MM channel 0 on {{.*}} was given a buffer on {{.*}}; a tile's DMA can only address buffers on that tile.
 # CHECK: // empty: ValueError: A task on S2MM channel 0 on {{.*}} needs at least one Bd.

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 // REQUIRES: ryzen_ai, peano
+// UNSUPPORTED: ryzen_ai_npu3
 //
 // Dynamic CONDITIONAL passthrough on real hardware. The runtime sequence guards
 // the whole n-tile transfer with a runtime i1 %do_copy; when false it issues no

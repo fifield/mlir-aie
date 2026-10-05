@@ -863,6 +863,10 @@ def test_publishing_migrates_records_and_leaves_redirects(tmp_path):
     assert history["runs"][1]["provenance"] == {"fixtures": "abcdef012345"}
 
 
+@pytest.mark.skipif(
+    not (WORKFLOWS / "buildAndTestPythons.yml").exists(),
+    reason="this fork does not carry buildAndTestPythons.yml",
+)
 def test_a_hosted_job_runs_the_page_tests_instead_of_skipping_them():
     job = workflow("buildAndTestPythons.yml")["jobs"]["build-repo"]
     assert job["runs-on"].startswith("ubuntu-")

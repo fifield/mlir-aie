@@ -195,7 +195,7 @@ mlir::LogicalResult AIE::AIETranslateShimSolution(mlir::ModuleOp module,
   if (!deviceOp) {
     return mlir::failure();
   }
-  if (failed(verifyDMAChannelsResolved(targetOp)))
+  if (failed(verifyDMAChannelsResolved(deviceOp)))
     return mlir::failure();
 
   std::set<std::pair<uint32_t, uint32_t>> visitedPorts;

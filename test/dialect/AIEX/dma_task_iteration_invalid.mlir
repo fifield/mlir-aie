@@ -8,7 +8,8 @@
 // RUN: aie-opt --verify-diagnostics --split-input-file %s
 
 // The iteration attribute takes the iteration register, so a mem tile BD that
-// already fills its four dimensions has no room for it.
+// already fills its five dimensions (D0..D3 plus iteration) has no room for
+// it.
 
 module {
   aie.device(npu1_1col) {
@@ -16,8 +17,8 @@ module {
     %buf = aie.buffer(%tile_0_1) : memref<256xi32>
     aie.runtime_sequence(%arg0: memref<256xi32>) {
       %t = aiex.dma_configure_task(%tile_0_1, MM2S, 0) {
-        // expected-error @+1 {{Cannot give more than 3 dimensions for step sizes and wraps alongside the iteration attribute on this tile (got 4 dimensions).}}
-        aie.dma_bd(%buf : memref<256xi32> offset = 0 len = 64 sizes = [2, 2, 2, 8] strides = [1, 16, 64, 128]) {iteration = #aie.bd_iteration<size = 2, stride = 8, current = 0>}
+        // expected-error @+1 {{Cannot give more than 4 dimensions for step sizes and wraps alongside the iteration attribute on this tile (got 5 dimensions).}}
+        aie.dma_bd(%buf : memref<256xi32> offset = 0 len = 64 sizes = [1, 2, 2, 2, 8] strides = [0, 1, 16, 64, 128]) {iteration = #aie.bd_iteration<size = 2, stride = 8, current = 0>}
         aie.end
       }
     }
