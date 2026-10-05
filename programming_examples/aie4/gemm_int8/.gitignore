@@ -1,0 +1,14 @@
+# Copyright (C) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+build_*/
+kernel_K*/
+test.exe
+kernel_bench/project/
+kernel_bench/*.elf
+kernel_bench/*.mlir
+kernel_bench/test.exe
+kernel_bench/aiecc.log
+.nfs*
+uc_log_*.txt
+sweep_results.md

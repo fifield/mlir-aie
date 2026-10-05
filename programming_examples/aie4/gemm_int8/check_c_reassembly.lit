@@ -1,0 +1,8 @@
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Exercise NGS=1 with a delayed producer, including ping/pong reuse. The
+// scheduler reads the actual generated DMA BDs and lock operations.
+// RUN: %python %S/gemm_int8_placed.py -M 512 -N 768 -K 128 --iters 2 > %t.mlir
+// RUN: %python %S/test_c_reassembly.py %t.mlir
+// RUN: aie-opt --aie-objectFifo-stateful-transform --aie-assign-lock-ids --aie-assign-bd-ids --aie-assign-buffer-addresses --aie-create-pathfinder-flows %t.mlir -o /dev/null
