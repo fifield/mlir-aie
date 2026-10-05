@@ -269,36 +269,6 @@ std::optional<std::pair<TileID, Port>> getLinkedInput(TileID tile, Port output);
     return ss.str();                                                           \
   }
 
-using Port = struct Port {
-  WireBundle bundle;
-  int channel;
-
-  bool operator==(const Port &rhs) const {
-    return std::tie(bundle, channel) == std::tie(rhs.bundle, rhs.channel);
-  }
-
-  bool operator!=(const Port &rhs) const { return !(*this == rhs); }
-
-  bool operator<(const Port &rhs) const {
-    return std::tie(bundle, channel) < std::tie(rhs.bundle, rhs.channel);
-  }
-
-  friend std::ostream &operator<<(std::ostream &os, const Port &port) {
-    os << "(";
-    os << stringifyWireBundle(port.bundle).str();
-    os << ": " << std::to_string(port.channel) << ")";
-    return os;
-  }
-
-  GENERATE_TO_STRING(Port)
-
-  friend llvm::raw_ostream &operator<<(llvm::raw_ostream &os,
-                                       const Port &port) {
-    os << to_string(port);
-    return os;
-  }
-};
-
 std::optional<std::pair<TileID, Port>>
 getConnectingWireEndpoint(const AIETargetModel &targetModel, TileID tile,
                           Port port);
@@ -326,6 +296,15 @@ using DMAChannel = struct DMAChannel {
     return std::tie(direction, channel) == std::tie(rhs.direction, rhs.channel);
   }
 };
+
+/// Validate a placed DMA channel before BD-pool or register queries.
+mlir::LogicalResult verifyDMAChannel(mlir::Operation *op,
+                                     const AIETargetModel &targetModel, int col,
+                                     int row, DMAChannelDir direction,
+                                     int64_t channel);
+/// Defer target checks until both tile coordinates are known.
+mlir::LogicalResult verifyDMAChannel(mlir::Operation *op, TileLike tile,
+                                     DMAChannelDir direction, int64_t channel);
 
 const AIETargetModel &getTargetModel(mlir::Operation *op);
 const AIETargetModel &getTargetModel(AIEDevice device);

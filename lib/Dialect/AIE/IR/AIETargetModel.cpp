@@ -52,6 +52,51 @@ std::string getModuleForTileEvents(const AIETargetModel &model, TileID tile,
 
 AIETargetModel::~AIETargetModel() = default;
 
+// Keep the serialized DMA selector separate from its stream-switch bundle.
+static std::optional<WireBundle> getDmaBundle(DMAChannelDir direction) {
+  switch (direction) {
+  case DMAChannelDir::MM2S:
+  case DMAChannelDir::S2MM:
+    return WireBundle::DMA;
+  case DMAChannelDir::ControlMM2S:
+    return WireBundle::DMAControl;
+  case DMAChannelDir::TraceS2MM:
+    return WireBundle::DMATrace;
+  }
+  return std::nullopt;
+}
+
+uint32_t AIETargetModel::getNumDmaChannels(TileID tile,
+                                           DMAChannelDir direction) const {
+  auto bundle = getDmaBundle(direction);
+  if (!bundle || tile.col < 0 || tile.col >= columns() || tile.row < 0 ||
+      tile.row >= rows() || isShimPLTile(tile.col, tile.row))
+    return 0;
+  if (isSpecializedShimDMAChannel(direction) &&
+      (!isa<AIE4TargetModel>(*this) || !isShimNOCTile(tile.col, tile.row)))
+    return 0;
+  bool source = isMM2S(direction);
+  if (isShimNOCTile(tile.col, tile.row))
+    return source ? getNumSourceShimMuxConnections(tile.col, tile.row, *bundle)
+                  : getNumDestShimMuxConnections(tile.col, tile.row, *bundle);
+  return source ? getNumSourceSwitchboxConnections(tile.col, tile.row, *bundle)
+                : getNumDestSwitchboxConnections(tile.col, tile.row, *bundle);
+}
+
+bool AIETargetModel::isDmaChannelSupported(TileID tile, DMAChannelDir direction,
+                                           int channel) const {
+  return channel >= 0 &&
+         static_cast<uint32_t>(channel) < getNumDmaChannels(tile, direction);
+}
+
+std::optional<Port> AIETargetModel::getDmaStreamPort(TileID tile,
+                                                     DMAChannelDir direction,
+                                                     int channel) const {
+  if (!isDmaChannelSupported(tile, direction, channel))
+    return std::nullopt;
+  return Port{*getDmaBundle(direction), channel};
+}
+
 // Base class implementations for register database
 
 std::unique_ptr<RegisterDatabase> AIETargetModel::loadRegisterDatabase() const {
@@ -278,6 +323,9 @@ bool AIE1TargetModel::isLegalMemAffinity(int coreCol, int coreRow, int memCol,
 uint64_t AIE1TargetModel::getDmaBdAddress(int col, int row, uint32_t bd_id,
                                           int channel,
                                           AIE::DMAChannelDir direction) const {
+  assert(isDmaChannelSupported({col, row}, direction,
+                               channel == -1 ? 0 : channel) &&
+         "unsupported DMA channel");
   uint32_t offset = 0;
   if (isShimNOCTile(col, row)) {
     offset = 0x0001D000 + (bd_id * 0x14);
@@ -302,6 +350,8 @@ uint32_t AIE1TargetModel::getDmaBdAddressOffset(int col, int row) const {
 uint32_t
 AIE1TargetModel::getDmaControlAddress(int col, int row, int channel,
                                       AIE::DMAChannelDir direction) const {
+  assert(isDmaChannelSupported({col, row}, direction, channel) &&
+         "unsupported DMA channel");
   uint32_t offset = 0;
   if (isShimNOCTile(col, row))
     offset = 0x0001D140 + (channel * 0x8);
@@ -835,6 +885,9 @@ bool AIE2TargetModel::isLegalMemAffinity(int coreCol, int coreRow, int memCol,
 uint64_t AIE2TargetModel::getDmaBdAddress(int col, int row, uint32_t bd_id,
                                           int channel,
                                           AIE::DMAChannelDir direction) const {
+  assert(isDmaChannelSupported({col, row}, direction,
+                               channel == -1 ? 0 : channel) &&
+         "unsupported DMA channel");
   uint64_t offset = 0;
   // Shimtile and Coretile currently compute the same offset; flagged by
   // bugprone-branch-clone -- unconfirmed whether the DMA BD register bank
@@ -978,6 +1031,8 @@ uint32_t AIE2TargetModel::getDmaBdAddressOffset(int col, int row) const {
 uint32_t
 AIE2TargetModel::getDmaControlAddress(int col, int row, int channel,
                                       AIE::DMAChannelDir direction) const {
+  assert(isDmaChannelSupported({col, row}, direction, channel) &&
+         "unsupported DMA channel");
   uint32_t offset = 0;
   if (isShimNOCTile(col, row)) {
     offset = 0x0001D200 + (channel * 0x8);
@@ -1857,6 +1912,10 @@ bool AIE4TargetModel::isLegalMemAffinity(int coreCol, int coreRow, int memCol,
 uint64_t AIE4TargetModel::getDmaBdAddress(int col, int row, uint32_t bd_id,
                                           int channel,
                                           AIE::DMAChannelDir direction) const {
+  assert(isDmaChannelSupported(
+             {col, row}, direction,
+             channel == -1 && isCoreTile(col, row) ? 0 : channel) &&
+         "unsupported DMA channel");
 
   uint64_t offset = 0;
   if (isShimNOCTile(col, row)) {
@@ -1876,10 +1935,6 @@ uint64_t AIE4TargetModel::getDmaBdAddress(int col, int row, uint32_t bd_id,
       // AIE4 shim trace-S2MM has its own pool of 4 private BDs per channel.
       numBds = 4;
       offset = 0x00018480;
-      if (channel >= 1) {
-        offset |= 0x00040000;
-        channel -= 1;
-      }
     } else if (isMM2S(direction)) {
       if (channel < 2) {
         offset = 0x00018000;
@@ -1903,15 +1958,13 @@ uint64_t AIE4TargetModel::getDmaBdAddress(int col, int row, uint32_t bd_id,
     offset += (channel * numBds * 0x30) + (bd_id * 0x30);
 
   } else if (isMemTile(col, row)) {
-    // AIE4 MemTile DMA BD address
-    // Base address for S2MM channel 0
-    offset = 0x00008000;
-    // Each BD is 11 words (0x2C bytes), 16 BDs per channel
-    if (isMM2S(direction)) {
-      offset = 0x00008C00; // MM2S base
-    }
-    offset += ((channel % 4) * 4 * 0x30) + (bd_id * 0x30);
-    if (channel >= 4)
+    // Each application bank has four S2MM and five MM2S channels. Every
+    // channel owns 16 BDs, each with 11 words at a 0x30-byte stride.
+    bool mm2s = isMM2S(direction);
+    int channelsPerBank = mm2s ? 5 : 4;
+    offset = mm2s ? 0x00008C00 : 0x00008000;
+    offset += (channel % channelsPerBank) * 16 * 0x30 + bd_id * 0x30;
+    if (channel >= channelsPerBank)
       offset += 0x40000;
 
   } else if (isCoreTile(col, row)) {
@@ -1940,6 +1993,8 @@ uint32_t AIE4TargetModel::getDmaBdAddressOffset(int col, int row) const {
 uint32_t
 AIE4TargetModel::getDmaControlAddress(int col, int row, int channel,
                                       AIE::DMAChannelDir direction) const {
+  assert(isDmaChannelSupported({col, row}, direction, channel) &&
+         "unsupported DMA channel");
   uint32_t offset = 0;
   if (isShimNOCTile(col, row)) {
     if (direction == AIE::DMAChannelDir::ControlMM2S) {
@@ -1948,8 +2003,6 @@ AIE4TargetModel::getDmaControlAddress(int col, int row, int channel,
         offset |= 0x00040000;
     } else if (direction == AIE::DMAChannelDir::TraceS2MM) {
       offset = 0x00018548;
-      if (channel >= 1)
-        offset |= 0x00040000;
     } else if (isS2MM(direction)) {
       uint32_t o[] = {0x00018540, 0x00058540, 0x000185D0, 0x000185D8};
       offset = o[channel];
@@ -1959,14 +2012,12 @@ AIE4TargetModel::getDmaControlAddress(int col, int row, int channel,
       offset = o[channel];
     }
   } else if (isMemTile(col, row)) {
-    if (isS2MM(direction)) {
-      // MEM S2MM channels are split into two four-channel application banks.
-      // The upper bank restarts its local channel index at zero.
-      offset = 0x00009E00 + ((channel % 4) * 0x8);
-    } else {
-      offset = 0x00009E60 + (channel * 0x8);
-    }
-    if (channel >= 4)
+    // Control registers use the same channel banks as BDs.
+    bool mm2s = isMM2S(direction);
+    int channelsPerBank = mm2s ? 5 : 4;
+    offset = mm2s ? 0x00009E60 : 0x00009E00;
+    offset += (channel % channelsPerBank) * 0x8;
+    if (channel >= channelsPerBank)
       offset += 0x40000;
   } else if (isCoreTile(col, row)) {
     if (isS2MM(direction)) {
@@ -2184,7 +2235,7 @@ AIE4TargetModel::getNumSourceSwitchboxConnections(int col, int row,
         return 0;
       return 2;
     }
-    case WireBundle::TileControl:
+    case WireBundle::DMAControl:
       return 2;
     case WireBundle::SouthControl:
     case WireBundle::Switch32:
@@ -2505,7 +2556,7 @@ bool AIE4TargetModel::isLegalTileConnection(int col, int row,
       return false;
     }
     // Control mm2s subordinate
-    if (srcBundle == WireBundle::TileControl) {
+    if (srcBundle == WireBundle::DMAControl) {
       if (isBundleInList(dstBundle, {WireBundle::West, WireBundle::East}))
         return (srcChan == 0) || (dstChan == 1);
       if (dstBundle == WireBundle::North) {
@@ -2640,6 +2691,9 @@ uint64_t
 AIE2PSTargetModel::getDmaBdAddress(int col, int row, uint32_t bd_id,
                                    int channel,
                                    AIE::DMAChannelDir direction) const {
+  assert(isDmaChannelSupported({col, row}, direction,
+                               channel == -1 ? 0 : channel) &&
+         "unsupported DMA channel");
   if (isShimNOCTile(col, row)) {
     uint64_t offset = 0x00009000 + bd_id * 0x30;
     return ((col & 0xff) << getColumnShift()) |
@@ -2652,9 +2706,11 @@ AIE2PSTargetModel::getDmaBdAddress(int col, int row, uint32_t bd_id,
 uint32_t
 AIE2PSTargetModel::getDmaControlAddress(int col, int row, int channel,
                                         AIE::DMAChannelDir direction) const {
+  assert(isDmaChannelSupported({col, row}, direction, channel) &&
+         "unsupported DMA channel");
   if (isShimNOCTile(col, row)) {
     uint32_t offset = 0x00009300 + (channel * 0x8);
-    if (direction == AIE::DMAChannelDir::MM2S)
+    if (isMM2S(direction))
       offset += 0x10;
     return ((col & 0xff) << getColumnShift()) |
            ((row & 0xff) << getRowShift()) | offset;
@@ -2666,10 +2722,7 @@ AIE2PSTargetModel::getDmaControlAddress(int col, int row, int channel,
 std::optional<uint32_t>
 AIE2PSTargetModel::getDmaStatusAddress(int col, int row, int channel,
                                        AIE::DMAChannelDir direction) const {
-  // The AIE2PS shim relocates its DMA registers (control is at 0x9300, not
-  // 0x1D200), and the status block has not been confirmed against a register
-  // spec. Report "unknown" rather than guess an address a maskpoll would then
-  // read garbage from; memtile and core tiles match AIE2.
+  // AIE2PS shim status addresses are unknown; other tiles use AIE2 addresses.
   if (isShimNOCTile(col, row))
     return std::nullopt;
   return AIE2TargetModel::getDmaStatusAddress(col, row, channel, direction);

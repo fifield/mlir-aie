@@ -74,6 +74,7 @@ static const std::map<xilinx::AIE::WireBundle, StrmSwPortType>
         {xilinx::AIE::WireBundle::Core, StrmSwPortType::CORE},
         {xilinx::AIE::WireBundle::DMA, StrmSwPortType::DMA},
         {xilinx::AIE::WireBundle::DMATrace, StrmSwPortType::DMA_Trace},
+        {xilinx::AIE::WireBundle::DMAControl, StrmSwPortType::DMA_CTRL},
         {xilinx::AIE::WireBundle::TileControl, StrmSwPortType::CTRL},
         {xilinx::AIE::WireBundle::FIFO, StrmSwPortType::FIFO},
         {xilinx::AIE::WireBundle::South, StrmSwPortType::SOUTH},
@@ -201,18 +202,6 @@ using namespace mlir;
 using namespace xilinx;
 
 #define DEBUG_TYPE "aie-aiert"
-
-static StrmSwPortType getStrmSwPortType(const AIE::AIETargetModel &targetModel,
-                                        int col, int row,
-                                        AIE::WireBundle bundle,
-                                        bool isSourcePort) {
-  if (isSourcePort && bundle == AIE::WireBundle::TileControl &&
-      isa<AIE::AIE4TargetModel>(targetModel) &&
-      targetModel.isShimNOCTile(col, row))
-    return StrmSwPortType::DMA_CTRL;
-
-  return WIRE_BUNDLE_TO_STRM_SW_PORT_TYPE.at(bundle);
-}
 
 static bool hasTileControlMasterSet(Block &block) {
   return llvm::any_of(block.getOps<AIE::MasterSetOp>(), [](auto masterSetOp) {
@@ -423,7 +412,6 @@ configureLocksInBdBlock(const AIE::AIETargetModel &targetModel,
   }
 
 
-  // no RelEn in the arch spec even though the API requires you to set it?
   bool relEn = false;
   if (outOfOrder && !acqLockId) {
     // Release-only out-of-order BD: point the disabled acquire lock at the
@@ -829,12 +817,9 @@ xilinx::AIE::AIERTControl::disableOtherDeviceSwitches(DeviceOp &targetOp) {
         TxnLocBracket bracket(*this, connectOp.getLoc());
         TRY_XAIE_API_EMIT_ERROR(
             switchboxOp, XAie_StrmConnCctDisable, &aiert->devInst, tileLoc,
-            getStrmSwPortType(targetModel, col, row,
-                              connectOp.getSourceBundle(),
-                              /*isSourcePort=*/true),
+            WIRE_BUNDLE_TO_STRM_SW_PORT_TYPE.at(connectOp.getSourceBundle()),
             connectOp.sourceIndex(),
-            getStrmSwPortType(targetModel, col, row, connectOp.getDestBundle(),
-                              /*isSourcePort=*/false),
+            WIRE_BUNDLE_TO_STRM_SW_PORT_TYPE.at(connectOp.getDestBundle()),
             connectOp.destIndex());
       }
       for (auto masterSetOp : b.getOps<MasterSetOp>()) {
@@ -903,11 +888,9 @@ xilinx::AIE::AIERTControl::configureSwitches(DeviceOp &targetOp,
       TxnLocBracket bracket(*this, connectOp.getLoc());
       TRY_XAIE_API_EMIT_ERROR(
           switchboxOp, XAie_StrmConnCctEnable, &aiert->devInst, tileLoc,
-          getStrmSwPortType(targetModel, col, row, connectOp.getSourceBundle(),
-                            /*isSourcePort=*/true),
+          WIRE_BUNDLE_TO_STRM_SW_PORT_TYPE.at(connectOp.getSourceBundle()),
           connectOp.sourceIndex(),
-          getStrmSwPortType(targetModel, col, row, connectOp.getDestBundle(),
-                            /*isSourcePort=*/false),
+          WIRE_BUNDLE_TO_STRM_SW_PORT_TYPE.at(connectOp.getDestBundle()),
           connectOp.destIndex());
     }
 

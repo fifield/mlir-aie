@@ -9,7 +9,7 @@
 
 // CHECK: module @init_join_input {
 // CHECK:   aie.device(xcve2302) {
-// CHECK-DAG:     %[[SHIM_TILE:.*]] = aie.tile(1, 0)
+// CHECK-DAG:     %[[SHIM_TILE:.*]] = aie.tile(2, 0)
 // CHECK-DAG:     %[[MEM_TILE:.*]] = aie.tile(1, 1)
 // CHECK-DAG:     %[[TILE_1_2:.*]] = aie.tile(1, 2)
 // CHECK-DAG:     %[[TILE_2_3:.*]] = aie.tile(2, 3)
@@ -111,7 +111,7 @@
 
 module @init_join_input {
  aie.device(xcve2302) {
-    %tile10 = aie.tile(1, 0)
+    %tile20 = aie.tile(2, 0)
     %tile11 = aie.tile(1, 1)
     %tile12 = aie.tile(1, 2)
     %tile23 = aie.tile(2, 3)
@@ -120,7 +120,7 @@ module @init_join_input {
                                                                                             dense<[[4, 5], [6, 7]]> : memref<2x2xi32>]
     aie.objectfifo @of1 (%tile23, {%tile11}, 2 : i32) : !aie.objectfifo<memref<2x2xi32>> = [dense<[[0, 1], [2, 3]]> : memref<2x2xi32>,
                                                                                             dense<[[4, 5], [6, 7]]> : memref<2x2xi32>]
-    aie.objectfifo @of2 (%tile11, {%tile10}, 2 : i32) : !aie.objectfifo<memref<8xi32>>
+    aie.objectfifo @of2 (%tile11, {%tile20}, 2 : i32) : !aie.objectfifo<memref<8xi32>>
 
     aie.objectfifo.link [@of0, @of1] -> [@of2] ([0, 4] [])
  }

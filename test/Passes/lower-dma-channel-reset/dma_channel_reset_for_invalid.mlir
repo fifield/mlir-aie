@@ -36,3 +36,27 @@ module {
     }
   }
 }
+
+// -----
+
+// reset_for creates and lowers resets in the same pass, so the binding must
+// reject unsupported channels before any control-register address query.
+aie.device(npu2) {
+  %tile = aie.tile(0, 2)
+  // expected-error@+1 {{unsupported DMA channel (S2MM, 2) on tile (0, 2)}}
+  aie.objectfifo_rearm_binding @b channels(%tile : index) locks() {channel_dirs = array<i32: 0>, channel_indices = array<i32: 2>, lock_inits = array<i32>, head_bd_ids = array<i32: 0>, repeat_counts = array<i32: 0>}
+  aie.runtime_sequence() {
+    aiex.dma_channel_reset_for(@b)
+  }
+}
+
+// -----
+
+aie.device(npu3) {
+  %tile = aie.tile(0, 1)
+  // expected-error@+1 {{unsupported DMA channel (MM2S, 10) on tile (0, 1)}}
+  aie.objectfifo_rearm_binding @b channels(%tile : index) locks() {channel_dirs = array<i32: 1>, channel_indices = array<i32: 10>, lock_inits = array<i32>, head_bd_ids = array<i32: 0>, repeat_counts = array<i32: 0>}
+  aie.runtime_sequence() {
+    aiex.dma_channel_reset_for(@b)
+  }
+}

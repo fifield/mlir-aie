@@ -695,10 +695,16 @@ struct AIEInsertTraceFlowsPass
                              Value(info.tile.getResult()), info.tracePort,
                              info.traceChannel);
 
-      PacketDestOp::create(
-          flowBuilder, device.getLoc(), Value(shimInfo.shimTile.getResult()),
-          dedicatedTrace ? WireBundle::DMATrace : WireBundle::DMA,
-          chanDesc.channel);
+      auto port = targetModel.getDmaStreamPort(shimInfo.shimTile.getTileID(),
+                                               getTraceDirection(targetModel),
+                                               chanDesc.channel);
+      if (!port) {
+        device.emitError("no stream port for the selected trace DMA channel");
+        return signalPassFailure();
+      }
+      PacketDestOp::create(flowBuilder, device.getLoc(),
+                           Value(shimInfo.shimTile.getResult()), port->bundle,
+                           port->channel);
 
       EndOp::create(flowBuilder, device.getLoc());
 
@@ -945,8 +951,8 @@ struct AIEInsertTraceFlowsPass
           llvm::report_fatal_error(
               "Failed to lookup Enable_Token_Issue or Start_BD_ID fields");
 
-        uint32_t bdPool =
-            targetModel.getBdPoolId(shimCol, 0, chanDesc.channel, direction);
+        uint32_t bdPool = targetModel.getBdPoolId(
+            shimCol, 0, chanDesc.channel, getTraceDirection(targetModel));
         uint32_t localBdId =
             chanDesc.bdId - targetModel.getBdPoolStartId(shimCol, 0, bdPool);
         auto tokenValue = targetModel.encodeFieldValue(*tokenField, 1);
@@ -1251,14 +1257,19 @@ private:
   /// ShimDMAAllocationOp declarations, and objectFifos that end at a shim.
   std::map<int, std::set<int>> scanUsedS2MMChannels(DeviceOp device) {
     std::map<int, std::set<int>> used; // shimCol -> set of used S2MM channels
-    DMAChannelDir direction = getTraceDirection(device.getTargetModel());
-    WireBundle bundle = direction == DMAChannelDir::TraceS2MM
-                            ? WireBundle::DMATrace
-                            : WireBundle::DMA;
+    const auto &model = device.getTargetModel();
+    DMAChannelDir direction = getTraceDirection(model);
+    auto claimsTraceChannel = [&](TileOp tile, WireBundle bundle, int channel) {
+      if (!tile.isShimTile())
+        return false;
+      auto port = model.getDmaStreamPort(tile.getTileID(), direction, channel);
+      return port && *port == Port{bundle, channel};
+    };
 
     device.walk([&](FlowOp flow) {
       auto destTile = cast<TileOp>(flow.getDest().getDefiningOp());
-      if (destTile.isShimTile() && flow.getDestBundle() == bundle) {
+      if (claimsTraceChannel(destTile, flow.getDestBundle(),
+                             flow.getDestChannel())) {
         used[destTile.getCol()].insert(flow.getDestChannel());
       }
     });
@@ -1267,7 +1278,8 @@ private:
       for (auto &op : pktFlow.getPorts().front()) {
         if (auto dest = dyn_cast<PacketDestOp>(op)) {
           auto destTile = cast<TileOp>(dest.getTile().getDefiningOp());
-          if (destTile.isShimTile() && dest.getBundle() == bundle) {
+          if (claimsTraceChannel(destTile, dest.getBundle(),
+                                 dest.getChannel())) {
             used[destTile.getCol()].insert(dest.getChannel());
           }
         }

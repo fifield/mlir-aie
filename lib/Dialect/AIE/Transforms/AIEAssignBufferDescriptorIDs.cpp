@@ -66,8 +66,8 @@ void BdIdGenerator::assignBdId(uint32_t row, uint32_t channelIndex,
                                DMAChannelDir dir, uint32_t bdId) {
   uint32_t poolKey = targetModel.getBdPoolId(col, row, channelIndex, dir);
   alreadyAssigned[poolKey].insert(bdId);
-  LLVM_DEBUG(llvm::dbgs() << "Assigned BD ID " << bdId << " to pool "
-                          << poolKey << "\n");
+  LLVM_DEBUG(llvm::dbgs() << "Assigned BD ID " << bdId << " to pool " << poolKey
+                          << "\n");
 }
 
 bool BdIdGenerator::bdIdAlreadyAssigned(uint32_t row, uint32_t channelIndex,
@@ -75,8 +75,8 @@ bool BdIdGenerator::bdIdAlreadyAssigned(uint32_t row, uint32_t channelIndex,
   uint32_t poolKey = targetModel.getBdPoolId(col, row, channelIndex, dir);
   bool assigned = alreadyAssigned[poolKey].count(bdId);
   LLVM_DEBUG(llvm::dbgs() << "Checking if BD ID " << bdId
-                          << " is already assigned in pool " << poolKey
-                          << ": " << (assigned ? "Yes" : "No") << "\n");
+                          << " is already assigned in pool " << poolKey << ": "
+                          << (assigned ? "Yes" : "No") << "\n");
   return assigned;
 }
 
@@ -204,8 +204,10 @@ struct AIEAssignBufferDescriptorIDsPass
               for (uint32_t channel = 0; channel < 16; ++channel)
                 for (DMAChannelDir dir :
                      {DMAChannelDir::S2MM, DMAChannelDir::MM2S})
-                  gen.assignBdId(row, channel, dir,
-                                 static_cast<uint32_t>(bdId));
+                  if (targetModel.isDmaChannelSupported({col, row}, dir,
+                                                        channel))
+                    gen.assignBdId(row, channel, dir,
+                                   static_cast<uint32_t>(bdId));
         }
       }
       // Associate with each block the channel index specified by the

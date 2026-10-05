@@ -54,29 +54,31 @@ def PLIOWire : I32EnumAttrCase<"PLIO", 7>;
 def NOCWire : I32EnumAttrCase<"NOC", 8>;
 def TraceWire : I32EnumAttrCase<"Trace", 9>;
 def TileControlWire : I32EnumAttrCase<"TileControl", 10>;
-def NorthControlWire:  I32EnumAttrCase<"NorthControl", 11>;
-def SouthControlWire:  I32EnumAttrCase<"SouthControl", 12>;
-def SwitchWire: I32EnumAttrCase<"Switch32", 13>;
-def Control32Wire: I32EnumAttrCase<"Control32", 14>;
-def Trace32Wire: I32EnumAttrCase<"Trace32", 15>;
-def South32Wire: I32EnumAttrCase<"South32", 16>;
-def West32Wire: I32EnumAttrCase<"West32", 17>;
-def North32Wire: I32EnumAttrCase<"North32", 18>;
-def East32Wire: I32EnumAttrCase<"East32", 19>;
-def PLIO32Wire: I32EnumAttrCase<"PLIO32", 20>;
-def Switch512Wire: I32EnumAttrCase<"Switch512", 21>;
-def Controller32Wire: I32EnumAttrCase<"Controller32", 22>;
+def NorthControlWire : I32EnumAttrCase<"NorthControl", 11>;
+def SouthControlWire : I32EnumAttrCase<"SouthControl", 12>;
+def SwitchWire : I32EnumAttrCase<"Switch32", 13>;
+def Control32Wire : I32EnumAttrCase<"Control32", 14>;
+def Trace32Wire : I32EnumAttrCase<"Trace32", 15>;
+def South32Wire : I32EnumAttrCase<"South32", 16>;
+def West32Wire : I32EnumAttrCase<"West32", 17>;
+def North32Wire : I32EnumAttrCase<"North32", 18>;
+def East32Wire : I32EnumAttrCase<"East32", 19>;
+def PLIO32Wire : I32EnumAttrCase<"PLIO32", 20>;
+def Switch512Wire : I32EnumAttrCase<"Switch512", 21>;
+def Controller32Wire : I32EnumAttrCase<"Controller32", 22>;
 // AIE4 shim dedicated trace S2MM DMA.
-def DMATraceWire: I32EnumAttrCase<"DMATrace", 23>;
+def DMATraceWire : I32EnumAttrCase<"DMATrace", 23>;
+// AIE4 shim wide-switch source fed by the dedicated control MM2S DMA.
+def DMAControlWire : I32EnumAttrCase<"DMAControl", 24>;
 
-def WireBundle : I32EnumAttr<"WireBundle", "Bundle of wires",
-                             [CoreWire, DMAWire, FIFOWire, SouthWire, WestWire,
-                              NorthWire, EastWire, PLIOWire, NOCWire, TraceWire,
-                              TileControlWire, NorthControlWire,
-                              SouthControlWire, SwitchWire, Control32Wire,
-                              Trace32Wire, South32Wire, West32Wire, North32Wire,
-                              East32Wire, PLIO32Wire, Switch512Wire,
-                              Controller32Wire, DMATraceWire]> {
+def WireBundle
+    : I32EnumAttr<"WireBundle", "Bundle of wires",
+                  [CoreWire, DMAWire, FIFOWire, SouthWire, WestWire, NorthWire,
+                   EastWire, PLIOWire, NOCWire, TraceWire, TileControlWire,
+                   NorthControlWire, SouthControlWire, SwitchWire,
+                   Control32Wire, Trace32Wire, South32Wire, West32Wire,
+                   North32Wire, East32Wire, PLIO32Wire, Switch512Wire,
+                   Controller32Wire, DMATraceWire, DMAControlWire]> {
 
   let cppNamespace = "xilinx::AIE";
 }
@@ -134,8 +136,8 @@ def AIEDevice
            I32EnumAttrCase<"npu2_3col", 11>, I32EnumAttrCase<"npu2_4col", 12>,
            I32EnumAttrCase<"npu2_5col", 13>, I32EnumAttrCase<"npu2_6col", 14>,
            I32EnumAttrCase<"npu2_7col", 15>, I32EnumAttrCase<"xcve3858", 16>,
-           I32EnumAttrCase<"npu3", 17>,
-           I32EnumAttrCase<"npu3_1col", 18>, I32EnumAttrCase<"npu3_2col", 19>,
+           I32EnumAttrCase<"npu3", 17>, I32EnumAttrCase<"npu3_1col", 18>,
+           I32EnumAttrCase<"npu3_2col", 19>,
 ]> {
 
   let cppNamespace = "xilinx::AIE";
@@ -147,18 +149,17 @@ def ObjectFifoPort : I32EnumAttr<"ObjectFifoPort", "Ports of an object FIFO",
   let cppNamespace = "xilinx::AIE";
 }
 
-def DMAChannelDir: I32EnumAttr<"DMAChannelDir",
-  "DMA Channel direction. ControlMM2S/TraceS2MM are MM2S/S2MM variants "
-  "backed by separate hardware BD pools and address ranges (AIE4 shim "
-  "control-packet and trace DMA queues); the numeric values also match the "
-  "direction field encoded into aiex.npu.sync instructions, so they must "
-  "stay distinct literal cases rather than derived flags.",
-  [
-    I32EnumAttrCase<"S2MM", 0>,
-    I32EnumAttrCase<"MM2S", 1>,
-    I32EnumAttrCase<"ControlMM2S", 2>,
-    I32EnumAttrCase<"TraceS2MM", 3>
-  ]> {
+def DMAChannelDir
+    : I32EnumAttr<"DMAChannelDir",
+                  "DMA engine/direction selector. ControlMM2S and TraceS2MM "
+                  "select AIE4 "
+                  "shim control and trace engines with separate BD pools and "
+                  "registers. "
+                  "Numeric values encode the aiex.npu.sync direction and must "
+                  "remain stable.",
+                  [I32EnumAttrCase<"S2MM", 0>, I32EnumAttrCase<"MM2S", 1>,
+                   I32EnumAttrCase<"ControlMM2S", 2>,
+                   I32EnumAttrCase<"TraceS2MM", 3>]> {
   let cppNamespace = "xilinx::AIE";
 }
 
@@ -169,27 +170,23 @@ def BDDimLayoutAttr : AttrDef<AIE_Dialect, "BDDimLayout", []> {
     buffer descriptor;
   }];
 
-  let parameters = (ins
-    "uint32_t" : $size,
-    "uint32_t" : $stride
-  );
+  let parameters = (ins "uint32_t":$size, "uint32_t":$stride);
 
   let assemblyFormat = "`<` struct(params) `>`";
 }
 
 def BDDimLayoutArrayAttr : ArrayOfAttr<
-    /*dialect*/AIE_Dialect,
-    /*attrName*/"BDDimLayoutArray",
-    /*attrMnemonic*/"bd_dim_layout_array",
-    /*eltName*/BDDimLayoutAttr.cppClassName
->;
+                               /*dialect*/ AIE_Dialect,
+                               /*attrName*/ "BDDimLayoutArray",
+                               /*attrMnemonic*/ "bd_dim_layout_array",
+                               /*eltName*/ BDDimLayoutAttr.cppClassName>;
 
-def BDDimLayoutArrayArrayAttr : ArrayOfAttr<
-    /*dialect*/AIE_Dialect,
-    /*attrName*/"BDDimLayoutArrayArray",
-    /*attrMnemonic*/"bd_dim_layout_array_array",
-    /*eltName*/BDDimLayoutArrayAttr.cppClassName
->;
+def BDDimLayoutArrayArrayAttr
+    : ArrayOfAttr<
+          /*dialect*/ AIE_Dialect,
+          /*attrName*/ "BDDimLayoutArrayArray",
+          /*attrMnemonic*/ "bd_dim_layout_array_array",
+          /*eltName*/ BDDimLayoutArrayAttr.cppClassName>;
 
 def BDPadLayoutAttr : AttrDef<AIE_Dialect, "BDPadLayout", []> {
   let mnemonic = "bd_pad_layout";
@@ -198,20 +195,17 @@ def BDPadLayoutAttr : AttrDef<AIE_Dialect, "BDPadLayout", []> {
     n-dimensional buffer descriptor;
   }];
 
-  let parameters = (ins
-    "uint16_t" : $const_pad_before,
-    "uint16_t" : $const_pad_after
-  );
+  let parameters = (ins "uint16_t":$const_pad_before,
+      "uint16_t":$const_pad_after);
 
   let assemblyFormat = "`<` struct(params) `>`";
 }
 
 def BDPadLayoutArrayAttr : ArrayOfAttr<
-    /*dialect*/AIE_Dialect,
-    /*attrName*/"BDPadLayoutArray",
-    /*attrMnemonic*/"bd_pad_layout_array",
-    /*eltName*/BDPadLayoutAttr.cppClassName
->;
+                               /*dialect*/ AIE_Dialect,
+                               /*attrName*/ "BDPadLayoutArray",
+                               /*attrMnemonic*/ "bd_pad_layout_array",
+                               /*eltName*/ BDPadLayoutAttr.cppClassName>;
 
 // Per-segment, per-dimension padding for an objectFifo DMA endpoint.
 def BDPadLayoutArrayArrayAttr
@@ -271,11 +265,8 @@ def BDIterationAttr : AttrDef<AIE_Dialect, "BDIteration", []> {
     true (element) values;
   }];
 
-  let parameters = (ins
-    "uint32_t" : $size,
-    "uint32_t" : $stride,
-    "uint32_t" : $current
-  );
+  let parameters = (ins "uint32_t":$size, "uint32_t":$stride,
+      "uint32_t":$current);
 
   let assemblyFormat = "`<` struct(params) `>`";
 }
@@ -333,7 +324,7 @@ def TraceSliceArrayAttr
     : TypedArrayAttrBase<TraceSliceAttr, "array of trace buffer slices">;
 
 def InitValuesArrayAttr
-  : OptionalAttr<TypedArrayAttrBase<ElementsAttr, "array of ElementsAttr">>;
+    : OptionalAttr<TypedArrayAttrBase<ElementsAttr, "array of ElementsAttr">>;
 
 //===----------------------------------------------------------------------===//
 // ObjectFifo pools and endpoints

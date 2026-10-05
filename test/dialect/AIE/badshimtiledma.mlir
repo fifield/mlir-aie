@@ -21,11 +21,11 @@ module @test {
 
     // Tile DMA
     %m00 = aie.shim_dma(%t00) {
-      // expected-error@-1 {{'aie.shim_dma' op uses more input channels than available on this tile}}
         %dma = aie.dma_start("S2MM", 0, ^bd0, ^dma1)
       ^dma1:
         %dma2 = aie.dma_start("S2MM", 1, ^bd1, ^dma2)
       ^dma2:
+        // expected-error@+1 {{unsupported DMA channel (S2MM, 2) on tile (0, 0)}}
         %dma3 = aie.dma_start("S2MM", 2, ^bd2, ^end)
       ^bd0:
         aie.dma_bd(%buf_e : memref<256xi32> offset = 1 len = 256)

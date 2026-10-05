@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD 17)
 include(CTest)
 
 add_executable(target_model  target_model.cpp)
+add_executable(target_model_dma_ports target_model_dma_ports.cpp)
 add_executable(target_model_rtti  target_model_rtti.cpp)
 add_executable(target_model_unknown_device  target_model_unknown_device.cpp)
 add_executable(dma_channel_capacity  dma_channel_capacity.cpp)
@@ -24,6 +25,7 @@ target_include_directories(device_cache PRIVATE ${CMAKE_SOURCE_DIR}/tools/aiecc)
 target_link_libraries(device_cache PRIVATE MLIRParser)
 add_test(NAME DeviceCache COMMAND device_cache)
 add_test(NAME TargetModel COMMAND target_model)
+add_test(NAME TargetModelDmaPorts COMMAND target_model_dma_ports)
 add_test(NAME TargetModelRtti COMMAND target_model_rtti)
 add_test(NAME TargetModelUnknownDevice COMMAND target_model_unknown_device)
 add_test(NAME DMAChannelCapacity COMMAND dma_channel_capacity)
@@ -58,7 +60,7 @@ target_link_libraries(stack_size_analysis PRIVATE ${stack_size_analysis_libs})
 
 get_property(dialect_libs GLOBAL PROPERTY MLIR_DIALECT_LIBS)
 
-set(EXECUTABLES target_model target_model_rtti target_model_unknown_device
+set(EXECUTABLES target_model target_model_dma_ports target_model_rtti target_model_unknown_device
     dma_channel_capacity register_database device_cache)
 
 set(CPP_TEST_DEPENDS ${EXECUTABLES} bfloat16_fallback_test stack_size_analysis

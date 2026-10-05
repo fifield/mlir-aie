@@ -228,15 +228,13 @@ xilinx::AIE::myVerifyOffsetSizeAndStrideOp(OffsetSizeAndStrideOpInterface op) {
           op, "offset", op.getStaticOffsets().size(), op.getStaticOffsets(),
           op.getOffsets())))
     return failure();
-  if (failed(verifyListOfOperandsOrIntegers(op, "size",
-                                            op.getStaticSizes().size(),
-                                            op.getStaticSizes(),
-                                            op.getSizes())))
+  if (failed(
+          verifyListOfOperandsOrIntegers(op, "size", op.getStaticSizes().size(),
+                                         op.getStaticSizes(), op.getSizes())))
     return failure();
-  if (failed(verifyListOfOperandsOrIntegers(op, "stride",
-                                            op.getStaticStrides().size(),
-                                            op.getStaticStrides(),
-                                            op.getStrides())))
+  if (failed(verifyListOfOperandsOrIntegers(
+          op, "stride", op.getStaticStrides().size(), op.getStaticStrides(),
+          op.getStrides())))
     return failure();
   // Each getMixed* call rebuilds its list, so read them once.
   const size_t numMixedOffsets = op.getMixedOffsets().size();
@@ -520,44 +518,30 @@ struct HasSomeTerminator {
   }
 };
 
-static LogicalResult verifyAIE4ShimDMAChannel(Operation *op, TileLike tile,
-                                              DMAChannelDir direction,
-                                              int channel) {
-  const auto &targetModel = getTargetModel(op);
+LogicalResult xilinx::AIE::verifyDMAChannel(Operation *op,
+                                            const AIETargetModel &targetModel,
+                                            int col, int row,
+                                            DMAChannelDir direction,
+                                            int64_t channel) {
+  if (channel < 0 || channel > std::numeric_limits<int>::max() ||
+      !targetModel.isDmaChannelSupported({col, row}, direction,
+                                         static_cast<int>(channel)))
+    return op->emitOpError("unsupported DMA channel (")
+           << stringifyDMAChannelDir(direction) << ", " << channel
+           << ") on tile (" << col << ", " << row << ").";
+  return success();
+}
+
+LogicalResult xilinx::AIE::verifyDMAChannel(Operation *op, TileLike tile,
+                                            DMAChannelDir direction,
+                                            int64_t channel) {
   auto col = tile.tryGetCol();
   auto row = tile.tryGetRow();
-  // Before --aie-place-tiles the tile is still an aie.logical_tile with no
-  // coordinates, so defer every target-model check to the post-placement
-  // re-verify, mirroring SwitchboxOp::verify.
+  // Placement re-verifies logical tiles once their coordinates are known.
   if (!col || !row)
     return success();
-
-  if (!isa<AIE4TargetModel>(targetModel) ||
-      !targetModel.isShimNOCTile(*col, *row)) {
-    // ControlMM2S and TraceS2MM are AIE4 shim-NOC hardware. Reject them
-    // elsewhere rather than ignoring them: HasValidDMAChannels deliberately
-    // skips these directions when counting data-port usage, so one that
-    // reached another tile type would escape channel bounding altogether, and
-    // a non-AIE4 getDmaBdAddress would silently encode TraceS2MM as a data
-    // S2MM.
-    if (isSpecializedShimDMAChannel(direction))
-      return op->emitOpError() << stringifyDMAChannelDir(direction)
-                               << " is only available on AIE4 shim NOC tiles";
-    return success();
-  }
-
-  std::optional<int> channelCount;
-  if (direction == DMAChannelDir::TraceS2MM)
-    channelCount = 1;
-  else if (direction == DMAChannelDir::ControlMM2S)
-    channelCount = 2;
-  if (!channelCount || channel < *channelCount)
-    return success();
-
-  return op->emitOpError() << stringifyDMAChannelDir(direction) << " channel "
-                           << channel
-                           << " is out of range; expected 0 <= channel < "
-                           << *channelCount;
+  return verifyDMAChannel(op, getTargetModel(op), *col, *row, direction,
+                          channel);
 }
 
 // Check that the given DMA-like op (e.g. MemOp, ShimDMAOp)
@@ -583,6 +567,11 @@ LogicalResult HasValidBDs<ConcreteType>::verifyTrait(Operation *op) {
       for (auto dmaStart : block.template getOps<DMAStartOp>()) {
         DMAChannel chan = {dmaStart.getChannelDir(),
                            dmaStart.getChannelIndex()};
+        // This trait runs before HasValidDMAChannels. Validate the channel
+        // before any BD-pool query, which requires a supported DMA engine.
+        if (failed(
+                verifyDMAChannel(dmaStart, tile, chan.direction, chan.channel)))
+          return failure();
         llvm::SmallPtrSet<Block *, 16> visited;
         SmallVector<Block *, 16> worklist;
         Block *firstBD = dmaStart.getDest();
@@ -617,8 +606,8 @@ LogicalResult HasValidBDs<ConcreteType>::verifyTrait(Operation *op) {
       auto it = blockChannelMap.find(&block);
       if (it != blockChannelMap.end()) {
         DMAChannel chan = it->second;
-        uint32_t poolId = targetModel.getBdPoolId(*col, *row, chan.channel,
-                                                  chan.direction);
+        uint32_t poolId =
+            targetModel.getBdPoolId(*col, *row, chan.channel, chan.direction);
         poolBdCount[poolId]++;
         int poolMax = targetModel.getNumBDsInPool(*col, *row, poolId);
         if (poolBdCount[poolId] > poolMax) {
@@ -736,18 +725,12 @@ LogicalResult HasValidDMAChannels<ConcreteType>::verifyTrait(Operation *op) {
       }
       DMAChannel dmaChan = {dmaStart.getChannelDir(),
                             dmaStart.getChannelIndex()};
-      if (failed(verifyAIE4ShimDMAChannel(dmaStart, tile, dmaChan.direction,
-                                          dmaChan.channel)))
+      if (failed(verifyDMAChannel(dmaStart, tile, dmaChan.direction,
+                                  dmaChan.channel)))
         return failure();
-      // The AIE4 shim's control-MM2S and trace-S2MM channels are separate
-      // hardware from the data DMA ports and consume no WireBundle::DMA
-      // connection, so counting them against the data limits below would
-      // reject legal configurations (e.g. both data S2MM channels plus trace).
-      // verifyAIE4ShimDMAChannel has already bounded their channel indices.
+      // Control and trace engines do not consume data-DMA ports.
       if (isSpecializedShimDMAChannel(dmaChan.direction))
         continue;
-      // check if number of input and output channels is more than available
-      // hardware
       if (isS2MM(dmaChan.direction))
         inputChannels.insert(dmaChan);
       else
@@ -755,6 +738,8 @@ LogicalResult HasValidDMAChannels<ConcreteType>::verifyTrait(Operation *op) {
     }
   }
 
+  // TileLike counts use the DMA perspective: sources are S2MM channels,
+  // destinations are MM2S channels.
   auto named = [&](DMAChannelDir dir) -> size_t {
     return llvm::count_if(namedChannels,
                           [&](auto channel) { return channel.first == dir; });
@@ -2974,8 +2959,7 @@ LogicalResult GetStreamOp::verify() {
                          "vector<16xi32> or vector<32xi32> result; got ")
              << type;
     APInt channel;
-    if (matchPattern(getChannel(), m_ConstantInt(&channel)) &&
-        channel.ugt(1)) {
+    if (matchPattern(getChannel(), m_ConstantInt(&channel)) && channel.ugt(1)) {
       SmallString<40> channelStr;
       channel.toString(channelStr, /*Radix=*/10, /*Signed=*/false);
       return emitOpError("AIE4 cores have input streams 0 and 1 only; got ")
@@ -3717,7 +3701,7 @@ size_t TileOp::getNumDestConnections(WireBundle bundle) {
     // Note source is correct here, since direction is reversed.
     if (isShimNOCorPLTile())
       return targetModel.getNumSourceShimMuxConnections(getCol(), getRow(),
-                                                      bundle);
+                                                        bundle);
     return targetModel.getNumSourceSwitchboxConnections(getCol(), getRow(),
                                                         bundle);
   }
@@ -4609,8 +4593,8 @@ LogicalResult DMAOp::verify() {
   if (!parentOp->getRegion(0).getOps<DMAStartOp>().empty())
     return emitOpError("DMAOp is not compatible with DMAStart ops");
   TileLike tile = cast<TileElement>(parentOp).getTileLike();
-  if (failed(verifyAIE4ShimDMAChannel(getOperation(), tile, getChannelDir(),
-                                      getChannelIndex())))
+  if (failed(verifyDMAChannel(getOperation(), tile, getChannelDir(),
+                              getChannelIndex())))
     return failure();
   auto bdRegions = getBds();
   for (auto &bdRegion : bdRegions) {
@@ -6345,7 +6329,31 @@ LogicalResult ShimDMAAllocationOp::verify() {
     return emitOpError("tile must be a shim tile");
   }
 
-  return verifyAssignedPacket(*this, getPacketAttr());
+  if (failed(verifyAssignedPacket(*this, getPacketAttr())))
+    return failure();
+
+  if (!getPlio())
+    return verifyDMAChannel(getOperation(), tileLike, getChannelDir(),
+                            getChannelIndex());
+
+  // PLIO indices name stream ports, including on tiles without memory DMA.
+  if (isSpecializedShimDMAChannel(getChannelDir()))
+    return emitOpError("PLIO allocations only support MM2S or S2MM");
+  auto col = tileLike.tryGetCol();
+  auto row = tileLike.tryGetRow();
+  if (!col || !row)
+    return success();
+  const auto &targetModel = getTargetModel(getOperation());
+  uint32_t count = getChannelDir() == DMAChannelDir::MM2S
+                       ? targetModel.getNumSourceShimMuxConnections(
+                             *col, *row, WireBundle::PLIO)
+                       : targetModel.getNumDestShimMuxConnections(
+                             *col, *row, WireBundle::PLIO);
+  int64_t channel = getChannelIndex();
+  if (channel < 0 || static_cast<uint64_t>(channel) >= count)
+    return emitOpError("PLIO channel ")
+           << channel << " is out of range; expected 0 <= channel < " << count;
+  return success();
 }
 
 TileOp ShimDMAAllocationOp::getTileOp() {
@@ -6406,7 +6414,8 @@ LogicalResult ObjectFifoRearmBindingOp::verify() {
   // The lowering resolves each operand to its aie.tile / aie.lock, so reject a
   // binding whose operands are not those (otherwise the lowering would cast a
   // non-lock/non-tile operand and abort).
-  for (Value tile : getChannelTiles()) {
+  for (auto [tile, dir, channel] :
+       llvm::zip(getChannelTiles(), getChannelDirs(), getChannelIndices())) {
     auto tileOp = tile.getDefiningOp<TileOp>();
     if (!tileOp)
       return emitOpError("channel_tiles operands must be aie.tile values");
@@ -6417,6 +6426,12 @@ LogicalResult ObjectFifoRearmBindingOp::verify() {
     if (tileOp.isShimTile())
       return emitOpError("channel_tiles must be non-shim tiles; a shim DMA "
                          "endpoint is host-managed and is not re-armed here");
+    // reset_for expands and lowers its reset operations in one pass, before
+    // the generated operations can verify their channel indices.
+    if (failed(verifyDMAChannel(
+            getOperation(), cast<TileLike>(tileOp.getOperation()),
+            dir == 0 ? DMAChannelDir::S2MM : DMAChannelDir::MM2S, channel)))
+      return failure();
   }
   for (Value lock : getLocks())
     if (!lock.getDefiningOp<LockOp>())

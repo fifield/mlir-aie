@@ -16,6 +16,8 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <sstream>
 #include <vector>
 
 namespace xilinx::AIE {
@@ -80,6 +82,41 @@ struct DmaBdLayout {
   DmaBdField burstLength, axcache;
   DmaBdField nextBd, useNextBd, validBd;
   DmaBdField lockRelValue, lockRelId, lockAcqEnable, lockAcqValue, lockAcqId;
+};
+
+/// A numbered stream port. Source/destination is determined by its use.
+using Port = struct Port {
+  WireBundle bundle;
+  int channel;
+
+  bool operator==(const Port &rhs) const {
+    return std::tie(bundle, channel) == std::tie(rhs.bundle, rhs.channel);
+  }
+
+  bool operator!=(const Port &rhs) const { return !(*this == rhs); }
+
+  bool operator<(const Port &rhs) const {
+    return std::tie(bundle, channel) < std::tie(rhs.bundle, rhs.channel);
+  }
+
+  friend std::ostream &operator<<(std::ostream &os, const Port &port) {
+    os << "(";
+    os << stringifyWireBundle(port.bundle).str();
+    os << ": " << std::to_string(port.channel) << ")";
+    return os;
+  }
+
+  friend std::string to_string(const Port &port) {
+    std::ostringstream ss;
+    ss << port;
+    return ss.str();
+  }
+
+  friend llvm::raw_ostream &operator<<(llvm::raw_ostream &os,
+                                       const Port &port) {
+    os << to_string(port);
+    return os;
+  }
 };
 
 class AIETargetModel {
@@ -485,6 +522,20 @@ public:
   getStreamSwitchPortIndex(int col, int row, WireBundle bundle,
                            uint32_t channel, bool master) const = 0;
 
+  /// Number of DMA channels for this selector; zero if unavailable on the tile.
+  uint32_t getNumDmaChannels(TileID tile, DMAChannelDir direction) const;
+
+  /// Whether the tile supports this selector and channel. Check before
+  /// querying channel-specific BD pools or registers.
+  bool isDmaChannelSupported(TileID tile, DMAChannelDir direction,
+                             int channel) const;
+
+  /// Map a DMA channel to its logical routing port (before shim-mux lowering).
+  /// MM2S channels feed the switch; S2MM channels receive from it. Returns
+  /// nullopt for an unsupported tile, selector, or channel.
+  std::optional<Port> getDmaStreamPort(TileID tile, DMAChannelDir direction,
+                                       int channel) const;
+
   /// Return the number of buffer descriptors supported by the DMA in the given
   /// tile.
   uint32_t getNumBDs(int col, int row) const {
@@ -558,6 +609,8 @@ public:
   /// the pool's [startId, startId + numBDs) range.
   bool isBdChannelAccessible(int col, int row, uint32_t bd_id, int channel,
                              DMAChannelDir dir) const {
+    if (!isDmaChannelSupported({col, row}, dir, channel))
+      return false;
     uint32_t pool = getBdPoolId(col, row, channel, dir);
     uint32_t start = getBdPoolStartId(col, row, pool);
     uint32_t count = getNumBDsInPool(col, row, pool);
@@ -577,7 +630,8 @@ public:
   /// Return the array address of the dma buffer descriptor for the given
   /// col, row, buffer descriptor id, channel and direction. Not all
   /// architecture variants will use channel and direction so these have default
-  /// values.
+  /// values. A channel of -1 is allowed only when the BD address is independent
+  /// of the channel (AIE1/AIE2 and AIE4 core tiles).
   virtual uint64_t getDmaBdAddress(
       int col, int row, uint32_t bd_id, int channel = -1,
       AIE::DMAChannelDir direction = AIE::DMAChannelDir::MM2S) const = 0;
@@ -844,10 +898,7 @@ public:
   std::optional<uint32_t> getLocalLockAddress(uint32_t lockId,
                                               TileID tile) const override;
   uint32_t getNumBDs(AIETileType tileType) const override { return 16; }
-  uint32_t getBDMaxDims(AIETileType tileType) const override {
-    // AIE1 has no MemTiles; preserve the historical BD dimension limit.
-    return 3;
-  }
+  uint32_t getBDMaxDims(AIETileType tileType) const override { return 3; }
   uint64_t getDmaBdMaxLen(AIETileType tileType) const override {
     // AIE1 has no mem tiles. Core tiles use a 13-bit length field with a +1
     // hardware encoding (max 2^13 = 8192 32-bit words); shim tiles use a full
@@ -858,6 +909,8 @@ public:
   }
   uint32_t getBdPoolId(int col, int row, int channel,
                        DMAChannelDir dir) const override {
+    assert(isDmaChannelSupported({col, row}, dir, channel) &&
+           "unsupported DMA channel");
     return 0; // Single shared pool for all channels.
   }
   uint32_t getDmaBdWrapBits(AIETileType tileType) const override {
@@ -1016,6 +1069,8 @@ public:
 
   uint32_t getBdPoolId(int col, int row, int channel,
                        DMAChannelDir dir) const override {
+    assert(isDmaChannelSupported({col, row}, dir, channel) &&
+           "unsupported DMA channel");
     if (isMemTile(col, row))
       return (channel & 1); // even channels → pool 0, odd → pool 1
     return 0;               // single shared pool
@@ -1417,17 +1472,8 @@ public:
   AIE4TargetModel(TargetModelKind k, Properties p = None)
       : AIETargetModel(k, p | properties) {}
 
-  /// AIE4 uses a non-trivial address encoding: a MEM tile owns 5MiB of address
-  /// space rather than the 1MiB every other tile gets, so Address[24:20] is no
-  /// longer the row index, according to the architecture specification.
-  /// Logical MEM row `m` (1-based) covers address rows 5m-4 .. 5m, and each MEM
-  /// row therefore pushes the core rows up by 4, not by 5:
-  ///
-  ///   1 MEM row : shim 0 | MEM 1-5      | core rows 6, 7, 8, 9
-  ///   2 MEM rows: shim 0 | MEM 1-5, 6-10 | core rows 11, 12, ...
-  ///
-  /// so MEM row `m` encodes to address row 5m-4 and core tile (col, row)
-  /// encodes as (col << 25) | ((row + 4*numMemTileRows) << 20).
+  /// Each memtile row occupies five address rows. Memtile row m starts at
+  /// address row 5m-4; core rows are offset by 4*numMemTileRows.
   uint32_t getTileAddress(int col, int row) const override {
     uint32_t addrRow = static_cast<uint32_t>(row);
     if (isCoreTile(col, row))
@@ -1459,16 +1505,13 @@ public:
   /// Per the AIE4 register database, each Stream_Switch_*_Subordinate_*
   /// port exposes Slot0-Slot3 (4 slots), same as AIE1/AIE2.
   uint32_t getNumSlaveSlots() const override { return 4; }
-  /// Return the largest packet id the stream switch can route. Per the AIE4
-  /// register database, the Packet_ID field (e.g. DMA_BD*_8) and the
-  /// stream-switch slot `id` field are both 5 bits wide, same as AIE1/AIE2.
+  /// Packet IDs in BDs and stream-switch slots are five bits wide.
   uint32_t getMaxPacketId() const override { return 31; }
   /// Out-of-order BD index is a 4-bit field ([8:5] of the stream packet
   /// header), matching the 4-bit
   /// Out_Of_Order_BD_ID in every AIE4 module's BD registers.
   uint32_t getMaxOutOfOrderId() const override { return 15; }
-  /// Repeat count is bits [27:16] of the DMA task word -- 12 bits, widened
-  /// from AIE2's 8, as defined by the architecture specification.
+  /// Repeat count occupies the 12-bit field [27:16] of the DMA task word.
   uint32_t getMaxRepeatCount() const override { return 4095; }
   /// Task-queue depth tracking is not modeled for AIE4 yet (no occupancy
   /// register via getDmaTaskQueueSizeMask), so report "unsupported".
@@ -1587,6 +1630,8 @@ public:
 
   uint32_t getBdPoolId(int col, int row, int channel,
                        DMAChannelDir dir) const override {
+    assert(isDmaChannelSupported({col, row}, dir, channel) &&
+           "unsupported DMA channel");
     if (isMemTile(col, row)) {
       // Private per-channel BDs: unique pool per (channel, dir)
       uint32_t id = channel;

@@ -933,6 +933,24 @@ AIEX::NpuDmaMemcpyNdOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
     return success();
   auto allocOp = symbolTable.lookupSymbolIn<AIE::ShimDMAAllocationOp>(
       dev, getMetadata().getRootReference());
+  if (allocOp) {
+  if (auto tile =
+          dyn_cast<AIE::TileOp>(allocOp.getTile().getDefiningOp())) {
+    int col = tile.getCol(), row = tile.getRow();
+    auto direction = allocOp.getChannelDir();
+    int64_t channel = allocOp.getChannelIndex();
+    if (failed(AIE::verifyDMAChannel(getOperation(), targetModel, col, row,
+                                     direction, channel)))
+      return failure();
+    if (getId() > std::numeric_limits<uint32_t>::max() ||
+        !targetModel.isBdChannelAccessible(col, row, getId(), channel,
+                                           direction))
+      return emitOpError("BD ID ")
+             << getId() << " is not accessible from channel ("
+             << stringifyDMAChannelDir(direction) << ", " << channel
+             << ").";
+  }
+  }
   if (isDynamic)
     return verifyDynamicSizesStrides(targetModel, buffer, allocOp);
 
@@ -1040,17 +1058,13 @@ LogicalResult AIEX::NpuDmaWaitOp::verify() {
 
 LogicalResult AIEX::NpuPushQueueOp::verify() {
   const auto &targetModel = AIE::getTargetModel(*this);
-  // bd_id and repeat_count are SSA operands; range-check them only when they
-  // are compile-time constants. A runtime repeat_count is checked on the host
-  // when lowered (AIEDmaToNpu); a runtime bd_id comes from the tile's BD pool.
-  //
-  // Check membership of the target channel's own BD pool rather than the flat
-  // per-tile count: the AIE4 shim's control-MM2S and trace-S2MM channels have
-  // private 8- and 4-BD banks, so an id inside the flat count (32 on an AIE4b
-  // shim) can still name a neighbouring bank's registers. isBdChannelAccessible
-  // tests the pool's [startId, startId + numBDs) range, which matters because
-  // pools do not all start at 0 -- the AIE4b shim's upper MM2S pool spans ids
-  // 16..31.
+  // The channel must exist even when the BD ID is only known at runtime.
+  int col = getColumn(), row = getRow(), channel = getChannel();
+  if (failed(AIE::verifyDMAChannel(getOperation(), targetModel, col, row,
+                                   getDirection(), channel)))
+    return failure();
+  // Only constant BD IDs and repeat counts can be checked here. BD IDs must
+  // belong to the selected channel's pool, which may not start at zero.
   if (std::optional<uint32_t> bdId = getConstantIntOperand(getBdId());
       bdId && !targetModel.isBdChannelAccessible(getColumn(), getRow(), *bdId,
                                                  getChannel(), getDirection()))
@@ -1098,15 +1112,16 @@ LogicalResult AIEX::NpuWriteBdOp::verify() {
   bool isLinearTransfer = (getD0Size() >= 1) && (getD1Size() == 1) &&
                           (getD2Size() <= 1) && (getD3Size() <= 1) &&
                           (getIterationSize() == 0);
-  // See NpuPushQueueOp::verify -- membership of the target channel's own BD
-  // pool, not the flat per-tile count. `direction` is a plain i32 here rather
-  // than a DMAChannelDir attribute, so validate it before converting: an
-  // out-of-range value would otherwise fall through getBdPoolId's
-  // if-chain and be silently treated as S2MM.
+  // Decode the integer selector and validate the channel before querying its
+  // BD pool. As in NpuPushQueueOp::verify, BD limits are per pool.
   std::optional<AIE::DMAChannelDir> direction =
       AIE::symbolizeDMAChannelDir(static_cast<uint32_t>(getDirection()));
   if (!direction)
     return emitOpError("invalid direction ") << getDirection();
+  int col = getColumn(), row = getRow(), channel = getChannel();
+  if (failed(AIE::verifyDMAChannel(getOperation(), targetModel, col, row,
+                                   *direction, channel)))
+    return failure();
   if (!targetModel.isBdChannelAccessible(getColumn(), getRow(), getBdId(),
                                          getChannel(), *direction))
     return emitOpError("BD ID ")
@@ -1128,13 +1143,8 @@ LogicalResult AIEX::NpuWriteBdOp::verify() {
   bool isAIE4 = isa<AIE::AIE4TargetModel>(targetModel);
   bool isShim = targetModel.isShimNOCTile(getColumn(), getRow());
   bool isMemTile = targetModel.isMemTile(getColumn(), getRow());
-  // Every value on this op is already the hardware-encoded field value (wrap
-  // fields unbiased, stepsize/iteration fields biased actual-1), so the legal
-  // encoded range for a B-bit field is [0, 2^B - 1]. The widths are per tile
-  // class and per generation, so take them from the target model rather than
-  // a flat per-arch constant: an AIE2 core tile has an 8-bit wrap where the
-  // mem tile has 10, and AIE4 widens both according to the architecture
-  // specification.
+  // Fields are already hardware-encoded, including actual-1 biases. Validate
+  // against the encoded widths for this target and tile type.
   AIE::AIETileType tileType = targetModel.getTileType(getColumn(), getRow());
   uint32_t wrapBits = targetModel.getDmaBdWrapBits(tileType);
   uint32_t stepBits = targetModel.getDmaBdStepBits(tileType);
@@ -1188,22 +1198,8 @@ LogicalResult AIEX::NpuWriteBdOp::verify() {
                  getD2ZeroBefore() != 0 || getD2ZeroAfter() != 0))
     return emitOpError("ShimTile doesn't support zero padding.");
 
-  // Pad field widths (AIE2P ArchSpec Table 3-34, in 32-bit words): D0 is a
-  // 6-bit field (max 63), D1 a 5-bit field (max 31), D2 a 4-bit field (max
-  // 15).
-  //
-  // Placement is a deliberate compromise. DMABDOp::verify() would be the
-  // better home for this check, since its diagnostic would point at the
-  // user's own `aie.dma_bd`. But DMABDOp::verify() early-returns for BDs
-  // nested inside `aiex.dma_configure_task`, and the only case with
-  // hardware evidence for this defect is on that task path -- a check
-  // placed only in DMABDOp::verify() would miss it. NpuWriteBdOp is where
-  // both the static and task runtime paths converge, so putting it here
-  // covers both, at the cost of the diagnostic pointing at this
-  // compiler-generated op rather than the user-written BD.
-  //
-  // TODO: migrate this check to DMABDOp::verify() once BD iteration becomes
-  // an explicit `aie.dma_bd` field and that early-return can be removed.
+  // Padding counts are in 32-bit words. Check here to cover both static BDs
+  // and task BDs, which bypass DMABDOp's dimension checks.
   if (getD0ZeroBefore() > 0x3F || getD0ZeroAfter() > 0x3F)
     return emitOpError("D0 pad_before/pad_after exceeds the [0:63] range.");
   if (getD1ZeroBefore() > 0x1F || getD1ZeroAfter() > 0x1F)
@@ -1802,6 +1798,9 @@ verifyTaskBDDimensions(const AIE::AIETargetModel &targetModel, int col, int row,
 }
 
 LogicalResult AIEX::DMAConfigureTaskOp::verify() {
+  if (failed(AIE::verifyDMAChannel(getOperation(), getTileLike(),
+                                   getDirection(), getChannel())))
+    return failure();
   const AIE::AIETargetModel &targetModel = AIE::getTargetModel(getOperation());
   // Skip the per-BD dimension check on an unplaced (logical) tile: the ND limit
   // is a function of the tile's placed coordinates, which are not yet known.
@@ -2195,10 +2194,12 @@ LogicalResult AIEX::DMAConfigureTaskForOp::verifySymbolUses(
   // becomes a concrete dma_configure_task. Before the objectFIFO lowering
   // the name is the fifo's own, and the check waits.
   Value tileValue;
+  AIE::ShimDMAAllocationOp allocOp;
   LogicalResult named =
       TypeSwitch<Operation *, LogicalResult>(target)
           .Case([&](AIE::ShimDMAAllocationOp alloc) {
             tileValue = alloc.getTile();
+            allocOp = alloc;
             return success();
           })
           .Case([&](AIE::RouteEndpointOp endpoint) -> LogicalResult {
@@ -2224,6 +2225,11 @@ LogicalResult AIEX::DMAConfigureTaskForOp::verifySymbolUses(
   auto tile = tileValue ? tileValue.getDefiningOp<AIE::TileOp>() : nullptr;
   if (!tile)
     return success();
+  if (allocOp &&
+      failed(AIE::verifyDMAChannel(
+          getOperation(), llvm::cast<AIE::TileLike>(tile.getOperation()),
+          allocOp.getChannelDir(), allocOp.getChannelIndex())))
+    return failure();
   const AIE::AIETargetModel &targetModel = AIE::getTargetModel(getOperation());
   return verifyTaskBDDimensions(targetModel, tile.getCol(), tile.getRow(),
                                 getBody());
@@ -2240,6 +2246,9 @@ AIE::BDChainOp AIEX::DMAStartBdChainOp::getBDChainOp() {
 }
 
 LogicalResult AIEX::DMAStartBdChainOp::verify() {
+  if (failed(AIE::verifyDMAChannel(getOperation(), getTileLike(),
+                                   getDirection(), getChannel())))
+    return failure();
   AIE::BDChainOp chain = getBDChainOp();
   if (!chain) {
     return emitOpError("symbol does not reference valid BD chain");
@@ -2289,8 +2298,6 @@ AIEX::getCtrlPktPayloadWords(AIEX::NpuControlPacketOp op) {
 }
 
 LogicalResult AIEX::NpuControlPacketOp::verify() {
-  // Operation encoding, AIE4 arch spec: "00" write, "01" read,
-  // "10" write with response. "11" is reserved and yields undefined behavior.
   uint32_t opcode = getOpcode();
   if (opcode > 2)
     return emitOpError("opcode ")
@@ -2306,11 +2313,7 @@ LogicalResult AIEX::NpuControlPacketOp::verify() {
     return emitOpError(
         "control packet with a write opcode requires a data payload");
 
-  // The payload word count is encoded as (words - 1) in a fixed-width field of
-  // the control word, so a count outside the supported range cannot be
-  // represented and would silently alias onto a different length. Per AIE4
-  // arch spec, a mismatch between the encoded word count and the actual
-  // payload is undefined behavior, so reject rather than truncate.
+  // The control word encodes words-1; zero would alias a different length.
   std::optional<uint32_t> words = getCtrlPktPayloadWords(*this);
   if (!words)
     return emitOpError("read control packet requires a length attribute");
@@ -2439,7 +2442,8 @@ LogicalResult AIEX::DmaChannelResetOp::verify() {
                             "has "
                          << numChannels << " DMA channel(s) in this direction)";
 
-  return success();
+  return AIE::verifyDMAChannel(getOperation(), targetModel, col, row,
+                               getDirection(), getChannel());
 }
 
 LogicalResult AIEX::DmaChannelResetForOp::verify() {

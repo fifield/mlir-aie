@@ -164,7 +164,7 @@ struct AIEGenerateColumnControlOverlayPass
       if (!configuration)
         continue;
       bool aie4 = isa<AIE4TargetModel>(model);
-      WireBundle bundle = aie4 ? WireBundle::TileControl : WireBundle::DMA;
+      WireBundle bundle = aie4 ? WireBundle::DMAControl : WireBundle::DMA;
       DMAChannelDir direction = aie4 ? DMAChannelDir::ControlMM2S
                                      : DMAChannelDir::MM2S;
       int channel = -1;

@@ -9,16 +9,16 @@
 
 // CHECK: module @link_to_stream_AIE2 {
 // CHECK:   aie.device(xcve2302) {
-// CHECK-DAG:     %shim_pl_tile_1_0 = aie.tile(1, 0)
+// CHECK-DAG:     %shim_noc_tile_2_0 = aie.tile(2, 0)
 // CHECK-DAG:     %mem_tile_1_1 = aie.tile(1, 1)
 // CHECK-DAG:     %tile_3_3 = aie.tile(3, 3)
 // CHECK-DAG:     %of_in__cons__buf0 = aie.buffer(%mem_tile_1_1) {sym_name = "of_in__cons__buf0"} : memref<16xi32>
 // CHECK-DAG:     %of_in__cons__buf1 = aie.buffer(%mem_tile_1_1) {sym_name = "of_in__cons__buf1"} : memref<16xi32>
 // CHECK-DAG:     %of_in__cons__prodlock0 = aie.lock(%mem_tile_1_1) {init = 2 : i32, sym_name = "of_in__cons__prodlock0"}
 // CHECK-DAG:     %of_in__cons__conslock0 = aie.lock(%mem_tile_1_1) {init = 0 : i32, sym_name = "of_in__cons__conslock0"}
-// CHECK-DAG:     aie.flow(%shim_pl_tile_1_0, DMA : 0, %mem_tile_1_1, DMA : 0)
+// CHECK-DAG:     aie.flow(%shim_noc_tile_2_0, DMA : 0, %mem_tile_1_1, DMA : 0)
 // CHECK-DAG:     aie.flow(%mem_tile_1_1, DMA : 0, %tile_3_3, Core : 0)
-// CHECK-DAG:     aie.shim_dma_allocation @of_in__shim_alloc(%shim_pl_tile_1_0, MM2S, 0)
+// CHECK-DAG:     aie.shim_dma_allocation @of_in__shim_alloc(%shim_noc_tile_2_0, MM2S, 0)
 // CHECK:     %memtile_dma_1_1 = aie.memtile_dma(%mem_tile_1_1) {
 // CHECK:       %0 = aie.dma_start(S2MM, 0, ^bb1, ^bb3)
 // CHECK:     ^bb1:  // 2 preds: ^bb0, ^bb2
@@ -51,11 +51,11 @@
 
 module @link_to_stream_AIE2 {
  aie.device(xcve2302) {
-    %tile10 = aie.tile(1, 0)
+    %tile20 = aie.tile(2, 0)
     %tile11 = aie.tile(1, 1)
     %tile33 = aie.tile(3, 3)
 
-    aie.objectfifo @of_in (%tile10, {%tile11}, 2 : i32) : !aie.objectfifo<memref<16xi32>>
+    aie.objectfifo @of_in (%tile20, {%tile11}, 2 : i32) : !aie.objectfifo<memref<16xi32>>
     aie.objectfifo @of_stream (%tile11, {%tile33}, 2 : i32) {cons_ports = [#aie.end_port<Core : 0>]} : !aie.objectfifo<memref<16xi32>>
     aie.objectfifo.link [@of_in] -> [@of_stream] ([] [])
   }

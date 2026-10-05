@@ -1,12 +1,5 @@
-//===- ctrl_pkt_to_dma_aie4.mlir -------------------------------*- MLIR -*-===//
-//
-// This file is licensed under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-// (c) Copyright 2026 Advanced Micro Devices, Inc.
-//
-//===----------------------------------------------------------------------===//
 
 // RUN: aie-opt %s -aie-ctrl-packet-infer-tiles -aie-generate-column-control-overlay="route-shim-to-tile-ctrl=true" -aie-ctrl-packet-to-dma | FileCheck %s
 
@@ -26,7 +19,7 @@
 // CHECK:   aiex.npu.sync(%[[COL]], %[[ROW]], %[[DIR]], %[[CHAN]], %[[COLNUM]], %[[ROWNUM]])
 // CHECK: }
 // CHECK: aie.packet_flow(29) {
-// CHECK:   aie.packet_source<%[[SHIM]], TileControl : 1>
+// CHECK:   aie.packet_source<%[[SHIM]], DMAControl : 1>
 // CHECK:   aie.packet_dest<%[[CORE]], TileControl : 0>
 // CHECK: } {keep_pkt_header = false, priority_route = true}
 // CHECK: aie.shim_dma_allocation @ctrlpkt_col0_ctrl_mm2s_chan1(%[[SHIM]], ControlMM2S, 1)

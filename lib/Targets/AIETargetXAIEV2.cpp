@@ -86,6 +86,8 @@ static std::string wireBundleToPortType(WireBundle bundle) {
     return "_32B_TRACE";
   case WireBundle::DMATrace:
     return "DMA_Trace";
+  case WireBundle::DMAControl:
+    return "DMA_CTRL";
   case WireBundle::South32:
     return "_32B_SOUTH";
   case WireBundle::West32:
@@ -103,17 +105,6 @@ static std::string wireBundleToPortType(WireBundle bundle) {
   default:
     return stringifyWireBundle(bundle).upper();
   }
-}
-
-static std::string wireBundleToPortType(WireBundle bundle,
-                                        const AIETargetModel &targetModel,
-                                        int col, int row,
-                                        bool isSourcePort) {
-  if (isSourcePort && bundle == WireBundle::TileControl &&
-      isa<AIE4TargetModel>(targetModel) && targetModel.isShimNOCTile(col, row))
-    return "DMA_CTRL";
-
-  return wireBundleToPortType(bundle);
 }
 
 static bool hasTileControlMasterSet(Block &block) {
@@ -864,15 +855,9 @@ xilinx::AIE::AIETranslateToXAIEV2(ModuleOp module, raw_ostream &output,
     for (auto connectOp : b.getOps<ConnectOp>())
       output << "__mlir_aie_try(XAie_StrmConnCctEnable(" << deviceInstRef
              << ", " << tileLocStr("x", "y") << ", "
-             << wireBundleToPortType(connectOp.getSourceBundle(), targetModel,
-                                     switchCol, switchRow,
-                                     /*isSourcePort=*/true)
-             << ", "
+             << wireBundleToPortType(connectOp.getSourceBundle()) << ", "
              << connectOp.sourceIndex() << ", "
-             << wireBundleToPortType(connectOp.getDestBundle(), targetModel,
-                                     switchCol, switchRow,
-                                     /*isSourcePort=*/false)
-             << ", "
+             << wireBundleToPortType(connectOp.getDestBundle()) << ", "
              << connectOp.destIndex() << "));\n";
 
     for (auto connectOp : b.getOps<MasterSetOp>()) {

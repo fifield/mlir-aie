@@ -37,3 +37,44 @@ module {
     }
   }
 }
+
+// -----
+
+// Specialized shim engines do not exist on core or memory tiles.
+aie.device(npu2) {
+  %tile = aie.tile(0, 2)
+  aie.runtime_sequence() {
+    // expected-error@+1 {{unsupported DMA channel (ControlMM2S, 0) on tile (0, 2)}}
+    aiex.dma_channel_reset(%tile, ControlMM2S, 0)
+  }
+}
+
+// -----
+
+aie.device(npu2) {
+  %tile = aie.tile(0, 1)
+  aie.runtime_sequence() {
+    // expected-error@+1 {{unsupported DMA channel (TraceS2MM, 0) on tile (0, 1)}}
+    aiex.dma_channel_reset(%tile, TraceS2MM, 0)
+  }
+}
+
+// -----
+
+aie.device(npu3) {
+  %tile = aie.tile(0, 1)
+  aie.runtime_sequence() {
+    // expected-error@+1 {{unsupported DMA channel (ControlMM2S, 0) on tile (0, 1)}}
+    aiex.dma_channel_reset(%tile, ControlMM2S, 0)
+  }
+}
+
+// -----
+
+aie.device(npu3) {
+  %tile = aie.tile(0, 2)
+  aie.runtime_sequence() {
+    // expected-error@+1 {{unsupported DMA channel (TraceS2MM, 0) on tile (0, 2)}}
+    aiex.dma_channel_reset(%tile, TraceS2MM, 0)
+  }
+}

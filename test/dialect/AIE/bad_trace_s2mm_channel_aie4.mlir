@@ -6,7 +6,7 @@
 //===----------------------------------------------------------------------===//
 
 // RUN: not aie-opt --canonicalize --split-input-file %s 2>&1 | FileCheck %s
-// CHECK: 'aie.dma_start' op TraceS2MM channel 1 is out of range; expected 0 <= channel < 1
+// CHECK: 'aie.dma_start' op unsupported DMA channel (TraceS2MM, 1) on tile (0, 0)
 
 // AIE4 has exactly one trace-S2MM channel. In particular, there is no
 // application-B trace channel or second trace register bank.
@@ -25,7 +25,7 @@ aie.device(npu3) {
 
 // -----
 
-// CHECK: 'aie.dma' op TraceS2MM channel 1 is out of range; expected 0 <= channel < 1
+// CHECK: 'aie.dma' op unsupported DMA channel (TraceS2MM, 1) on tile (0, 0)
 
 // Region-form DMA operations must enforce the same channel bounds.
 aie.device(npu3) {
@@ -45,7 +45,7 @@ aie.device(npu3) {
 
 // -----
 
-// CHECK: 'aie.dma_start' op ControlMM2S channel 2 is out of range; expected 0 <= channel < 2
+// CHECK: 'aie.dma_start' op unsupported DMA channel (ControlMM2S, 2) on tile (0, 0)
 
 // AIE4 has exactly two control-MM2S channels.
 aie.device(npu3) {
@@ -63,7 +63,7 @@ aie.device(npu3) {
 
 // -----
 
-// CHECK: 'aie.dma' op ControlMM2S channel 2 is out of range; expected 0 <= channel < 2
+// CHECK: 'aie.dma' op unsupported DMA channel (ControlMM2S, 2) on tile (0, 0)
 
 // Region-form control DMA operations must enforce the same channel bounds.
 aie.device(npu3) {
