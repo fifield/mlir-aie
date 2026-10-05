@@ -3,4 +3,4 @@
 # This is deliberately separate from peano-requirements.txt: the public
 # llvm-aie nightly does not ship the internal AIE4 target.  The version is
 # updated by update-aie4-peano.yml after querying the Artifactory repository.
-https://xcoartifactory.xilinx.com/artifactory/scc-peano-wheel/llvm_aie-1.9.0.dev20260927144654+g663a9e74-py3-none-manylinux_2_38_x86_64.whl
+https://xcoartifactory.xilinx.com/artifactory/scc-peano-wheel/llvm_aie-1.9.0.dev20261002032408+g8eff0aca-py3-none-manylinux_2_38_x86_64.whl
