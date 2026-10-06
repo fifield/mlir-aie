@@ -41,17 +41,28 @@ def AIEVec_AIE4MatMulOp
     Integer formats require `lhs_signed` and `rhs_signed`, which select the
     X and Z operand signedness independently. Floating formats reject them.
 
-    Converting a floating-point `vector.contract` requires its `afn`
-    fastmath flag (`fast` includes it). Shape alone is insufficient because
-    MMAC uses hardware accumulation order and rounding. Integer contractions
-    need no fastmath permission.
+    A floating-point `vector.contract` converts to this op only if it
+    carries `afn` (`fast` includes it). The AIE4 conversion treats `afn` on
+    a floating-point contraction as an opt-in to the MMAC numerical behavior
+    below, including its reduction order, rounding, and subnormal handling.
+    This is an AIE4 lowering convention; `afn` does not generally permit
+    reassociation. `reassoc`, `contract`, and `nsz` alone do not enable this
+    conversion. Integer contractions need no flag: their wrapping arithmetic
+    is the hardware's.
 
     Numerical behavior:
 
-    * bf16 MMAC accepts subnormal bf16 multiplicands but flushes subnormal
-      f32 accumulator inputs and results to zero. Rewrites must preserve
-      this behavior: `matmul(0, b, acc)` cannot generally fold to `acc`.
-      Constant folding requires a bit-exact model of the hardware numerics.
+    * bf16 (measured on NPU3). Products are exact; subnormal multiplicands
+      are accepted. The 32 products form two blocks of 16. Within each block,
+      products are aligned to the largest product exponent, individually
+      rounded to nearest even at 23 fractional binary digits, and then summed
+      without normalization. The two block sums and the accumulator are
+      aligned to their largest exponent (a block that cancels to zero still
+      counts), individually rounded the same way, summed, and rounded to f32.
+      Subnormal accumulator inputs and results flush to +0; -0 is never
+      produced; a NaN result can be 0x7F800001 or 0xFF800001. Rewrites must
+      preserve this:
+      `matmul(0, b, acc)` cannot generally fold to `acc`.
     * int8 and int4 products are exact in i32. Accumulation wraps modulo
       2^32, matching `arith.addi` and `arith.muli` on operands extended
       according to `lhs_signed` and `rhs_signed`.
@@ -166,8 +177,8 @@ def AIEVec_AIE4MmacOp : AIEVec_Op<"aie4.mmac", []>,
     `aievec.aie4.matmul` for the selected format.
 
     Without `acc`, the hardware replaces the accumulator by zeros (conf bit 0,
-    `zero_acc`). This is not the same as adding a +0.0 accumulator for the
-    sign of zero.
+    `zero_acc`). For bf16 this equals a +0.0 accumulator, since the bf16
+    MMAC never produces -0; for fp8 the sign of zero is not characterized.
 
     Integer formats require `lhs_signed` (X, conf bit 9) and `rhs_signed`
     (Z, conf bit 8). `rhs_signed` must match the region, because int4

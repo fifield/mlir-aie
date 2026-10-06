@@ -42,9 +42,11 @@ def AIEVecGrantContractAfn : Pass<"aievec-grant-contract-afn"> {
     accumulator has a floating-point element type, keeping the flags it
     already has. Integer contractions are left alone.
 
-    `afn` permits AIE4 MMAC numerics (`aievec.aie4.matmul`), including
-    hardware accumulation order, rounding, and subnormal handling. This
-    pass records that permission in the IR for sources that cannot
+    The AIE4 conversion treats `afn` on a floating-point contraction as an
+    opt-in to MMAC numerics (see `aievec.aie4.matmul`), including hardware
+    reduction order, rounding, and subnormal handling. This is an AIE4
+    lowering convention; `afn` does not generally permit reassociation.
+    This pass records that opt-in in the IR for sources that cannot
     annotate their contractions directly.
 
     Off by default. The `contract-afn` option of the
