@@ -120,6 +120,8 @@ _TD_MNEMONIC_CLASS_RE = re.compile(
     r'\b(?:AIEVec4_IntrOp|AIE4\w*IntrOp)\s*<\s*"([^"]+)"'
 )
 
+_TD_DEF_SPLIT_RE = re.compile(r"^(?=def\s)", re.MULTILINE)
+
 # Trailing-dot prefixes such as "llvm.aie4.put." are skipped below;
 # this scan does not resolve C++ string concatenation.
 _LITERAL_NAME_RE = re.compile(r'"(llvm\.aie4\.[A-Za-z0-9_.]*)"')
@@ -159,10 +161,22 @@ def find_referenced_names(repo_root: Path) -> tuple[set[str], list[str], set[str
             ):
                 continue
             if path.suffix == ".td":
-                for m in _TD_MNEMONIC_CLASS_RE.finditer(text):
-                    full_name = "llvm.aie4." + m.group(1)
-                    names.add(full_name)
-                    td_derived_names.add(full_name)
+                # An op with a custom llvmBuilder emits the names spelled in
+                # that builder (e.g. one op selecting among several intrinsics,
+                # or reusing another op's); only the others emit the mnemonic.
+                for block in _TD_DEF_SPLIT_RE.split(text):
+                    mnemonic = _TD_MNEMONIC_CLASS_RE.search(block)
+                    if mnemonic is None:
+                        continue
+                    builder = block[block.find("llvmBuilder") :]
+                    custom = (
+                        set(_LITERAL_NAME_RE.findall(builder))
+                        if "llvmBuilder" in block
+                        else set()
+                    )
+                    derived = custom or {"llvm.aie4." + mnemonic.group(1)}
+                    names |= derived
+                    td_derived_names |= derived
             for m in _LITERAL_NAME_RE.finditer(text):
                 literal = m.group(1)
                 if literal.endswith("."):
