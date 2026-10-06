@@ -1,0 +1,40 @@
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// Check referenced snapshot signatures and memory effects against installed Peano.
+// --build-dir also compares scanned XLLVM names with TableGen output.
+// xllvm_verify.test checks the XLLVM ops' declared operand/result types.
+//
+// REQUIRES: peano
+// RUN: %python %S/../../utils/aie4/check_aie4_intrinsics.py \
+// RUN:     --peano-install-dir %PEANO_INSTALL_DIR --repo-root %S/../.. \
+// RUN:     --build-dir %aie_obj_root | FileCheck %s
+//
+// CHECK: cross-check: OK (identical name sets)
+// CHECK-DAG: llvm.aie4.I512.v32.acc32.srs: OK
+// CHECK-DAG: llvm.aie4.put.ms: OK
+// CHECK-DAG: llvm.aie4.get.ss: OK
+// CHECK-DAG: llvm.aie4.event: OK
+// CHECK-DAG: llvm.aie4.vshuffle: OK
+// The nine dense MMAC, staging and commit intrinsics (XLLVMAIE4IntrOps.td).
+// CHECK-DAG: llvm.aie4.bf16.I512.ACC2048.mmac: OK
+// CHECK-DAG: llvm.aie4.I512.ACC2048.mmac: OK
+// CHECK-DAG: llvm.aie4.fp8.I512.ACC2048.mmac: OK
+// CHECK-DAG: llvm.aie4.insert.staging.bf16.I1024: OK
+// CHECK-DAG: llvm.aie4.insert.staging.int.I1024: OK
+// CHECK-DAG: llvm.aie4.insert.staging.fp8.I1024: OK
+// CHECK-DAG: llvm.aie4.staging.to.matrix.I32768: OK
+// CHECK-DAG: llvm.aie4.staging.to.matrix.I4.I32768: OK
+// CHECK-DAG: llvm.aie4.staging.to.matrix.FP32768: OK
+// CHECK: == [[COUNT:[1-9][0-9]*]] referenced, [[COUNT]] OK, 0 FAILED ==
+// CHECK: PASS: every referenced AIE4 intrinsic matches the installed wheel
+// CHECK-SAME: snapshot vs installed wheel only
+
+// Exercise type, immarg, and memory-effect handling across the full snapshot.
+//
+// RUN: %python %S/../../utils/aie4/check_aie4_intrinsics.py \
+// RUN:     --peano-install-dir %PEANO_INSTALL_DIR --repo-root %S/../.. \
+// RUN:     --all | FileCheck %s --check-prefix=ALL
+//
+// ALL: == 527 snapshot record(s) self-checked, 527 OK, 0 FAILED ==
+// ALL: PASS: every snapshot record self-checks clean against the installed wheel.

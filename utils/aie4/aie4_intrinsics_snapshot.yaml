@@ -1,0 +1,7746 @@
+# Copyright (C) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+# Baseline copied from the superproject's utils/aie4_intrinsics_snapshot.yaml.
+# Source: llvm-aie e73e9ffae72bb28f1435319b503ec4e0de99e7c3 (2026-09-12).
+# The source revision is independent of utils/aie4-peano-requirements.txt.
+# Regenerate manually with gen_aie4_intrinsics_snapshot.py; see README.md.
+schema_version: 1
+description: Signature snapshot of AIE4 LLVM IR intrinsics (int_aie4_* records), generated from the pinned
+  llvm-aie submodule. Used for drift detection against a weekly-floating toolchain pin -- see utils/aie4/check_aie4_intrinsics.py.
+  Do not hand-edit; regenerate with utils/aie4/gen_aie4_intrinsics_snapshot.py.
+count: 527
+intrinsics:
+- name: llvm.aie4.I1024.ACC2048.mac.c
+  record_name: int_aie4_I1024_ACC2048_mac_c
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 784
+  ret_types:
+  - llvm_v64i32_ty
+  param_types:
+  - llvm_v64i32_ty
+  - llvm_v128i8_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I1024.ACC2048.mmac
+  record_name: int_aie4_I1024_ACC2048_mmac
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 787
+  ret_types:
+  - llvm_v64i32_ty
+  param_types:
+  - llvm_v64i32_ty
+  - llvm_v128i8_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I1024.I1024.ACC1024.fp.mac.ewise.conf
+  record_name: int_aie4_I1024_I1024_ACC1024_fp_mac_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 802
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_v32f32_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I1024.I1024.ACC1024.fp.msc.ewise.conf
+  record_name: int_aie4_I1024_I1024_ACC1024_fp_msc_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 805
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_v32f32_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I1024.I1024.ACC1024.fp.mul.ewise.conf
+  record_name: int_aie4_I1024_I1024_ACC1024_fp_mul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 808
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I1024.I1024.ACC1024.fp.negmul.ewise.conf
+  record_name: int_aie4_I1024_I1024_ACC1024_fp_negmul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 811
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I1024.I1024.fp32.ACC1024.fp.mac.ewise.conf
+  record_name: int_aie4_I1024_I1024_fp32_ACC1024_fp_mac_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 814
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_v32f32_ty
+  - llvm_float_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I1024.I1024.fp32.ACC1024.fp.msc.ewise.conf
+  record_name: int_aie4_I1024_I1024_fp32_ACC1024_fp_msc_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 817
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_v32f32_ty
+  - llvm_float_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I1024.fp32.ACC1024.fp.mac.ewise.conf
+  record_name: int_aie4_I1024_fp32_ACC1024_fp_mac_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 790
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_float_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I1024.fp32.ACC1024.fp.msc.ewise.conf
+  record_name: int_aie4_I1024_fp32_ACC1024_fp_msc_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 793
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_float_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I1024.fp32.ACC1024.fp.mul.ewise.conf
+  record_name: int_aie4_I1024_fp32_ACC1024_fp_mul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 796
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_float_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I1024.fp32.ACC1024.fp.negmul.ewise.conf
+  record_name: int_aie4_I1024_fp32_ACC1024_fp_negmul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 799
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_float_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I1024.v32.acc64.srs
+  record_name: int_aie4_I1024_v32_acc64_srs
+  source_file: IntrinsicsAIE4.td
+  source_line: 750
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i64_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I1024.v64.acc32.srs
+  record_name: int_aie4_I1024_v64_acc32_srs
+  source_file: IntrinsicsAIE4.td
+  source_line: 751
+  ret_types:
+  - llvm_v64i16_ty
+  param_types:
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I128.v16.acc64.srs
+  record_name: int_aie4_I128_v16_acc64_srs
+  source_file: IntrinsicsAIE4.td
+  source_line: 739
+  ret_types:
+  - llvm_v16i8_ty
+  param_types:
+  - llvm_v16i64_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I128.v32.acc32.srs
+  record_name: int_aie4_I128_v32_acc32_srs
+  source_file: IntrinsicsAIE4.td
+  source_line: 738
+  ret_types:
+  - llvm_v16i8_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I256.I256.ACC1024.mac.ewise.conf
+  record_name: int_aie4_I256_I256_ACC1024_mac_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 848
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i8_ty
+  - llvm_v32i8_ty
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I256.I256.ACC1024.msc.ewise.conf
+  record_name: int_aie4_I256_I256_ACC1024_msc_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 851
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i8_ty
+  - llvm_v32i8_ty
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I256.I256.ACC1024.mul.ewise.conf
+  record_name: int_aie4_I256_I256_ACC1024_mul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 854
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i8_ty
+  - llvm_v32i8_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I256.I256.ACC1024.negmul.ewise.conf
+  record_name: int_aie4_I256_I256_ACC1024_negmul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 857
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i8_ty
+  - llvm_v32i8_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I256.I256.I32.ACC1024.mac.ewise.conf
+  record_name: int_aie4_I256_I256_I32_ACC1024_mac_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 860
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i8_ty
+  - llvm_v32i8_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I256.I256.I32.ACC1024.msc.ewise.conf
+  record_name: int_aie4_I256_I256_I32_ACC1024_msc_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 863
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i8_ty
+  - llvm_v32i8_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I256.char.ACC1024.mac.ewise.conf
+  record_name: int_aie4_I256_char_ACC1024_mac_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 836
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i8_ty
+  - llvm_i32_ty
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I256.char.ACC1024.msc.ewise.conf
+  record_name: int_aie4_I256_char_ACC1024_msc_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 839
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i8_ty
+  - llvm_i32_ty
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I256.char.ACC1024.mul.ewise.conf
+  record_name: int_aie4_I256_char_ACC1024_mul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 842
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i8_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I256.char.ACC1024.negmul.ewise.conf
+  record_name: int_aie4_I256_char_ACC1024_negmul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 845
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i8_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I256.v16.acc32.srs
+  record_name: int_aie4_I256_v16_acc32_srs
+  source_file: IntrinsicsAIE4.td
+  source_line: 740
+  ret_types:
+  - llvm_v16i16_ty
+  param_types:
+  - llvm_v16i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I256.v16.acc64.srs
+  record_name: int_aie4_I256_v16_acc64_srs
+  source_file: IntrinsicsAIE4.td
+  source_line: 741
+  ret_types:
+  - llvm_v16i16_ty
+  param_types:
+  - llvm_v16i64_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I256.v32.acc32.srs
+  record_name: int_aie4_I256_v32_acc32_srs
+  source_file: IntrinsicsAIE4.td
+  source_line: 742
+  ret_types:
+  - llvm_v32i8_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I256.v32.acc64.srs
+  record_name: int_aie4_I256_v32_acc64_srs
+  source_file: IntrinsicsAIE4.td
+  source_line: 745
+  ret_types:
+  - llvm_v32i8_ty
+  param_types:
+  - llvm_v32i64_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I256.v64.acc32.srs
+  record_name: int_aie4_I256_v64_acc32_srs
+  source_file: IntrinsicsAIE4.td
+  source_line: 744
+  ret_types:
+  - llvm_v32i8_ty
+  param_types:
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I256.v8.acc64.srs
+  record_name: int_aie4_I256_v8_acc64_srs
+  source_file: IntrinsicsAIE4.td
+  source_line: 743
+  ret_types:
+  - llvm_v8i32_ty
+  param_types:
+  - llvm_v8i64_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I512.ACC2048.mmac
+  record_name: int_aie4_I512_ACC2048_mmac
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 866
+  ret_types:
+  - llvm_v64i32_ty
+  param_types:
+  - llvm_v64i32_ty
+  - llvm_v64i8_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I512.I256.ACC1024.mac.ewise.conf
+  record_name: int_aie4_I512_I256_ACC1024_mac_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 869
+  ret_types:
+  - llvm_v16i64_ty
+  param_types:
+  - llvm_v16i32_ty
+  - llvm_v16i16_ty
+  - llvm_v16i64_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I512.I256.ACC1024.msc.ewise.conf
+  record_name: int_aie4_I512_I256_ACC1024_msc_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 872
+  ret_types:
+  - llvm_v16i64_ty
+  param_types:
+  - llvm_v16i32_ty
+  - llvm_v16i16_ty
+  - llvm_v16i64_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I512.I256.ACC1024.mul.ewise.conf
+  record_name: int_aie4_I512_I256_ACC1024_mul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 875
+  ret_types:
+  - llvm_v16i64_ty
+  param_types:
+  - llvm_v16i32_ty
+  - llvm_v16i16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I512.I256.ACC1024.negmul.ewise.conf
+  record_name: int_aie4_I512_I256_ACC1024_negmul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 878
+  ret_types:
+  - llvm_v16i64_ty
+  param_types:
+  - llvm_v16i32_ty
+  - llvm_v16i16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I512.I256.I64.ACC1024.mac.ewise.conf
+  record_name: int_aie4_I512_I256_I64_ACC1024_mac_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 881
+  ret_types:
+  - llvm_v16i64_ty
+  param_types:
+  - llvm_v16i32_ty
+  - llvm_v16i16_ty
+  - llvm_v2i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I512.I256.I64.ACC1024.msc.ewise.conf
+  record_name: int_aie4_I512_I256_I64_ACC1024_msc_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 884
+  ret_types:
+  - llvm_v16i64_ty
+  param_types:
+  - llvm_v16i32_ty
+  - llvm_v16i16_ty
+  - llvm_v2i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I512.I512.ACC1024.mac.ewise.conf
+  record_name: int_aie4_I512_I512_ACC1024_mac_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 887
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i16_ty
+  - llvm_v32i16_ty
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I512.I512.ACC1024.msc.ewise.conf
+  record_name: int_aie4_I512_I512_ACC1024_msc_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 890
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i16_ty
+  - llvm_v32i16_ty
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I512.I512.ACC1024.mul.ewise.conf
+  record_name: int_aie4_I512_I512_ACC1024_mul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 893
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i16_ty
+  - llvm_v32i16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I512.I512.ACC1024.negmul.ewise.conf
+  record_name: int_aie4_I512_I512_ACC1024_negmul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 896
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i16_ty
+  - llvm_v32i16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I512.I512.I32.ACC1024.mac.ewise.conf
+  record_name: int_aie4_I512_I512_I32_ACC1024_mac_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 899
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i16_ty
+  - llvm_v32i16_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I512.I512.I32.ACC1024.msc.ewise.conf
+  record_name: int_aie4_I512_I512_I32_ACC1024_msc_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 902
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i16_ty
+  - llvm_v32i16_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I512.I512.I64.ACC1024.mac.ewise.conf
+  record_name: int_aie4_I512_I512_I64_ACC1024_mac_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 905
+  ret_types:
+  - llvm_v16i64_ty
+  param_types:
+  - llvm_v32i16_ty
+  - llvm_v32i16_ty
+  - llvm_v2i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I512.I512.I64.ACC1024.msc.ewise.conf
+  record_name: int_aie4_I512_I512_I64_ACC1024_msc_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 908
+  ret_types:
+  - llvm_v16i64_ty
+  param_types:
+  - llvm_v32i16_ty
+  - llvm_v32i16_ty
+  - llvm_v2i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I512.int.ACC1024.mac.ewise.conf
+  record_name: int_aie4_I512_int_ACC1024_mac_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 911
+  ret_types:
+  - llvm_v16i64_ty
+  param_types:
+  - llvm_v16i32_ty
+  - llvm_i32_ty
+  - llvm_v16i64_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I512.int.ACC1024.msc.ewise.conf
+  record_name: int_aie4_I512_int_ACC1024_msc_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 914
+  ret_types:
+  - llvm_v16i64_ty
+  param_types:
+  - llvm_v16i32_ty
+  - llvm_i32_ty
+  - llvm_v16i64_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I512.int.ACC1024.mul.ewise.conf
+  record_name: int_aie4_I512_int_ACC1024_mul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 917
+  ret_types:
+  - llvm_v16i64_ty
+  param_types:
+  - llvm_v16i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I512.int.ACC1024.negmul.ewise.conf
+  record_name: int_aie4_I512_int_ACC1024_negmul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 920
+  ret_types:
+  - llvm_v16i64_ty
+  param_types:
+  - llvm_v16i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I512.short.ACC1024.mac.ewise.conf
+  record_name: int_aie4_I512_short_ACC1024_mac_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 923
+  ret_types:
+  - llvm_v16i64_ty
+  param_types:
+  - llvm_v16i32_ty
+  - llvm_i32_ty
+  - llvm_v16i64_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I512.short.ACC1024.msc.ewise.conf
+  record_name: int_aie4_I512_short_ACC1024_msc_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 926
+  ret_types:
+  - llvm_v16i64_ty
+  param_types:
+  - llvm_v16i32_ty
+  - llvm_i32_ty
+  - llvm_v16i64_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I512.short.ACC1024.mul.ewise.conf
+  record_name: int_aie4_I512_short_ACC1024_mul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 929
+  ret_types:
+  - llvm_v16i64_ty
+  param_types:
+  - llvm_v16i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I512.short.ACC1024.negmul.ewise.conf
+  record_name: int_aie4_I512_short_ACC1024_negmul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 932
+  ret_types:
+  - llvm_v16i64_ty
+  param_types:
+  - llvm_v16i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I512.v16.acc64.srs
+  record_name: int_aie4_I512_v16_acc64_srs
+  source_file: IntrinsicsAIE4.td
+  source_line: 746
+  ret_types:
+  - llvm_v16i32_ty
+  param_types:
+  - llvm_v16i64_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I512.v32.acc32.srs
+  record_name: int_aie4_I512_v32_acc32_srs
+  source_file: IntrinsicsAIE4.td
+  source_line: 747
+  ret_types:
+  - llvm_v32i16_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I512.v32.acc64.srs
+  record_name: int_aie4_I512_v32_acc64_srs
+  source_file: IntrinsicsAIE4.td
+  source_line: 748
+  ret_types:
+  - llvm_v32i16_ty
+  param_types:
+  - llvm_v32i64_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.I512.v64.acc32.srs
+  record_name: int_aie4_I512_v64_acc32_srs
+  source_file: IntrinsicsAIE4.td
+  source_line: 749
+  ret_types:
+  - llvm_v64i8_ty
+  param_types:
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.MX1536.ACC2048.mmac
+  record_name: int_aie4_MX1536_ACC2048_mmac
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 938
+  ret_types:
+  - llvm_v64f32_ty
+  param_types:
+  - llvm_v64f32_ty
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_v2i32_ty
+  - llvm_v2i32_ty
+  - llvm_v2i32_ty
+  - llvm_v2i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.MX768.ACC2048.mmac
+  record_name: int_aie4_MX768_ACC2048_mmac
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 941
+  ret_types:
+  - llvm_v64f32_ty
+  param_types:
+  - llvm_v64f32_ty
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_v2i32_ty
+  - llvm_v2i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.MXFP8.528.ACC2048.mmac
+  record_name: int_aie4_MXFP8_528_ACC2048_mmac
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 944
+  ret_types:
+  - llvm_v64f32_ty
+  param_types:
+  - llvm_v64f32_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.MXINT8.576.ACC2048.mmac
+  record_name: int_aie4_MXINT8_576_ACC2048_mmac
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 947
+  ret_types:
+  - llvm_v64f32_ty
+  param_types:
+  - llvm_v64f32_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.abs.max.reduce.FP1024
+  record_name: int_aie4_abs_max_reduce_FP1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 900
+  ret_types:
+  - llvm_float_ty
+  param_types:
+  - llvm_v32f32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.abs.max.reduce.FP1024.scl
+  record_name: int_aie4_abs_max_reduce_FP1024_scl
+  source_file: IntrinsicsAIE4.td
+  source_line: 901
+  ret_types:
+  - llvm_float_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_float_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.abs.max.reduce.I1024
+  record_name: int_aie4_abs_max_reduce_I1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 899
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.abs.min.reduce.FP1024
+  record_name: int_aie4_abs_min_reduce_FP1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 896
+  ret_types:
+  - llvm_float_ty
+  param_types:
+  - llvm_v32f32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.abs.min.reduce.FP1024.scl
+  record_name: int_aie4_abs_min_reduce_FP1024_scl
+  source_file: IntrinsicsAIE4.td
+  source_line: 897
+  ret_types:
+  - llvm_float_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_float_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.abs.min.reduce.I1024
+  record_name: int_aie4_abs_min_reduce_I1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 895
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.acc32.v16.I256.ups
+  record_name: int_aie4_acc32_v16_I256_ups
+  source_file: IntrinsicsAIE4.td
+  source_line: 113
+  ret_types:
+  - llvm_v16i32_ty
+  param_types:
+  - llvm_v16i16_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.acc32.v32.I256.ups
+  record_name: int_aie4_acc32_v32_I256_ups
+  source_file: IntrinsicsAIE4.td
+  source_line: 114
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i8_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.acc32.v32.I512.ups
+  record_name: int_aie4_acc32_v32_I512_ups
+  source_file: IntrinsicsAIE4.td
+  source_line: 115
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i16_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.acc32.v64.I1024.ups
+  record_name: int_aie4_acc32_v64_I1024_ups
+  source_file: IntrinsicsAIE4.td
+  source_line: 121
+  ret_types:
+  - llvm_v64i32_ty
+  param_types:
+  - llvm_v64i16_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.acc32.v64.I512.ups
+  record_name: int_aie4_acc32_v64_I512_ups
+  source_file: IntrinsicsAIE4.td
+  source_line: 119
+  ret_types:
+  - llvm_v64i32_ty
+  param_types:
+  - llvm_v64i8_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.acc64.v16.I256.ups
+  record_name: int_aie4_acc64_v16_I256_ups
+  source_file: IntrinsicsAIE4.td
+  source_line: 116
+  ret_types:
+  - llvm_v16i64_ty
+  param_types:
+  - llvm_v16i16_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.acc64.v16.I512.ups
+  record_name: int_aie4_acc64_v16_I512_ups
+  source_file: IntrinsicsAIE4.td
+  source_line: 117
+  ret_types:
+  - llvm_v16i64_ty
+  param_types:
+  - llvm_v16i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.acc64.v32.I1024.ups
+  record_name: int_aie4_acc64_v32_I1024_ups
+  source_file: IntrinsicsAIE4.td
+  source_line: 122
+  ret_types:
+  - llvm_v32i64_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.acc64.v32.I512.ups
+  record_name: int_aie4_acc64_v32_I512_ups
+  source_file: IntrinsicsAIE4.td
+  source_line: 120
+  ret_types:
+  - llvm_v32i64_ty
+  param_types:
+  - llvm_v32i16_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.acc64.v8.I256.ups
+  record_name: int_aie4_acc64_v8_I256_ups
+  source_file: IntrinsicsAIE4.td
+  source_line: 118
+  ret_types:
+  - llvm_v8i64_ty
+  param_types:
+  - llvm_v8i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.acquire
+  record_name: int_aie4_acquire
+  source_file: IntrinsicsAIE4.td
+  source_line: 32
+  ret_types: []
+  param_types:
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrHasSideEffects
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.acquire.cond
+  record_name: int_aie4_acquire_cond
+  source_file: IntrinsicsAIE4.td
+  source_line: 34
+  ret_types: []
+  param_types:
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrHasSideEffects
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.acquire.cond.ptr
+  record_name: int_aie4_acquire_cond_ptr
+  source_file: IntrinsicsAIE4.td
+  source_line: 42
+  ret_types: []
+  param_types:
+  - llvm_ptr_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrHasSideEffects
+  disable_default_attributes: 0
+- name: llvm.aie4.acquire.ptr
+  record_name: int_aie4_acquire_ptr
+  source_file: IntrinsicsAIE4.td
+  source_line: 40
+  ret_types: []
+  param_types:
+  - llvm_ptr_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrHasSideEffects
+  disable_default_attributes: 0
+- name: llvm.aie4.add.2d
+  record_name: int_aie4_add_2d
+  source_file: IntrinsicsAIE4.td
+  source_line: 351
+  ret_types:
+  - llvm_ptr_ty
+  - llvm_i20_ty
+  param_types:
+  - llvm_ptr_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.add.3d
+  record_name: int_aie4_add_3d
+  source_file: IntrinsicsAIE4.td
+  source_line: 352
+  ret_types:
+  - llvm_ptr_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  param_types:
+  - llvm_ptr_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.add.fp32
+  record_name: int_aie4_add_fp32
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 462
+  ret_types:
+  - llvm_float_ty
+  param_types:
+  - llvm_float_ty
+  - llvm_float_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.add.reduce.FP1024
+  record_name: int_aie4_add_reduce_FP1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 892
+  ret_types:
+  - llvm_float_ty
+  param_types:
+  - llvm_v32f32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.add.reduce.FP1024.scl
+  record_name: int_aie4_add_reduce_FP1024_scl
+  source_file: IntrinsicsAIE4.td
+  source_line: 893
+  ret_types:
+  - llvm_float_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_float_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.add.reduce.I1024
+  record_name: int_aie4_add_reduce_I1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 891
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.arg.max.FP1024
+  record_name: int_aie4_arg_max_FP1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 907
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_v32f32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.arg.max.I1024
+  record_name: int_aie4_arg_max_I1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 904
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_v32i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.arg.min.FP1024
+  record_name: int_aie4_arg_min_FP1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 906
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_v32f32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.arg.min.I1024
+  record_name: int_aie4_arg_min_I1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 903
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_v32i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I1024.bf16.I1024.bf16.I1024.mul.ewise.64b.conf
+  record_name: int_aie4_bf16_I1024_bf16_I1024_bf16_I1024_mul_ewise_64b_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 479
+  ret_types:
+  - llvm_v64bf16_ty
+  param_types:
+  - llvm_v64bf16_ty
+  - llvm_v64bf16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I1024.bf16.I1024.bf16.I1024.negmul.ewise.64b.conf
+  record_name: int_aie4_bf16_I1024_bf16_I1024_bf16_I1024_negmul_ewise_64b_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 483
+  ret_types:
+  - llvm_v64bf16_ty
+  param_types:
+  - llvm_v64bf16_ty
+  - llvm_v64bf16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I1024.bf16.I1024.fp16.I1024.mul.ewise.64.conf
+  record_name: int_aie4_bf16_I1024_bf16_I1024_fp16_I1024_mul_ewise_64_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 486
+  ret_types:
+  - llvm_v64f16_ty
+  param_types:
+  - llvm_v64bf16_ty
+  - llvm_v64bf16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I1024.bf16.I1024.fp16.I1024.negmul.ewise.64.conf
+  record_name: int_aie4_bf16_I1024_bf16_I1024_fp16_I1024_negmul_ewise_64_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 490
+  ret_types:
+  - llvm_v64f16_ty
+  param_types:
+  - llvm_v64bf16_ty
+  - llvm_v64bf16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I1024.bf16.bf16.I1024.mul.ewise.64b.conf
+  record_name: int_aie4_bf16_I1024_bf16_bf16_I1024_mul_ewise_64b_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 463
+  ret_types:
+  - llvm_v64bf16_ty
+  param_types:
+  - llvm_v64bf16_ty
+  - llvm_bfloat_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I1024.bf16.bf16.I1024.negmul.ewise.64b.conf
+  record_name: int_aie4_bf16_I1024_bf16_bf16_I1024_negmul_ewise_64b_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 467
+  ret_types:
+  - llvm_v64bf16_ty
+  param_types:
+  - llvm_v64bf16_ty
+  - llvm_bfloat_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I1024.bf16.fp16.I1024.mul.ewise.64.conf
+  record_name: int_aie4_bf16_I1024_bf16_fp16_I1024_mul_ewise_64_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 471
+  ret_types:
+  - llvm_v64f16_ty
+  param_types:
+  - llvm_v64bf16_ty
+  - llvm_bfloat_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I1024.bf16.fp16.I1024.negmul.ewise.64.conf
+  record_name: int_aie4_bf16_I1024_bf16_fp16_I1024_negmul_ewise_64_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 475
+  ret_types:
+  - llvm_v64f16_ty
+  param_types:
+  - llvm_v64bf16_ty
+  - llvm_bfloat_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I1024.fp16.I1024.bf16.I1024.mul.ewise.64b.conf
+  record_name: int_aie4_bf16_I1024_fp16_I1024_bf16_I1024_mul_ewise_64b_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 509
+  ret_types:
+  - llvm_v64bf16_ty
+  param_types:
+  - llvm_v64bf16_ty
+  - llvm_v64f16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I1024.fp16.I1024.bf16.I1024.negmul.ewise.64b.conf
+  record_name: int_aie4_bf16_I1024_fp16_I1024_bf16_I1024_negmul_ewise_64b_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 513
+  ret_types:
+  - llvm_v64bf16_ty
+  param_types:
+  - llvm_v64bf16_ty
+  - llvm_v64f16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I1024.fp16.I1024.fp16.I1024.mul.ewise.64.conf
+  record_name: int_aie4_bf16_I1024_fp16_I1024_fp16_I1024_mul_ewise_64_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 516
+  ret_types:
+  - llvm_v64f16_ty
+  param_types:
+  - llvm_v64bf16_ty
+  - llvm_v64f16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I1024.fp16.I1024.fp16.I1024.negmul.ewise.64.conf
+  record_name: int_aie4_bf16_I1024_fp16_I1024_fp16_I1024_negmul_ewise_64_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 520
+  ret_types:
+  - llvm_v64f16_ty
+  param_types:
+  - llvm_v64bf16_ty
+  - llvm_v64f16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I1024.fp16.bf16.I1024.mul.ewise.64b.conf
+  record_name: int_aie4_bf16_I1024_fp16_bf16_I1024_mul_ewise_64b_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 493
+  ret_types:
+  - llvm_v64bf16_ty
+  param_types:
+  - llvm_v64bf16_ty
+  - llvm_f16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I1024.fp16.bf16.I1024.negmul.ewise.64b.conf
+  record_name: int_aie4_bf16_I1024_fp16_bf16_I1024_negmul_ewise_64b_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 497
+  ret_types:
+  - llvm_v64bf16_ty
+  param_types:
+  - llvm_v64bf16_ty
+  - llvm_f16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I1024.fp16.fp16.I1024.mul.ewise.64.conf
+  record_name: int_aie4_bf16_I1024_fp16_fp16_I1024_mul_ewise_64_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 501
+  ret_types:
+  - llvm_v64f16_ty
+  param_types:
+  - llvm_v64bf16_ty
+  - llvm_f16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I1024.fp16.fp16.I1024.negmul.ewise.64.conf
+  record_name: int_aie4_bf16_I1024_fp16_fp16_I1024_negmul_ewise_64_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 505
+  ret_types:
+  - llvm_v64f16_ty
+  param_types:
+  - llvm_v64bf16_ty
+  - llvm_f16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I512.ACC2048.mmac
+  record_name: int_aie4_bf16_I512_ACC2048_mmac
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 523
+  ret_types:
+  - llvm_v64f32_ty
+  param_types:
+  - llvm_v64f32_ty
+  - llvm_v32bf16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I512.bf16.ACC1024.fp.mac.ewise.conf
+  record_name: int_aie4_bf16_I512_bf16_ACC1024_fp_mac_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 526
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32bf16_ty
+  - llvm_bfloat_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I512.bf16.ACC1024.fp.msc.ewise.conf
+  record_name: int_aie4_bf16_I512_bf16_ACC1024_fp_msc_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 529
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32bf16_ty
+  - llvm_bfloat_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I512.bf16.ACC1024.fp.mul.ewise.conf
+  record_name: int_aie4_bf16_I512_bf16_ACC1024_fp_mul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 532
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32bf16_ty
+  - llvm_bfloat_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I512.bf16.ACC1024.fp.negmul.ewise.conf
+  record_name: int_aie4_bf16_I512_bf16_ACC1024_fp_negmul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 535
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32bf16_ty
+  - llvm_bfloat_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I512.bf16.I512.ACC1024.fp.mac.ewise.conf
+  record_name: int_aie4_bf16_I512_bf16_I512_ACC1024_fp_mac_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 539
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32bf16_ty
+  - llvm_v32bf16_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I512.bf16.I512.ACC1024.fp.msc.ewise.conf
+  record_name: int_aie4_bf16_I512_bf16_I512_ACC1024_fp_msc_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 543
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32bf16_ty
+  - llvm_v32bf16_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I512.bf16.I512.ACC1024.fp.mul.ewise.conf
+  record_name: int_aie4_bf16_I512_bf16_I512_ACC1024_fp_mul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 547
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32bf16_ty
+  - llvm_v32bf16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I512.bf16.I512.ACC1024.fp.negmul.ewise.conf
+  record_name: int_aie4_bf16_I512_bf16_I512_ACC1024_fp_negmul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 551
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32bf16_ty
+  - llvm_v32bf16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I512.bf16.I512.fp32.ACC1024.fp.mac.ewise.conf
+  record_name: int_aie4_bf16_I512_bf16_I512_fp32_ACC1024_fp_mac_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 828
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32bf16_ty
+  - llvm_v32bf16_ty
+  - llvm_float_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I512.bf16.I512.fp32.ACC1024.fp.msc.ewise.conf
+  record_name: int_aie4_bf16_I512_bf16_I512_fp32_ACC1024_fp_msc_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 832
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32bf16_ty
+  - llvm_v32bf16_ty
+  - llvm_float_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I512.fp16.ACC1024.fp.mac.ewise.conf
+  record_name: int_aie4_bf16_I512_fp16_ACC1024_fp_mac_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 555
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32bf16_ty
+  - llvm_f16_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I512.fp16.ACC1024.fp.msc.ewise.conf
+  record_name: int_aie4_bf16_I512_fp16_ACC1024_fp_msc_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 558
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32bf16_ty
+  - llvm_f16_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I512.fp16.ACC1024.fp.mul.ewise.conf
+  record_name: int_aie4_bf16_I512_fp16_ACC1024_fp_mul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 561
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32bf16_ty
+  - llvm_f16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I512.fp16.ACC1024.fp.negmul.ewise.conf
+  record_name: int_aie4_bf16_I512_fp16_ACC1024_fp_negmul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 564
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32bf16_ty
+  - llvm_f16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I512.fp16.I512.ACC1024.fp.mac.ewise.conf
+  record_name: int_aie4_bf16_I512_fp16_I512_ACC1024_fp_mac_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 568
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32bf16_ty
+  - llvm_v32f16_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I512.fp16.I512.ACC1024.fp.msc.ewise.conf
+  record_name: int_aie4_bf16_I512_fp16_I512_ACC1024_fp_msc_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 572
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32bf16_ty
+  - llvm_v32f16_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I512.fp16.I512.ACC1024.fp.mul.ewise.conf
+  record_name: int_aie4_bf16_I512_fp16_I512_ACC1024_fp_mul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 576
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32bf16_ty
+  - llvm_v32f16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I512.fp16.I512.ACC1024.fp.negmul.ewise.conf
+  record_name: int_aie4_bf16_I512_fp16_I512_ACC1024_fp_negmul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 580
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32bf16_ty
+  - llvm_v32f16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I512.fp16.I512.fp32.ACC1024.fp.mac.ewise.conf
+  record_name: int_aie4_bf16_I512_fp16_I512_fp32_ACC1024_fp_mac_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 820
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32bf16_ty
+  - llvm_v32f16_ty
+  - llvm_float_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.bf16.I512.fp16.I512.fp32.ACC1024.fp.msc.ewise.conf
+  record_name: int_aie4_bf16_I512_fp16_I512_fp32_ACC1024_fp_msc_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 824
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32bf16_ty
+  - llvm_v32f16_ty
+  - llvm_float_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.clb
+  record_name: int_aie4_clb
+  source_file: IntrinsicsAIE4.td
+  source_line: 28
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.ctrl.packet.header
+  record_name: int_aie4_ctrl_packet_header
+  source_file: IntrinsicsAIE4.td
+  source_line: 348
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrHasSideEffects
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.delay1
+  record_name: int_aie4_delay1
+  source_file: IntrinsicsAIE4.td
+  source_line: 56
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.delay2
+  record_name: int_aie4_delay2
+  source_file: IntrinsicsAIE4.td
+  source_line: 57
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.delay3
+  record_name: int_aie4_delay3
+  source_file: IntrinsicsAIE4.td
+  source_line: 58
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.delay4
+  record_name: int_aie4_delay4
+  source_file: IntrinsicsAIE4.td
+  source_line: 59
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.delay5
+  record_name: int_aie4_delay5
+  source_file: IntrinsicsAIE4.td
+  source_line: 60
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.delay6
+  record_name: int_aie4_delay6
+  source_file: IntrinsicsAIE4.td
+  source_line: 61
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.divs
+  record_name: int_aie4_divs
+  source_file: IntrinsicsAIE4.td
+  source_line: 82
+  ret_types:
+  - llvm_i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.done
+  record_name: int_aie4_done
+  source_file: IntrinsicsAIE4.td
+  source_line: 48
+  ret_types: []
+  param_types: []
+  properties:
+  - IntrHasSideEffects
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.event
+  record_name: int_aie4_event
+  source_file: IntrinsicsAIE4.td
+  source_line: 31
+  ret_types: []
+  param_types:
+  - llvm_i32_ty
+  properties:
+  - IntrHasSideEffects
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.exp2
+  record_name: int_aie4_exp2
+  source_file: IntrinsicsAIE4.td
+  source_line: 77
+  ret_types:
+  - llvm_v32bf16_ty
+  param_types:
+  - llvm_v32f32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.exp2.bf20
+  record_name: int_aie4_exp2_bf20
+  source_file: IntrinsicsAIE4.td
+  source_line: 78
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.expand.f8x8.8x8
+  record_name: int_aie4_expand_f8x8_8x8
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 584
+  ret_types: []
+  param_types:
+  - llvm_v64i8_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.expand.fconvo.ph0
+  record_name: int_aie4_expand_fconvo_ph0
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 586
+  ret_types: []
+  param_types:
+  - llvm_v128i8_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.expand.fconvo.ph1
+  record_name: int_aie4_expand_fconvo_ph1
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 589
+  ret_types: []
+  param_types:
+  - llvm_v64i8_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.expand.i8x8.8x8
+  record_name: int_aie4_expand_i8x8_8x8
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 592
+  ret_types: []
+  param_types:
+  - llvm_v64i8_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.expand.iconvo.ph0
+  record_name: int_aie4_expand_iconvo_ph0
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 594
+  ret_types: []
+  param_types:
+  - llvm_v128i8_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.expand.iconvo.ph1
+  record_name: int_aie4_expand_iconvo_ph1
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 597
+  ret_types: []
+  param_types:
+  - llvm_v64i8_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.fill.ss
+  record_name: int_aie4_fifo_fill_ss
+  source_file: IntrinsicsAIE4.td
+  source_line: 636
+  ret_types:
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_i32_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.ld.fill
+  record_name: int_aie4_fifo_ld_fill
+  source_file: IntrinsicsAIE4.td
+  source_line: 589
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.ld.fillx
+  record_name: int_aie4_fifo_ld_fillx
+  source_file: IntrinsicsAIE4.td
+  source_line: 598
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.ld.pop.1024.unaligned
+  record_name: int_aie4_fifo_ld_pop_1024_unaligned
+  source_file: IntrinsicsAIE4.td
+  source_line: 594
+  ret_types:
+  - llvm_v128i8_ty
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.ld.pop.1d.1024.unaligned
+  record_name: int_aie4_fifo_ld_pop_1d_1024_unaligned
+  source_file: IntrinsicsAIE4.td
+  source_line: 595
+  ret_types:
+  - llvm_v128i8_ty
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.ld.pop.1d.512.unaligned
+  record_name: int_aie4_fifo_ld_pop_1d_512_unaligned
+  source_file: IntrinsicsAIE4.td
+  source_line: 591
+  ret_types:
+  - llvm_v64i8_ty
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.ld.pop.1d.MX6.1536
+  record_name: int_aie4_fifo_ld_pop_1d_MX6_1536
+  source_file: IntrinsicsAIE4.td
+  source_line: 617
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_v2i32_ty
+  - llvm_v2i32_ty
+  - llvm_v2i32_ty
+  - llvm_v2i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.ld.pop.1d.MXFP4.544
+  record_name: int_aie4_fifo_ld_pop_1d_MXFP4_544
+  source_file: IntrinsicsAIE4.td
+  source_line: 616
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.ld.pop.1d.MXFP6.800
+  record_name: int_aie4_fifo_ld_pop_1d_MXFP6_800
+  source_file: IntrinsicsAIE4.td
+  source_line: 615
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.ld.pop.1d.MXFP8.1056
+  record_name: int_aie4_fifo_ld_pop_1d_MXFP8_1056
+  source_file: IntrinsicsAIE4.td
+  source_line: 614
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.ld.pop.1d.MXINT8.1152
+  record_name: int_aie4_fifo_ld_pop_1d_MXINT8_1152
+  source_file: IntrinsicsAIE4.td
+  source_line: 612
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.ld.pop.1d.MXINT8.EBS8.1152
+  record_name: int_aie4_fifo_ld_pop_1d_MXINT8_EBS8_1152
+  source_file: IntrinsicsAIE4.td
+  source_line: 613
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.ld.pop.2d.1024.unaligned
+  record_name: int_aie4_fifo_ld_pop_2d_1024_unaligned
+  source_file: IntrinsicsAIE4.td
+  source_line: 596
+  ret_types:
+  - llvm_v128i8_ty
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.ld.pop.2d.512.unaligned
+  record_name: int_aie4_fifo_ld_pop_2d_512_unaligned
+  source_file: IntrinsicsAIE4.td
+  source_line: 592
+  ret_types:
+  - llvm_v64i8_ty
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.ld.pop.2d.MX6.1536
+  record_name: int_aie4_fifo_ld_pop_2d_MX6_1536
+  source_file: IntrinsicsAIE4.td
+  source_line: 623
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_v2i32_ty
+  - llvm_v2i32_ty
+  - llvm_v2i32_ty
+  - llvm_v2i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.ld.pop.2d.MXFP4.544
+  record_name: int_aie4_fifo_ld_pop_2d_MXFP4_544
+  source_file: IntrinsicsAIE4.td
+  source_line: 622
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.ld.pop.2d.MXFP6.800
+  record_name: int_aie4_fifo_ld_pop_2d_MXFP6_800
+  source_file: IntrinsicsAIE4.td
+  source_line: 621
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.ld.pop.2d.MXFP8.1056
+  record_name: int_aie4_fifo_ld_pop_2d_MXFP8_1056
+  source_file: IntrinsicsAIE4.td
+  source_line: 620
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.ld.pop.2d.MXINT8.1152
+  record_name: int_aie4_fifo_ld_pop_2d_MXINT8_1152
+  source_file: IntrinsicsAIE4.td
+  source_line: 618
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.ld.pop.2d.MXINT8.EBS8.1152
+  record_name: int_aie4_fifo_ld_pop_2d_MXINT8_EBS8_1152
+  source_file: IntrinsicsAIE4.td
+  source_line: 619
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.ld.pop.3d.1024.unaligned
+  record_name: int_aie4_fifo_ld_pop_3d_1024_unaligned
+  source_file: IntrinsicsAIE4.td
+  source_line: 597
+  ret_types:
+  - llvm_v128i8_ty
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.ld.pop.3d.512.unaligned
+  record_name: int_aie4_fifo_ld_pop_3d_512_unaligned
+  source_file: IntrinsicsAIE4.td
+  source_line: 593
+  ret_types:
+  - llvm_v64i8_ty
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.ld.pop.3d.MX6.1536
+  record_name: int_aie4_fifo_ld_pop_3d_MX6_1536
+  source_file: IntrinsicsAIE4.td
+  source_line: 629
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_v2i32_ty
+  - llvm_v2i32_ty
+  - llvm_v2i32_ty
+  - llvm_v2i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.ld.pop.3d.MXFP4.544
+  record_name: int_aie4_fifo_ld_pop_3d_MXFP4_544
+  source_file: IntrinsicsAIE4.td
+  source_line: 628
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.ld.pop.3d.MXFP6.800
+  record_name: int_aie4_fifo_ld_pop_3d_MXFP6_800
+  source_file: IntrinsicsAIE4.td
+  source_line: 627
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.ld.pop.3d.MXFP8.1056
+  record_name: int_aie4_fifo_ld_pop_3d_MXFP8_1056
+  source_file: IntrinsicsAIE4.td
+  source_line: 626
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.ld.pop.3d.MXINT8.1152
+  record_name: int_aie4_fifo_ld_pop_3d_MXINT8_1152
+  source_file: IntrinsicsAIE4.td
+  source_line: 624
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.ld.pop.3d.MXINT8.EBS8.1152
+  record_name: int_aie4_fifo_ld_pop_3d_MXINT8_EBS8_1152
+  source_file: IntrinsicsAIE4.td
+  source_line: 625
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.ld.pop.512.unaligned
+  record_name: int_aie4_fifo_ld_pop_512_unaligned
+  source_file: IntrinsicsAIE4.td
+  source_line: 590
+  ret_types:
+  - llvm_v64i8_ty
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.ld.pop.MX6.1536
+  record_name: int_aie4_fifo_ld_pop_MX6_1536
+  source_file: IntrinsicsAIE4.td
+  source_line: 611
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_v2i32_ty
+  - llvm_v2i32_ty
+  - llvm_v2i32_ty
+  - llvm_v2i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.ld.pop.MXFP4.544
+  record_name: int_aie4_fifo_ld_pop_MXFP4_544
+  source_file: IntrinsicsAIE4.td
+  source_line: 610
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.ld.pop.MXFP6.800
+  record_name: int_aie4_fifo_ld_pop_MXFP6_800
+  source_file: IntrinsicsAIE4.td
+  source_line: 609
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.ld.pop.MXFP8.1056
+  record_name: int_aie4_fifo_ld_pop_MXFP8_1056
+  source_file: IntrinsicsAIE4.td
+  source_line: 608
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.ld.pop.MXINT8.1152
+  record_name: int_aie4_fifo_ld_pop_MXINT8_1152
+  source_file: IntrinsicsAIE4.td
+  source_line: 606
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.ld.pop.MXINT8.EBS8.1152
+  record_name: int_aie4_fifo_ld_pop_MXINT8_EBS8_1152
+  source_file: IntrinsicsAIE4.td
+  source_line: 607
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.ld.pop.ss.1024
+  record_name: int_aie4_fifo_ld_pop_ss_1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 605
+  ret_types:
+  - llvm_v128i8_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_i32_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.ld.pop.ss.32
+  record_name: int_aie4_fifo_ld_pop_ss_32
+  source_file: IntrinsicsAIE4.td
+  source_line: 603
+  ret_types:
+  - llvm_i32_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_i32_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.ld.pop.ss.512
+  record_name: int_aie4_fifo_ld_pop_ss_512
+  source_file: IntrinsicsAIE4.td
+  source_line: 604
+  ret_types:
+  - llvm_v64i8_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_i32_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.ld.pop.ss.MX6.1536
+  record_name: int_aie4_fifo_ld_pop_ss_MX6_1536
+  source_file: IntrinsicsAIE4.td
+  source_line: 635
+  ret_types:
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_v2i32_ty
+  - llvm_v2i32_ty
+  - llvm_v2i32_ty
+  - llvm_v2i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_i32_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.ld.pop.ss.MXFP4.544
+  record_name: int_aie4_fifo_ld_pop_ss_MXFP4_544
+  source_file: IntrinsicsAIE4.td
+  source_line: 634
+  ret_types:
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_i32_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.ld.pop.ss.MXFP6.800
+  record_name: int_aie4_fifo_ld_pop_ss_MXFP6_800
+  source_file: IntrinsicsAIE4.td
+  source_line: 633
+  ret_types:
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_i32_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.ld.pop.ss.MXFP8.1056
+  record_name: int_aie4_fifo_ld_pop_ss_MXFP8_1056
+  source_file: IntrinsicsAIE4.td
+  source_line: 632
+  ret_types:
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_i32_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.ld.pop.ss.MXINT8.1152
+  record_name: int_aie4_fifo_ld_pop_ss_MXINT8_1152
+  source_file: IntrinsicsAIE4.td
+  source_line: 630
+  ret_types:
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  param_types:
+  - llvm_i32_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.ld.pop.ss.MXINT8.EBS8.1152
+  record_name: int_aie4_fifo_ld_pop_ss_MXINT8_EBS8_1152
+  source_file: IntrinsicsAIE4.td
+  source_line: 631
+  ret_types:
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  param_types:
+  - llvm_i32_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.ld.pop.ss.unpack.4x
+  record_name: int_aie4_fifo_ld_pop_ss_unpack_4x
+  source_file: IntrinsicsAIE4.td
+  source_line: 637
+  ret_types:
+  - llvm_v128i8_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.ld.pop.ss.unpack.8x
+  record_name: int_aie4_fifo_ld_pop_ss_unpack_8x
+  source_file: IntrinsicsAIE4.td
+  source_line: 638
+  ret_types:
+  - llvm_v128i8_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.ld.popx
+  record_name: int_aie4_fifo_ld_popx
+  source_file: IntrinsicsAIE4.td
+  source_line: 599
+  ret_types:
+  - llvm_v64i8_ty
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.ld.popx.1d
+  record_name: int_aie4_fifo_ld_popx_1d
+  source_file: IntrinsicsAIE4.td
+  source_line: 600
+  ret_types:
+  - llvm_v64i8_ty
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.ld.popx.2d
+  record_name: int_aie4_fifo_ld_popx_2d
+  source_file: IntrinsicsAIE4.td
+  source_line: 601
+  ret_types:
+  - llvm_v64i8_ty
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_v32i32_ty
+  - llvm_i20_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.ld.popx.3d
+  record_name: int_aie4_fifo_ld_popx_3d
+  source_file: IntrinsicsAIE4.td
+  source_line: 602
+  ret_types:
+  - llvm_v64i8_ty
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_v32i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.st.flush
+  record_name: int_aie4_fifo_st_flush
+  source_file: IntrinsicsAIE4.td
+  source_line: 655
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.st.flush.1d
+  record_name: int_aie4_fifo_st_flush_1d
+  source_file: IntrinsicsAIE4.td
+  source_line: 657
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.st.flush.1d.conv
+  record_name: int_aie4_fifo_st_flush_1d_conv
+  source_file: IntrinsicsAIE4.td
+  source_line: 658
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.st.flush.2d
+  record_name: int_aie4_fifo_st_flush_2d
+  source_file: IntrinsicsAIE4.td
+  source_line: 659
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.st.flush.2d.conv
+  record_name: int_aie4_fifo_st_flush_2d_conv
+  source_file: IntrinsicsAIE4.td
+  source_line: 660
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.st.flush.3d
+  record_name: int_aie4_fifo_st_flush_3d
+  source_file: IntrinsicsAIE4.td
+  source_line: 661
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.st.flush.3d.conv
+  record_name: int_aie4_fifo_st_flush_3d_conv
+  source_file: IntrinsicsAIE4.td
+  source_line: 662
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  - llvm_i20_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.st.flush.conv
+  record_name: int_aie4_fifo_st_flush_conv
+  source_file: IntrinsicsAIE4.td
+  source_line: 656
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.st.push.1024
+  record_name: int_aie4_fifo_st_push_1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 642
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v32i32_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.st.push.512
+  record_name: int_aie4_fifo_st_push_512
+  source_file: IntrinsicsAIE4.td
+  source_line: 641
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v16i32_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.st.push.FP6.192
+  record_name: int_aie4_fifo_st_push_FP6_192
+  source_file: IntrinsicsAIE4.td
+  source_line: 643
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v8i32_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.st.push.FP6.384
+  record_name: int_aie4_fifo_st_push_FP6_384
+  source_file: IntrinsicsAIE4.td
+  source_line: 644
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v16i32_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.st.push.MX6.192
+  record_name: int_aie4_fifo_st_push_MX6_192
+  source_file: IntrinsicsAIE4.td
+  source_line: 646
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v4i32_ty
+  - llvm_i32_ty
+  - llvm_i16_ty
+  - llvm_i16_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.st.push.MX6.384
+  record_name: int_aie4_fifo_st_push_MX6_384
+  source_file: IntrinsicsAIE4.td
+  source_line: 645
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_v8i32_ty
+  - llvm_v2i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fifo.st.push.MXFP4.136
+  record_name: int_aie4_fifo_st_push_MXFP4_136
+  source_file: IntrinsicsAIE4.td
+  source_line: 654
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_i264_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.st.push.MXFP4.272
+  record_name: int_aie4_fifo_st_push_MXFP4_272
+  source_file: IntrinsicsAIE4.td
+  source_line: 651
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.st.push.MXFP6.200
+  record_name: int_aie4_fifo_st_push_MXFP6_200
+  source_file: IntrinsicsAIE4.td
+  source_line: 653
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_i264_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.st.push.MXFP6.400
+  record_name: int_aie4_fifo_st_push_MXFP6_400
+  source_file: IntrinsicsAIE4.td
+  source_line: 650
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.st.push.MXFP8.264
+  record_name: int_aie4_fifo_st_push_MXFP8_264
+  source_file: IntrinsicsAIE4.td
+  source_line: 652
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_i264_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.st.push.MXFP8.528
+  record_name: int_aie4_fifo_st_push_MXFP8_528
+  source_file: IntrinsicsAIE4.td
+  source_line: 649
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.st.push.MXINT8.288
+  record_name: int_aie4_fifo_st_push_MXINT8_288
+  source_file: IntrinsicsAIE4.td
+  source_line: 648
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_i288_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 1
+- name: llvm.aie4.fifo.st.push.MXINT8.576
+  record_name: int_aie4_fifo_st_push_MXINT8_576
+  source_file: IntrinsicsAIE4.td
+  source_line: 647
+  ret_types:
+  - llvm_anyptr_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_anyptr_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 1
+- name: llvm.aie4.float.to.fp8
+  record_name: int_aie4_float_to_fp8
+  source_file: IntrinsicsAIE4.td
+  source_line: 853
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_float_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.flt2fx
+  record_name: int_aie4_flt2fx
+  source_file: IntrinsicsAIE4.td
+  source_line: 73
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_float_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I1024.bf16.I1024.bf16.I1024.mul.ewise.64b.conf
+  record_name: int_aie4_fp16_I1024_bf16_I1024_bf16_I1024_mul_ewise_64b_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 619
+  ret_types:
+  - llvm_v64bf16_ty
+  param_types:
+  - llvm_v64f16_ty
+  - llvm_v64bf16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I1024.bf16.I1024.bf16.I1024.negmul.ewise.64b.conf
+  record_name: int_aie4_fp16_I1024_bf16_I1024_bf16_I1024_negmul_ewise_64b_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 623
+  ret_types:
+  - llvm_v64bf16_ty
+  param_types:
+  - llvm_v64f16_ty
+  - llvm_v64bf16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I1024.bf16.I1024.fp16.I1024.mul.ewise.64.conf
+  record_name: int_aie4_fp16_I1024_bf16_I1024_fp16_I1024_mul_ewise_64_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 627
+  ret_types:
+  - llvm_v64f16_ty
+  param_types:
+  - llvm_v64f16_ty
+  - llvm_v64bf16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I1024.bf16.I1024.fp16.I1024.negmul.ewise.64.conf
+  record_name: int_aie4_fp16_I1024_bf16_I1024_fp16_I1024_negmul_ewise_64_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 631
+  ret_types:
+  - llvm_v64f16_ty
+  param_types:
+  - llvm_v64f16_ty
+  - llvm_v64bf16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I1024.bf16.bf16.I1024.mul.ewise.64b.conf
+  record_name: int_aie4_fp16_I1024_bf16_bf16_I1024_mul_ewise_64b_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 603
+  ret_types:
+  - llvm_v64bf16_ty
+  param_types:
+  - llvm_v64f16_ty
+  - llvm_bfloat_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I1024.bf16.bf16.I1024.negmul.ewise.64b.conf
+  record_name: int_aie4_fp16_I1024_bf16_bf16_I1024_negmul_ewise_64b_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 607
+  ret_types:
+  - llvm_v64bf16_ty
+  param_types:
+  - llvm_v64f16_ty
+  - llvm_bfloat_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I1024.bf16.fp16.I1024.mul.ewise.64.conf
+  record_name: int_aie4_fp16_I1024_bf16_fp16_I1024_mul_ewise_64_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 611
+  ret_types:
+  - llvm_v64f16_ty
+  param_types:
+  - llvm_v64f16_ty
+  - llvm_bfloat_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I1024.bf16.fp16.I1024.negmul.ewise.64.conf
+  record_name: int_aie4_fp16_I1024_bf16_fp16_I1024_negmul_ewise_64_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 615
+  ret_types:
+  - llvm_v64f16_ty
+  param_types:
+  - llvm_v64f16_ty
+  - llvm_bfloat_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I1024.fp16.I1024.bf16.I1024.mul.ewise.64b.conf
+  record_name: int_aie4_fp16_I1024_fp16_I1024_bf16_I1024_mul_ewise_64b_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 650
+  ret_types:
+  - llvm_v64bf16_ty
+  param_types:
+  - llvm_v64f16_ty
+  - llvm_v64f16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I1024.fp16.I1024.bf16.I1024.negmul.ewise.64b.conf
+  record_name: int_aie4_fp16_I1024_fp16_I1024_bf16_I1024_negmul_ewise_64b_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 654
+  ret_types:
+  - llvm_v64bf16_ty
+  param_types:
+  - llvm_v64f16_ty
+  - llvm_v64f16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I1024.fp16.I1024.fp16.I1024.mul.ewise.64.conf
+  record_name: int_aie4_fp16_I1024_fp16_I1024_fp16_I1024_mul_ewise_64_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 658
+  ret_types:
+  - llvm_v64f16_ty
+  param_types:
+  - llvm_v64f16_ty
+  - llvm_v64f16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I1024.fp16.I1024.fp16.I1024.negmul.ewise.64.conf
+  record_name: int_aie4_fp16_I1024_fp16_I1024_fp16_I1024_negmul_ewise_64_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 662
+  ret_types:
+  - llvm_v64f16_ty
+  param_types:
+  - llvm_v64f16_ty
+  - llvm_v64f16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I1024.fp16.bf16.I1024.mul.ewise.64b.conf
+  record_name: int_aie4_fp16_I1024_fp16_bf16_I1024_mul_ewise_64b_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 634
+  ret_types:
+  - llvm_v64bf16_ty
+  param_types:
+  - llvm_v64f16_ty
+  - llvm_f16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I1024.fp16.bf16.I1024.negmul.ewise.64b.conf
+  record_name: int_aie4_fp16_I1024_fp16_bf16_I1024_negmul_ewise_64b_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 638
+  ret_types:
+  - llvm_v64bf16_ty
+  param_types:
+  - llvm_v64f16_ty
+  - llvm_f16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I1024.fp16.fp16.I1024.mul.ewise.64.conf
+  record_name: int_aie4_fp16_I1024_fp16_fp16_I1024_mul_ewise_64_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 642
+  ret_types:
+  - llvm_v64f16_ty
+  param_types:
+  - llvm_v64f16_ty
+  - llvm_f16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I1024.fp16.fp16.I1024.negmul.ewise.64.conf
+  record_name: int_aie4_fp16_I1024_fp16_fp16_I1024_negmul_ewise_64_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 646
+  ret_types:
+  - llvm_v64f16_ty
+  param_types:
+  - llvm_v64f16_ty
+  - llvm_f16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I512.bf16.ACC1024.fp.mac.ewise.conf
+  record_name: int_aie4_fp16_I512_bf16_ACC1024_fp_mac_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 665
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f16_ty
+  - llvm_bfloat_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I512.bf16.ACC1024.fp.msc.ewise.conf
+  record_name: int_aie4_fp16_I512_bf16_ACC1024_fp_msc_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 668
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f16_ty
+  - llvm_bfloat_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I512.bf16.ACC1024.fp.mul.ewise.conf
+  record_name: int_aie4_fp16_I512_bf16_ACC1024_fp_mul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 671
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f16_ty
+  - llvm_bfloat_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I512.bf16.ACC1024.fp.negmul.ewise.conf
+  record_name: int_aie4_fp16_I512_bf16_ACC1024_fp_negmul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 674
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f16_ty
+  - llvm_bfloat_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I512.bf16.I512.ACC1024.fp.mac.ewise.conf
+  record_name: int_aie4_fp16_I512_bf16_I512_ACC1024_fp_mac_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 678
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f16_ty
+  - llvm_v32bf16_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I512.bf16.I512.ACC1024.fp.msc.ewise.conf
+  record_name: int_aie4_fp16_I512_bf16_I512_ACC1024_fp_msc_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 682
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f16_ty
+  - llvm_v32bf16_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I512.bf16.I512.ACC1024.fp.mul.ewise.conf
+  record_name: int_aie4_fp16_I512_bf16_I512_ACC1024_fp_mul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 686
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f16_ty
+  - llvm_v32bf16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I512.bf16.I512.ACC1024.fp.negmul.ewise.conf
+  record_name: int_aie4_fp16_I512_bf16_I512_ACC1024_fp_negmul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 690
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f16_ty
+  - llvm_v32bf16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I512.bf16.I512.fp32.ACC1024.fp.mac.ewise.conf
+  record_name: int_aie4_fp16_I512_bf16_I512_fp32_ACC1024_fp_mac_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 694
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f16_ty
+  - llvm_v32bf16_ty
+  - llvm_float_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I512.bf16.I512.fp32.ACC1024.fp.msc.ewise.conf
+  record_name: int_aie4_fp16_I512_bf16_I512_fp32_ACC1024_fp_msc_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 698
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f16_ty
+  - llvm_v32bf16_ty
+  - llvm_float_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I512.fp16.ACC1024.fp.mac.ewise.conf
+  record_name: int_aie4_fp16_I512_fp16_ACC1024_fp_mac_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 702
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f16_ty
+  - llvm_f16_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I512.fp16.ACC1024.fp.msc.ewise.conf
+  record_name: int_aie4_fp16_I512_fp16_ACC1024_fp_msc_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 705
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f16_ty
+  - llvm_f16_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I512.fp16.ACC1024.fp.mul.ewise.conf
+  record_name: int_aie4_fp16_I512_fp16_ACC1024_fp_mul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 708
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f16_ty
+  - llvm_f16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I512.fp16.ACC1024.fp.negmul.ewise.conf
+  record_name: int_aie4_fp16_I512_fp16_ACC1024_fp_negmul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 711
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f16_ty
+  - llvm_f16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I512.fp16.I512.ACC1024.fp.mac.ewise.conf
+  record_name: int_aie4_fp16_I512_fp16_I512_ACC1024_fp_mac_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 715
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f16_ty
+  - llvm_v32f16_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I512.fp16.I512.ACC1024.fp.msc.ewise.conf
+  record_name: int_aie4_fp16_I512_fp16_I512_ACC1024_fp_msc_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 719
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f16_ty
+  - llvm_v32f16_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I512.fp16.I512.ACC1024.fp.mul.ewise.conf
+  record_name: int_aie4_fp16_I512_fp16_I512_ACC1024_fp_mul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 723
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f16_ty
+  - llvm_v32f16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I512.fp16.I512.ACC1024.fp.negmul.ewise.conf
+  record_name: int_aie4_fp16_I512_fp16_I512_ACC1024_fp_negmul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 727
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f16_ty
+  - llvm_v32f16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I512.fp16.I512.fp32.ACC1024.fp.mac.ewise.conf
+  record_name: int_aie4_fp16_I512_fp16_I512_fp32_ACC1024_fp_mac_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 731
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f16_ty
+  - llvm_v32f16_ty
+  - llvm_float_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp16.I512.fp16.I512.fp32.ACC1024.fp.msc.ewise.conf
+  record_name: int_aie4_fp16_I512_fp16_I512_fp32_ACC1024_fp_msc_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 735
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f16_ty
+  - llvm_v32f16_ty
+  - llvm_float_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp8.I1024.ACC2048.mac.c
+  record_name: int_aie4_fp8_I1024_ACC2048_mac_c
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 739
+  ret_types:
+  - llvm_v64f32_ty
+  param_types:
+  - llvm_v64f32_ty
+  - llvm_v128i8_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp8.I1024.ACC2048.mmac
+  record_name: int_aie4_fp8_I1024_ACC2048_mmac
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 742
+  ret_types:
+  - llvm_v64f32_ty
+  param_types:
+  - llvm_v64f32_ty
+  - llvm_v128i8_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp8.I256.fp8.ACC1024.fp.mac.ewise.conf
+  record_name: int_aie4_fp8_I256_fp8_ACC1024_fp_mac_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 745
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32i8_ty
+  - llvm_i32_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp8.I256.fp8.ACC1024.fp.msc.ewise.conf
+  record_name: int_aie4_fp8_I256_fp8_ACC1024_fp_msc_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 748
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32i8_ty
+  - llvm_i32_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp8.I256.fp8.ACC1024.fp.mul.ewise.conf
+  record_name: int_aie4_fp8_I256_fp8_ACC1024_fp_mul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 751
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32i8_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp8.I256.fp8.ACC1024.fp.negmul.ewise.conf
+  record_name: int_aie4_fp8_I256_fp8_ACC1024_fp_negmul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 754
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32i8_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp8.I256.fp8.I256.ACC1024.fp.mac.ewise.conf
+  record_name: int_aie4_fp8_I256_fp8_I256_ACC1024_fp_mac_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 757
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32i8_ty
+  - llvm_v32i8_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp8.I256.fp8.I256.ACC1024.fp.msc.ewise.conf
+  record_name: int_aie4_fp8_I256_fp8_I256_ACC1024_fp_msc_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 761
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32i8_ty
+  - llvm_v32i8_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp8.I256.fp8.I256.ACC1024.fp.mul.ewise.conf
+  record_name: int_aie4_fp8_I256_fp8_I256_ACC1024_fp_mul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 765
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32i8_ty
+  - llvm_v32i8_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp8.I256.fp8.I256.ACC1024.fp.negmul.ewise.conf
+  record_name: int_aie4_fp8_I256_fp8_I256_ACC1024_fp_negmul_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 769
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32i8_ty
+  - llvm_v32i8_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp8.I256.fp8.I256.fp32.ACC1024.fp.mac.ewise.conf
+  record_name: int_aie4_fp8_I256_fp8_I256_fp32_ACC1024_fp_mac_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 773
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32i8_ty
+  - llvm_v32i8_ty
+  - llvm_float_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp8.I256.fp8.I256.fp32.ACC1024.fp.msc.ewise.conf
+  record_name: int_aie4_fp8_I256_fp8_I256_fp32_ACC1024_fp_msc_ewise_conf
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 777
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32i8_ty
+  - llvm_v32i8_ty
+  - llvm_float_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fp8.I512.ACC2048.mmac
+  record_name: int_aie4_fp8_I512_ACC2048_mmac
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 781
+  ret_types:
+  - llvm_v64f32_ty
+  param_types:
+  - llvm_v64f32_ty
+  - llvm_v64i8_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.fx2flt
+  record_name: int_aie4_fx2flt
+  source_file: IntrinsicsAIE4.td
+  source_line: 72
+  ret_types:
+  - llvm_float_ty
+  param_types:
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.get.coreid
+  record_name: int_aie4_get_coreid
+  source_file: IntrinsicsAIE4.td
+  source_line: 25
+  ret_types:
+  - llvm_i32_ty
+  param_types: []
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.get.ctrl.reg
+  record_name: int_aie4_get_ctrl_reg
+  source_file: IntrinsicsAIE4.td
+  source_line: 92
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.get.ss
+  record_name: int_aie4_get_ss
+  source_file: IntrinsicsAIE4.td
+  source_line: 309
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  disable_default_attributes: 0
+- name: llvm.aie4.get.ss.activation
+  record_name: int_aie4_get_ss_activation
+  source_file: IntrinsicsAIE4.td
+  source_line: 310
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  disable_default_attributes: 0
+- name: llvm.aie4.get.ss.conflict
+  record_name: int_aie4_get_ss_conflict
+  source_file: IntrinsicsAIE4.td
+  source_line: 314
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  disable_default_attributes: 0
+- name: llvm.aie4.get.ss.m128x64int4
+  record_name: int_aie4_get_ss_m128x64int4
+  source_file: IntrinsicsAIE4.td
+  source_line: 320
+  ret_types: []
+  param_types:
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.get.ss.m64x64float8
+  record_name: int_aie4_get_ss_m64x64float8
+  source_file: IntrinsicsAIE4.td
+  source_line: 321
+  ret_types: []
+  param_types:
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.get.ss.m64x64int8
+  record_name: int_aie4_get_ss_m64x64int8
+  source_file: IntrinsicsAIE4.td
+  source_line: 319
+  ret_types: []
+  param_types:
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.get.ss.tkeep
+  record_name: int_aie4_get_ss_tkeep
+  source_file: IntrinsicsAIE4.td
+  source_line: 315
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  disable_default_attributes: 0
+- name: llvm.aie4.get.ss.weight
+  record_name: int_aie4_get_ss_weight
+  source_file: IntrinsicsAIE4.td
+  source_line: 311
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  disable_default_attributes: 0
+- name: llvm.aie4.get.status.reg
+  record_name: int_aie4_get_status_reg
+  source_file: IntrinsicsAIE4.td
+  source_line: 97
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.get.tlast
+  record_name: int_aie4_get_tlast
+  source_file: IntrinsicsAIE4.td
+  source_line: 313
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  disable_default_attributes: 0
+- name: llvm.aie4.getl.wss
+  record_name: int_aie4_getl_wss
+  source_file: IntrinsicsAIE4.td
+  source_line: 312
+  ret_types:
+  - llvm_v16i32_ty
+  param_types:
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  disable_default_attributes: 0
+- name: llvm.aie4.insert.exp
+  record_name: int_aie4_insert_exp
+  source_file: IntrinsicsAIE4.td
+  source_line: 370
+  ret_types:
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_v4i8_ty
+  - llvm_v4i8_ty
+  param_types:
+  - llvm_v8i8_ty
+  - llvm_v16i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.insert.exp.mxfp
+  record_name: int_aie4_insert_exp_mxfp
+  source_file: IntrinsicsAIE4.td
+  source_line: 366
+  ret_types:
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_i8_ty
+  - llvm_i8_ty
+  param_types:
+  - llvm_v2i8_ty
+  - llvm_v16i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.insert.exp.wide.mxfp
+  record_name: int_aie4_insert_exp_wide_mxfp
+  source_file: IntrinsicsAIE4.td
+  source_line: 367
+  ret_types:
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_i8_ty
+  - llvm_i8_ty
+  - llvm_i8_ty
+  - llvm_i8_ty
+  param_types:
+  - llvm_v4i8_ty
+  - llvm_v32i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.insert.exponent.v128mxfp4
+  record_name: int_aie4_insert_exponent_v128mxfp4
+  source_file: IntrinsicsAIE4.td
+  source_line: 198
+  ret_types:
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_i32_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.insert.exponent.v128mxfp6
+  record_name: int_aie4_insert_exponent_v128mxfp6
+  source_file: IntrinsicsAIE4.td
+  source_line: 197
+  ret_types:
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_i32_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.insert.exponent.v128mxfp8
+  record_name: int_aie4_insert_exponent_v128mxfp8
+  source_file: IntrinsicsAIE4.td
+  source_line: 196
+  ret_types:
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_i32_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.insert.exponent.v64mxfp4
+  record_name: int_aie4_insert_exponent_v64mxfp4
+  source_file: IntrinsicsAIE4.td
+  source_line: 189
+  ret_types:
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_i16_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.insert.exponent.v64mxfp6
+  record_name: int_aie4_insert_exponent_v64mxfp6
+  source_file: IntrinsicsAIE4.td
+  source_line: 188
+  ret_types:
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_i16_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.insert.exponent.v64mxfp8
+  record_name: int_aie4_insert_exponent_v64mxfp8
+  source_file: IntrinsicsAIE4.td
+  source_line: 187
+  ret_types:
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_i16_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.insert.exponent.v64mxint8
+  record_name: int_aie4_insert_exponent_v64mxint8
+  source_file: IntrinsicsAIE4.td
+  source_line: 180
+  ret_types:
+  - llvm_i288_ty
+  - llvm_i288_ty
+  param_types:
+  - llvm_v2i32_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.insert.magnitude.v128mxfp4
+  record_name: int_aie4_insert_magnitude_v128mxfp4
+  source_file: IntrinsicsAIE4.td
+  source_line: 173
+  ret_types:
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.insert.magnitude.v128mxfp6
+  record_name: int_aie4_insert_magnitude_v128mxfp6
+  source_file: IntrinsicsAIE4.td
+  source_line: 172
+  ret_types:
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.insert.magnitude.v128mxfp8
+  record_name: int_aie4_insert_magnitude_v128mxfp8
+  source_file: IntrinsicsAIE4.td
+  source_line: 171
+  ret_types:
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.insert.magnitude.v128mxint8
+  record_name: int_aie4_insert_magnitude_v128mxint8
+  source_file: IntrinsicsAIE4.td
+  source_line: 155
+  ret_types:
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.insert.magnitude.v64mxfp4
+  record_name: int_aie4_insert_magnitude_v64mxfp4
+  source_file: IntrinsicsAIE4.td
+  source_line: 164
+  ret_types:
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_v16i32_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.insert.magnitude.v64mxfp6
+  record_name: int_aie4_insert_magnitude_v64mxfp6
+  source_file: IntrinsicsAIE4.td
+  source_line: 163
+  ret_types:
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_v16i32_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.insert.magnitude.v64mxfp8
+  record_name: int_aie4_insert_magnitude_v64mxfp8
+  source_file: IntrinsicsAIE4.td
+  source_line: 162
+  ret_types:
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_v16i32_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.insert.magnitude.v64mxint8
+  record_name: int_aie4_insert_magnitude_v64mxint8
+  source_file: IntrinsicsAIE4.td
+  source_line: 148
+  ret_types:
+  - llvm_i288_ty
+  - llvm_i288_ty
+  param_types:
+  - llvm_v16i32_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.insert.staging.MX6.1536
+  record_name: int_aie4_insert_staging_MX6_1536
+  source_file: IntrinsicsAIE4.td
+  source_line: 433
+  ret_types: []
+  param_types:
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_v2i32_ty
+  - llvm_v2i32_ty
+  - llvm_v2i32_ty
+  - llvm_v2i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.insert.staging.MXFP.1056
+  record_name: int_aie4_insert_staging_MXFP_1056
+  source_file: IntrinsicsAIE4.td
+  source_line: 435
+  ret_types: []
+  param_types:
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.insert.staging.MXINT.1152
+  record_name: int_aie4_insert_staging_MXINT_1152
+  source_file: IntrinsicsAIE4.td
+  source_line: 434
+  ret_types: []
+  param_types:
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.insert.staging.bf16.I1024
+  record_name: int_aie4_insert_staging_bf16_I1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 424
+  ret_types: []
+  param_types:
+  - llvm_v64bf16_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.insert.staging.fp8.I1024
+  record_name: int_aie4_insert_staging_fp8_I1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 428
+  ret_types: []
+  param_types:
+  - llvm_v128i8_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.insert.staging.int.I1024
+  record_name: int_aie4_insert_staging_int_I1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 427
+  ret_types: []
+  param_types:
+  - llvm_v128i8_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.insert.staging.sparsity.int32.I1024
+  record_name: int_aie4_insert_staging_sparsity_int32_I1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 429
+  ret_types: []
+  param_types:
+  - llvm_ptr_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.inv
+  record_name: int_aie4_inv
+  source_file: IntrinsicsAIE4.td
+  source_line: 74
+  ret_types:
+  - llvm_float_ty
+  param_types:
+  - llvm_float_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.invsqrt
+  record_name: int_aie4_invsqrt
+  source_file: IntrinsicsAIE4.td
+  source_line: 75
+  ret_types:
+  - llvm_float_ty
+  param_types:
+  - llvm_float_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.load.4x16.hi
+  record_name: int_aie4_load_4x16_hi
+  source_file: IntrinsicsAIE4.td
+  source_line: 356
+  ret_types:
+  - llvm_v8i32_ty
+  param_types:
+  - llvm_v8i32_ty
+  properties:
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.load.4x16.lo
+  record_name: int_aie4_load_4x16_lo
+  source_file: IntrinsicsAIE4.td
+  source_line: 355
+  ret_types:
+  - llvm_v8i32_ty
+  param_types:
+  - llvm_v8i32_ty
+  properties:
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.load.4x32.hi
+  record_name: int_aie4_load_4x32_hi
+  source_file: IntrinsicsAIE4.td
+  source_line: 358
+  ret_types:
+  - llvm_v8i32_ty
+  param_types:
+  - llvm_v8i32_ty
+  properties:
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.load.4x32.lo
+  record_name: int_aie4_load_4x32_lo
+  source_file: IntrinsicsAIE4.td
+  source_line: 357
+  ret_types:
+  - llvm_v8i32_ty
+  param_types:
+  - llvm_v8i32_ty
+  properties:
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.load.4x64.hi
+  record_name: int_aie4_load_4x64_hi
+  source_file: IntrinsicsAIE4.td
+  source_line: 360
+  ret_types:
+  - llvm_v8i32_ty
+  param_types:
+  - llvm_v8i32_ty
+  properties:
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.load.4x64.lo
+  record_name: int_aie4_load_4x64_lo
+  source_file: IntrinsicsAIE4.td
+  source_line: 359
+  ret_types:
+  - llvm_v8i32_ty
+  param_types:
+  - llvm_v8i32_ty
+  properties:
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.load.staging.fp8.int32.I1024
+  record_name: int_aie4_load_staging_fp8_int32_I1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 431
+  ret_types: []
+  param_types:
+  - llvm_ptr_ty
+  - llvm_ptr_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.load.staging.int8.int32.I1024
+  record_name: int_aie4_load_staging_int8_int32_I1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 430
+  ret_types: []
+  param_types:
+  - llvm_ptr_ty
+  - llvm_ptr_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.load.staging.sparse.int32.I1024
+  record_name: int_aie4_load_staging_sparse_int32_I1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 432
+  ret_types: []
+  param_types:
+  - llvm_ptr_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.loop.version.threshold
+  record_name: int_aie4_loop_version_threshold
+  source_file: IntrinsicsAIE4.td
+  source_line: 910
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_i32_ty
+  properties:
+  - ImmArg<ArgNo=1>
+  - IntrHasSideEffects
+  - IntrNoDuplicate
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.m32x64acc32.v64acc32.ext
+  record_name: int_aie4_m32x64acc32_v64acc32_ext
+  source_file: IntrinsicsAIE4.td
+  source_line: 867
+  ret_types:
+  - llvm_v64i32_ty
+  param_types:
+  - llvm_v2048i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.m32x64acc32.v64acc32.upd
+  record_name: int_aie4_m32x64acc32_v64acc32_upd
+  source_file: IntrinsicsAIE4.td
+  source_line: 873
+  ret_types:
+  - llvm_v2048i32_ty
+  param_types:
+  - llvm_v2048i32_ty
+  - llvm_v64i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.mac.fp32
+  record_name: int_aie4_mac_fp32
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 935
+  ret_types:
+  - llvm_float_ty
+  param_types:
+  - llvm_float_ty
+  - llvm_float_ty
+  - llvm_float_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.max.exp.v32mxfp4.v32accfloat
+  record_name: int_aie4_max_exp_v32mxfp4_v32accfloat
+  source_file: IntrinsicsAIE4.td
+  source_line: 861
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_v32f32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.max.exp.v32mxfp6.v32accfloat
+  record_name: int_aie4_max_exp_v32mxfp6_v32accfloat
+  source_file: IntrinsicsAIE4.td
+  source_line: 859
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_v32f32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.max.exp.v32mxfp8.v32accfloat
+  record_name: int_aie4_max_exp_v32mxfp8_v32accfloat
+  source_file: IntrinsicsAIE4.td
+  source_line: 857
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_v32f32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.max.exp.v32mxint8.v32accfloat
+  record_name: int_aie4_max_exp_v32mxint8_v32accfloat
+  source_file: IntrinsicsAIE4.td
+  source_line: 855
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_v32f32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.max.exp.v64mxfp4.v64accfloat
+  record_name: int_aie4_max_exp_v64mxfp4_v64accfloat
+  source_file: IntrinsicsAIE4.td
+  source_line: 862
+  ret_types:
+  - llvm_v2i32_ty
+  param_types:
+  - llvm_v64f32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.max.exp.v64mxfp6.v64accfloat
+  record_name: int_aie4_max_exp_v64mxfp6_v64accfloat
+  source_file: IntrinsicsAIE4.td
+  source_line: 860
+  ret_types:
+  - llvm_v2i32_ty
+  param_types:
+  - llvm_v64f32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.max.exp.v64mxfp8.v64accfloat
+  record_name: int_aie4_max_exp_v64mxfp8_v64accfloat
+  source_file: IntrinsicsAIE4.td
+  source_line: 858
+  ret_types:
+  - llvm_v2i32_ty
+  param_types:
+  - llvm_v64f32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.max.exp.v64mxint8.v64accfloat
+  record_name: int_aie4_max_exp_v64mxint8_v64accfloat
+  source_file: IntrinsicsAIE4.td
+  source_line: 856
+  ret_types:
+  - llvm_v2i32_ty
+  param_types:
+  - llvm_v64f32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.max.reduce.FP1024
+  record_name: int_aie4_max_reduce_FP1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 888
+  ret_types:
+  - llvm_float_ty
+  param_types:
+  - llvm_v32f32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.max.reduce.FP1024.scl
+  record_name: int_aie4_max_reduce_FP1024_scl
+  source_file: IntrinsicsAIE4.td
+  source_line: 889
+  ret_types:
+  - llvm_float_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_float_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.max.reduce.I1024
+  record_name: int_aie4_max_reduce_I1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 887
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.mcd.write.vec
+  record_name: int_aie4_mcd_write_vec
+  source_file: IntrinsicsAIE4.td
+  source_line: 302
+  ret_types: []
+  param_types:
+  - llvm_v16i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  disable_default_attributes: 0
+- name: llvm.aie4.min.reduce.FP1024
+  record_name: int_aie4_min_reduce_FP1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 884
+  ret_types:
+  - llvm_float_ty
+  param_types:
+  - llvm_v32f32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.min.reduce.FP1024.scl
+  record_name: int_aie4_min_reduce_FP1024_scl
+  source_file: IntrinsicsAIE4.td
+  source_line: 885
+  ret_types:
+  - llvm_float_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_float_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.min.reduce.I1024
+  record_name: int_aie4_min_reduce_I1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 883
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.msc.fp32
+  record_name: int_aie4_msc_fp32
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 936
+  ret_types:
+  - llvm_float_ty
+  param_types:
+  - llvm_float_ty
+  - llvm_float_ty
+  - llvm_float_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.mul.fp32
+  record_name: int_aie4_mul_fp32
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 937
+  ret_types:
+  - llvm_float_ty
+  param_types:
+  - llvm_float_ty
+  - llvm_float_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.negmul.fp32
+  record_name: int_aie4_negmul_fp32
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 950
+  ret_types:
+  - llvm_float_ty
+  param_types:
+  - llvm_float_ty
+  - llvm_float_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.pack.I1024.I4.I8
+  record_name: int_aie4_pack_I1024_I4_I8
+  source_file: IntrinsicsAIE4.td
+  source_line: 447
+  ret_types:
+  - llvm_v64i8_ty
+  param_types:
+  - llvm_v128i8_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.pack.I1024.I8.I16
+  record_name: int_aie4_pack_I1024_I8_I16
+  source_file: IntrinsicsAIE4.td
+  source_line: 446
+  ret_types:
+  - llvm_v64i8_ty
+  param_types:
+  - llvm_v64i16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.pack.I512.I4.I8
+  record_name: int_aie4_pack_I512_I4_I8
+  source_file: IntrinsicsAIE4.td
+  source_line: 445
+  ret_types:
+  - llvm_v32i8_ty
+  param_types:
+  - llvm_v64i8_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.pack.I512.I8.I16
+  record_name: int_aie4_pack_I512_I8_I16
+  source_file: IntrinsicsAIE4.td
+  source_line: 444
+  ret_types:
+  - llvm_v32i8_ty
+  param_types:
+  - llvm_v32i16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.packet.header
+  record_name: int_aie4_packet_header
+  source_file: IntrinsicsAIE4.td
+  source_line: 347
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrHasSideEffects
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.ptr.delay1
+  record_name: int_aie4_ptr_delay1
+  source_file: IntrinsicsAIE4.td
+  source_line: 64
+  ret_types:
+  - llvm_ptr_ty
+  param_types:
+  - llvm_ptr_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.ptr.delay2
+  record_name: int_aie4_ptr_delay2
+  source_file: IntrinsicsAIE4.td
+  source_line: 65
+  ret_types:
+  - llvm_ptr_ty
+  param_types:
+  - llvm_ptr_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.ptr.delay3
+  record_name: int_aie4_ptr_delay3
+  source_file: IntrinsicsAIE4.td
+  source_line: 66
+  ret_types:
+  - llvm_ptr_ty
+  param_types:
+  - llvm_ptr_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.ptr.delay4
+  record_name: int_aie4_ptr_delay4
+  source_file: IntrinsicsAIE4.td
+  source_line: 67
+  ret_types:
+  - llvm_ptr_ty
+  param_types:
+  - llvm_ptr_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.ptr.delay5
+  record_name: int_aie4_ptr_delay5
+  source_file: IntrinsicsAIE4.td
+  source_line: 68
+  ret_types:
+  - llvm_ptr_ty
+  param_types:
+  - llvm_ptr_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.ptr.delay6
+  record_name: int_aie4_ptr_delay6
+  source_file: IntrinsicsAIE4.td
+  source_line: 69
+  ret_types:
+  - llvm_ptr_ty
+  param_types:
+  - llvm_ptr_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.put.ms
+  record_name: int_aie4_put_ms
+  source_file: IntrinsicsAIE4.td
+  source_line: 333
+  ret_types: []
+  param_types:
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrHasSideEffects
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.put.ms.mxf
+  record_name: int_aie4_put_ms_mxf
+  source_file: IntrinsicsAIE4.td
+  source_line: 341
+  ret_types: []
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  disable_default_attributes: 0
+- name: llvm.aie4.put.ms.mxi
+  record_name: int_aie4_put_ms_mxi
+  source_file: IntrinsicsAIE4.td
+  source_line: 342
+  ret_types: []
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  disable_default_attributes: 0
+- name: llvm.aie4.put.ms.v16
+  record_name: int_aie4_put_ms_v16
+  source_file: IntrinsicsAIE4.td
+  source_line: 336
+  ret_types: []
+  param_types:
+  - llvm_v16i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  disable_default_attributes: 0
+- name: llvm.aie4.put.ms.v32mx6
+  record_name: int_aie4_put_ms_v32mx6
+  source_file: IntrinsicsAIE4.td
+  source_line: 337
+  ret_types: []
+  param_types:
+  - llvm_v4i32_ty
+  - llvm_i32_ty
+  - llvm_i16_ty
+  - llvm_i16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  disable_default_attributes: 0
+- name: llvm.aie4.put.ms.v32mxfp
+  record_name: int_aie4_put_ms_v32mxfp
+  source_file: IntrinsicsAIE4.td
+  source_line: 339
+  ret_types: []
+  param_types:
+  - llvm_v8i32_ty
+  - llvm_i8_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  disable_default_attributes: 0
+- name: llvm.aie4.put.ms.v32mxfp.i264
+  record_name: int_aie4_put_ms_v32mxfp_i264
+  source_file: IntrinsicsAIE4.td
+  source_line: 340
+  ret_types: []
+  param_types:
+  - llvm_i264_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  disable_default_attributes: 0
+- name: llvm.aie4.put.ms.v4
+  record_name: int_aie4_put_ms_v4
+  source_file: IntrinsicsAIE4.td
+  source_line: 334
+  ret_types: []
+  param_types:
+  - llvm_v4i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  disable_default_attributes: 0
+- name: llvm.aie4.put.ms.v64mx6
+  record_name: int_aie4_put_ms_v64mx6
+  source_file: IntrinsicsAIE4.td
+  source_line: 338
+  ret_types: []
+  param_types:
+  - llvm_v8i32_ty
+  - llvm_v2i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  disable_default_attributes: 0
+- name: llvm.aie4.put.ms.v8
+  record_name: int_aie4_put_ms_v8
+  source_file: IntrinsicsAIE4.td
+  source_line: 335
+  ret_types: []
+  param_types:
+  - llvm_v8i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  disable_default_attributes: 0
+- name: llvm.aie4.read.tm
+  record_name: int_aie4_read_tm
+  source_file: IntrinsicsAIE4.td
+  source_line: 85
+  ret_types:
+  - llvm_i32_ty
+  param_types:
+  - llvm_ptr_ty
+  properties:
+  - IntrArgMemOnly
+  disable_default_attributes: 0
+- name: llvm.aie4.release
+  record_name: int_aie4_release
+  source_file: IntrinsicsAIE4.td
+  source_line: 36
+  ret_types: []
+  param_types:
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrHasSideEffects
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.release.cond
+  record_name: int_aie4_release_cond
+  source_file: IntrinsicsAIE4.td
+  source_line: 38
+  ret_types: []
+  param_types:
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrHasSideEffects
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.release.cond.ptr
+  record_name: int_aie4_release_cond_ptr
+  source_file: IntrinsicsAIE4.td
+  source_line: 46
+  ret_types: []
+  param_types:
+  - llvm_ptr_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrHasSideEffects
+  disable_default_attributes: 0
+- name: llvm.aie4.release.ptr
+  record_name: int_aie4_release_ptr
+  source_file: IntrinsicsAIE4.td
+  source_line: 44
+  ret_types: []
+  param_types:
+  - llvm_ptr_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrArgMemOnly
+  - IntrHasSideEffects
+  disable_default_attributes: 0
+- name: llvm.aie4.scd.read.vec
+  record_name: int_aie4_scd_read_vec
+  source_file: IntrinsicsAIE4.td
+  source_line: 299
+  ret_types:
+  - llvm_v16i32_ty
+  param_types:
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  disable_default_attributes: 0
+- name: llvm.aie4.sched.barrier
+  record_name: int_aie4_sched_barrier
+  source_file: IntrinsicsAIE4.td
+  source_line: 52
+  ret_types: []
+  param_types: []
+  properties:
+  - IntrConvergent
+  - IntrHasSideEffects
+  - IntrNoMem
+  - IntrWillReturn
+  disable_default_attributes: 0
+- name: llvm.aie4.set.ctrl.reg
+  record_name: int_aie4_set_ctrl_reg
+  source_file: IntrinsicsAIE4.td
+  source_line: 90
+  ret_types: []
+  param_types:
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.set.ss.conflict
+  record_name: int_aie4_set_ss_conflict
+  source_file: IntrinsicsAIE4.td
+  source_line: 317
+  ret_types: []
+  param_types:
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrHasSideEffects
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.set.ss.tkeep
+  record_name: int_aie4_set_ss_tkeep
+  source_file: IntrinsicsAIE4.td
+  source_line: 318
+  ret_types: []
+  param_types:
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrHasSideEffects
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.set.status.reg
+  record_name: int_aie4_set_status_reg
+  source_file: IntrinsicsAIE4.td
+  source_line: 95
+  ret_types: []
+  param_types:
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.set.tlast
+  record_name: int_aie4_set_tlast
+  source_file: IntrinsicsAIE4.td
+  source_line: 316
+  ret_types: []
+  param_types:
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrHasSideEffects
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.sqrtf
+  record_name: int_aie4_sqrtf
+  source_file: IntrinsicsAIE4.td
+  source_line: 76
+  ret_types:
+  - llvm_float_ty
+  param_types:
+  - llvm_float_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.staging.to.matrix.FP32768
+  record_name: int_aie4_staging_to_matrix_FP32768
+  source_file: IntrinsicsAIE4.td
+  source_line: 407
+  ret_types: []
+  param_types: []
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.staging.to.matrix.I32768
+  record_name: int_aie4_staging_to_matrix_I32768
+  source_file: IntrinsicsAIE4.td
+  source_line: 403
+  ret_types: []
+  param_types: []
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.staging.to.matrix.I4.I32768
+  record_name: int_aie4_staging_to_matrix_I4_I32768
+  source_file: IntrinsicsAIE4.td
+  source_line: 405
+  ret_types: []
+  param_types: []
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.staging.to.matrix.MX6
+  record_name: int_aie4_staging_to_matrix_MX6
+  source_file: IntrinsicsAIE4.td
+  source_line: 417
+  ret_types: []
+  param_types: []
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.staging.to.matrix.MXFP8
+  record_name: int_aie4_staging_to_matrix_MXFP8
+  source_file: IntrinsicsAIE4.td
+  source_line: 411
+  ret_types: []
+  param_types: []
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.staging.to.matrix.MXINT8
+  record_name: int_aie4_staging_to_matrix_MXINT8
+  source_file: IntrinsicsAIE4.td
+  source_line: 409
+  ret_types: []
+  param_types: []
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.staging.to.matrix.sparse.6144
+  record_name: int_aie4_staging_to_matrix_sparse_6144
+  source_file: IntrinsicsAIE4.td
+  source_line: 421
+  ret_types: []
+  param_types: []
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.staging.to.matrix.sparse.FP43008
+  record_name: int_aie4_staging_to_matrix_sparse_FP43008
+  source_file: IntrinsicsAIE4.td
+  source_line: 415
+  ret_types: []
+  param_types: []
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.staging.to.matrix.sparse.I38912
+  record_name: int_aie4_staging_to_matrix_sparse_I38912
+  source_file: IntrinsicsAIE4.td
+  source_line: 413
+  ret_types: []
+  param_types: []
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.staging.to.matrix.sparse.MX6.61440
+  record_name: int_aie4_staging_to_matrix_sparse_MX6_61440
+  source_file: IntrinsicsAIE4.td
+  source_line: 419
+  ret_types: []
+  param_types: []
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.sub.fp32
+  record_name: int_aie4_sub_fp32
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 952
+  ret_types:
+  - llvm_float_ty
+  param_types:
+  - llvm_float_ty
+  - llvm_float_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.tanh
+  record_name: int_aie4_tanh
+  source_file: IntrinsicsAIE4.td
+  source_line: 79
+  ret_types:
+  - llvm_v32bf16_ty
+  param_types:
+  - llvm_v32f32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.unpack.I1024.I16.I8
+  record_name: int_aie4_unpack_I1024_I16_I8
+  source_file: IntrinsicsAIE4.td
+  source_line: 451
+  ret_types:
+  - llvm_v64i16_ty
+  param_types:
+  - llvm_v64i8_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.unpack.I1024.I4.I1
+  record_name: int_aie4_unpack_I1024_I4_I1
+  source_file: IntrinsicsAIE4.td
+  source_line: 454
+  ret_types:
+  - llvm_v128i8_ty
+  param_types:
+  - llvm_v32i8_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.unpack.I1024.I4.I2
+  record_name: int_aie4_unpack_I1024_I4_I2
+  source_file: IntrinsicsAIE4.td
+  source_line: 453
+  ret_types:
+  - llvm_v128i8_ty
+  param_types:
+  - llvm_v64i8_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.unpack.I1024.I8.I1
+  record_name: int_aie4_unpack_I1024_I8_I1
+  source_file: IntrinsicsAIE4.td
+  source_line: 456
+  ret_types:
+  - llvm_v128i8_ty
+  param_types:
+  - llvm_v16i8_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.unpack.I1024.I8.I2
+  record_name: int_aie4_unpack_I1024_I8_I2
+  source_file: IntrinsicsAIE4.td
+  source_line: 455
+  ret_types:
+  - llvm_v128i8_ty
+  param_types:
+  - llvm_v32i8_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.unpack.I1024.I8.I4
+  record_name: int_aie4_unpack_I1024_I8_I4
+  source_file: IntrinsicsAIE4.td
+  source_line: 452
+  ret_types:
+  - llvm_v128i8_ty
+  param_types:
+  - llvm_v64i8_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.unpack.I512.I16.I8
+  record_name: int_aie4_unpack_I512_I16_I8
+  source_file: IntrinsicsAIE4.td
+  source_line: 448
+  ret_types:
+  - llvm_v32i16_ty
+  param_types:
+  - llvm_v32i8_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.unpack.I512.I4.I2
+  record_name: int_aie4_unpack_I512_I4_I2
+  source_file: IntrinsicsAIE4.td
+  source_line: 450
+  ret_types:
+  - llvm_v64i8_ty
+  param_types:
+  - llvm_v32i8_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.unpack.I512.I8.I4
+  record_name: int_aie4_unpack_I512_I8_I4
+  source_file: IntrinsicsAIE4.td
+  source_line: 449
+  ret_types:
+  - llvm_v64i8_ty
+  param_types:
+  - llvm_v32i8_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v128float4.to.v128float8
+  record_name: int_aie4_v128float4_to_v128float8
+  source_file: IntrinsicsAIE4.td
+  source_line: 128
+  ret_types:
+  - llvm_v128i8_ty
+  param_types:
+  - llvm_v64i8_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v16accfloat.to.v16bfloat16
+  record_name: int_aie4_v16accfloat_to_v16bfloat16
+  source_file: IntrinsicsAIE4.td
+  source_line: 758
+  ret_types:
+  - llvm_v16bf16_ty
+  param_types:
+  - llvm_v16f32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v16accfloat.to.v16float16
+  record_name: int_aie4_v16accfloat_to_v16float16
+  source_file: IntrinsicsAIE4.td
+  source_line: 761
+  ret_types:
+  - llvm_v16f16_ty
+  param_types:
+  - llvm_v16f32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v16float.to.v16int16
+  record_name: int_aie4_v16float_to_v16int16
+  source_file: IntrinsicsAIE4.td
+  source_line: 822
+  ret_types:
+  - llvm_v16i16_ty
+  param_types:
+  - llvm_v16f32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v16float.to.v16int32
+  record_name: int_aie4_v16float_to_v16int32
+  source_file: IntrinsicsAIE4.td
+  source_line: 821
+  ret_types:
+  - llvm_v16i32_ty
+  param_types:
+  - llvm_v16f32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v16float.to.v32accfloat
+  record_name: int_aie4_v16float_to_v32accfloat
+  source_file: IntrinsicsAIE4.td
+  source_line: 127
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v16f32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v32accfloat.to.v32bfloat16
+  record_name: int_aie4_v32accfloat_to_v32bfloat16
+  source_file: IntrinsicsAIE4.td
+  source_line: 759
+  ret_types:
+  - llvm_v32bf16_ty
+  param_types:
+  - llvm_v32f32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v32accfloat.to.v32float16
+  record_name: int_aie4_v32accfloat_to_v32float16
+  source_file: IntrinsicsAIE4.td
+  source_line: 762
+  ret_types:
+  - llvm_v32f16_ty
+  param_types:
+  - llvm_v32f32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v32accfloat.to.v32float4
+  record_name: int_aie4_v32accfloat_to_v32float4
+  source_file: IntrinsicsAIE4.td
+  source_line: 769
+  ret_types:
+  - llvm_v32i8_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v32accfloat.to.v32float6
+  record_name: int_aie4_v32accfloat_to_v32float6
+  source_file: IntrinsicsAIE4.td
+  source_line: 767
+  ret_types:
+  - llvm_v32i8_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v32accfloat.to.v32float8
+  record_name: int_aie4_v32accfloat_to_v32float8
+  source_file: IntrinsicsAIE4.td
+  source_line: 765
+  ret_types:
+  - llvm_v32i8_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v32accfloat.to.v32mx6
+  record_name: int_aie4_v32accfloat_to_v32mx6
+  source_file: IntrinsicsAIE4.td
+  source_line: 753
+  ret_types:
+  - llvm_v4i32_ty
+  - llvm_i32_ty
+  - llvm_i16_ty
+  - llvm_i16_ty
+  param_types:
+  - llvm_v32f32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v32accfloat.to.v32mx6b
+  record_name: int_aie4_v32accfloat_to_v32mx6b
+  source_file: IntrinsicsAIE4.td
+  source_line: 754
+  ret_types:
+  - llvm_v4i32_ty
+  - llvm_i32_ty
+  - llvm_i16_ty
+  - llvm_i16_ty
+  param_types:
+  - llvm_v32f32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v32accfloat.to.v32mxfp4
+  record_name: int_aie4_v32accfloat_to_v32mxfp4
+  source_file: IntrinsicsAIE4.td
+  source_line: 850
+  ret_types:
+  - llvm_i32_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.v32accfloat.to.v32mxfp6
+  record_name: int_aie4_v32accfloat_to_v32mxfp6
+  source_file: IntrinsicsAIE4.td
+  source_line: 848
+  ret_types:
+  - llvm_i32_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.v32accfloat.to.v32mxfp8
+  record_name: int_aie4_v32accfloat_to_v32mxfp8
+  source_file: IntrinsicsAIE4.td
+  source_line: 846
+  ret_types:
+  - llvm_i32_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.v32accfloat.to.v32mxint8.ebs16
+  record_name: int_aie4_v32accfloat_to_v32mxint8_ebs16
+  source_file: IntrinsicsAIE4.td
+  source_line: 841
+  ret_types:
+  - llvm_i32_ty
+  - llvm_i288_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.v32accfloat.to.v32mxint8.ebs32
+  record_name: int_aie4_v32accfloat_to_v32mxint8_ebs32
+  source_file: IntrinsicsAIE4.td
+  source_line: 843
+  ret_types:
+  - llvm_i32_ty
+  - llvm_i288_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.v32accfloat.to.v32mxint8.ebs8
+  record_name: int_aie4_v32accfloat_to_v32mxint8_ebs8
+  source_file: IntrinsicsAIE4.td
+  source_line: 839
+  ret_types:
+  - llvm_i32_ty
+  - llvm_i288_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.v32bf16.to.v32accfloat
+  record_name: int_aie4_v32bf16_to_v32accfloat
+  source_file: IntrinsicsAIE4.td
+  source_line: 123
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32bf16_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v32bfloat16.to.v32int16
+  record_name: int_aie4_v32bfloat16_to_v32int16
+  source_file: IntrinsicsAIE4.td
+  source_line: 834
+  ret_types:
+  - llvm_v32i16_ty
+  param_types:
+  - llvm_v32bf16_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v32float.to.v32int16
+  record_name: int_aie4_v32float_to_v32int16
+  source_file: IntrinsicsAIE4.td
+  source_line: 817
+  ret_types:
+  - llvm_v32i16_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v32float.to.v32int32
+  record_name: int_aie4_v32float_to_v32int32
+  source_file: IntrinsicsAIE4.td
+  source_line: 816
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v32float.to.v32int4
+  record_name: int_aie4_v32float_to_v32int4
+  source_file: IntrinsicsAIE4.td
+  source_line: 819
+  ret_types:
+  - llvm_v16i8_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v32float.to.v32int8
+  record_name: int_aie4_v32float_to_v32int8
+  source_file: IntrinsicsAIE4.td
+  source_line: 818
+  ret_types:
+  - llvm_v32i8_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v32float16.to.v32accfloat
+  record_name: int_aie4_v32float16_to_v32accfloat
+  source_file: IntrinsicsAIE4.td
+  source_line: 125
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f16_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v32float16.to.v32int16
+  record_name: int_aie4_v32float16_to_v32int16
+  source_file: IntrinsicsAIE4.td
+  source_line: 828
+  ret_types:
+  - llvm_v32i16_ty
+  param_types:
+  - llvm_v32f16_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v64accfloat.to.v64bfloat16
+  record_name: int_aie4_v64accfloat_to_v64bfloat16
+  source_file: IntrinsicsAIE4.td
+  source_line: 760
+  ret_types:
+  - llvm_v64bf16_ty
+  param_types:
+  - llvm_v64f32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v64accfloat.to.v64float16
+  record_name: int_aie4_v64accfloat_to_v64float16
+  source_file: IntrinsicsAIE4.td
+  source_line: 763
+  ret_types:
+  - llvm_v64f16_ty
+  param_types:
+  - llvm_v64f32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v64accfloat.to.v64float4
+  record_name: int_aie4_v64accfloat_to_v64float4
+  source_file: IntrinsicsAIE4.td
+  source_line: 770
+  ret_types:
+  - llvm_v32i8_ty
+  param_types:
+  - llvm_v64f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v64accfloat.to.v64float6
+  record_name: int_aie4_v64accfloat_to_v64float6
+  source_file: IntrinsicsAIE4.td
+  source_line: 768
+  ret_types:
+  - llvm_v64i8_ty
+  param_types:
+  - llvm_v64f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v64accfloat.to.v64float8
+  record_name: int_aie4_v64accfloat_to_v64float8
+  source_file: IntrinsicsAIE4.td
+  source_line: 766
+  ret_types:
+  - llvm_v64i8_ty
+  param_types:
+  - llvm_v64f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v64accfloat.to.v64mx6
+  record_name: int_aie4_v64accfloat_to_v64mx6
+  source_file: IntrinsicsAIE4.td
+  source_line: 755
+  ret_types:
+  - llvm_v8i32_ty
+  - llvm_v2i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_v64f32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v64accfloat.to.v64mx6b
+  record_name: int_aie4_v64accfloat_to_v64mx6b
+  source_file: IntrinsicsAIE4.td
+  source_line: 756
+  ret_types:
+  - llvm_v8i32_ty
+  - llvm_v2i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_v64f32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v64accfloat.to.v64mxfp4
+  record_name: int_aie4_v64accfloat_to_v64mxfp4
+  source_file: IntrinsicsAIE4.td
+  source_line: 851
+  ret_types:
+  - llvm_v2i32_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_v64f32_ty
+  - llvm_v2i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.v64accfloat.to.v64mxfp6
+  record_name: int_aie4_v64accfloat_to_v64mxfp6
+  source_file: IntrinsicsAIE4.td
+  source_line: 849
+  ret_types:
+  - llvm_v2i32_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_v64f32_ty
+  - llvm_v2i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.v64accfloat.to.v64mxfp8
+  record_name: int_aie4_v64accfloat_to_v64mxfp8
+  source_file: IntrinsicsAIE4.td
+  source_line: 847
+  ret_types:
+  - llvm_v2i32_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_v64f32_ty
+  - llvm_v2i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.v64accfloat.to.v64mxint8.ebs16
+  record_name: int_aie4_v64accfloat_to_v64mxint8_ebs16
+  source_file: IntrinsicsAIE4.td
+  source_line: 842
+  ret_types:
+  - llvm_v2i32_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  param_types:
+  - llvm_v64f32_ty
+  - llvm_v2i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.v64accfloat.to.v64mxint8.ebs32
+  record_name: int_aie4_v64accfloat_to_v64mxint8_ebs32
+  source_file: IntrinsicsAIE4.td
+  source_line: 844
+  ret_types:
+  - llvm_v2i32_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  param_types:
+  - llvm_v64f32_ty
+  - llvm_v2i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.v64accfloat.to.v64mxint8.ebs8
+  record_name: int_aie4_v64accfloat_to_v64mxint8_ebs8
+  source_file: IntrinsicsAIE4.td
+  source_line: 840
+  ret_types:
+  - llvm_v2i32_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  param_types:
+  - llvm_v64f32_ty
+  - llvm_v2i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 1
+- name: llvm.aie4.v64bf16.to.v64accfloat
+  record_name: int_aie4_v64bf16_to_v64accfloat
+  source_file: IntrinsicsAIE4.td
+  source_line: 124
+  ret_types:
+  - llvm_v64f32_ty
+  param_types:
+  - llvm_v64bf16_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v64bfloat16.to.v64float8
+  record_name: int_aie4_v64bfloat16_to_v64float8
+  source_file: IntrinsicsAIE4.td
+  source_line: 773
+  ret_types:
+  - llvm_v64i8_ty
+  param_types:
+  - llvm_v64bf16_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v64bfloat16.to.v64int16
+  record_name: int_aie4_v64bfloat16_to_v64int16
+  source_file: IntrinsicsAIE4.td
+  source_line: 830
+  ret_types:
+  - llvm_v64i16_ty
+  param_types:
+  - llvm_v64bf16_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v64bfloat16.to.v64int4
+  record_name: int_aie4_v64bfloat16_to_v64int4
+  source_file: IntrinsicsAIE4.td
+  source_line: 832
+  ret_types:
+  - llvm_v32i8_ty
+  param_types:
+  - llvm_v64bf16_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v64bfloat16.to.v64int8
+  record_name: int_aie4_v64bfloat16_to_v64int8
+  source_file: IntrinsicsAIE4.td
+  source_line: 831
+  ret_types:
+  - llvm_v64i8_ty
+  param_types:
+  - llvm_v64bf16_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v64float16.to.v64accfloat
+  record_name: int_aie4_v64float16_to_v64accfloat
+  source_file: IntrinsicsAIE4.td
+  source_line: 126
+  ret_types:
+  - llvm_v64f32_ty
+  param_types:
+  - llvm_v64f16_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v64float16.to.v64float8
+  record_name: int_aie4_v64float16_to_v64float8
+  source_file: IntrinsicsAIE4.td
+  source_line: 772
+  ret_types:
+  - llvm_v64i8_ty
+  param_types:
+  - llvm_v64f16_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v64float16.to.v64int16
+  record_name: int_aie4_v64float16_to_v64int16
+  source_file: IntrinsicsAIE4.td
+  source_line: 824
+  ret_types:
+  - llvm_v64i16_ty
+  param_types:
+  - llvm_v64f16_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v64float16.to.v64int4
+  record_name: int_aie4_v64float16_to_v64int4
+  source_file: IntrinsicsAIE4.td
+  source_line: 826
+  ret_types:
+  - llvm_v32i8_ty
+  param_types:
+  - llvm_v64f16_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.v64float16.to.v64int8
+  record_name: int_aie4_v64float16_to_v64int8
+  source_file: IntrinsicsAIE4.td
+  source_line: 825
+  ret_types:
+  - llvm_v64i8_ty
+  param_types:
+  - llvm_v64f16_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vabs16.1024
+  record_name: int_aie4_vabs16_1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 263
+  ret_types:
+  - llvm_v64i16_ty
+  - llvm_v2i32_ty
+  param_types:
+  - llvm_v64i16_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vabs16.512
+  record_name: int_aie4_vabs16_512
+  source_file: IntrinsicsAIE4.td
+  source_line: 260
+  ret_types:
+  - llvm_v32i16_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_v32i16_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vabs32.1024
+  record_name: int_aie4_vabs32_1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 264
+  ret_types:
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vabs32.512
+  record_name: int_aie4_vabs32_512
+  source_file: IntrinsicsAIE4.td
+  source_line: 261
+  ret_types:
+  - llvm_v16i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_v16i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vabs8.1024
+  record_name: int_aie4_vabs8_1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 262
+  ret_types:
+  - llvm_v128i8_ty
+  - llvm_v16i32_ty
+  param_types:
+  - llvm_v128i8_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vabs8.512
+  record_name: int_aie4_vabs8_512
+  source_file: IntrinsicsAIE4.td
+  source_line: 259
+  ret_types:
+  - llvm_v64i8_ty
+  - llvm_v2i32_ty
+  param_types:
+  - llvm_v64i8_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vadd.s32
+  record_name: int_aie4_vadd_s32
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 987
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_v32i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vadd16.1024
+  record_name: int_aie4_vadd16_1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 291
+  ret_types:
+  - llvm_v64i16_ty
+  - llvm_v2i32_ty
+  param_types:
+  - llvm_v64i16_ty
+  - llvm_v64i16_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vadd16.512
+  record_name: int_aie4_vadd16_512
+  source_file: IntrinsicsAIE4.td
+  source_line: 283
+  ret_types:
+  - llvm_v32i16_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_v32i16_ty
+  - llvm_v32i16_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vadd16.mask.1024
+  record_name: int_aie4_vadd16_mask_1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 248
+  ret_types:
+  - llvm_v64i16_ty
+  param_types:
+  - llvm_v64i16_ty
+  - llvm_v64i16_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_v2i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vadd16.mask.512
+  record_name: int_aie4_vadd16_mask_512
+  source_file: IntrinsicsAIE4.td
+  source_line: 245
+  ret_types:
+  - llvm_v32i16_ty
+  param_types:
+  - llvm_v32i16_ty
+  - llvm_v32i16_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vadd32.1024
+  record_name: int_aie4_vadd32_1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 294
+  ret_types:
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vadd32.512
+  record_name: int_aie4_vadd32_512
+  source_file: IntrinsicsAIE4.td
+  source_line: 286
+  ret_types:
+  - llvm_v16i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_v16i32_ty
+  - llvm_v16i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vadd32.ACC1024.ACC1024
+  record_name: int_aie4_vadd32_ACC1024_ACC1024
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 968
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vadd32.ACC1024.I32
+  record_name: int_aie4_vadd32_ACC1024_I32
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 973
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vadd32.I1024.I1024
+  record_name: int_aie4_vadd32_I1024_I1024
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 965
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vadd32.I1024.I32
+  record_name: int_aie4_vadd32_I1024_I32
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 971
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vadd32.mask.1024
+  record_name: int_aie4_vadd32_mask_1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 249
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vadd32.mask.512
+  record_name: int_aie4_vadd32_mask_512
+  source_file: IntrinsicsAIE4.td
+  source_line: 246
+  ret_types:
+  - llvm_v16i32_ty
+  param_types:
+  - llvm_v16i32_ty
+  - llvm_v16i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vadd32f.ACC1024.ACC1024
+  record_name: int_aie4_vadd32f_ACC1024_ACC1024
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 959
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vadd32f.ACC1024.fp32
+  record_name: int_aie4_vadd32f_ACC1024_fp32
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 962
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_float_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vadd32f.I1024.I1024
+  record_name: int_aie4_vadd32f_I1024_I1024
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 953
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vadd32f.I1024.fp32
+  record_name: int_aie4_vadd32f_I1024_fp32
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 956
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_float_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vadd64.ACC1024.ACC1024
+  record_name: int_aie4_vadd64_ACC1024_ACC1024
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 976
+  ret_types:
+  - llvm_v16i64_ty
+  param_types:
+  - llvm_v16i64_ty
+  - llvm_v16i64_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vadd64.ACC1024.I64
+  record_name: int_aie4_vadd64_ACC1024_I64
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 979
+  ret_types:
+  - llvm_v16i64_ty
+  param_types:
+  - llvm_v16i64_ty
+  - llvm_v2i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vadd64.I1024.I1024
+  record_name: int_aie4_vadd64_I1024_I1024
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 982
+  ret_types:
+  - llvm_v16i64_ty
+  param_types:
+  - llvm_v16i64_ty
+  - llvm_v16i64_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vadd64.I1024.I64
+  record_name: int_aie4_vadd64_I1024_I64
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 985
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_v2i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vadd8.1024
+  record_name: int_aie4_vadd8_1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 289
+  ret_types:
+  - llvm_v128i8_ty
+  - llvm_v16i32_ty
+  param_types:
+  - llvm_v128i8_ty
+  - llvm_v128i8_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vadd8.512
+  record_name: int_aie4_vadd8_512
+  source_file: IntrinsicsAIE4.td
+  source_line: 281
+  ret_types:
+  - llvm_v64i8_ty
+  - llvm_v2i32_ty
+  param_types:
+  - llvm_v64i8_ty
+  - llvm_v64i8_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vadd8.mask.1024
+  record_name: int_aie4_vadd8_mask_1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 247
+  ret_types:
+  - llvm_v128i8_ty
+  param_types:
+  - llvm_v128i8_ty
+  - llvm_v128i8_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_v16i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vadd8.mask.512
+  record_name: int_aie4_vadd8_mask_512
+  source_file: IntrinsicsAIE4.td
+  source_line: 244
+  ret_types:
+  - llvm_v64i8_ty
+  param_types:
+  - llvm_v64i8_ty
+  - llvm_v64i8_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_v2i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vaddbfloat16.1024
+  record_name: int_aie4_vaddbfloat16_1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 292
+  ret_types:
+  - llvm_v64bf16_ty
+  - llvm_v2i32_ty
+  param_types:
+  - llvm_v64bf16_ty
+  - llvm_v64bf16_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vaddbfloat16.512
+  record_name: int_aie4_vaddbfloat16_512
+  source_file: IntrinsicsAIE4.td
+  source_line: 284
+  ret_types:
+  - llvm_v32bf16_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_v32bf16_ty
+  - llvm_v32bf16_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vaddfloat.1024
+  record_name: int_aie4_vaddfloat_1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 295
+  ret_types:
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vaddfloat.512
+  record_name: int_aie4_vaddfloat_512
+  source_file: IntrinsicsAIE4.td
+  source_line: 287
+  ret_types:
+  - llvm_v16f32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_v16f32_ty
+  - llvm_v16f32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vaddfloat16.1024
+  record_name: int_aie4_vaddfloat16_1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 293
+  ret_types:
+  - llvm_v64f16_ty
+  - llvm_v2i32_ty
+  param_types:
+  - llvm_v64f16_ty
+  - llvm_v64f16_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vaddfloat16.512
+  record_name: int_aie4_vaddfloat16_512
+  source_file: IntrinsicsAIE4.td
+  source_line: 285
+  ret_types:
+  - llvm_v32f16_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_v32f16_ty
+  - llvm_v32f16_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vaddfloat8.1024
+  record_name: int_aie4_vaddfloat8_1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 290
+  ret_types:
+  - llvm_v128i8_ty
+  - llvm_v16i32_ty
+  param_types:
+  - llvm_v128i8_ty
+  - llvm_v128i8_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vaddfloat8.512
+  record_name: int_aie4_vaddfloat8_512
+  source_file: IntrinsicsAIE4.td
+  source_line: 282
+  ret_types:
+  - llvm_v64i8_ty
+  - llvm_v2i32_ty
+  param_types:
+  - llvm_v64i8_ty
+  - llvm_v64i8_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vbcst.shuffle16
+  record_name: int_aie4_vbcst_shuffle16
+  source_file: IntrinsicsAIE4.td
+  source_line: 226
+  ret_types:
+  - llvm_v16i32_ty
+  param_types:
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vbcst.shuffle32
+  record_name: int_aie4_vbcst_shuffle32
+  source_file: IntrinsicsAIE4.td
+  source_line: 227
+  ret_types:
+  - llvm_v16i32_ty
+  param_types:
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vbcst.shuffle64
+  record_name: int_aie4_vbcst_shuffle64
+  source_file: IntrinsicsAIE4.td
+  source_line: 228
+  ret_types:
+  - llvm_v16i32_ty
+  param_types:
+  - llvm_v2i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vbcst.shuffle8
+  record_name: int_aie4_vbcst_shuffle8
+  source_file: IntrinsicsAIE4.td
+  source_line: 225
+  ret_types:
+  - llvm_v16i32_ty
+  param_types:
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vbroadcast32.bf1024
+  record_name: int_aie4_vbroadcast32_bf1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 219
+  ret_types:
+  - llvm_v64bf16_ty
+  param_types:
+  - llvm_v2bf16_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vbroadcast32.bf512
+  record_name: int_aie4_vbroadcast32_bf512
+  source_file: IntrinsicsAIE4.td
+  source_line: 217
+  ret_types:
+  - llvm_v32bf16_ty
+  param_types:
+  - llvm_v2bf16_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vbroadcast64.bf1024
+  record_name: int_aie4_vbroadcast64_bf1024
+  source_file: IntrinsicsAIE4.td
+  source_line: 220
+  ret_types:
+  - llvm_v64bf16_ty
+  param_types:
+  - llvm_v4bf16_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 1
+- name: llvm.aie4.vbroadcast64.bf512
+  record_name: int_aie4_vbroadcast64_bf512
+  source_file: IntrinsicsAIE4.td
+  source_line: 218
+  ret_types:
+  - llvm_v32bf16_ty
+  param_types:
+  - llvm_v4bf16_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vextract.broadcast128.I512
+  record_name: int_aie4_vextract_broadcast128_I512
+  source_file: IntrinsicsAIE4.td
+  source_line: 222
+  ret_types:
+  - llvm_v16i32_ty
+  param_types:
+  - llvm_v16i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vinsert32.bf512
+  record_name: int_aie4_vinsert32_bf512
+  source_file: IntrinsicsAIE4.td
+  source_line: 213
+  ret_types:
+  - llvm_v32bf16_ty
+  param_types:
+  - llvm_v32bf16_ty
+  - llvm_i32_ty
+  - llvm_v2bf16_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vinsert64.bf512
+  record_name: int_aie4_vinsert64_bf512
+  source_file: IntrinsicsAIE4.td
+  source_line: 214
+  ret_types:
+  - llvm_v32bf16_ty
+  param_types:
+  - llvm_v32bf16_ty
+  - llvm_i32_ty
+  - llvm_v4bf16_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vmov.to.q.row
+  record_name: int_aie4_vmov_to_q_row
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 600
+  ret_types: []
+  param_types:
+  - llvm_i32_ty
+  - llvm_v32i32_ty
+  properties:
+  - ImmArg<ArgNo=1>
+  - IntrInaccessibleMemOnly
+  - IntrWriteMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vneg.s32
+  record_name: int_aie4_vneg_s32
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 1000
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vneg32f.ACC1024
+  record_name: int_aie4_vneg32f_ACC1024
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 990
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vneg32f.I1024
+  record_name: int_aie4_vneg32f_I1024
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 988
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vneg32s.ACC1024
+  record_name: int_aie4_vneg32s_ACC1024
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 996
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vneg32s.I1024
+  record_name: int_aie4_vneg32s_I1024
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 992
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vneg64s.ACC1024
+  record_name: int_aie4_vneg64s_ACC1024
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 998
+  ret_types:
+  - llvm_v16i64_ty
+  param_types:
+  - llvm_v16i64_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vneg64s.I1024
+  record_name: int_aie4_vneg64s_I1024
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 994
+  ret_types:
+  - llvm_v16i64_ty
+  param_types:
+  - llvm_v16i64_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vshift.I512.I512
+  record_name: int_aie4_vshift_I512_I512
+  source_file: IntrinsicsAIE4.td
+  source_line: 210
+  ret_types:
+  - llvm_v16i32_ty
+  param_types:
+  - llvm_v16i32_ty
+  - llvm_v16i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vshift.bf512.bf512
+  record_name: int_aie4_vshift_bf512_bf512
+  source_file: IntrinsicsAIE4.td
+  source_line: 211
+  ret_types:
+  - llvm_v32bf16_ty
+  param_types:
+  - llvm_v32bf16_ty
+  - llvm_v32bf16_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vshuffle
+  record_name: int_aie4_vshuffle
+  source_file: IntrinsicsAIE4.td
+  source_line: 231
+  ret_types:
+  - llvm_v16i32_ty
+  param_types:
+  - llvm_v16i32_ty
+  - llvm_v16i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vshuffle.MX768.MX768.MX768
+  record_name: int_aie4_vshuffle_MX768_MX768_MX768
+  source_file: IntrinsicsAIE4.td
+  source_line: 234
+  ret_types:
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_v2i32_ty
+  - llvm_v2i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  param_types:
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_v2i32_ty
+  - llvm_v2i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_v8i32_ty
+  - llvm_v8i32_ty
+  - llvm_v2i32_ty
+  - llvm_v2i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vshuffle.MXFP528.MXFP528.MXFP528
+  record_name: int_aie4_vshuffle_MXFP528_MXFP528_MXFP528
+  source_file: IntrinsicsAIE4.td
+  source_line: 233
+  ret_types:
+  - llvm_i264_ty
+  - llvm_i264_ty
+  param_types:
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i264_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vshuffle.MXINT576.MXINT576.MXINT576
+  record_name: int_aie4_vshuffle_MXINT576_MXINT576_MXINT576
+  source_file: IntrinsicsAIE4.td
+  source_line: 232
+  ret_types:
+  - llvm_i288_ty
+  - llvm_i288_ty
+  param_types:
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i288_ty
+  - llvm_i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vsub.s32
+  record_name: int_aie4_vsub_s32
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 1035
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_v32i32_ty
+  properties:
+  - IntrNoMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vsub32.ACC1024.ACC1024
+  record_name: int_aie4_vsub32_ACC1024_ACC1024
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 1009
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vsub32.ACC1024.I32
+  record_name: int_aie4_vsub32_ACC1024_I32
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 1006
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vsub32.I1024.I1024
+  record_name: int_aie4_vsub32_I1024_I1024
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 1001
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vsub32.I1024.I32
+  record_name: int_aie4_vsub32_I1024_I32
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 1004
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vsub32f.ACC1024.ACC1024
+  record_name: int_aie4_vsub32f_ACC1024_ACC1024
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 1018
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vsub32f.ACC1024.fp32
+  record_name: int_aie4_vsub32f_ACC1024_fp32
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 1021
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_float_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vsub32f.I1024.I1024
+  record_name: int_aie4_vsub32f_I1024_I1024
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 1012
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_v32f32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vsub32f.I1024.fp32
+  record_name: int_aie4_vsub32f_I1024_fp32
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 1015
+  ret_types:
+  - llvm_v32f32_ty
+  param_types:
+  - llvm_v32f32_ty
+  - llvm_float_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vsub64.ACC1024.ACC1024
+  record_name: int_aie4_vsub64_ACC1024_ACC1024
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 1024
+  ret_types:
+  - llvm_v16i64_ty
+  param_types:
+  - llvm_v16i64_ty
+  - llvm_v16i64_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vsub64.ACC1024.I64
+  record_name: int_aie4_vsub64_ACC1024_I64
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 1027
+  ret_types:
+  - llvm_v16i64_ty
+  param_types:
+  - llvm_v16i64_ty
+  - llvm_v2i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vsub64.I1024.I1024
+  record_name: int_aie4_vsub64_I1024_I1024
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 1030
+  ret_types:
+  - llvm_v16i64_ty
+  param_types:
+  - llvm_v16i64_ty
+  - llvm_v16i64_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.vsub64.I1024.I64
+  record_name: int_aie4_vsub64_I1024_I64
+  source_file: IntrinsicsAIE4Mac.td
+  source_line: 1033
+  ret_types:
+  - llvm_v32i32_ty
+  param_types:
+  - llvm_v32i32_ty
+  - llvm_v2i32_ty
+  - llvm_i32_ty
+  properties:
+  - IntrInaccessibleMemOnly
+  - IntrReadMem
+  disable_default_attributes: 0
+- name: llvm.aie4.write.tm
+  record_name: int_aie4_write_tm
+  source_file: IntrinsicsAIE4.td
+  source_line: 86
+  ret_types: []
+  param_types:
+  - llvm_i32_ty
+  - llvm_ptr_ty
+  properties:
+  - IntrWriteMem
+  disable_default_attributes: 0

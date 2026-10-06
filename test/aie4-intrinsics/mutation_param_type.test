@@ -1,0 +1,13 @@
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// A changed parameter type must fail with a signature-drift diagnostic.
+//
+// REQUIRES: peano
+// RUN: %python %S/mutate_snapshot.py %S/../../utils/aie4/aie4_intrinsics_snapshot.yaml \
+// RUN:     %t.yaml mutate-param llvm.aie4.I512.v32.acc32.srs 0 llvm_v16i32_ty
+// RUN: not %python %S/../../utils/aie4/check_aie4_intrinsics.py --snapshot %t.yaml \
+// RUN:     --peano-install-dir %PEANO_INSTALL_DIR --repo-root %S/../.. 2>&1 | FileCheck %s
+
+// CHECK: SIGNATURE DRIFT: llvm.aie4.I512.v32.acc32.srs
+// CHECK-SAME: Intrinsic has incorrect argument type

@@ -1,0 +1,12 @@
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// A changed memory property must fail with the affected intrinsic name.
+//
+// REQUIRES: peano
+// RUN: %python %S/mutate_snapshot.py %S/../../utils/aie4/aie4_intrinsics_snapshot.yaml \
+// RUN:     %t.yaml mutate-property llvm.aie4.get.ss IntrInaccessibleMemOnly IntrNoMem
+// RUN: not %python %S/../../utils/aie4/check_aie4_intrinsics.py --snapshot %t.yaml \
+// RUN:     --peano-install-dir %PEANO_INSTALL_DIR --repo-root %S/../.. 2>&1 | FileCheck %s
+
+// CHECK: MEMORY ATTRIBUTE MISMATCH: llvm.aie4.get.ss

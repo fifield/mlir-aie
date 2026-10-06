@@ -1,0 +1,13 @@
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// An empty source scan must fail so a wrong root cannot bypass verification.
+//
+// REQUIRES: peano
+// RUN: rm -rf %t.emptyrepo
+// RUN: mkdir -p %t.emptyrepo/include %t.emptyrepo/lib
+// RUN: not %python %S/../../utils/aie4/check_aie4_intrinsics.py \
+// RUN:     --peano-install-dir %PEANO_INSTALL_DIR --repo-root %t.emptyrepo 2>&1 | FileCheck %s
+
+// CHECK: == 0 referenced llvm.aie4.* intrinsic name(s) found
+// CHECK: error: 0 referenced llvm.aie4.* names found

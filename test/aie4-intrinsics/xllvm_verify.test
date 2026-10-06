@@ -1,0 +1,29 @@
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// Verify translated XLLVM operand/result types against Peano's intrinsic table.
+// These inputs cover the vadd/select/reduce, elementwise/conversion, shuffle,
+// and dense MMAC/staging/commit families. Coverage is checked against TableGen.
+// Separate translation and verification steps expose each stage's diagnostics.
+//
+// REQUIRES: peano
+// RUN: aie-translate %S/../Target/LLVMIR/aievec-aie4.mlir -mlir-to-llvmir -o %t.vadd.ll
+// RUN: %PEANO_INSTALL_DIR/bin/opt -S -mtriple=aie4 %t.vadd.ll -o %t.vadd.opt.ll
+// RUN: aie-translate %S/../Target/LLVMIR/aievec-aie4-ewise.mlir -mlir-to-llvmir -o %t.ewise.ll
+// RUN: %PEANO_INSTALL_DIR/bin/opt -S -mtriple=aie4 %t.ewise.ll -o %t.ewise.opt.ll
+// RUN: aie-translate %S/../Target/LLVMIR/shuffle-aie4.mlir -mlir-to-llvmir -o %t.shuffle.ll
+// RUN: %PEANO_INSTALL_DIR/bin/opt -S -mtriple=aie4 %t.shuffle.ll -o %t.shuffle.opt.ll
+// RUN: aie-translate %S/../Target/LLVMIR/aievec-aie4-mmac.mlir -mlir-to-llvmir -o %t.mmac.ll
+// RUN: %PEANO_INSTALL_DIR/bin/opt -S -mtriple=aie4 %t.mmac.ll -o %t.mmac.opt.ll
+// RUN: %python %S/check_xllvm_coverage.py \
+// RUN:     %aie_obj_root/include/aie/Dialect/XLLVM/IR/XLLVMConversions.inc \
+// RUN:     %t.vadd.ll %t.ewise.ll %t.shuffle.ll %t.mmac.ll | FileCheck %s
+// CHECK: PASS: all {{[1-9][0-9]*}} generated AIE4 XLLVM intrinsic names have translated calls
+
+// Omitting the elementwise input must fail coverage, including the MSC/unpack cases.
+// RUN: not %python %S/check_xllvm_coverage.py \
+// RUN:     %aie_obj_root/include/aie/Dialect/XLLVM/IR/XLLVMConversions.inc \
+// RUN:     %t.vadd.ll %t.shuffle.ll %t.mmac.ll | FileCheck %s --check-prefix=MISSING
+// MISSING-DAG: MISSING XLLVM CALL: llvm.aie4.I1024.I1024.ACC1024.fp.msc.ewise.conf
+// MISSING-DAG: MISSING XLLVM CALL: llvm.aie4.bf16.I512.bf16.I512.ACC1024.fp.msc.ewise.conf
+// MISSING-DAG: MISSING XLLVM CALL: llvm.aie4.unpack.I512.I16.I8

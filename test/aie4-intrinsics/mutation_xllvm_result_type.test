@@ -1,0 +1,31 @@
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// Translate a valid SRS op, then change its LLVM result to i32 everywhere so the IR
+// remains well-typed but disagrees with Peano's intrinsic signature.
+//
+// REQUIRES: peano
+// RUN: split-file %s %t
+// RUN: aie-translate %t/srs.mlir -mlir-to-llvmir -o %t/srs.ll
+// RUN: %PEANO_INSTALL_DIR/bin/opt -S -mtriple=aie4 %t/srs.ll -o %t/valid.ll
+// RUN: %python %t/mutate.py %t/srs.ll %t/bad.ll
+// RUN: not --crash %PEANO_INSTALL_DIR/bin/opt -S -mtriple=aie4 %t/bad.ll -o %t/bad.opt.ll 2>&1 | FileCheck %s
+
+// CHECK: Intrinsic has incorrect return type!
+// CHECK-NEXT: ptr @llvm.aie4.I512.v32.acc32.srs
+
+//--- srs.mlir
+llvm.func @srs(%acc: vector<32xi32>) -> vector<32xi16> {
+  %0 = "xllvm.intr.aie4.I512.v32.acc32.srs"(%acc) <{shift = 4 : i32, sign = 1 : i32}> :
+      (vector<32xi32>) -> vector<32xi16>
+  llvm.return %0 : vector<32xi16>
+}
+
+//--- mutate.py
+import sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text()
+# Function result, intrinsic call, return instruction, and declaration.
+assert text.count("<32 x i16>") == 4
+Path(sys.argv[2]).write_text(text.replace("<32 x i16>", "i32"))

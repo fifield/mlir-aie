@@ -484,7 +484,9 @@ class LitConfigHelper:
                             "Running tests on NPU3 with command line: %s", run_on_npu3
                         )
                     else:
-                        logger.warning("NPU3 detected but aietools for aie4 not available")
+                        logger.warning(
+                            "NPU3 detected but aietools for aie4 not available"
+                        )
                 else:
                     logger.warning("xrt-smi reported unknown NPU model '%s'.", model)
                 break
@@ -605,7 +607,7 @@ class LitConfigHelper:
                 config.features.append("peano")
 
                 peano_executable_suffix = ".exe" if os.name == "nt" else ""
-                for tool_name in ["clang++", "clang"]:
+                for tool_name in ["clang++", "clang", "opt"]:
                     tool_path = os.path.join(
                         peano_tools_dir, f"{tool_name}{peano_executable_suffix}"
                     )

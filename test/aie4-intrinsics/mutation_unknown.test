@@ -1,0 +1,19 @@
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// The source and snapshot agree on a name that Peano does not recognize.
+// opt accepts unknown intrinsics as external functions, so its exit code
+// alone cannot detect this failure. event has no printed memory attribute,
+// avoiding an incidental memory mismatch as the reason for rejection.
+//
+// REQUIRES: peano
+// RUN: split-file %s %t
+// RUN: %python %S/mutate_snapshot.py %S/../../utils/aie4/aie4_intrinsics_snapshot.yaml \
+// RUN:     %t/snapshot.yaml rename llvm.aie4.event llvm.aie4.unknown.for.drift.test
+// RUN: not %python %S/../../utils/aie4/check_aie4_intrinsics.py --snapshot %t/snapshot.yaml \
+// RUN:     --peano-install-dir %PEANO_INSTALL_DIR --repo-root %t 2>&1 | FileCheck %s
+// CHECK: NOT AN INTRINSIC IN THIS WHEEL: llvm.aie4.unknown.for.drift.test
+// CHECK: == 1 referenced, 0 OK, 1 FAILED ==
+
+//--- lib/unknown.cpp
+const char *intrinsic = "llvm.aie4.unknown.for.drift.test";
