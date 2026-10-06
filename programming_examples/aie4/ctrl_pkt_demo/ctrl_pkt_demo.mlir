@@ -60,7 +60,8 @@ module {
       // AIE4 allows up to 16 data beats per control packet, so this fits in
       // one packet and aie-legalize-control-packet does not have to split it.
       aiex.control_packet {address = 0x600400 : ui32, data = array<i32: 4660, 22136, 4661, 22137, 4662, 22138, 4663, 22139, 4664, 22140, 4665, 22141, 4666, 22142, 4667, 22143>, opcode = 0 : i32, stream_id = 0 : i32}
-      aiex.set_lock(%lock_go, 1)
+      %c1_go = arith.constant 1 : i32
+      aiex.set_lock(%lock_go, %c1_go)
       aiex.npu.dma_memcpy_nd(%out[0, 0, 0, 0][1, 1, 1, 16][0, 0, 0, 1]) {id = 0 : i64, issue_token = true, metadata = @out} : memref<16xi32>
       aiex.npu.dma_wait {symbol = @out}
     }

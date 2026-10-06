@@ -30,7 +30,7 @@ def extract(module):
     for block in blocks:
         for op in block.operations:
             if op.name == "aie.dma_start":
-                ch = op.attributes["channel_index"].value
+                ch = op.attributes["channel"].value
                 direction = (
                     "S2MM" if op.attributes["channel_dir"].value == 0 else "MM2S"
                 )
