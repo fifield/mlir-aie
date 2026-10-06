@@ -79,8 +79,8 @@ uint32_t encodeAIE4MacConf(bool zeroAcc, AIE4AMode amode, AIE4BMode bmode,
 
 uint32_t encodeAIE4Bf16FpConf(bool zeroAcc, AIE4AMode amode, AIE4BMode bmode,
                               bool xIsBf16, bool yIsBf16) {
-  return encodeAIE4MulConf(zeroAcc, amode, bmode) |
-         (xIsBf16 ? 1u << 5 : 0u) | (yIsBf16 ? 1u << 6 : 0u);
+  return encodeAIE4MulConf(zeroAcc, amode, bmode) | (xIsBf16 ? 1u << 5 : 0u) |
+         (yIsBf16 ? 1u << 6 : 0u);
 }
 
 uint32_t encodeAIE4MmacIntConf(bool zeroAcc, AIE4MmacIntPrecision bmode,
@@ -141,9 +141,9 @@ llvm::Value *createAIE4FPOrderIntrinsicCall(
                    selector == AIE4VFCmpOpSel::Fp16Ge ||
                    selector == AIE4VFCmpOpSel::Fp32Lt ||
                    selector == AIE4VFCmpOpSel::Fp32Ge;
-  auto *helperResTy = isCompare
-                          ? llvm::cast<llvm::StructType>(resTy)->getElementType(1)
-                          : resTy;
+  auto *helperResTy =
+      isCompare ? llvm::cast<llvm::StructType>(resTy)->getElementType(1)
+                : resTy;
   auto operands = moduleTranslation.lookupValues(intrOp->getOperands());
   SmallVector<llvm::Type *> types;
   for (auto *operand : operands)
@@ -197,15 +197,14 @@ llvm::Value *createAIE4FPOrderIntrinsicCall(
   }
   llvm::Value *result = builder.CreateCall(helper, operands);
   if (isCompare)
-    result = builder.CreateInsertValue(llvm::PoisonValue::get(resTy), result, 1);
+    result =
+        builder.CreateInsertValue(llvm::PoisonValue::get(resTy), result, 1);
   return result;
 }
 
-llvm::CallInst *
-createAIE4SelIntrinsicCall(llvm::IRBuilderBase &builder,
-                           LLVM::ModuleTranslation &moduleTranslation,
-                           Operation *intrOp, llvm::StringRef intrinsicName,
-                           uint32_t sign) {
+llvm::CallInst *createAIE4SelIntrinsicCall(
+    llvm::IRBuilderBase &builder, LLVM::ModuleTranslation &moduleTranslation,
+    Operation *intrOp, llvm::StringRef intrinsicName, uint32_t sign) {
   assert(intrOp->getNumOperands() == 3 &&
          "AIE4 select intrinsic takes exactly (lhs, rhs, sel)");
   assert(intrOp->getNumResults() == 1 &&
@@ -216,9 +215,9 @@ createAIE4SelIntrinsicCall(llvm::IRBuilderBase &builder,
   auto operandVals = moduleTranslation.lookupValues(intrOp->getOperands());
   // The mask precedes fporder in the intrinsic signature.
   SmallVector<llvm::Value *> operands = {
-      operandVals[0],           operandVals[1],
-      builder.getInt32(sign),   builder.getInt32(2), // opsel = VSEL
-      operandVals[2],           builder.getInt32(0)  // fporder = 0
+      operandVals[0],         operandVals[1],
+      builder.getInt32(sign), builder.getInt32(2), // opsel = VSEL
+      operandVals[2],         builder.getInt32(0)  // fporder = 0
   };
 
   SmallVector<llvm::Type *> types;
@@ -237,3 +236,23 @@ createAIE4SelIntrinsicCall(llvm::IRBuilderBase &builder,
 
 #define GET_OP_CLASSES
 #include "aie/Dialect/XLLVM/IR/XLLVMOps.cpp.inc"
+
+// Keep matrix-state classification complete as operations are added.
+template <template <typename> class Trait, typename... Ops>
+static constexpr bool allHaveTrait() {
+  return (Ops::template hasTrait<Trait>() && ...);
+}
+static_assert(allHaveTrait<AIE4StagingWriter, InsertStagingBf16I1024AIE4IntrOp,
+                           InsertStagingIntI1024AIE4IntrOp,
+                           InsertStagingFp8I1024AIE4IntrOp>());
+static_assert(allHaveTrait<AIE4MatrixCommit, StagingToMatrixI32768AIE4IntrOp,
+                           StagingToMatrixI4I32768AIE4IntrOp,
+                           StagingToMatrixFP32768AIE4IntrOp>());
+static_assert(
+    allHaveTrait<AIE4MatrixReader, MmacBf16I512Acc2048AIE4IntrOp,
+                 MmacI512Acc2048AIE4IntrOp, MmacFp8I512Acc2048AIE4IntrOp,
+                 MmacI512Acc2048DynConfAIE4IntrOp>());
+static_assert(!GetSsAIE4IntrOp::hasTrait<AIE4StagingWriter>() &&
+              !GetSsAIE4IntrOp::hasTrait<AIE4MatrixCommit>() &&
+              !GetSsAIE4IntrOp::hasTrait<AIE4MatrixReader>() &&
+              !GetSsAIE4IntrOp::hasTrait<AIE4MatrixStateWriter>());

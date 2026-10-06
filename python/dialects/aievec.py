@@ -3,6 +3,7 @@
 
 # noinspection PyUnresolvedReferences
 from ._aievec_ops_gen import *
+from ._aievec_enum_gen import *
 
 from .._mlir_libs._aie import *
 from .._mlir_libs import get_dialect_registry

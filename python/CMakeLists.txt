@@ -168,6 +168,8 @@ declare_mlir_dialect_python_bindings(
   SOURCES
     dialects/aievec.py
   DIALECT_NAME aievec
+  GEN_ENUM_BINDINGS_TD_FILE
+    "dialects/AIEVecEnumBinding.td"
   DEPENDS
     aie-headers
 )

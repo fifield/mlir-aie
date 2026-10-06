@@ -1,0 +1,22 @@
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// B0/B1/B0 restaging must preserve all 96 inserts despite repeated B0 operands.
+// Int8 inserts read crIntMMode and must survive MachineCSE, both with and
+// without aiecc's staging-load workaround.
+//
+// REQUIRES: peano
+//
+// RUN: %python %S/Inputs/aie4_mmac_restage.py > %t.mlir
+// RUN: aie-translate %t.mlir -mlir-to-llvmir -o %t.ll
+// RUN: opt --passes='default<O1>' -inline-threshold=10 -S %t.ll -o %t.opt.ll
+// RUN: llc -O2 --mtriple=aie4 --mcpu=aie4b -aie4postlegalizercustomcombiner-disable-rule=combine_staging_upd_load --function-sections -stack-size-section -filetype=obj %t.opt.ll -o %t.o
+// RUN: llvm-objdump -d %t.o > %t.dis
+// RUN: grep -c "za\[" %t.dis | FileCheck %s --check-prefix=INSERTS
+// RUN: %python %S/Inputs/check_aie4_mmac_schedule.py %t.dis --function restage --mmacs-per-tile 1,1,1 | FileCheck %s --check-prefix=ORDER
+//
+// RUN: llc -O2 --mtriple=aie4 --mcpu=aie4b -filetype=obj %t.opt.ll -o %t.nowa.o
+// RUN: llvm-objdump -d %t.nowa.o | grep -c "za\[" | FileCheck %s --check-prefix=INSERTS
+//
+// INSERTS: {{^}}96{{$}}
+// ORDER: ORDER OK: 3 tiles, 96 inserts, 3 MMACs, no accumulator spills

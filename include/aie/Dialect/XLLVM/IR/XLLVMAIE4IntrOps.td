@@ -40,7 +40,7 @@ class AIEVec4_IntrOp<string mnemonic, list<Trait> traits = [],
 // we instead decompose it into typed, range-verified attributes, because MLIR
 // is the only layer in the stack where a bad field can be caught at all.
 //
-// Field layout defined by the ISA, restricted to the bits this op uses:
+// Configuration fields used by this operation:
 //
 //   bit    0   zero_acc   dynamically zero the accumulator before accumulating
 //   bits 2:1   amode      arithmetic mode (operand data type)
@@ -354,13 +354,41 @@ def I512V32Acc32SrsAIE4IntrOp
 
     Rounding and saturation depend on `crRnd` and `crSat`; this op does not
     establish or restore those modes. It reads the mode registers and writes
-    SRS overflow status.
+    SRS overflow status. Peano sets `crSRSMode` to zero before the SRS.
   }];
 
   let llvmBuilder = [{
     auto *inst = ::xilinx::xllvm::createAIE4ConfIntrinsicCall(builder,
                       moduleTranslation, &opInst,
                       "llvm.aie4.I512.v32.acc32.srs",
+                      ::llvm::ArrayRef<uint32_t>{
+                          (uint32_t) op.getShift(),
+                          (uint32_t) op.getSign()});
+    (void) inst;
+    $res = inst;
+  }];
+}
+
+def I512V64Acc32SrsAIE4IntrOp
+    : AIEVec4_IntrOp<
+          "I512.v64.acc32.srs",
+          [TypeIs<"res", FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>>]>,
+      Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [64], [I32]>:$acc,
+          ConfinedAttr<I32Attr, [IntMinValue<0>, IntMaxValue<59>]>:$shift,
+          AIE4_SRSSign:$sign)> {
+  let summary = "AIE4 shift-round-saturate i32 accumulator -> i8 (vsrs.4x)";
+  let description = [{
+    Narrows i32 lanes to i8. `shift` (0..59) and `sign` (unsigned=0,
+    signed=1) become trailing i32 arguments. Left shifts are not supported.
+
+    Reads `crRnd` and `crSat` without changing them and writes SRS overflow
+    status. Peano sets `crSRSMode` to zero before the SRS.
+  }];
+
+  let llvmBuilder = [{
+    auto *inst = ::xilinx::xllvm::createAIE4ConfIntrinsicCall(builder,
+                      moduleTranslation, &opInst,
+                      "llvm.aie4.I512.v64.acc32.srs",
                       ::llvm::ArrayRef<uint32_t>{
                           (uint32_t) op.getShift(),
                           (uint32_t) op.getSign()});
@@ -808,8 +836,7 @@ def AIE4_ShuffleMode
   let cppNamespace = "::xilinx::xllvm";
 }
 
-// The intrinsic is IntrNoMem and the ISA specifies no status/control
-// register use, so the operation is pure.
+// No memory or status/control register effects.
 def ShuffleAIE4IntrOp
     : AIEVec4_IntrOp<
           "vshuffle",
@@ -895,6 +922,52 @@ def InvAIE4IntrOp : AIEVec4_IntrOp<"inv", [TypeIs<"res", F32>]>,
 }
 
 //===----------------------------------------------------------------------===//
+// Stream reads
+//===----------------------------------------------------------------------===//
+
+def AIE4_GetSsKind_Generic : I32EnumAttrCase<"Generic", 0, "generic">;
+def AIE4_GetSsKind_Weight : I32EnumAttrCase<"Weight", 1, "weight">;
+def AIE4_GetSsKind_Activation : I32EnumAttrCase<"Activation", 2, "activation">;
+
+def AIE4_GetSsKind
+    : I32EnumAttr<"AIE4GetSsKind", "AIE4 1024-bit stream read kind",
+                  [AIE4_GetSsKind_Generic, AIE4_GetSsKind_Weight,
+                   AIE4_GetSsKind_Activation]> {
+  let cppNamespace = "::xilinx::xllvm";
+}
+
+// Match aie.get_stream's generic intrinsic signature to share its declaration.
+def GetSsAIE4IntrOp
+    : AIEVec4_IntrOp<
+          "get.ss",
+          [TypeIs<"res", FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>>]>,
+      Arguments<(ins I32:$port, AIE4_GetSsKind:$kind)> {
+  let summary = "AIE4 read 1024 bits from a stream port (vmovb y, ss)";
+  let description = [{
+    Pops one 1024-bit word from input stream `port`, blocking until available.
+    `kind` selects `get.ss`, `get.ss.weight` or `get.ss.activation`; all three
+    currently lower to `vmovb`. Consuming stream data is a side effect.
+  }];
+  let llvmBuilder = [{
+    ::llvm::StringRef name = "llvm.aie4.get.ss";
+    switch (op.getKind()) {
+    case ::xilinx::xllvm::AIE4GetSsKind::Generic:
+      break;
+    case ::xilinx::xllvm::AIE4GetSsKind::Weight:
+      name = "llvm.aie4.get.ss.weight";
+      break;
+    case ::xilinx::xllvm::AIE4GetSsKind::Activation:
+      name = "llvm.aie4.get.ss.activation";
+      break;
+    }
+    auto *inst = ::xilinx::xllvm::createExternalLLVMIntrinsicCall(builder,
+                      moduleTranslation, &opInst, name);
+    (void) inst;
+    $res = inst;
+  }];
+}
+
+//===----------------------------------------------------------------------===//
 // Dense matrix MAC (MMAC), staging and commit
 //===----------------------------------------------------------------------===//
 //
@@ -904,10 +977,18 @@ def InvAIE4IntrOp : AIEVec4_IntrOp<"inv", [TypeIs<"res", F32>]>,
 // The MLIR ops retain unknown effects to preserve execution and ordering
 // through generic MLIR transformations.
 
-// Every staging or active-matrix writer must carry this trait so that
-// matrix_region rejects operations that would clobber its resident tile.
-// Read-only MMACs omit it because region bodies are lowered in place.
+// See AIE4MatrixState.h for the shared trait contracts.
 def AIE4MatrixStateWriter : NativeOpTrait<"AIE4MatrixStateWriter"> {
+  let cppNamespace = "::xilinx::xllvm";
+}
+
+def AIE4StagingWriter : NativeOpTrait<"AIE4StagingWriter"> {
+  let cppNamespace = "::xilinx::xllvm";
+}
+def AIE4MatrixCommit : NativeOpTrait<"AIE4MatrixCommit"> {
+  let cppNamespace = "::xilinx::xllvm";
+}
+def AIE4MatrixReader : NativeOpTrait<"AIE4MatrixReader"> {
   let cppNamespace = "::xilinx::xllvm";
 }
 
@@ -962,7 +1043,8 @@ def AIE4_IntMMode
 def MmacBf16I512Acc2048AIE4IntrOp
     : AIEVec4_IntrOp<
           "bf16.I512.ACC2048.mmac",
-          [TypeIs<"res", FixedVectorOfRankAndLengthAndType<[1], [64], [F32]>>]>,
+          [AIE4MatrixReader,
+           TypeIs<"res", FixedVectorOfRankAndLengthAndType<[1], [64], [F32]>>]>,
       Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [64], [F32]>:$acc,
           FixedVectorOfRankAndLengthAndType<[1], [32], [BF16]>:$lhs,
           UnitAttr:$zeroAcc)> {
@@ -990,7 +1072,8 @@ def MmacBf16I512Acc2048AIE4IntrOp
 def MmacI512Acc2048AIE4IntrOp
     : AIEVec4_IntrOp<
           "I512.ACC2048.mmac",
-          [TypeIs<"res", FixedVectorOfRankAndLengthAndType<[1], [64], [I32]>>]>,
+          [AIE4MatrixReader,
+           TypeIs<"res", FixedVectorOfRankAndLengthAndType<[1], [64], [I32]>>]>,
       Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [64], [I32]>:$acc,
           FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>:$lhs,
           UnitAttr:$zeroAcc, AIE4_MmacIntPrecision:$bmode,
@@ -1013,6 +1096,30 @@ def MmacI512Acc2048AIE4IntrOp
   }];
 }
 
+def MmacI512Acc2048DynConfAIE4IntrOp
+    : AIEVec4_IntrOp<
+          "I512.ACC2048.mmac.dyn_conf",
+          [AIE4MatrixReader,
+           TypeIs<"res", FixedVectorOfRankAndLengthAndType<[1], [64], [I32]>>]>,
+      Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [64], [I32]>:$acc,
+          FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>:$lhs, I32:$conf)> {
+  let summary = "AIE4 dense integer matrix MAC with a dynamic conf word";
+  let description = [{
+    Uses the same intrinsic as `intr.aie4.I512.ACC2048.mmac`, with an unchecked
+    SSA `conf` operand for runtime choices such as zeroing the first K-tile.
+    Only int8x8/int4x4 configurations are supported: bit 0 zero_acc, bit 3
+    bmode, bit 8 zSign and bit 9 xSign; other bits must be zero.
+    See `encodeAIE4MmacIntConf` for constant configurations.
+  }];
+  let llvmBuilder = [{
+    auto *inst = ::xilinx::xllvm::createExternalLLVMIntrinsicCall(builder,
+                      moduleTranslation, &opInst,
+                      "llvm.aie4.I512.ACC2048.mmac");
+    (void) inst;
+    $res = inst;
+  }];
+}
+
 // llvm.aie4.fp8.I512.ACC2048.mmac
 //     <64 x float> (<64 x float> acc, <64 x i8> x, i32 conf)
 //
@@ -1020,7 +1127,8 @@ def MmacI512Acc2048AIE4IntrOp
 def MmacFp8I512Acc2048AIE4IntrOp
     : AIEVec4_IntrOp<
           "fp8.I512.ACC2048.mmac",
-          [TypeIs<"res", FixedVectorOfRankAndLengthAndType<[1], [64], [F32]>>]>,
+          [AIE4MatrixReader,
+           TypeIs<"res", FixedVectorOfRankAndLengthAndType<[1], [64], [F32]>>]>,
       Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [64], [F32]>:$acc,
           FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>:$lhs,
           UnitAttr:$zeroAcc, AIE4_MmacFp8EMode:$emode)> {
@@ -1050,7 +1158,8 @@ def MmacFp8I512Acc2048AIE4IntrOp
 //
 // bf16 staging fixes crIntMMode to 2 (int8/bf16 format, unsigned mode).
 def InsertStagingBf16I1024AIE4IntrOp
-    : AIEVec4_IntrOp<"insert.staging.bf16.I1024", [AIE4MatrixStateWriter],
+    : AIEVec4_IntrOp<"insert.staging.bf16.I1024",
+                     [AIE4MatrixStateWriter, AIE4StagingWriter],
                      /*numResults=*/0>,
       Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [64], [BF16]>:$src,
           I32:$index)> {
@@ -1071,7 +1180,8 @@ def InsertStagingBf16I1024AIE4IntrOp
 //     void (<128 x i8> src, i32 index, i32 mode)
 //
 def InsertStagingIntI1024AIE4IntrOp
-    : AIEVec4_IntrOp<"insert.staging.int.I1024", [AIE4MatrixStateWriter],
+    : AIEVec4_IntrOp<"insert.staging.int.I1024",
+                     [AIE4MatrixStateWriter, AIE4StagingWriter],
                      /*numResults=*/0>,
       Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [128], [I8]>:$src,
           I32:$index, AIE4_IntMMode:$mode)> {
@@ -1093,7 +1203,8 @@ def InsertStagingIntI1024AIE4IntrOp
 // llvm.aie4.insert.staging.fp8.I1024
 //     void (<128 x i8> src, i32 index)
 def InsertStagingFp8I1024AIE4IntrOp
-    : AIEVec4_IntrOp<"insert.staging.fp8.I1024", [AIE4MatrixStateWriter],
+    : AIEVec4_IntrOp<"insert.staging.fp8.I1024",
+                     [AIE4MatrixStateWriter, AIE4StagingWriter],
                      /*numResults=*/0>,
       Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [128], [I8]>:$src,
           I32:$index)> {
@@ -1115,7 +1226,8 @@ def InsertStagingFp8I1024AIE4IntrOp
 // Commit staging with I32768 for int8/bf16, I4.I32768 for int4, or
 // FP32768 for fp8.
 class AIE4StagingToMatrixIntrOp<string mnemonic, string asm>
-    : AIEVec4_IntrOp<mnemonic, [AIE4MatrixStateWriter], /*numResults=*/0> {
+    : AIEVec4_IntrOp<mnemonic, [AIE4MatrixStateWriter, AIE4MatrixCommit],
+                     /*numResults=*/0> {
   let summary = "AIE4 commit staging to the active matrix ("#asm#")";
   let description = [{
     Copies the whole staging matrix to the active matrix read by the MMACs.

@@ -122,9 +122,12 @@ def ShuffleMode
   let genSpecializedAttr = 0;
 }
 
+// See python/dialects/AIEVecEnumBinding.td for the Python binding exclusion.
+#ifndef AIEVEC_PYTHON_ENUM_BINDINGS
 def AIEVec_ShuffleModeAttr : EnumAttr<AIEVec_Dialect, ShuffleMode, "mode"> {
   let assemblyFormat = "`[` $value `]`";
 }
+#endif
 
 //===----------------------------------------------------------------------===//
 // AIE4 integer min/max/compare/select
@@ -132,26 +135,28 @@ def AIEVec_ShuffleModeAttr : EnumAttr<AIEVec_Dialect, ShuffleMode, "mode"> {
 
 def AIE4_MinMaxKind_Min : I32EnumAttrCase<"Min", 0, "min">;
 def AIE4_MinMaxKind_Max : I32EnumAttrCase<"Max", 1, "max">;
-def AIE4MinMaxKind : I32EnumAttr<"AIE4MinMaxKind",
-    "AIE4 native min/max selector", [AIE4_MinMaxKind_Min, AIE4_MinMaxKind_Max]> {
+def AIE4MinMaxKind
+    : I32EnumAttr<"AIE4MinMaxKind", "AIE4 native min/max selector",
+                  [AIE4_MinMaxKind_Min, AIE4_MinMaxKind_Max]> {
   let cppNamespace = "::xilinx::aievec";
   let genSpecializedAttr = 0;
 }
 
-def AIEVec_AIE4MinMaxKindAttr :
-    EnumAttr<AIEVec_Dialect, AIE4MinMaxKind, "aie4_minmax_kind">;
+def AIEVec_AIE4MinMaxKindAttr
+    : EnumAttr<AIEVec_Dialect, AIE4MinMaxKind, "aie4_minmax_kind">;
 
 def AIE4_CmpPredicate_Lt : I32EnumAttrCase<"Lt", 0, "lt">;
 def AIE4_CmpPredicate_Ge : I32EnumAttrCase<"Ge", 1, "ge">;
-def AIE4CmpPredicate : I32EnumAttr<"AIE4CmpPredicate",
-    "AIE4 native less-than or greater-or-equal predicate",
-    [AIE4_CmpPredicate_Lt, AIE4_CmpPredicate_Ge]> {
+def AIE4CmpPredicate
+    : I32EnumAttr<"AIE4CmpPredicate",
+                  "AIE4 native less-than or greater-or-equal predicate",
+                  [AIE4_CmpPredicate_Lt, AIE4_CmpPredicate_Ge]> {
   let cppNamespace = "::xilinx::aievec";
   let genSpecializedAttr = 0;
 }
 
-def AIEVec_AIE4CmpPredicateAttr :
-    EnumAttr<AIEVec_Dialect, AIE4CmpPredicate, "aie4_cmp_predicate">;
+def AIEVec_AIE4CmpPredicateAttr
+    : EnumAttr<AIEVec_Dialect, AIE4CmpPredicate, "aie4_cmp_predicate">;
 
 //===----------------------------------------------------------------------===//
 // AIE4 1024-bit vector reductions
@@ -160,15 +165,17 @@ def AIEVec_AIE4CmpPredicateAttr :
 def AIE4_ReduceKind_Add : I32EnumAttrCase<"Add", 0, "add">;
 def AIE4_ReduceKind_Min : I32EnumAttrCase<"Min", 1, "min">;
 def AIE4_ReduceKind_Max : I32EnumAttrCase<"Max", 2, "max">;
-def AIE4ReduceKind : I32EnumAttr<"AIE4ReduceKind",
-    "AIE4 native 1024-bit vector-to-scalar reduction kind",
-    [AIE4_ReduceKind_Add, AIE4_ReduceKind_Min, AIE4_ReduceKind_Max]> {
+def AIE4ReduceKind
+    : I32EnumAttr<"AIE4ReduceKind",
+                  "AIE4 native 1024-bit vector-to-scalar reduction kind",
+                  [AIE4_ReduceKind_Add, AIE4_ReduceKind_Min,
+                   AIE4_ReduceKind_Max]> {
   let cppNamespace = "::xilinx::aievec";
   let genSpecializedAttr = 0;
 }
 
-def AIEVec_AIE4ReduceKindAttr :
-    EnumAttr<AIEVec_Dialect, AIE4ReduceKind, "aie4_reduce_kind">;
+def AIEVec_AIE4ReduceKindAttr
+    : EnumAttr<AIEVec_Dialect, AIE4ReduceKind, "aie4_reduce_kind">;
 
 //===----------------------------------------------------------------------===//
 // AIE4 shuffle
@@ -180,25 +187,24 @@ def AIEVec_AIE4ReduceKindAttr :
 //
 // T32_4X4 and T8_8X8 transpose one 512-bit vector. T32_2X16_LO/HI
 // interleave the lower/upper eight lanes of two 16-lane vectors.
-def AIE4_ShuffleMode_T32_4X4 :
-    I32EnumAttrCase<"T32_4X4", 90, "t32_4x4">;
-def AIE4_ShuffleMode_T8_8X8 :
-    I32EnumAttrCase<"T8_8X8", 72, "t8_8x8">;
-def AIE4_ShuffleMode_T32_2X16_LO :
-    I32EnumAttrCase<"T32_2X16_LO", 66, "t32_2x16_lo">;
-def AIE4_ShuffleMode_T32_2X16_HI :
-    I32EnumAttrCase<"T32_2X16_HI", 67, "t32_2x16_hi">;
+def AIE4_ShuffleMode_T32_4X4 : I32EnumAttrCase<"T32_4X4", 90, "t32_4x4">;
+def AIE4_ShuffleMode_T8_8X8 : I32EnumAttrCase<"T8_8X8", 72, "t8_8x8">;
+def AIE4_ShuffleMode_T32_2X16_LO
+    : I32EnumAttrCase<"T32_2X16_LO", 66, "t32_2x16_lo">;
+def AIE4_ShuffleMode_T32_2X16_HI
+    : I32EnumAttrCase<"T32_2X16_HI", 67, "t32_2x16_hi">;
 
-def AIE4ShuffleMode : I32EnumAttr<"AIE4ShuffleMode",
-    "AIE4 vector shuffle/transpose mode",
-    [AIE4_ShuffleMode_T32_4X4, AIE4_ShuffleMode_T8_8X8,
-     AIE4_ShuffleMode_T32_2X16_LO, AIE4_ShuffleMode_T32_2X16_HI]> {
+def AIE4ShuffleMode
+    : I32EnumAttr<"AIE4ShuffleMode", "AIE4 vector shuffle/transpose mode",
+                  [AIE4_ShuffleMode_T32_4X4, AIE4_ShuffleMode_T8_8X8,
+                   AIE4_ShuffleMode_T32_2X16_LO,
+                   AIE4_ShuffleMode_T32_2X16_HI]> {
   let cppNamespace = "::xilinx::aievec";
   let genSpecializedAttr = 0;
 }
 
-def AIEVec_AIE4ShuffleModeAttr :
-    EnumAttr<AIEVec_Dialect, AIE4ShuffleMode, "aie4_shuffle_mode">;
+def AIEVec_AIE4ShuffleModeAttr
+    : EnumAttr<AIEVec_Dialect, AIE4ShuffleMode, "aie4_shuffle_mode">;
 
 //===----------------------------------------------------------------------===//
 // AIE4 dense matrix MAC formats
@@ -209,17 +215,17 @@ def AIEVec_AIE4ShuffleModeAttr :
 def AIE4_MatrixFormat_Bf16 : I32EnumAttrCase<"Bf16", 0, "bf16">;
 def AIE4_MatrixFormat_Int8 : I32EnumAttrCase<"Int8", 1, "int8">;
 def AIE4_MatrixFormat_Int4 : I32EnumAttrCase<"Int4", 2, "int4">;
-def AIE4_MatrixFormat_Fp8  : I32EnumAttrCase<"Fp8",  3, "fp8">;
-def AIE4MatrixFormat : I32EnumAttr<"AIE4MatrixFormat",
-    "AIE4 dense MMAC operand format",
-    [AIE4_MatrixFormat_Bf16, AIE4_MatrixFormat_Int8, AIE4_MatrixFormat_Int4,
-     AIE4_MatrixFormat_Fp8]> {
+def AIE4_MatrixFormat_Fp8 : I32EnumAttrCase<"Fp8", 3, "fp8">;
+def AIE4MatrixFormat
+    : I32EnumAttr<"AIE4MatrixFormat", "AIE4 dense MMAC operand format",
+                  [AIE4_MatrixFormat_Bf16, AIE4_MatrixFormat_Int8,
+                   AIE4_MatrixFormat_Int4, AIE4_MatrixFormat_Fp8]> {
   let cppNamespace = "::xilinx::aievec";
   let genSpecializedAttr = 0;
 }
 
-def AIEVec_AIE4MatrixFormatAttr :
-    EnumAttr<AIEVec_Dialect, AIE4MatrixFormat, "aie4_matrix_format"> {
+def AIEVec_AIE4MatrixFormatAttr
+    : EnumAttr<AIEVec_Dialect, AIE4MatrixFormat, "aie4_matrix_format"> {
   let assemblyFormat = "$value";
 }
 

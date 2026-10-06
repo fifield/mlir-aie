@@ -1,12 +1,11 @@
 /* Copyright (C) 2026 Advanced Micro Devices, Inc.
  * SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception */
 
-//===- AIE4MatrixState.h - AIE4 MMAC matrix-state op trait ---------C++ -*-===//
+//===- AIE4MatrixState.h - AIE4 MMAC matrix-state op traits --------C++ -*-===//
 //
-// The AIE4 matrix MAC reads B from hidden matrix registers (za staging, zb
-// active matrix). Operations that write that state carry the
-// `AIE4MatrixStateWriter` trait. AIEVec uses it to reject staging and commit
-// operations inside `aievec.aie4.matrix_region` without linking XLLVM.
+// Header-only traits let AIEVec classify matrix-state operations without
+// linking XLLVM. Staging writers and commits also carry AIE4MatrixStateWriter
+// so matrix_region can reject operations that clobber its resident tile.
 //
 //===----------------------------------------------------------------------===//
 
@@ -21,6 +20,21 @@ namespace xilinx::xllvm {
 template <typename ConcreteType>
 class AIE4MatrixStateWriter
     : public mlir::OpTrait::TraitBase<ConcreteType, AIE4MatrixStateWriter> {};
+
+/// Marks an operation that writes one or more za staging chunks.
+template <typename ConcreteType>
+class AIE4StagingWriter
+    : public mlir::OpTrait::TraitBase<ConcreteType, AIE4StagingWriter> {};
+
+/// Marks an operation that copies staging to the active matrix.
+template <typename ConcreteType>
+class AIE4MatrixCommit
+    : public mlir::OpTrait::TraitBase<ConcreteType, AIE4MatrixCommit> {};
+
+/// Marks an operation that reads the active matrix.
+template <typename ConcreteType>
+class AIE4MatrixReader
+    : public mlir::OpTrait::TraitBase<ConcreteType, AIE4MatrixReader> {};
 
 } // namespace xilinx::xllvm
 
