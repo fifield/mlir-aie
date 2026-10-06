@@ -15,7 +15,7 @@
 // RUN: %PEANO_INSTALL_DIR/bin/opt -S -mtriple=aie4 %t.shuffle.ll -o %t.shuffle.opt.ll
 // RUN: aie-translate %S/../Target/LLVMIR/aievec-aie4-mmac.mlir -mlir-to-llvmir -o %t.mmac.ll
 // RUN: %PEANO_INSTALL_DIR/bin/opt -S -mtriple=aie4 %t.mmac.ll -o %t.mmac.opt.ll
-// RUN: aie-translate %S/../Target/LLVMIR/aievec-aie4-getss-srs-dynconf.mlir -mlir-to-llvmir -split-input-file -o %t.stream.ll
+// RUN: aie-translate %S/../Target/LLVMIR/aievec-aie4-getss-srs-dynconf.mlir -mlir-to-llvmir -o %t.stream.ll
 // RUN: %PEANO_INSTALL_DIR/bin/opt -S -mtriple=aie4 %t.stream.ll -o %t.stream.opt.ll
 // RUN: %python %S/check_xllvm_coverage.py \
 // RUN:     %aie_obj_root/include/aie/Dialect/XLLVM/IR/XLLVMConversions.inc \
