@@ -37,6 +37,25 @@ using namespace xilinx::AIE;
 
 namespace {
 
+// DMA engine selectors and stream-switch bundles are different namespaces.
+// Invert the target's mapping instead of treating equal channel indices as
+// the same endpoint (data, control and trace each have a channel zero).
+std::optional<TileDMAChannel> dmaChannelAt(const AIETargetModel &model,
+                                           const StreamEndpoint &endpoint,
+                                           bool sending) {
+  for (DMAChannelDir direction :
+       {DMAChannelDir::MM2S, DMAChannelDir::S2MM, DMAChannelDir::ControlMM2S,
+        DMAChannelDir::TraceS2MM}) {
+    if (isMM2S(direction) != sending)
+      continue;
+    auto port =
+        model.getDmaStreamPort(endpoint.tile, direction, endpoint.port.channel);
+    if (port && *port == endpoint.port)
+      return TileDMAChannel{endpoint.tile, direction, endpoint.port.channel};
+  }
+  return std::nullopt;
+}
+
 std::optional<TileID> tileOf(Value tile) {
   if (auto tileOp = dyn_cast_or_null<TileOp>(tile.getDefiningOp()))
     return tileOp.getTileID();
@@ -222,7 +241,7 @@ void walkLoopsTwice(Region &region, function_ref<void(Operation *)> fn) {
 std::map<TileDMAChannel, std::set<int>> collectSentPacketIDs(DeviceOp device) {
   std::map<TileDMAChannel, std::set<int>> ids;
   for (const DmaChannelProgram &p : collectDmaPrograms(device)) {
-    if (p.dma.dir != DMAChannelDir::MM2S)
+    if (!isMM2S(p.dma.dir))
       continue;
     forEachInProgram<DMABDOp>(p, [&](DMABDOp bd) {
       if (std::optional<PacketInfoAttr> packet = bd.getPacket())
@@ -251,7 +270,8 @@ std::map<TileDMAChannel, std::set<int>> collectSentPacketIDs(DeviceOp device) {
 class StreamTracer {
 public:
   explicit StreamTracer(DeviceOp device)
-      : maxPacketID(getTargetModel(device).getMaxPacketId()) {
+      : targetModel(getTargetModel(device)),
+        maxPacketID(targetModel.getMaxPacketId()) {
     for (auto sb : device.getOps<SwitchboxOp>())
       switchboxes[sb.getTileOp().getTileID()] = sb;
     for (auto mux : device.getOps<ShimMuxOp>())
@@ -266,7 +286,10 @@ public:
           traceFrom({tile, p}, mux, p);
     for (auto &[tile, sb] : switchboxes)
       for (Port p : inputPorts(sb.getConnections()))
-        if (!isDirectional(p.bundle))
+        // Bidirectional fabric bundles (including width bridges) have an
+        // outgoing wire as well. SouthControl is the input-only exception.
+        // Neither kind is a stream source at the edge of the fabric.
+        if (p.bundle != WireBundle::SouthControl && !getLinkedInput(tile, p))
           traceFrom({tile, p}, sb, p);
     return std::move(streams);
   }
@@ -292,19 +315,20 @@ private:
   }
 
   void traceFrom(StreamEndpoint src, Interconnect interconnect, Port input) {
+    // Circuit switches preserve any header the producer sends. Packet master
+    // ports may strip it; carry that decision through later circuit hops.
     std::optional<std::set<int>> ids;
-    // A tile sends from its MM2S channel on the port of the same number.
-    if (src.port.bundle == WireBundle::DMA) {
-      auto it = sentIDs.find({src.tile, DMAChannelDir::MM2S, src.port.channel});
+    if (auto dma = dmaChannelAt(targetModel, src, /*sending=*/true)) {
+      auto it = sentIDs.find(*dma);
       if (it != sentIDs.end())
         ids = it->second;
     }
     if (!ids) {
-      step(src, {interconnect, input}, std::nullopt);
+      step(src, {interconnect, input}, std::nullopt, true);
       return;
     }
     for (int id : *ids)
-      step(src, {interconnect, input}, id);
+      step(src, {interconnect, input}, id, true);
   }
 
   // The switchbox input a master port of `from` drives, or the tile port it
@@ -317,39 +341,21 @@ private:
           return Hop{sb->second, {WireBundle::South, out.channel}};
       return StreamEndpoint{here, out};
     }
-    if (!isDirectional(out.bundle))
-      return StreamEndpoint{here, out};
-    if (out.bundle == WireBundle::South)
+    // AIE4 shim endpoints connect directly to their switchbox. Only legacy
+    // shims lower DMA/PLIO through a South-facing shim mux.
+    if (!isa<AIE4TargetModel>(targetModel) && out.bundle == WireBundle::South)
       if (auto mux = shimMuxes.find(here); mux != shimMuxes.end())
         return Hop{mux->second, {WireBundle::North, out.channel}};
-    TileID next = here;
-    WireBundle in = WireBundle::South;
-    switch (out.bundle) {
-    case WireBundle::North:
-      next.row++;
-      in = WireBundle::South;
-      break;
-    case WireBundle::South:
-      next.row--;
-      in = WireBundle::North;
-      break;
-    case WireBundle::East:
-      next.col++;
-      in = WireBundle::West;
-      break;
-    default:
-      next.col--;
-      in = WireBundle::East;
-      break;
-    }
-    if (auto sb = switchboxes.find(next); sb != switchboxes.end())
-      return Hop{sb->second, {in, out.channel}};
+    if (auto next = getLinkedInput(here, out))
+      if (auto sb = switchboxes.find(next->first); sb != switchboxes.end())
+        return Hop{sb->second, next->second};
     return StreamEndpoint{here, out};
   }
 
   // Follows the stream `src` sends with `id` on from `hop`, along every
   // branch that does not come back to an input it already took.
-  void step(StreamEndpoint src, Hop hop, std::optional<int> id) {
+  void step(StreamEndpoint src, Hop hop, std::optional<int> id,
+            bool headerPresent) {
     std::pair<Operation *, Port> input{hop.interconnect, hop.input};
     if (!onPath.insert(input).second)
       return;
@@ -358,7 +364,7 @@ private:
     Block &b = hop.interconnect.getConnections().front();
 
     auto next = [&](Port out, std::optional<int> nextID,
-                    std::optional<int> arbiter, bool keepsPktHeader = false) {
+                    std::optional<int> arbiter, bool keepsPktHeader) {
       if (sb)
         path.push_back({sb.getTileOp().getTileID(), hop.input, arbiter});
       llvm::scope_exit backtrack([&] {
@@ -369,12 +375,12 @@ private:
       if (auto *endpoint = std::get_if<StreamEndpoint>(&to))
         streams.push_back({src, *endpoint, nextID, keepsPktHeader, path});
       else
-        step(src, std::get<Hop>(to), nextID);
+        step(src, std::get<Hop>(to), nextID, keepsPktHeader);
     };
 
     for (auto connect : b.getOps<ConnectOp>())
       if (connect.sourcePort() == hop.input)
-        next(connect.destPort(), id, std::nullopt);
+        next(connect.destPort(), id, std::nullopt, headerPresent);
 
     for (auto rules : b.getOps<PacketRulesOp>()) {
       if (rules.sourcePort() != hop.input)
@@ -399,6 +405,7 @@ private:
     }
   }
 
+  const AIETargetModel &targetModel;
   std::map<TileID, SwitchboxOp> switchboxes;
   std::map<TileID, ShimMuxOp> shimMuxes;
   std::map<TileDMAChannel, std::set<int>> sentIDs;
@@ -425,7 +432,8 @@ std::vector<RoutedStream> AIE::requestedStreams(DeviceOp device) {
       streams.push_back(
           {{*srcTile, {flow.getSourceBundle(), flow.sourceIndex()}},
            {*dstTile, {flow.getDestBundle(), flow.destIndex()}},
-           std::nullopt});
+           std::nullopt,
+           /*keepsPktHeader=*/true});
   }
   // The router writes one keep_pkt_header per destination port, the last
   // packet flow's into it.
@@ -510,10 +518,9 @@ constexpr int maxBDSteps = 1024;
 
 std::optional<uint64_t>
 StreamVolumeAnalysis::sendVolume(const RoutedStream &stream) const {
-  if (stream.src.port.bundle != WireBundle::DMA)
+  auto dma = dmaChannelAt(getTargetModel(device), stream.src, /*sending=*/true);
+  if (!dma)
     return std::nullopt;
-  TileDMAChannel dma{stream.src.tile, DMAChannelDir::MM2S,
-                     stream.src.port.channel};
   constexpr uint64_t pktHeaderBytes = 4;
   auto headerBytes = [&](std::optional<PacketInfoAttr> packet) -> uint64_t {
     return packet && stream.keepsPktHeader ? pktHeaderBytes : 0;
@@ -525,7 +532,7 @@ StreamVolumeAnalysis::sendVolume(const RoutedStream &stream) const {
   };
   bool known = false;
   uint64_t total = 0;
-  if (auto it = programs.find(dma); it != programs.end()) {
+  if (auto it = programs.find(*dma); it != programs.end()) {
     for (const DmaChannelProgram &p : it->second) {
       bool carried = false;
       uint64_t bytes = 0;
@@ -569,7 +576,7 @@ StreamVolumeAnalysis::sendVolume(const RoutedStream &stream) const {
       total += bytes * runs;
     }
   }
-  if (auto it = memcpys.find(dma); it != memcpys.end()) {
+  if (auto it = memcpys.find(*dma); it != memcpys.end()) {
     for (Operation *op : it->second) {
       auto memcpy = cast<AIEX::NpuDmaMemcpyNdOp>(op);
       std::optional<PacketInfoAttr> packet = memcpy.getPacket();
@@ -705,13 +712,12 @@ StreamVolumeAnalysis::maySendAfter(const RoutedStream &first,
       ((*first.packetID ^ *then.packetID) & first.packetMask &
        then.packetMask) == 0)
     return true;
-  if (first.src.port.bundle != WireBundle::DMA)
+  auto dma = dmaChannelAt(getTargetModel(device), first.src, /*sending=*/true);
+  if (!dma)
     return std::nullopt;
-  TileDMAChannel dma{first.src.tile, DMAChannelDir::MM2S,
-                     first.src.port.channel};
-  auto it = programs.find(dma);
+  auto it = programs.find(*dma);
   if (it == programs.end() || it->second.size() != 1 ||
-      !isa<DMAStartOp, DMAOp>(it->second.front().op) || memcpys.count(dma))
+      !isa<DMAStartOp, DMAOp>(it->second.front().op) || memcpys.count(*dma))
     return std::nullopt;
   const DmaChannelProgram &p = it->second.front();
   bool sent = false, after = false;
@@ -751,9 +757,13 @@ StreamVolumeAnalysis::releasesOver(const DmaChannelProgram &p,
     return perPass * p.passes;
   }
   // A looping receiver finishes only the BDs what it is sent fills.
-  if (p.dma.dir != DMAChannelDir::S2MM || sequence.empty())
+  if (!isS2MM(p.dma.dir) || sequence.empty())
     return std::nullopt;
-  StreamEndpoint endpoint{p.dma.tile, {WireBundle::DMA, p.dma.channel}};
+  auto port = getTargetModel(device).getDmaStreamPort(p.dma.tile, p.dma.dir,
+                                                      p.dma.channel);
+  if (!port)
+    return std::nullopt;
+  StreamEndpoint endpoint{p.dma.tile, *port};
   uint64_t received = 0;
   for (const RoutedStream &s : streams) {
     if (s.dst != endpoint)
@@ -853,10 +863,10 @@ static std::optional<uint64_t> programCapacity(const DmaChannelProgram &p,
 
 std::optional<uint64_t>
 StreamVolumeAnalysis::receiveCapacity(const StreamEndpoint &endpoint) const {
-  if (endpoint.port.bundle != WireBundle::DMA)
+  auto dma = dmaChannelAt(getTargetModel(device), endpoint, /*sending=*/false);
+  if (!dma)
     return 0;
-  auto it = programs.find(
-      {endpoint.tile, DMAChannelDir::S2MM, endpoint.port.channel});
+  auto it = programs.find(*dma);
   if (it == programs.end())
     return 0;
   std::optional<uint64_t> capacity;
@@ -885,12 +895,13 @@ bool StreamVolumeAnalysis::canFill(const StreamEndpoint &endpoint,
 
 StreamWaitGraph::StreamWaitGraph(DeviceOp device,
                                  ArrayRef<RoutedStream> streams,
-                                 const StreamVolumeAnalysis &volumes) {
+                                 const StreamVolumeAnalysis &volumes)
+    : targetModel(getTargetModel(device)) {
   std::set<TileDMAChannel> neverFull;
   for (const RoutedStream &s : streams)
-    if (s.dst.port.bundle == WireBundle::DMA &&
-        !volumes.canFill(s.dst, streams))
-      neverFull.insert({s.dst.tile, DMAChannelDir::S2MM, s.dst.port.channel});
+    if (auto dma = dmaChannelAt(targetModel, s.dst, /*sending=*/false))
+      if (!volumes.canFill(s.dst, streams))
+        neverFull.insert(*dma);
   auto waitsOnLocks = [&](unsigned agent) {
     const Agent &a = agents[agent];
     return a.kind == Agent::Kind::Core || !neverFull.count(a.dma);
@@ -935,9 +946,9 @@ StreamWaitGraph::StreamWaitGraph(DeviceOp device,
 
   for (const RoutedStream &s : streams) {
     std::optional<unsigned> from, to;
-    if (std::optional<Agent> agent = Agent::at(s.src, true))
+    if (std::optional<Agent> agent = Agent::at(targetModel, s.src, true))
       from = getOrCreate(*agent);
-    if (std::optional<Agent> agent = Agent::at(s.dst, false))
+    if (std::optional<Agent> agent = Agent::at(targetModel, s.dst, false))
       to = getOrCreate(*agent);
     if (!from || !to || *from == *to)
       continue;
@@ -992,11 +1003,14 @@ StreamWaitGraph::StreamWaitGraph(DeviceOp device,
                                rows = getConstantIntValue(sync.getRowNum());
         if (!col || !row || !dir || !channel || !cols || !rows)
           return SmallVector<TileDMAChannel>{};
+        auto direction = symbolizeDMAChannelDir(static_cast<uint32_t>(*dir));
+        if (!direction)
+          return SmallVector<TileDMAChannel>{};
         SmallVector<TileDMAChannel> keys;
         for (int64_t c = *col; c < *col + *cols; c++)
           for (int64_t r = *row; r < *row + *rows; r++)
             keys.push_back({{static_cast<int>(c), static_cast<int>(r)},
-                            *dir ? DMAChannelDir::MM2S : DMAChannelDir::S2MM,
+                            *direction,
                             static_cast<int>(*channel)});
         return keys;
       }
@@ -1045,7 +1059,6 @@ StreamWaitGraph::StreamWaitGraph(DeviceOp device,
   // A channel nothing programs here is programmed elsewhere, in ways this
   // cannot see, so it may wait on anything else on its tile. One on a shim
   // tile is driven by the host, which may wait on any other shim tile first.
-  const AIETargetModel &targetModel = getTargetModel(device);
   for (Agent &a : agents)
     a.onShim = a.kind == Agent::Kind::Channel &&
                targetModel.isShimNOCorPLTile(a.dma.tile.col, a.dma.tile.row);
@@ -1075,17 +1088,18 @@ StreamWaitGraph::StreamWaitGraph(DeviceOp device,
 }
 
 std::optional<StreamWaitGraph::Agent>
-StreamWaitGraph::Agent::at(const StreamEndpoint &endpoint, bool sending) {
+StreamWaitGraph::Agent::at(const AIETargetModel &targetModel,
+                           const StreamEndpoint &endpoint, bool sending) {
   if (endpoint.port.bundle == WireBundle::Core)
     return core(endpoint.tile);
-  if (endpoint.port.bundle == WireBundle::TileControl && sending)
+  if (sending && (endpoint.port.bundle == WireBundle::TileControl ||
+                  endpoint.port.bundle == WireBundle::Control32))
     return controller(endpoint.tile);
-  if (endpoint.port.bundle == WireBundle::DMA)
-    return channel({endpoint.tile,
-                    sending ? DMAChannelDir::MM2S : DMAChannelDir::S2MM,
-                    endpoint.port.channel});
-  // Other ports (PLIO, NOC, a receiving TileControl) are taken to always
-  // drain, so the streams into them never block.
+  if (auto dma = dmaChannelAt(targetModel, endpoint, sending))
+    return channel(*dma);
+  // Controller32 consumes task-complete responses independently of a DMA
+  // program; it is a protocol sink, not a data or trace DMA channel. Like
+  // PLIO, NOC and a receiving TileControl, it is taken to always drain.
   return std::nullopt;
 }
 
@@ -1120,7 +1134,7 @@ void StreamWaitGraph::addEdge(unsigned from, unsigned to, EdgeKind kind,
 
 std::optional<unsigned> StreamWaitGraph::agentAt(const StreamEndpoint &endpoint,
                                                  bool sending) const {
-  if (std::optional<Agent> agent = Agent::at(endpoint, sending))
+  if (std::optional<Agent> agent = Agent::at(targetModel, endpoint, sending))
     return lookup(*agent);
   return std::nullopt;
 }

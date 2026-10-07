@@ -799,7 +799,6 @@ LogicalResult xilinx::AIE::AIERTControl::initBuffers(DeviceOp &targetOp) {
 // them again.
 LogicalResult
 xilinx::AIE::AIERTControl::disableOtherDeviceSwitches(DeviceOp &targetOp) {
-  AIEDialect::IsCtrlPktOverlayAttrHelper overlay(targetOp.getContext());
   auto moduleOp = targetOp->getParentOfType<ModuleOp>();
   if (!moduleOp)
     return success();
@@ -812,7 +811,7 @@ xilinx::AIE::AIERTControl::disableOtherDeviceSwitches(DeviceOp &targetOp) {
       XAie_LocType tileLoc = XAie_TileLoc(col, row);
       Block &b = switchboxOp.getConnections().front();
       for (auto connectOp : b.getOps<ConnectOp>()) {
-        if (overlay.isAttrPresent(connectOp))
+        if (isControlPacketOverlay(connectOp))
           continue;
         TxnLocBracket bracket(*this, connectOp.getLoc());
         TRY_XAIE_API_EMIT_ERROR(
@@ -823,7 +822,7 @@ xilinx::AIE::AIERTControl::disableOtherDeviceSwitches(DeviceOp &targetOp) {
             connectOp.destIndex());
       }
       for (auto masterSetOp : b.getOps<MasterSetOp>()) {
-        if (overlay.isAttrPresent(masterSetOp))
+        if (isControlPacketOverlay(masterSetOp))
           continue;
         TxnLocBracket bracket(*this, masterSetOp.getLoc());
         TRY_XAIE_API_EMIT_ERROR(
@@ -833,18 +832,18 @@ xilinx::AIE::AIERTControl::disableOtherDeviceSwitches(DeviceOp &targetOp) {
             masterSetOp.destIndex());
       }
       for (auto packetRulesOp : b.getOps<PacketRulesOp>()) {
-        if (overlay.isAttrPresent(packetRulesOp))
+        if (isControlPacketOverlay(packetRulesOp))
           continue;
         TxnLocBracket bracket(*this, packetRulesOp.getLoc());
         auto rules = packetRulesOp.getRules().front().getOps<PacketRuleOp>();
         if (llvm::any_of(rules, [&](PacketRuleOp rule) {
-              return overlay.isAttrPresent(rule);
+              return isControlPacketOverlay(rule);
             })) {
           // A shared slave stays enabled for the installed overlay. Retire
           // only application slots, keeping every rule's physical slot index.
           int slot = 0;
           for (PacketRuleOp rule : rules) {
-            if (!overlay.isAttrPresent(rule))
+            if (!isControlPacketOverlay(rule))
               TRY_XAIE_API_EMIT_ERROR(rule, XAie_StrmPktSwSlaveSlotDisable,
                                       &aiert->devInst, tileLoc,
                                       WIRE_BUNDLE_TO_STRM_SW_PORT_TYPE.at(
@@ -868,7 +867,6 @@ xilinx::AIE::AIERTControl::disableOtherDeviceSwitches(DeviceOp &targetOp) {
 LogicalResult
 xilinx::AIE::AIERTControl::configureSwitches(DeviceOp &targetOp,
                                              bool skipCtrlPktOverlay) {
-  AIEDialect::IsCtrlPktOverlayAttrHelper overlay(targetOp.getContext());
   if (isa<AIE4TargetModel>(targetModel) &&
       failed(disableOtherDeviceSwitches(targetOp)))
     return failure();
@@ -883,7 +881,7 @@ xilinx::AIE::AIERTControl::configureSwitches(DeviceOp &targetOp,
 
     Block &b = switchboxOp.getConnections().front();
     for (auto connectOp : b.getOps<ConnectOp>()) {
-      if (skipCtrlPktOverlay && overlay.isAttrPresent(connectOp))
+      if (skipCtrlPktOverlay && isControlPacketOverlay(connectOp))
         continue;
       TxnLocBracket bracket(*this, connectOp.getLoc());
       TRY_XAIE_API_EMIT_ERROR(
@@ -895,7 +893,7 @@ xilinx::AIE::AIERTControl::configureSwitches(DeviceOp &targetOp,
     }
 
     for (auto masterSetOp : b.getOps<MasterSetOp>()) {
-      if (skipCtrlPktOverlay && overlay.isAttrPresent(masterSetOp))
+      if (skipCtrlPktOverlay && isControlPacketOverlay(masterSetOp))
         continue;
       TxnLocBracket bracket(*this, masterSetOp.getLoc());
       int mask = 0;
@@ -920,7 +918,7 @@ xilinx::AIE::AIERTControl::configureSwitches(DeviceOp &targetOp,
     }
 
     for (auto packetRulesOp : b.getOps<PacketRulesOp>()) {
-      if (skipCtrlPktOverlay && overlay.isAttrPresent(packetRulesOp))
+      if (skipCtrlPktOverlay && isControlPacketOverlay(packetRulesOp))
         continue;
       TxnLocBracket bracket(*this, packetRulesOp.getLoc());
       int slot = 0;
@@ -930,10 +928,10 @@ xilinx::AIE::AIERTControl::configureSwitches(DeviceOp &targetOp,
       bool overlayPort =
           skipCtrlPktOverlay &&
           llvm::any_of(block.getOps<PacketRuleOp>(), [&](PacketRuleOp rule) {
-            return overlay.isAttrPresent(rule);
+            return isControlPacketOverlay(rule);
           });
       for (auto slotOp : block.getOps<PacketRuleOp>()) {
-        if (skipCtrlPktOverlay && overlay.isAttrPresent(slotOp)) {
+        if (skipCtrlPktOverlay && isControlPacketOverlay(slotOp)) {
           slot++;
           continue;
         }

@@ -118,12 +118,12 @@ module {
 // CHECK: aie.masterset(North : [[UP]], %[[UP_AMSEL:[a-zA-Z0-9_]+]])
 // CHECK: aie.masterset(Switch32 : [[BR:[0-9]+]], %[[BR_AMSEL:[a-zA-Z0-9_]+]])
 // CHECK: aie.masterset(Controller32 : 0, %[[DEST_AMSEL:[a-zA-Z0-9_]+]])
+// CHECK: aie.packet_rules(Switch512 : [[BR]]) {
+// CHECK-NEXT: aie.rule(31, 3, %[[DEST_AMSEL]])
 // CHECK: aie.packet_rules(North : [[DOWN]]) {
 // CHECK-NEXT: aie.rule(31, 3, %[[BR_AMSEL]])
 // CHECK-NEXT: aie.rule(31, 1, %[[UP_AMSEL]])
 // CHECK-NEXT: aie.rule(31, 2, %[[UP_AMSEL]])
-// CHECK: aie.packet_rules(Switch512 : [[BR]]) {
-// CHECK-NEXT: aie.rule(31, 3, %[[DEST_AMSEL]])
 
 module {
   aie.device(npu3_1col) {

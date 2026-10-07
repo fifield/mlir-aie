@@ -127,9 +127,9 @@ struct HoldCycle {
 };
 
 /// Follows every stream from its source tile port through the configured
-/// switchboxes, using tile geometry for the links between them. A packet
-/// stream is traced once per id its source sends, as read off the BDs and
-/// runtime transfers that program the source; with none known, once per
+/// switchboxes, following physical links including same-tile width bridges.
+/// A packet stream is traced once per id its source sends, as read off the BDs
+/// and runtime transfers that program the source; with none known, once per
 /// rule of the first switchbox it enters.
 std::vector<RoutedStream> traceRoutedStreams(DeviceOp device);
 
@@ -201,15 +201,15 @@ private:
 
 /// Which agent waits on which. An agent is a core, one DMA channel, or the
 /// controller of a tile, which sends the task-complete tokens the host waits
-/// for on its TileControl port. P waits on Q when P acquires a lock Q
-/// releases, when P sends a stream Q receives or the reverse, or when P is a
-/// runtime-issued channel the host issues only after waiting on Q. Waiting on
-/// a channel waits on the controllers of its column too, whose tokens tell
-/// the host it is done. A channel with no program in the design may wait on
-/// anything on its tile. A receiving channel that takes in all it is sent
-/// before its locks run out waits on no lock. Program order within an agent
-/// is not modeled. A DMA receiver taking one sender's data waits on none of
-/// its other DMA senders: a DMA channel sends a packet whole once it starts,
+/// for on its TileControl (AIE2) or Control32 (AIE4) port. P waits on Q when P
+/// acquires a lock Q releases, when P sends a stream Q receives or the reverse,
+/// or when P is a runtime-issued channel the host issues only after waiting on
+/// Q. Waiting on a channel waits on the controllers of its column too, whose
+/// tokens tell the host it is done. A channel with no program in the design may
+/// wait on anything on its tile. A receiving channel that takes in all it is
+/// sent before its locks run out waits on no lock. Program order within an
+/// agent is not modeled. A DMA receiver taking one sender's data waits on none
+/// of its other DMA senders: a DMA channel sends a packet whole once it starts,
 /// so it never holds the receiver while waiting on anything. A core can pause
 /// one input while waiting on another.
 class StreamWaitGraph {
@@ -231,7 +231,8 @@ public:
     static Agent channel(const TileDMAChannel &dma) { return {dma}; }
     /// Each agent at a stream endpoint: the core, DMA channel or controller
     /// pushing data into (`sending`) or pulling data out of the fabric there.
-    static std::optional<Agent> at(const StreamEndpoint &endpoint,
+    static std::optional<Agent> at(const AIETargetModel &targetModel,
+                                   const StreamEndpoint &endpoint,
                                    bool sending);
   };
 
@@ -278,6 +279,7 @@ private:
   void addEdge(unsigned from, unsigned to, EdgeKind kind, bool sends = false,
                bool receives = false);
 
+  const AIETargetModel &targetModel;
   std::vector<Agent> agents;
   std::vector<llvm::SmallVector<Edge, 4>> edges;
   std::map<std::pair<Agent::Kind, TileDMAChannel>, unsigned> agentIDs;

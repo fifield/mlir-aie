@@ -262,6 +262,11 @@ WireBundle getConnectingBundle(WireBundle dir);
 /// geometry, not device bounds or port availability, which callers validate.
 std::optional<std::pair<TileID, Port>> getLinkedInput(TileID tile, Port output);
 
+/// Read current and legacy Medusa overlay markers. Emitters use the canonical
+/// namespaced UnitAttr; old IR used an unqualified presence marker.
+bool isControlPacketOverlay(mlir::Operation *op);
+
+
 #define GENERATE_TO_STRING(TYPE_WITH_INSERTION_OP)                             \
   friend std::string to_string(const TYPE_WITH_INSERTION_OP &s) {              \
     std::ostringstream ss;                                                     \

@@ -574,7 +574,6 @@ static void emitFlows(OpBuilder &rewriter, Location loc, Value srcTile,
                       const std::vector<PacketConnection> &endpoints,
                       bool emitVias, bool dropIntraTile, int idMask,
                       FlowKeySet &seen, LiftedOps &lifted) {
-  AIEDialect::IsCtrlPktOverlayAttrHelper overlay(rewriter.getContext());
   AIEDialect::PriorityRouteAttrHelper prioritizedRule(rewriter.getContext());
   for (const PacketConnection &c : endpoints) {
     Operation *destOp = c.portConnection.op;
@@ -589,9 +588,9 @@ static void emitFlows(OpBuilder &rewriter, Location loc, Value srcTile,
       Operation *rulesParent =
           isa_and_nonnull<PacketRuleOp>(op) ? op->getParentOp() : nullptr;
       return lifted.fixed.contains(op) ||
-             (op && overlay.isAttrPresent(op) &&
+             (op && isControlPacketOverlay(op) &&
               !(isa<ConnectOp>(op) && isa<ShimMuxOp>(op->getParentOp()))) ||
-             (rulesParent && overlay.isAttrPresent(rulesParent));
+             (rulesParent && isControlPacketOverlay(rulesParent));
     });
     if (marked) {
       for (Operation *op : c.usedOps) {
@@ -888,10 +887,16 @@ static void findFlowsFrom(TileOp op, ConnectivityAnalysis &analysis,
 
   std::vector bundles = {WireBundle::Core, WireBundle::DMA};
   for (WireBundle bundle : bundles) {
-    LLVM_DEBUG(llvm::dbgs()
-               << op << stringifyWireBundle(bundle) << " has "
-               << op.getNumSourceConnections(bundle) << " Connections\n");
-    for (size_t i = 0; i < op.getNumSourceConnections(bundle); i++) {
+    const AIETargetModel &targetModel = getTargetModel(op);
+    // AIE4 DMA engines attach directly to switch inputs. Their source counts
+    // differ from the switch outputs feeding the tile's receive engines.
+    size_t sources = isa<AIE4TargetModel>(targetModel)
+                         ? targetModel.getNumSourceSwitchboxConnections(
+                               op.getCol(), op.getRow(), bundle)
+                         : op.getNumSourceConnections(bundle);
+    LLVM_DEBUG(llvm::dbgs() << op << stringifyWireBundle(bundle) << " has "
+                            << sources << " Connections\n");
+    for (size_t i = 0; i < sources; i++) {
       Port port = {bundle, (int)i};
       std::vector<PacketConnection> tiles = exactPacketEndpoints(
           analysis.getConnectedTiles(op, port, keepPartialFlows), idMask,
@@ -947,6 +952,7 @@ static void findFlowsFromInterconnect(Operation *switchOp,
 
   for (Port p : sourcePorts) {
     Value srcTile;
+    bool isFabricEntry = true;
     WireBundle srcBundle = p.bundle;
     int srcChannel = p.channel;
     if (auto up = analysis.upstreamOf(switchOp, p)) {
@@ -960,6 +966,7 @@ static void findFlowsFromInterconnect(Operation *switchOp,
           continue;
         }
         srcTile = resolveEndpointTile(upOp);
+        isFabricEntry = false;
         srcBundle = upPort.bundle;
         srcChannel = upPort.channel;
       } else if (analysis.drivesPort(upOp, upPort)) {
@@ -985,7 +992,7 @@ static void findFlowsFromInterconnect(Operation *switchOp,
         },
         emitVias);
     emitFlows(rewriter, switchOp->getLoc(), srcTile, srcBundle, srcChannel,
-              tiles, emitVias, /*dropIntraTile=*/true, idMask, seen, lifted);
+              tiles, emitVias, /*dropIntraTile=*/isFabricEntry, idMask, seen, lifted);
   }
 }
 

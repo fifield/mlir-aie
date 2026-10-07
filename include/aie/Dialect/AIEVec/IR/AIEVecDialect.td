@@ -21,6 +21,9 @@ def AIEVec_Dialect : Dialect {
   // bfp16 FIFO stream addresses are LLVM pointers.
   let dependentDialects = ["::mlir::LLVM::LLVMDialect"];
 
+  // Preserve the existing attr-dict syntax for property-backed operations.
+  let useStrictPropertiesInAssemblyFormat = 0;
+
   let extraClassDeclaration = [{
     void registerTypes();
   }];

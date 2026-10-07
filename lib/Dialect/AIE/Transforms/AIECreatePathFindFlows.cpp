@@ -3433,8 +3433,52 @@ void AIEPathfinderPass::runOnOperation() {
       if (!tile || !sw)
         continue;
       Location loc = tile.getLoc();
-      if (isa<AIE4TargetModel>(d.getTargetModel()))
-        wire(loc, sw, WireBundle::Switch512, sw, WireBundle::Switch32);
+      if (isa<AIE4TargetModel>(d.getTargetModel())) {
+        const AIETargetModel &targetModel = d.getTargetModel();
+        auto inputs = [&](TileID at, WireBundle bundle) {
+          return targetModel.getNumSourceSwitchboxConnections(at.col, at.row,
+                                                              bundle);
+        };
+        auto outputs = [&](TileID at, WireBundle bundle) {
+          return targetModel.getNumDestSwitchboxConnections(at.col, at.row,
+                                                            bundle);
+        };
+        // WireOp represents both directions of a physical adjacency, retaining
+        // the channel index. Emit only adjacencies with a real driving and
+        // receiving port in at least one direction.
+        auto link = [&](SwitchboxOp a, WireBundle out, SwitchboxOp b,
+                        WireBundle in) {
+          TileID from = a.getTileOp().getTileID();
+          TileID to = b.getTileOp().getTileID();
+          if ((outputs(from, out) && inputs(to, in)) ||
+              (outputs(to, in) && inputs(from, out)))
+            wire(loc, a, out, b, in);
+        };
+        link(sw, WireBundle::Switch512, sw, WireBundle::Switch32);
+        if (col > 0)
+          if (SwitchboxOp west = analyzer.lookupSwitchbox({col - 1, row})) {
+            link(west, WireBundle::East, sw, WireBundle::West);
+            if (row == 0)
+              link(west, WireBundle::East32, sw, WireBundle::West32);
+          }
+        if (row > 0)
+          if (SwitchboxOp south = analyzer.lookupSwitchbox({col, row - 1})) {
+            link(south, WireBundle::North, sw, WireBundle::South);
+            link(south, WireBundle::North32, sw, WireBundle::South32);
+            link(south, WireBundle::NorthControl, sw, WireBundle::SouthControl);
+          }
+        // AIE4 endpoints attach directly to the stream switch, including shim
+        // DMA/control/trace engines. A zero-count bundle has no endpoint wire.
+        for (WireBundle bundle :
+             {WireBundle::Core, WireBundle::DMA, WireBundle::DMAControl,
+              WireBundle::DMATrace, WireBundle::Control32,
+              WireBundle::Controller32, WireBundle::TileControl,
+              WireBundle::Trace, WireBundle::Trace32, WireBundle::PLIO,
+              WireBundle::PLIO32, WireBundle::NOC})
+          if (inputs({col, row}, bundle) || outputs({col, row}, bundle))
+            wire(loc, tile, bundle, sw, bundle);
+        continue;
+      }
       // connections east-west between stream switches
       if (col > 0)
         if (SwitchboxOp westsw = analyzer.lookupSwitchbox({col - 1, row}))

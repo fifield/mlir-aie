@@ -6169,6 +6169,12 @@ TileOp ShimMuxOp::getTileOp() {
   return cast<TileElement>(this->getOperation()).getTileOp();
 }
 
+bool xilinx::AIE::isControlPacketOverlay(Operation *op) {
+  return AIEDialect::IsCtrlPktOverlayAttrHelper(op->getContext())
+             .isAttrPresent(op) ||
+         op->hasAttr("is_ctrl_pkt_overlay");
+}
+
 std::optional<std::pair<TileID, Port>>
 xilinx::AIE::getLinkedInput(TileID tile, Port output) {
   switch (output.bundle) {

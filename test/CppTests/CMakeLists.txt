@@ -18,6 +18,10 @@ add_executable(stream_wait_graph stream_wait_graph.cpp)
 llvm_update_compile_flags(stream_wait_graph)
 target_link_libraries(stream_wait_graph PRIVATE AIETransforms MLIRParser)
 add_test(NAME StreamWaitGraph COMMAND stream_wait_graph)
+add_executable(stream_dependency_aie4 stream_dependency_aie4.cpp)
+llvm_update_compile_flags(stream_dependency_aie4)
+target_link_libraries(stream_dependency_aie4 PRIVATE AIETransforms AIEX MLIRParser)
+add_test(NAME StreamDependencyAie4 COMMAND stream_dependency_aie4)
 # aiecc's headers define cl::opt globals, whose typeinfo must match LLVM's
 # RTTI setting; take aiecc's compile flags so rtti=OFF builds link.
 llvm_update_compile_flags(device_cache)
@@ -61,7 +65,7 @@ target_link_libraries(stack_size_analysis PRIVATE ${stack_size_analysis_libs})
 get_property(dialect_libs GLOBAL PROPERTY MLIR_DIALECT_LIBS)
 
 set(EXECUTABLES target_model target_model_dma_ports target_model_rtti target_model_unknown_device
-    dma_channel_capacity register_database device_cache)
+    dma_channel_capacity register_database device_cache stream_dependency_aie4)
 
 set(CPP_TEST_DEPENDS ${EXECUTABLES} bfloat16_fallback_test stack_size_analysis
     aievec_shuffle_modes stream_wait_graph)

@@ -18,7 +18,7 @@
 
 // CHECK-LABEL: aie.switchbox(%tile_0_3)
 // CHECK-DAG:     %[[UP:.*]] = aie.amsel<2> (0)
-// CHECK-DAG:     aie.masterset(North : 4, %[[UP]])
+// CHECK-DAG:     aie.masterset(North : 2, %[[UP]])
 // CHECK:         aie.packet_rules(DMA : 0) {
 // CHECK-NEXT:      aie.rule(31, 29, %[[UP]])
 // CHECK-NEXT:      aie.rule(31, 9,

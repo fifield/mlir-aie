@@ -1509,6 +1509,8 @@ public:
   /// port exposes Slot0-Slot3 (4 slots), same as AIE1/AIE2.
   uint32_t getNumSlaveSlots() const override { return 4; }
   /// Packet IDs in BDs and stream-switch slots are five bits wide.
+  uint32_t getNumArbiters() const override { return 6; }
+  uint32_t getNumMselsPerArbiter() const override { return 4; }
   uint32_t getMaxPacketId() const override { return 31; }
   /// Out-of-order BD index is a 4-bit field ([8:5] of the stream packet
   /// header), matching the 4-bit
