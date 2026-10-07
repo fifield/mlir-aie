@@ -9,7 +9,7 @@
 //===----------------------------------------------------------------------===//
 //
 // Verifies MMAC bf16*bf16->fp32 matrix multiply on AIE4.
-// C[4x64] += A[4x128] * B[128x64]. Direct tile memory access.
+// C[4x64] = A[4x128] * B[128x64]. Direct tile memory access.
 //
 // Data layout (K_outer-blocked, matching kernel access pattern):
 //   A[ko * M * K_INNER + m * K_INNER + k]  — row-major within each block

@@ -7,7 +7,7 @@
 #
 # Hardware (npu3 / medusa) port of the matmul_bf16 compute example.
 #
-# C[4x64] += A[4x128] * B[128x64], bf16 inputs, fp32 output, MMAC unit.
+# C[4x64] = A[4x128] * B[128x64], bf16 inputs, fp32 output, MMAC unit.
 #
 # The sim variant (aie4.mlir + test_sim.cpp) pokes the core's local memory
 # directly.  This placed design moves A, B and C over real shim DMAs into

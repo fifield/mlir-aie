@@ -6,7 +6,7 @@
 // Copyright (C) 2026, Advanced Micro Devices, Inc.
 //
 // MMAC bf16*bf16 -> fp32 matrix multiply on a single core tile.
-// C[4x64] += A[4x128] * B[128x64], K_outer=4, K_inner=32.
+// C[4x64] = A[4x128] * B[128x64], K_outer=4, K_inner=32.
 //
 // RUN: xchesscc_wrapper aie4 -c %S/kernel.cc
 // RUN: aiecc --alloc-scheme=basic-sequential --xchesscc --xbridge --get-txn --txn-name=transaction.bin --get-aiesim %s %test_utils_flags -- %S/test_sim.cpp

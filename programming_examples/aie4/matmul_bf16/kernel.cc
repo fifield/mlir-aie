@@ -8,7 +8,9 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Matrix multiply C[Mx64] += A[MxK] * B[Kx64] with bf16 inputs, fp32 output.
+// Matrix multiply C[Mx64] = A[MxK] * B[Kx64] with bf16 inputs, fp32 output.
+// C is write-only: the first K tile starts from zero_acc and the accumulators
+// are then stored over C.
 // M=4 rows, K=128 (4 outer iterations of 32), N=64 columns.
 // Uses AIE4 MMAC unit: 32x64 bf16 matrix register, 2048 mults/cycle.
 // ISA: MMAC.f bf16*bf16 on AIE4b.
