@@ -13,7 +13,7 @@
 // RUN: llc -O2 --mtriple=aie4 --mcpu=aie4b -aie4postlegalizercustomcombiner-disable-rule=combine_staging_upd_load --function-sections -stack-size-section -filetype=obj %t.opt.ll -o %t.o
 // RUN: llvm-objdump -d %t.o > %t.dis
 // RUN: grep -c "za\[" %t.dis | FileCheck %s --check-prefix=INSERTS
-// RUN: %python %S/Inputs/check_aie4_mmac_schedule.py %t.dis --function restage --mmacs-per-tile 1,1,1 | FileCheck %s --check-prefix=ORDER
+// RUN: %python %S/aie4-mmac-schedule-checker.py %t.dis --function restage --mmacs-per-tile 1,1,1 | FileCheck %s --check-prefix=ORDER
 //
 // RUN: llc -O2 --mtriple=aie4 --mcpu=aie4b -filetype=obj %t.opt.ll -o %t.nowa.o
 // RUN: llvm-objdump -d %t.nowa.o | grep -c "za\[" | FileCheck %s --check-prefix=INSERTS

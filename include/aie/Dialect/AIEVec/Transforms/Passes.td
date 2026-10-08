@@ -58,4 +58,41 @@ def AIEVecGrantContractAfn : Pass<"aievec-grant-contract-afn"> {
                            "mlir::vector::VectorDialect"];
 }
 
+def AIEVecAIE4CheckStaging
+    : Pass<"aievec-aie4-check-staging", "mlir::ModuleOp"> {
+  let summary = "Check AIE4 flat staging/commit provenance and matmul "
+                "co-existence";
+  let description = [{
+    Checks programs that use the flat AIE4 matrix-state ops
+    (`aievec.aie4.stage`, `stage_stream`, `commit`, `mmac_active`).
+
+    Part 1 (co-existence) rejects an `aievec.aie4.matmul` in an execution
+    scope (an `aie.core`, a function, or another isolated op) that also
+    holds flat ops: generic transforms may move the pure matmul between a
+    prime and its commit.
+
+    Part 2 (provenance) runs a must-defined dataflow analysis over each
+    scope that holds a flat op. Every `commit` must read 32 staging slots
+    written with its format (and int4 signedness) on every path, and every
+    `mmac_active` must read a matrix committed with its format on every
+    path. Calls, inline assembly, unregistered ops and raw XLLVM staging or
+    commit ops clobber the state. Only `scf.for`, `scf.if` and
+    `aievec.aie4.matrix_region` may surround matrix-state ops. Calls count
+    as matrix-state ops, so in a scope with flat ops a call inside, e.g.,
+    `scf.while` is rejected too. Scopes without flat ops are not analysed.
+
+    aiecc runs part 1 before vectorization and both parts around the
+    matmul expansion, as errors.
+  }];
+  let options =
+      [Option<"phase", "phase", "std::string", /*default=*/"\"all\"",
+              "\"coexistence\" (part 1), \"provenance\" (part 2) or \"all\" "
+              "(both, part 1 first)">,
+       Option<"strict", "strict", "bool", /*default=*/"true",
+              "Report findings as errors and fail the pass; false reports "
+              "warnings">,
+  ];
+  let dependentDialects = ["xilinx::aievec::AIEVecDialect"];
+}
+
 #endif // AIE_DIALECT_AIEVEC_TRANSFORMS_PASSES

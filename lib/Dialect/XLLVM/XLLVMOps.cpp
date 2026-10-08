@@ -254,5 +254,4 @@ static_assert(
                  MmacI512Acc2048DynConfAIE4IntrOp>());
 static_assert(!GetSsAIE4IntrOp::hasTrait<AIE4StagingWriter>() &&
               !GetSsAIE4IntrOp::hasTrait<AIE4MatrixCommit>() &&
-              !GetSsAIE4IntrOp::hasTrait<AIE4MatrixReader>() &&
-              !GetSsAIE4IntrOp::hasTrait<AIE4MatrixStateWriter>());
+              !GetSsAIE4IntrOp::hasTrait<AIE4MatrixReader>());

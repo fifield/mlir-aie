@@ -14,25 +14,25 @@
 // RUN: FileCheck %s --check-prefix=BF16-IR --input-file %t.bf16.prj/opted_main_core_0_2.ll
 // RUN: llvm-objdump -d %t.bf16.out/elfs_main_core_0_2/elfs_main_core_0_2.elf > %t.bf16.dis
 // RUN: FileCheck %s --check-prefix=BF16-ASM --input-file %t.bf16.dis
-// RUN: %python %S/Inputs/check_aie4_mmac_schedule.py %t.bf16.dis --mmacs-per-tile 4,4,4 | FileCheck %s --check-prefix=ORDER
+// RUN: %python %S/aie4-mmac-schedule-checker.py %t.bf16.dis --mmacs-per-tile 4,4,4 | FileCheck %s --check-prefix=ORDER
 // RUN: %python %S/Inputs/aie4_mmac_design.py int8 --r3-tile 0 -o %t.int8.mlir
 // RUN: %aiecc --get-core-elfs --tmpdir %t.int8.prj --output-dir %t.int8.out %t.int8.mlir
 // RUN: FileCheck %s --check-prefix=INT8-IR --input-file %t.int8.prj/opted_main_core_0_2.ll
 // RUN: llvm-objdump -d %t.int8.out/elfs_main_core_0_2/elfs_main_core_0_2.elf > %t.int8.dis
 // RUN: FileCheck %s --check-prefix=INT8-ASM --input-file %t.int8.dis
-// RUN: %python %S/Inputs/check_aie4_mmac_schedule.py %t.int8.dis --mmacs-per-tile 4,4,4 | FileCheck %s --check-prefix=ORDER
+// RUN: %python %S/aie4-mmac-schedule-checker.py %t.int8.dis --mmacs-per-tile 4,4,4 | FileCheck %s --check-prefix=ORDER
 // RUN: %python %S/Inputs/aie4_mmac_design.py int4 --r3-tile 0 -o %t.int4.mlir
 // RUN: %aiecc --get-core-elfs --tmpdir %t.int4.prj --output-dir %t.int4.out %t.int4.mlir
 // RUN: FileCheck %s --check-prefix=INT4-IR --input-file %t.int4.prj/opted_main_core_0_2.ll
 // RUN: llvm-objdump -d %t.int4.out/elfs_main_core_0_2/elfs_main_core_0_2.elf > %t.int4.dis
 // RUN: FileCheck %s --check-prefix=INT4-ASM --input-file %t.int4.dis
-// RUN: %python %S/Inputs/check_aie4_mmac_schedule.py %t.int4.dis --mmacs-per-tile 4,4,4 | FileCheck %s --check-prefix=ORDER
+// RUN: %python %S/aie4-mmac-schedule-checker.py %t.int4.dis --mmacs-per-tile 4,4,4 | FileCheck %s --check-prefix=ORDER
 // RUN: %python %S/Inputs/aie4_mmac_design.py fp8 --r3-tile 0 -o %t.fp8.mlir
 // RUN: %aiecc --get-core-elfs --tmpdir %t.fp8.prj --output-dir %t.fp8.out %t.fp8.mlir
 // RUN: FileCheck %s --check-prefix=FP8-IR --input-file %t.fp8.prj/opted_main_core_0_2.ll
 // RUN: llvm-objdump -d %t.fp8.out/elfs_main_core_0_2/elfs_main_core_0_2.elf > %t.fp8.dis
 // RUN: FileCheck %s --check-prefix=FP8-ASM --implicit-check-not=crintmmode --input-file %t.fp8.dis
-// RUN: %python %S/Inputs/check_aie4_mmac_schedule.py %t.fp8.dis --mmacs-per-tile 4,4,4 | FileCheck %s --check-prefix=ORDER
+// RUN: %python %S/aie4-mmac-schedule-checker.py %t.fp8.dis --mmacs-per-tile 4,4,4 | FileCheck %s --check-prefix=ORDER
 //
 // ORDER: ORDER OK: 3 tiles, 96 inserts, 12 MMACs, no accumulator spills
 //
@@ -53,7 +53,7 @@
 // RUN: %python %S/Inputs/aie4_mmac_kloop.py -o %t.kloop.mlir
 // RUN: %aiecc --get-core-elfs --tmpdir %t.kloop.prj --output-dir %t.kloop.out %t.kloop.mlir
 // RUN: llvm-objdump -d %t.kloop.out/elfs_main_core_0_2/elfs_main_core_0_2.elf > %t.kloop.dis
-// RUN: %python %S/Inputs/check_aie4_mmac_schedule.py %t.kloop.dis --mmacs-per-tile 4,4 | FileCheck %s --check-prefix=KLOOP
+// RUN: %python %S/aie4-mmac-schedule-checker.py %t.kloop.dis --mmacs-per-tile 4,4 | FileCheck %s --check-prefix=KLOOP
 // RUN: FileCheck %s --check-prefix=KLOOP-ASM --input-file %t.kloop.dis
 // KLOOP: ORDER OK: 2 tiles, 64 inserts, 8 MMACs, no accumulator spills (loop body checked twice)
 // Accept either a conditional loop or a zero-overhead loop (ls/le/lc).

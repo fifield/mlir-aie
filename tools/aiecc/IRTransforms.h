@@ -1423,6 +1423,14 @@ inline std::unique_ptr<mlir::PassManager> getInputWithAddressesPipeline(
   auto pm = std::make_unique<mlir::PassManager>(ctx);
   std::string target = detectAIETarget(mod);
   bool aie2Family = target == "aie2" || target == "aieml" || target == "aie2p";
+  bool hasAie4 = moduleHasAie4Device(mod);
+  if (hasAie4) {
+    // A matmul must not share an execution scope with flat staging ops:
+    // check before convert-vector-to-aievec's LICM can move a pure matmul.
+    xilinx::aievec::AIEVecAIE4CheckStagingOptions coexist;
+    coexist.phase = "coexistence";
+    pm->addPass(xilinx::aievec::createAIEVecAIE4CheckStaging(coexist));
+  }
   // AIE4 is gated behind a development opt-in, so it must not run by default.
   if (aie2Family || (enableAie4Vectorization && target == "aie4")) {
     // Operates on scf.for loops inside aie.core, so it must run before
@@ -1462,6 +1470,17 @@ inline std::unique_ptr<mlir::PassManager> getInputWithAddressesPipeline(
     dpm2.addPass(createAIECoreIntRangeNarrowingPass());
   }
   dpm2.addPass(createAIENarrowCoreLoopsPass());
+  // Check provenance before expanding regions; expand before SCF lowering and
+  // core outlining. Recheck coexistence after vectorization can create matmuls.
+  if (hasAie4) {
+    xilinx::aievec::AIEVecAIE4CheckStagingOptions coexist, provenance;
+    coexist.phase = "coexistence";
+    provenance.phase = "provenance";
+    pm->addPass(xilinx::aievec::createAIEVecAIE4CheckStaging(coexist));
+    pm->addPass(xilinx::aievec::createAIEVecAIE4ExpandMatMulPass());
+    pm->addPass(xilinx::aievec::createAIEVecAIE4CheckStaging(provenance));
+    pm->addPass(xilinx::aievec::createAIEVecAIE4ExpandMatrixRegionPass());
+  }
   pm->addPass(xilinx::AIEX::createAIESCFToControlFlowPass());
   return pm;
 }

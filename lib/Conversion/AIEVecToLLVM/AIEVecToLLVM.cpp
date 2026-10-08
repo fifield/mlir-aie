@@ -5665,9 +5665,8 @@ struct ConvertAIEVecToLLVMPass
       return;
     }
 
-    // AIE4 MMAC: the semantic matmul becomes a matrix region first, and the
-    // region and row MMACs are then lowered by the conversion patterns.
-    if (targetInfo.isAIE4() && failed(expandAIE4MatMulOps(module))) {
+    if (targetInfo.isAIE4() && (failed(expandAIE4MatMulOps(module)) ||
+                                failed(expandAIE4MatrixRegionOps(module)))) {
       signalPassFailure();
       return;
     }

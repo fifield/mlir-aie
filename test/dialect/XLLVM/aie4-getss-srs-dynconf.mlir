@@ -8,16 +8,12 @@
 // RUN: aie-opt %s -split-input-file -canonicalize | FileCheck %s --check-prefix=DCE
 
 // CHECK-LABEL: llvm.func @roundtrip
-// CHECK: "xllvm.intr.aie4.get.ss"(%{{.*}}) <{kind = 0 : i32}> : (i32) -> vector<32xi32>
-// CHECK: "xllvm.intr.aie4.get.ss"(%{{.*}}) <{kind = 1 : i32}> : (i32) -> vector<32xi32>
-// CHECK: "xllvm.intr.aie4.get.ss"(%{{.*}}) <{kind = 2 : i32}> : (i32) -> vector<32xi32>
+// CHECK: "xllvm.intr.aie4.get.ss"(%{{.*}}) : (i32) -> vector<32xi32>
 // CHECK: "xllvm.intr.aie4.I512.ACC2048.mmac.dyn_conf"(%{{.*}}, %{{.*}}, %{{.*}}) : (vector<64xi32>, vector<64xi8>, i32) -> vector<64xi32>
 // CHECK: "xllvm.intr.aie4.I512.v64.acc32.srs"(%{{.*}}) <{shift = 0 : i32, sign = 0 : i32}> : (vector<64xi32>) -> vector<64xi8>
 // CHECK: "xllvm.intr.aie4.I512.v64.acc32.srs"(%{{.*}}) <{shift = 59 : i32, sign = 1 : i32}> : (vector<64xi32>) -> vector<64xi8>
 llvm.func @roundtrip(%port: i32, %acc: vector<64xi32>, %a: vector<64xi8>, %conf: i32) {
-  %0 = "xllvm.intr.aie4.get.ss"(%port) {kind = 0 : i32} : (i32) -> vector<32xi32>
-  %1 = "xllvm.intr.aie4.get.ss"(%port) {kind = 1 : i32} : (i32) -> vector<32xi32>
-  %2 = "xllvm.intr.aie4.get.ss"(%port) {kind = 2 : i32} : (i32) -> vector<32xi32>
+  %0 = "xllvm.intr.aie4.get.ss"(%port) : (i32) -> vector<32xi32>
   %3 = "xllvm.intr.aie4.I512.ACC2048.mmac.dyn_conf"(%acc, %a, %conf) : (vector<64xi32>, vector<64xi8>, i32) -> vector<64xi32>
   %4 = "xllvm.intr.aie4.I512.v64.acc32.srs"(%3) {shift = 0 : i32, sign = 0 : i32} : (vector<64xi32>) -> vector<64xi8>
   %5 = "xllvm.intr.aie4.I512.v64.acc32.srs"(%3) {shift = 59 : i32, sign = 1 : i32} : (vector<64xi32>) -> vector<64xi8>
@@ -36,8 +32,8 @@ llvm.func @roundtrip(%port: i32, %acc: vector<64xi32>, %a: vector<64xi8>, %conf:
 // CSE: %[[R1:.*]] = "xllvm.intr.aie4.I512.v64.acc32.srs"
 // CSE: llvm.add %[[R0]], %[[R1]]
 llvm.func @pairs_not_merged(%port: i32, %acc: vector<64xi32>, %a: vector<64xi8>, %conf: i32) -> vector<64xi8> {
-  %0 = "xllvm.intr.aie4.get.ss"(%port) {kind = 1 : i32} : (i32) -> vector<32xi32>
-  %1 = "xllvm.intr.aie4.get.ss"(%port) {kind = 1 : i32} : (i32) -> vector<32xi32>
+  %0 = "xllvm.intr.aie4.get.ss"(%port) : (i32) -> vector<32xi32>
+  %1 = "xllvm.intr.aie4.get.ss"(%port) : (i32) -> vector<32xi32>
   %3 = "xllvm.intr.aie4.I512.ACC2048.mmac.dyn_conf"(%acc, %a, %conf) : (vector<64xi32>, vector<64xi8>, i32) -> vector<64xi32>
   %4 = "xllvm.intr.aie4.I512.ACC2048.mmac.dyn_conf"(%acc, %a, %conf) : (vector<64xi32>, vector<64xi8>, i32) -> vector<64xi32>
   %5 = llvm.add %3, %4 : vector<64xi32>
@@ -54,7 +50,7 @@ llvm.func @pairs_not_merged(%port: i32, %acc: vector<64xi32>, %a: vector<64xi8>,
 // DCE: "xllvm.intr.aie4.I512.ACC2048.mmac.dyn_conf"
 // DCE: "xllvm.intr.aie4.I512.v64.acc32.srs"
 llvm.func @unused_kept(%port: i32, %acc: vector<64xi32>, %a: vector<64xi8>, %conf: i32) {
-  %0 = "xllvm.intr.aie4.get.ss"(%port) {kind = 0 : i32} : (i32) -> vector<32xi32>
+  %0 = "xllvm.intr.aie4.get.ss"(%port) : (i32) -> vector<32xi32>
   %1 = "xllvm.intr.aie4.I512.ACC2048.mmac.dyn_conf"(%acc, %a, %conf) : (vector<64xi32>, vector<64xi8>, i32) -> vector<64xi32>
   %2 = "xllvm.intr.aie4.I512.v64.acc32.srs"(%acc) {shift = 12 : i32, sign = 1 : i32} : (vector<64xi32>) -> vector<64xi8>
   llvm.return

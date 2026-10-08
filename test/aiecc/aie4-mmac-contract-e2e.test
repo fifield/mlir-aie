@@ -15,7 +15,7 @@
 // RUN: %aiecc --enable-aie4-vectorization --get-core-elfs --tmpdir %t.int8.prj --output-dir %t.int8.out %t.int8.mlir
 // RUN: FileCheck %s --check-prefix=INT8 --input-file %t.int8.prj/opted_main_core_0_2.ll
 // RUN: llvm-objdump -d %t.int8.out/elfs_main_core_0_2/elfs_main_core_0_2.elf > %t.int8.dis
-// RUN: %python %S/Inputs/check_aie4_mmac_schedule.py %t.int8.dis --mmacs-per-tile 4,4,4 | FileCheck %s --check-prefix=ORDER
+// RUN: %python %S/aie4-mmac-schedule-checker.py %t.int8.dis --mmacs-per-tile 4,4,4 | FileCheck %s --check-prefix=ORDER
 // INT8-COUNT-32: call void @llvm.aie4.insert.staging.int.I1024({{.*}}, i32 3)
 // INT8: call void @llvm.aie4.staging.to.matrix.I32768()
 // INT8-COUNT-4: call <64 x i32> @llvm.aie4.I512.ACC2048.mmac({{.*}}, i32 264)
@@ -29,7 +29,7 @@
 // RUN: %aiecc --enable-aie4-vectorization --get-core-elfs --tmpdir %t.int4.prj --output-dir %t.int4.out %t.int4.mlir
 // RUN: FileCheck %s --check-prefix=INT4 --input-file %t.int4.prj/opted_main_core_0_2.ll
 // RUN: llvm-objdump -d %t.int4.out/elfs_main_core_0_2/elfs_main_core_0_2.elf > %t.int4.dis
-// RUN: %python %S/Inputs/check_aie4_mmac_schedule.py %t.int4.dis --mmacs-per-tile 4,4,4 | FileCheck %s --check-prefix=ORDER
+// RUN: %python %S/aie4-mmac-schedule-checker.py %t.int4.dis --mmacs-per-tile 4,4,4 | FileCheck %s --check-prefix=ORDER
 // INT4-COUNT-32: call void @llvm.aie4.insert.staging.int.I1024({{.*}}, i32 1)
 // INT4: call void @llvm.aie4.staging.to.matrix.I4.I32768()
 // INT4-COUNT-4: call <64 x i32> @llvm.aie4.I512.ACC2048.mmac({{.*}}, i32 768)
@@ -39,7 +39,7 @@
 // RUN: %aiecc --enable-aie4-vectorization --get-core-elfs --tmpdir %t.bf16.prj --output-dir %t.bf16.out %t.bf16.mlir
 // RUN: FileCheck %s --check-prefix=BF16 --input-file %t.bf16.prj/opted_main_core_0_2.ll
 // RUN: llvm-objdump -d %t.bf16.out/elfs_main_core_0_2/elfs_main_core_0_2.elf > %t.bf16.dis
-// RUN: %python %S/Inputs/check_aie4_mmac_schedule.py %t.bf16.dis --mmacs-per-tile 4,4,4 | FileCheck %s --check-prefix=ORDER
+// RUN: %python %S/aie4-mmac-schedule-checker.py %t.bf16.dis --mmacs-per-tile 4,4,4 | FileCheck %s --check-prefix=ORDER
 // BF16-COUNT-32: call void @llvm.aie4.insert.staging.bf16.I1024(
 // BF16: call void @llvm.aie4.staging.to.matrix.I32768()
 // BF16-COUNT-4: call <64 x float> @llvm.aie4.bf16.I512.ACC2048.mmac({{.*}}, i32 0)

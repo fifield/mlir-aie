@@ -112,9 +112,10 @@ def AIEVec_AIE4MatrixRegionOp
       and B signedness. Regions cannot nest because there is one active
       matrix.
     * Calls, `llvm.call_intrinsic`, `llvm.inline_asm`, and operations with
-      `AIE4MatrixStateWriter` are forbidden at every depth: they may clobber
-      the resident matrix. `aievec.aie4.matmul` is also forbidden because
-      its lowering stages another B tile.
+      `AIE4StagingWriter` or `AIE4MatrixCommit` are forbidden at every
+      depth: they may clobber the resident matrix. `aievec.aie4.matmul` is
+      also forbidden because its lowering stages another B tile, and
+      `aievec.aie4.mmac_active` because bodies use `aievec.aie4.mmac`.
     * Unregistered operations are rejected because their effects are
       unknown. Isolated-from-above operations are rejected because their
       bodies may execute outside the region.
@@ -196,6 +197,156 @@ def AIEVec_AIE4MmacOp : AIEVec_Op<"aie4.mmac", []>,
   let assemblyFormat = [{
     $format $lhs (`,` $acc^)? attr-dict `:` type($lhs) (`,` type($acc)^)?
     `->` type($result)
+  }];
+  let hasVerifier = 1;
+}
+
+//===----------------------------------------------------------------------===//
+// Flat layer: program-ordered matrix state
+//===----------------------------------------------------------------------===//
+//
+// Unknown memory effects preserve program order for staging (za) and active
+// matrix (zb) access. The traits are shared with the corresponding XLLVM ops.
+
+def AIEVec_AIE4StagingWriterTrait : NativeOpTrait<"AIE4StagingWriter"> {
+  let cppNamespace = "::xilinx::xllvm";
+}
+def AIEVec_AIE4MatrixCommitTrait : NativeOpTrait<"AIE4MatrixCommit"> {
+  let cppNamespace = "::xilinx::xllvm";
+}
+def AIEVec_AIE4MatrixReaderTrait : NativeOpTrait<"AIE4MatrixReader"> {
+  let cppNamespace = "::xilinx::xllvm";
+}
+
+def AIEVec_AIE4StageOp
+    : AIEVec_Op<"aie4.stage", [AIEVec_AIE4StagingWriterTrait]>,
+      Arguments<(ins AnyVectorOfNonZeroRank:$chunk, I32:$slot,
+          AIEVec_AIE4MatrixFormatAttr:$format,
+          OptionalAttr<BoolAttr>:$rhs_signed)> {
+  let summary = "AIE4 write one 1024-bit chunk to matrix staging slot `slot`";
+  let description = [{
+    Writes `chunk` to staging slot `slot` at this point in program order.
+    The slot keeps its value until the next write to it or until another
+    operation clobbers the staging matrix. No enclosing region is required;
+    `aievec.aie4.commit` copies the staged image to the active matrix.
+
+    A slot holds two 512-bit B columns: column 2i occupies bits 511:0 and
+    column 2i+1 bits 1023:512, where i is the slot. 32 slots fill one dense
+    B tile. A runtime slot outside [0, 32) has undefined behavior.
+
+    `format` and `rhs_signed` select the crIntMMode written by the insert.
+    Integer formats require `rhs_signed`; signed int4 staging converts two's
+    complement to sign/magnitude, so the MMAC Z signedness must match it.
+    Floating formats reject `rhs_signed`.
+
+    | format | `chunk` |
+    |--------|---------|
+    | bf16 | `vector<64xbf16>` |
+    | int8 | `vector<128xi8>` |
+    | int4 | `vector<256xi4>`, or its byte image `vector<128xi8>` (element 2j in the low nibble of byte j) |
+    | fp8  | `vector<128xf8E4M3FN>`, or its byte image `vector<128xi8>` |
+
+    Example:
+
+    ```mlir
+    aievec.aie4.stage int8 %chunk, %slot {rhs_signed = true}
+        : vector<128xi8>, i32
+    ```
+  }];
+  let assemblyFormat =
+      "$format $chunk `,` $slot attr-dict `:` type($chunk) `,` type($slot)";
+  let hasVerifier = 1;
+}
+
+def AIEVec_AIE4StageStreamOp
+    : AIEVec_Op<"aie4.stage_stream", [AIEVec_AIE4StagingWriterTrait]>,
+      Arguments<(ins I32:$port, I32:$slot, AIEVec_AIE4MatrixFormatAttr:$format,
+          OptionalAttr<BoolAttr>:$rhs_signed)> {
+  let summary =
+      "AIE4 pop 1024 bits from input stream `port` into staging slot `slot`";
+  let description = [{
+    Performs a blocking direct-mode read of 1024 bits from core input stream
+    `port` (0 or 1) and writes them to staging slot `slot`, with the slot
+    layout, `format` and `rhs_signed` rules of `aievec.aie4.stage`.
+
+    Sequential reads of one stream are ordered by their effects. Mixing
+    these reads with VLD.POP FIFO reads of the same stream before TLAST is
+    invalid. A short transfer that ends in TLAST is zero-padded.
+
+    Example:
+
+    ```mlir
+    aievec.aie4.stage_stream int8 %port, %slot {rhs_signed = true}
+        : i32, i32
+    ```
+  }];
+  let assemblyFormat = [{
+    $format $port `,` $slot attr-dict `:` type($port) `,`
+    type($slot)
+  }];
+  let hasVerifier = 1;
+}
+
+def AIEVec_AIE4CommitOp
+    : AIEVec_Op<"aie4.commit", [AIEVec_AIE4MatrixCommitTrait]>,
+      Arguments<(ins AIEVec_AIE4MatrixFormatAttr:$format,
+          OptionalAttr<BoolAttr>:$rhs_signed)> {
+  let summary = "AIE4 copy the staging image to the active matrix";
+  let description = [{
+    Copies all 32 staging slots to the active matrix read by
+    `aievec.aie4.mmac_active`. The commit is `staging.to.matrix.I32768` for
+    bf16 and int8, `.I4.I32768` for int4, and `.FP32768` for fp8.
+
+    Integer formats require `rhs_signed`, which must be the signedness the
+    slots were staged with. It does not change the lowering.
+
+    Example:
+
+    ```mlir
+    aievec.aie4.commit int8 {rhs_signed = true}
+    ```
+  }];
+  let assemblyFormat = "$format attr-dict";
+  let hasVerifier = 1;
+}
+
+def AIEVec_AIE4MmacActiveOp
+    : AIEVec_Op<"aie4.mmac_active", [AttrSizedOperandSegments,
+                                     AIEVec_AIE4MatrixReaderTrait]>,
+      Arguments<(ins AnyVectorOfNonZeroRank:$lhs,
+          Optional<AnyVectorOfNonZeroRank>:$acc, Optional<I1>:$zero_if,
+          AIEVec_AIE4MatrixFormatAttr:$format,
+          OptionalAttr<BoolAttr>:$lhs_signed,
+          OptionalAttr<BoolAttr>:$rhs_signed)>,
+      Results<(outs AnyVectorOfNonZeroRank:$result)> {
+  let summary = "AIE4 one-row MMAC with the currently committed matrix";
+  let description = [{
+    Computes `result[n] = acc[n] + sum_k lhs[k] * B[k][n]`, where B is the
+    matrix most recently committed by `aievec.aie4.commit` (or a raw XLLVM
+    commit) in program order, i.e. row x zb. Operand types and numerics are
+    those of `aievec.aie4.mmac` and `aievec.aie4.matmul` for `format`.
+
+    Without `acc`, the hardware replaces the accumulator by zeros
+    (`zero_acc`). With `zero_if %z`, `%z = true` replaces `acc` by zeros at
+    run time; this applies only to the integer formats and requires `acc`.
+
+    If the committed matrix does not have this op's format and, for int4,
+    B signedness, the results are unspecified but fixed values, not poison.
+
+    The op has no structural parent requirement. `matrix_region` bodies
+    reject it; region bodies use `aievec.aie4.mmac`.
+
+    Example:
+
+    ```mlir
+    %r = aievec.aie4.mmac_active int8 %x, %acc zero_if %first
+        {lhs_signed = true, rhs_signed = true}
+        : vector<64xi8>, vector<64xi32> -> vector<64xi32>
+    ```
+  }];
+  let assemblyFormat = [{
+    $format $lhs (`,` $acc^)? (`zero_if` $zero_if^)? attr-dict `:` type($lhs)
+    (`,` type($acc)^)? `->` type($result)
   }];
   let hasVerifier = 1;
 }

@@ -63,6 +63,27 @@ def AIEVecAIE4ExpandMatMul : Pass<"aievec-aie4-expand-matmul"> {
                            "xilinx::aievec::AIEVecDialect"];
 }
 
+def AIEVecAIE4ExpandMatrixRegion : Pass<"aievec-aie4-expand-matrix-region"> {
+  let summary = "Expand aievec.aie4.matrix_region into flat staging, commit "
+                "and mmac_active";
+  let description = [{
+    Rewrites each `aievec.aie4.matrix_region` into 32 `aievec.aie4.stage`
+    ops that stage its B tile column pair by column pair, an
+    `aievec.aie4.commit`, and its body inlined at the region's position with
+    every `aievec.aie4.mmac` replaced by `aievec.aie4.mmac_active`. Warns
+    when B is not supplied column-major, because staging then transposes it
+    element by element.
+
+    `convert-aievec-to-llvm` runs the same expansion for AIE4 after
+    `aievec-aie4-expand-matmul`; aiecc runs both before SCF lowering. The
+    pass is a no-op on IR without regions.
+  }];
+  let constructor = "xilinx::aievec::createAIEVecAIE4ExpandMatrixRegionPass()";
+  let dependentDialects = ["mlir::arith::ArithDialect",
+                           "mlir::vector::VectorDialect",
+                           "xilinx::aievec::AIEVecDialect"];
+}
+
 //===----------------------------------------------------------------------===//
 // AIEToTransaction
 //===----------------------------------------------------------------------===//

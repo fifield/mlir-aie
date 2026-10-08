@@ -3,9 +3,8 @@
 
 //===- AIE4MatrixState.h - AIE4 MMAC matrix-state op traits --------C++ -*-===//
 //
-// Header-only traits let AIEVec classify matrix-state operations without
-// linking XLLVM. Staging writers and commits also carry AIE4MatrixStateWriter
-// so matrix_region can reject operations that clobber its resident tile.
+// Classify access to staging (za) and the active matrix (zb) in both dialects.
+// Header-only traits let AIEVec recognize XLLVM writers without linking XLLVM.
 //
 //===----------------------------------------------------------------------===//
 
@@ -15,11 +14,6 @@
 #include "mlir/IR/OpDefinition.h"
 
 namespace xilinx::xllvm {
-
-/// Marks an operation that writes AIE4 matrix staging or active-matrix state.
-template <typename ConcreteType>
-class AIE4MatrixStateWriter
-    : public mlir::OpTrait::TraitBase<ConcreteType, AIE4MatrixStateWriter> {};
 
 /// Marks an operation that writes one or more za staging chunks.
 template <typename ConcreteType>
@@ -35,6 +29,11 @@ class AIE4MatrixCommit
 template <typename ConcreteType>
 class AIE4MatrixReader
     : public mlir::OpTrait::TraitBase<ConcreteType, AIE4MatrixReader> {};
+
+/// True for a staging or active-matrix writer, in XLLVM or AIEVec.
+inline bool isAIE4MatrixStateWriter(mlir::Operation *op) {
+  return op->hasTrait<AIE4StagingWriter>() || op->hasTrait<AIE4MatrixCommit>();
+}
 
 } // namespace xilinx::xllvm
 

@@ -3,23 +3,15 @@
 
 // RUN: aie-translate %s -mlir-to-llvmir -split-input-file | FileCheck %s
 
-// The kind selects the intrinsic name; all three are <32 x i32> (i32).
+// A stream read returns the same <32 x i32> type as aie.get_stream.
 // CHECK-LABEL: define void @get_ss
 llvm.func @get_ss(%port: i32, %out: !llvm.ptr) {
   // CHECK: call <32 x i32> @llvm.aie4.get.ss(i32 %{{[0-9]+}})
-  %0 = "xllvm.intr.aie4.get.ss"(%port) {kind = 0 : i32} : (i32) -> vector<32xi32>
-  // CHECK: call <32 x i32> @llvm.aie4.get.ss.weight(i32 %{{[0-9]+}})
-  %1 = "xllvm.intr.aie4.get.ss"(%port) {kind = 1 : i32} : (i32) -> vector<32xi32>
-  // CHECK: call <32 x i32> @llvm.aie4.get.ss.activation(i32 %{{[0-9]+}})
-  %2 = "xllvm.intr.aie4.get.ss"(%port) {kind = 2 : i32} : (i32) -> vector<32xi32>
-  %3 = llvm.add %0, %1 : vector<32xi32>
-  %4 = llvm.add %3, %2 : vector<32xi32>
-  llvm.store %4, %out : vector<32xi32>, !llvm.ptr
+  %0 = "xllvm.intr.aie4.get.ss"(%port) : (i32) -> vector<32xi32>
+  llvm.store %0, %out : vector<32xi32>, !llvm.ptr
   llvm.return
 }
-// CHECK-DAG: declare <32 x i32> @llvm.aie4.get.ss(i32)
-// CHECK-DAG: declare <32 x i32> @llvm.aie4.get.ss.weight(i32)
-// CHECK-DAG: declare <32 x i32> @llvm.aie4.get.ss.activation(i32)
+// CHECK: declare <32 x i32> @llvm.aie4.get.ss(i32)
 
 // -----
 
@@ -32,7 +24,7 @@ llvm.func @get_ss_with_get_stream(%port: i32) -> vector<32xi32> {
   // CHECK: call <32 x i32> @llvm.aie4.get.ss(i32 %{{[0-9]+}})
   %0 = llvm.call @llvm.aie4.get.ss(%port) : (i32) -> vector<32xi32>
   // CHECK: call <32 x i32> @llvm.aie4.get.ss(i32 %{{[0-9]+}})
-  %1 = "xllvm.intr.aie4.get.ss"(%port) {kind = 0 : i32} : (i32) -> vector<32xi32>
+  %1 = "xllvm.intr.aie4.get.ss"(%port) : (i32) -> vector<32xi32>
   %2 = llvm.add %0, %1 : vector<32xi32>
   llvm.return %2 : vector<32xi32>
 }

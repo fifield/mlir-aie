@@ -925,45 +925,17 @@ def InvAIE4IntrOp : AIEVec4_IntrOp<"inv", [TypeIs<"res", F32>]>,
 // Stream reads
 //===----------------------------------------------------------------------===//
 
-def AIE4_GetSsKind_Generic : I32EnumAttrCase<"Generic", 0, "generic">;
-def AIE4_GetSsKind_Weight : I32EnumAttrCase<"Weight", 1, "weight">;
-def AIE4_GetSsKind_Activation : I32EnumAttrCase<"Activation", 2, "activation">;
-
-def AIE4_GetSsKind
-    : I32EnumAttr<"AIE4GetSsKind", "AIE4 1024-bit stream read kind",
-                  [AIE4_GetSsKind_Generic, AIE4_GetSsKind_Weight,
-                   AIE4_GetSsKind_Activation]> {
-  let cppNamespace = "::xilinx::xllvm";
-}
-
 // Match aie.get_stream's generic intrinsic signature to share its declaration.
 def GetSsAIE4IntrOp
     : AIEVec4_IntrOp<
           "get.ss",
           [TypeIs<"res", FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>>]>,
-      Arguments<(ins I32:$port, AIE4_GetSsKind:$kind)> {
+      Arguments<(ins I32:$port)> {
   let summary = "AIE4 read 1024 bits from a stream port (vmovb y, ss)";
   let description = [{
     Pops one 1024-bit word from input stream `port`, blocking until available.
-    `kind` selects `get.ss`, `get.ss.weight` or `get.ss.activation`; all three
-    currently lower to `vmovb`. Consuming stream data is a side effect.
-  }];
-  let llvmBuilder = [{
-    ::llvm::StringRef name = "llvm.aie4.get.ss";
-    switch (op.getKind()) {
-    case ::xilinx::xllvm::AIE4GetSsKind::Generic:
-      break;
-    case ::xilinx::xllvm::AIE4GetSsKind::Weight:
-      name = "llvm.aie4.get.ss.weight";
-      break;
-    case ::xilinx::xllvm::AIE4GetSsKind::Activation:
-      name = "llvm.aie4.get.ss.activation";
-      break;
-    }
-    auto *inst = ::xilinx::xllvm::createExternalLLVMIntrinsicCall(builder,
-                      moduleTranslation, &opInst, name);
-    (void) inst;
-    $res = inst;
+    Lowers to `llvm.aie4.get.ss` and selects `vmovb y, ss`.
+    Consuming stream data is a side effect.
   }];
 }
 
@@ -977,11 +949,11 @@ def GetSsAIE4IntrOp
 // The MLIR ops retain unknown effects to preserve execution and ordering
 // through generic MLIR transformations.
 
-// See AIE4MatrixState.h for the shared trait contracts.
-def AIE4MatrixStateWriter : NativeOpTrait<"AIE4MatrixStateWriter"> {
-  let cppNamespace = "::xilinx::xllvm";
-}
-
+// Matrix-state classification: staging writers (za), commits (za -> zb) and
+// MMACs (read zb). The C++ classes are shared with AIEVec. Every staging or
+// active-matrix writer must carry AIE4StagingWriter or AIE4MatrixCommit so
+// that matrix_region rejects operations that would clobber its resident
+// tile. MMACs only read and are allowed in region bodies.
 def AIE4StagingWriter : NativeOpTrait<"AIE4StagingWriter"> {
   let cppNamespace = "::xilinx::xllvm";
 }
@@ -1158,8 +1130,7 @@ def MmacFp8I512Acc2048AIE4IntrOp
 //
 // bf16 staging fixes crIntMMode to 2 (int8/bf16 format, unsigned mode).
 def InsertStagingBf16I1024AIE4IntrOp
-    : AIEVec4_IntrOp<"insert.staging.bf16.I1024",
-                     [AIE4MatrixStateWriter, AIE4StagingWriter],
+    : AIEVec4_IntrOp<"insert.staging.bf16.I1024", [AIE4StagingWriter],
                      /*numResults=*/0>,
       Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [64], [BF16]>:$src,
           I32:$index)> {
@@ -1180,8 +1151,7 @@ def InsertStagingBf16I1024AIE4IntrOp
 //     void (<128 x i8> src, i32 index, i32 mode)
 //
 def InsertStagingIntI1024AIE4IntrOp
-    : AIEVec4_IntrOp<"insert.staging.int.I1024",
-                     [AIE4MatrixStateWriter, AIE4StagingWriter],
+    : AIEVec4_IntrOp<"insert.staging.int.I1024", [AIE4StagingWriter],
                      /*numResults=*/0>,
       Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [128], [I8]>:$src,
           I32:$index, AIE4_IntMMode:$mode)> {
@@ -1203,8 +1173,7 @@ def InsertStagingIntI1024AIE4IntrOp
 // llvm.aie4.insert.staging.fp8.I1024
 //     void (<128 x i8> src, i32 index)
 def InsertStagingFp8I1024AIE4IntrOp
-    : AIEVec4_IntrOp<"insert.staging.fp8.I1024",
-                     [AIE4MatrixStateWriter, AIE4StagingWriter],
+    : AIEVec4_IntrOp<"insert.staging.fp8.I1024", [AIE4StagingWriter],
                      /*numResults=*/0>,
       Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [128], [I8]>:$src,
           I32:$index)> {
@@ -1226,7 +1195,7 @@ def InsertStagingFp8I1024AIE4IntrOp
 // Commit staging with I32768 for int8/bf16, I4.I32768 for int4, or
 // FP32768 for fp8.
 class AIE4StagingToMatrixIntrOp<string mnemonic, string asm>
-    : AIEVec4_IntrOp<mnemonic, [AIE4MatrixStateWriter, AIE4MatrixCommit],
+    : AIEVec4_IntrOp<mnemonic, [AIE4MatrixCommit],
                      /*numResults=*/0> {
   let summary = "AIE4 commit staging to the active matrix ("#asm#")";
   let description = [{

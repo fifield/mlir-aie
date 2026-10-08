@@ -18,6 +18,7 @@
 #include "aie/Dialect/AIEVec/IR/AIEVecMatMul.h"
 #include "aie/Dialect/AIEVec/IR/AIEVecOps.h"
 #include "aie/Dialect/AIEVec/Pipelines/Passes.h"
+#include "aie/Dialect/AIEVec/Transforms/AIE4Staging.h"
 #include "aie/Dialect/AIEVec/Utils/TargetInfo.h"
 
 #include "aie/Dialect/AIEVec/Utils/Utils.h"
@@ -7240,9 +7241,15 @@ matchAIE4MatMulContract(vector::ContractionOp op) {
 
 // vector.contract (one native B tile, see matchAIE4MatMulContract)
 //     -> aievec.aie4.matmul
+//
+// Refuse native lowering in an execution scope that holds flat staging ops.
+// Both matmul and matrix_region stage and commit their own B tile, replacing
+// any primed staging contents or committed matrix used by the flat code.
 struct LowerAIE4ContractToMatMulPattern
     : OpConversionPattern<vector::ContractionOp> {
-  using OpConversionPattern::OpConversionPattern;
+  LowerAIE4ContractToMatMulPattern(
+      MLIRContext *ctx, const llvm::DenseSet<Operation *> &flatScopes)
+      : OpConversionPattern(ctx), flatScopes(&flatScopes) {}
 
   static bool matches(vector::ContractionOp op) {
     return matchAIE4MatMulContract(op).has_value();
@@ -7257,15 +7264,30 @@ struct LowerAIE4ContractToMatMulPattern
     auto boolAttr = [&](std::optional<bool> v) -> BoolAttr {
       return v ? rewriter.getBoolAttr(*v) : BoolAttr();
     };
+    if (flatScopes->contains(aievec::getAIE4ExecutionScope(op))) {
+      // Dialect conversion hides pattern-emitted errors; retain the refusal
+      // reason as a warning alongside the legalization error.
+      op.emitWarning()
+          << "AIE4: native vector.contract lowering must not share an "
+             "execution scope with flat staging operations; staging and "
+             "committing its B tile could replace a primed or committed tile. "
+             "Use explicit matrix operations where replacing the tile is safe";
+      return failure();
+    }
     rewriter.replaceOpWithNewOp<aievec::AIE4MatMulOp>(
         op, adaptor.getAcc().getType(), rewriter.getRemappedValue(match->lhs),
         rewriter.getRemappedValue(match->rhs), adaptor.getAcc(),
         boolAttr(match->lhsSigned), boolAttr(match->rhsSigned));
     return success();
   }
+
+private:
+  const llvm::DenseSet<Operation *> *flatScopes;
 };
 
-static void populateAIEVecV4ConversionPatterns(RewritePatternSet &patterns) {
+static void populateAIEVecV4ConversionPatterns(
+    RewritePatternSet &patterns,
+    const llvm::DenseSet<Operation *> &flatScopes) {
   patterns.add<ConvertIntMulToAIE4MacPattern>(patterns.getContext());
   patterns.add<LowerAIE4ApproxMathOp<math::ExpOp>>(patterns.getContext());
   patterns.add<ConvertBF16AddFToAIE4F32Pattern, ConvertBF16SubFToAIE4F32Pattern,
@@ -7291,8 +7313,9 @@ static void populateAIEVecV4ConversionPatterns(RewritePatternSet &patterns) {
       LowerVectorTransposeOpToAIE4ShuffleOpPattern,
       LowerVectorShuffleOpToAIE4ShuffleOpPattern,
       LowerAIE4ApproxMathOp<math::Exp2Op>, LowerAIE4ApproxMathOp<math::TanhOp>,
-      LowerAIE4ReciprocalOp, LowerAIE4ContractToMatMulPattern>(
-      patterns.getContext());
+      LowerAIE4ReciprocalOp>(patterns.getContext());
+  patterns.add<LowerAIE4ContractToMatMulPattern>(patterns.getContext(),
+                                                 flatScopes);
   // Higher benefit than the scalarize patterns above, which also match
   // fptosi/fptoui and would otherwise take the native shape.
   patterns.add<ConvertFPToSIToAIE4ConvPattern, ConvertFPToUIToAIE4ConvPattern>(
@@ -8873,6 +8896,10 @@ struct LowerVectorToAIEVec : PassWrapper<LowerVectorToAIEVec, OperationPass<>> {
     target.addLegalOp<xilinx::AIE::RuntimeSequenceOp>();
     target.markOpRecursivelyLegal<xilinx::AIE::RuntimeSequenceOp>();
 
+    // AIE4: refuse native contraction lowering in execution scopes with flat
+    // staging ops. Must outlive applyPartialConversion.
+    llvm::DenseSet<Operation *> flatScopes = collectAIE4FlatScopes(op);
+
     std::optional<AIEVecTargetInfo> maybeTargetInfo =
         parseAIEVecTarget(aieTarget, op);
     if (!maybeTargetInfo.has_value())
@@ -8904,7 +8931,7 @@ struct LowerVectorToAIEVec : PassWrapper<LowerVectorToAIEVec, OperationPass<>> {
       // Make masked operations tail-safe before the target lowering.
       if (failed(lowerAIE4Masks(op)))
         return signalPassFailure();
-      populateAIEVecV4ConversionPatterns(patterns);
+      populateAIEVecV4ConversionPatterns(patterns, flatScopes);
       configureAIEVecV4Legalizations(target);
     } else {
       llvm_unreachable("AIE version is misconfigured");

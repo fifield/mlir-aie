@@ -7,7 +7,7 @@
 # RUN: FileCheck %s --check-prefix=IN --input-file %t.mlir
 # RUN: %aiecc --enable-aie4-vectorization --get-core-elfs --tmpdir %t.prj --output-dir %t.out %t.mlir
 # RUN: llvm-objdump -d %t.out/elfs_main_core_0_2/elfs_main_core_0_2.elf > %t.dis
-# RUN: %python %S/Inputs/check_aie4_mmac_schedule.py %t.dis --mmacs-per-tile 4,4 | FileCheck %s --check-prefix=ORDER
+# RUN: %python %S/aie4-mmac-schedule-checker.py %t.dis --mmacs-per-tile 4,4 | FileCheck %s --check-prefix=ORDER
 # RUN: FileCheck %s --check-prefix=ASM --input-file %t.dis --implicit-check-not=llvm.aie4
 
 # IN: scf.for

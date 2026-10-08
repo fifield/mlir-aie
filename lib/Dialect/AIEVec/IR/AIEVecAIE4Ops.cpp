@@ -4,14 +4,15 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-// Verifiers for AIE4 dense MMAC operations:
-// aievec.aie4.matmul, aievec.aie4.matrix_region and aievec.aie4.mmac.
+// Verifiers for AIE4 matrix operations.
 //===----------------------------------------------------------------------===//
 
 #include "aie/Dialect/AIEVec/IR/AIEVecOps.h"
 #include "aie/Dialect/XLLVM/AIE4MatrixState.h"
 
+#include "mlir/Dialect/Vector/IR/VectorOps.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/Matchers.h"
 #include "mlir/Interfaces/CallInterfaces.h"
 
 using namespace mlir;
@@ -73,6 +74,51 @@ LogicalResult verifySignedness(Operation *op, bool isInteger, StringRef name,
   return success();
 }
 
+/// Checks shared by the row MMACs (aievec.aie4.mmac and mmac_active): row,
+/// accumulator and result types, and operand signedness.
+LogicalResult verifyRowMmac(Operation *op, AIE4MatrixFormat format, Value lhs,
+                            Value acc, Value result, BoolAttr lhsSigned,
+                            BoolAttr rhsSigned) {
+  AIE4MatrixFormatInfo info = getFormatInfo(op->getContext(), format);
+  StringRef formatName = stringifyAIE4MatrixFormat(format);
+
+  auto rowType = VectorType::get({info.k}, info.elementType);
+  if (lhs.getType() != rowType)
+    return op->emitOpError("lhs must be ")
+           << rowType << " for format " << formatName << ", got "
+           << lhs.getType();
+
+  auto accType = VectorType::get({kAIE4MmacColumns}, info.accElementType);
+  if (acc && acc.getType() != accType)
+    return op->emitOpError("acc must be ")
+           << accType << " for format " << formatName << ", got "
+           << acc.getType();
+  if (result.getType() != accType)
+    return op->emitOpError("result must be ")
+           << accType << " for format " << formatName << ", got "
+           << result.getType();
+
+  if (failed(verifySignedness(op, info.isInteger, "lhs_signed", lhsSigned)) ||
+      failed(verifySignedness(op, info.isInteger, "rhs_signed", rhsSigned)))
+    return failure();
+  return success();
+}
+
+/// Number of 1024-bit staging slots.
+constexpr int64_t kAIE4StagingSlots = 32;
+
+/// A constant staging slot must be in [0, 32).
+LogicalResult verifyConstantSlot(Operation *op, Value slot) {
+  APInt value;
+  if (matchPattern(slot, m_ConstantInt(&value))) {
+    int64_t v = value.getSExtValue();
+    if (v < 0 || v >= kAIE4StagingSlots)
+      return op->emitOpError("slot ")
+             << v << " is out of range [0, " << kAIE4StagingSlots << ")";
+  }
+  return success();
+}
+
 } // namespace
 
 //===----------------------------------------------------------------------===//
@@ -123,6 +169,42 @@ LogicalResult AIE4MatMulOp::verify() {
                               getRhsSignedAttr())))
     return failure();
   return success();
+}
+
+//===----------------------------------------------------------------------===//
+// matmul -> matrix_region of row MMACs
+//===----------------------------------------------------------------------===//
+//
+// Static row indices avoid routing n-D vector accesses through memory.
+// Unrolling keeps M accumulator rows live, so kAIE4MatMulMaxRows bounds M.
+// Larger problems can tile M or use a row loop directly in matrix_region.
+
+AIE4MatrixRegionOp aievec::buildAIE4MatMulRegion(OpBuilder &b, Location loc,
+                                                 Value lhs, Value rhs,
+                                                 Value acc, BoolAttr lhsSigned,
+                                                 BoolAttr rhsSigned) {
+  auto lhsType = cast<VectorType>(lhs.getType());
+  auto accType = cast<VectorType>(acc.getType());
+  std::optional<AIE4MatrixFormat> format =
+      getFormatForElementType(lhsType.getElementType());
+  assert(format && "lhs element type is not an AIE4 MMAC format");
+  int64_t m = lhsType.getDimSize(0);
+
+  auto region = AIE4MatrixRegionOp::create(b, loc, TypeRange{accType}, rhs,
+                                           ValueRange{acc}, *format, rhsSigned);
+  OpBuilder::InsertionGuard guard(b);
+  Block *body = b.createBlock(&region.getBody(), {}, {accType}, {loc});
+  Value bodyAcc = body->getArgument(0);
+  Value result = bodyAcc;
+  for (int64_t row = 0; row < m; ++row) {
+    Value a = vector::ExtractOp::create(b, loc, lhs, row);
+    Value c = vector::ExtractOp::create(b, loc, bodyAcc, row);
+    Value r = AIE4MmacOp::create(b, loc, c.getType(), a, c, *format, lhsSigned,
+                                 rhsSigned);
+    result = vector::InsertOp::create(b, loc, r, result, row);
+  }
+  AIE4MatrixYieldOp::create(b, loc, ValueRange{result});
+  return region;
 }
 
 //===----------------------------------------------------------------------===//
@@ -182,9 +264,18 @@ LogicalResult AIE4MatrixRegionOp::verifyRegions() {
       return reject("calls", "call here");
     if (name == "llvm.inline_asm")
       return reject("inline assembly", "inline assembly here");
-    if (op->hasTrait<xllvm::AIE4MatrixStateWriter>())
+    // XLLVM inserts and commits and aievec stage, stage_stream and commit
+    // share the matrix-state traits.
+    if (xllvm::isAIE4MatrixStateWriter(op))
       return reject("matrix staging or commit operations",
                     "matrix-state write here");
+    if (isa<AIE4MmacActiveOp>(op)) {
+      InFlightDiagnostic diag = emitOpError(
+          "body must not contain 'aievec.aie4.mmac_active'; region bodies use "
+          "'aievec.aie4.mmac'");
+      diag.attachNote(op->getLoc()) << "flat MMAC here";
+      return WalkResult::interrupt();
+    }
     if (isa<AIE4MatMulOp>(op))
       return reject("'aievec.aie4.matmul', which stages its own matrix",
                     "matmul here");
@@ -199,29 +290,9 @@ LogicalResult AIE4MatrixRegionOp::verifyRegions() {
 
 LogicalResult AIE4MmacOp::verify() {
   AIE4MatrixFormat format = getFormat();
-  AIE4MatrixFormatInfo info = getFormatInfo(getContext(), format);
   StringRef formatName = stringifyAIE4MatrixFormat(format);
-
-  auto rowType = VectorType::get({info.k}, info.elementType);
-  if (getLhs().getType() != rowType)
-    return emitOpError("lhs must be ")
-           << rowType << " for format " << formatName << ", got "
-           << getLhs().getType();
-
-  auto accType = VectorType::get({kAIE4MmacColumns}, info.accElementType);
-  if (Value acc = getAcc(); acc && acc.getType() != accType)
-    return emitOpError("acc must be ")
-           << accType << " for format " << formatName << ", got "
-           << acc.getType();
-  if (getResult().getType() != accType)
-    return emitOpError("result must be ")
-           << accType << " for format " << formatName << ", got "
-           << getResult().getType();
-
-  if (failed(verifySignedness(*this, info.isInteger, "lhs_signed",
-                              getLhsSignedAttr())) ||
-      failed(verifySignedness(*this, info.isInteger, "rhs_signed",
-                              getRhsSignedAttr())))
+  if (failed(verifyRowMmac(*this, format, getLhs(), getAcc(), getResult(),
+                           getLhsSignedAttr(), getRhsSignedAttr())))
     return failure();
 
   // Stop at isolation boundaries: a nested function can execute outside
@@ -244,5 +315,80 @@ LogicalResult AIE4MmacOp::verify() {
   if (region.getRhsSignedAttr() != getRhsSignedAttr())
     return emitOpError(
         "'rhs_signed' must match the enclosing region's 'rhs_signed'");
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// Flat layer: AIE4StageOp, AIE4StageStreamOp, AIE4CommitOp, AIE4MmacActiveOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult AIE4StageOp::verify() {
+  AIE4MatrixFormat format = getFormat();
+  AIE4MatrixFormatInfo info = getFormatInfo(getContext(), format);
+
+  // One staging chunk is two B columns. int4 and fp8 also accept their
+  // byte image, which is the register layout the insert takes.
+  constexpr int64_t kChunkBits = 1024;
+  auto logicalType =
+      VectorType::get({kChunkBits / info.elementType.getIntOrFloatBitWidth()},
+                      info.elementType);
+  auto byteType =
+      VectorType::get({kChunkBits / 8}, IntegerType::get(getContext(), 8));
+  SmallVector<VectorType, 2> accepted = {logicalType};
+  if (format == AIE4MatrixFormat::Int4 || format == AIE4MatrixFormat::Fp8)
+    accepted.push_back(byteType);
+  Type chunkType = getChunk().getType();
+  if (!llvm::is_contained(accepted, chunkType)) {
+    InFlightDiagnostic diag = emitOpError("chunk must be ");
+    llvm::interleave(
+        accepted, [&](VectorType t) { diag << t; }, [&] { diag << " or "; });
+    return diag << " for format " << stringifyAIE4MatrixFormat(format)
+                << ", got " << chunkType;
+  }
+
+  if (failed(verifySignedness(*this, info.isInteger, "rhs_signed",
+                              getRhsSignedAttr())))
+    return failure();
+  return verifyConstantSlot(*this, getSlot());
+}
+
+LogicalResult AIE4StageStreamOp::verify() {
+  AIE4MatrixFormatInfo info = getFormatInfo(getContext(), getFormat());
+  if (failed(verifySignedness(*this, info.isInteger, "rhs_signed",
+                              getRhsSignedAttr())) ||
+      failed(verifyConstantSlot(*this, getSlot())))
+    return failure();
+
+  // The core has input streams 0 and 1 (see aie.get_stream lowering).
+  APInt port;
+  if (matchPattern(getPort(), m_ConstantInt(&port))) {
+    int64_t v = port.getSExtValue();
+    if (v != 0 && v != 1)
+      return emitOpError("port ")
+             << v << " is not an AIE4 core input stream (0 or 1)";
+  }
+  return success();
+}
+
+LogicalResult AIE4CommitOp::verify() {
+  AIE4MatrixFormatInfo info = getFormatInfo(getContext(), getFormat());
+  return verifySignedness(*this, info.isInteger, "rhs_signed",
+                          getRhsSignedAttr());
+}
+
+LogicalResult AIE4MmacActiveOp::verify() {
+  AIE4MatrixFormat format = getFormat();
+  if (failed(verifyRowMmac(*this, format, getLhs(), getAcc(), getResult(),
+                           getLhsSignedAttr(), getRhsSignedAttr())))
+    return failure();
+
+  if (getZeroIf()) {
+    if (!getFormatInfo(getContext(), format).isInteger)
+      return emitOpError("'zero_if' applies only to integer formats (int8, "
+                         "int4); float formats peel the first K tile");
+    if (!getAcc())
+      return emitOpError("'zero_if' requires 'acc'; without 'acc' the "
+                         "accumulator is always zero");
+  }
   return success();
 }

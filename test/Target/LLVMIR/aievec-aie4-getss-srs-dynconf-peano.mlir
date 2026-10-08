@@ -9,33 +9,13 @@
 // RUN: llc -O2 --mtriple=aie4 --mcpu=aie4b -filetype=obj %t.ll -o %t.o
 // RUN: llvm-objdump -dr %t.o | FileCheck %s --implicit-check-not=llvm.aie4 --implicit-check-not=jl
 
-// Distinct ports expose incorrect operand forwarding for each stream kind.
-// CHECK-LABEL: <get_ss_kind0>:
-// CHECK-DAG: mova{{[[:blank:]]+}}[[P:p[0-9]+]], #0x3{{([[:blank:]]|;|$)}}
+// Forward the stream port and select a native 1024-bit stream read.
+// CHECK-LABEL: <get_ss>:
+// CHECK-DAG: mova{{[[:blank:]]+}}[[P:p[0-9]+]], #0x1{{([[:blank:]]|;|$)}}
 // CHECK-DAG: vmovb{{[[:blank:]]+}}y{{[0-9]+}}, ss[[[P]]]{{([[:blank:]]|;|$)}}
-llvm.func @get_ss_kind0(%out: !llvm.ptr) {
-  %p = llvm.mlir.constant(3 : i32) : i32
-  %0 = "xllvm.intr.aie4.get.ss"(%p) {kind = 0 : i32} : (i32) -> vector<32xi32>
-  llvm.store %0, %out : vector<32xi32>, !llvm.ptr
-  llvm.return
-}
-
-// CHECK-LABEL: <get_ss_kind1>:
-// CHECK-DAG: mova{{[[:blank:]]+}}[[P:p[0-9]+]], #0x5{{([[:blank:]]|;|$)}}
-// CHECK-DAG: vmovb{{[[:blank:]]+}}y{{[0-9]+}}, ss[[[P]]]{{([[:blank:]]|;|$)}}
-llvm.func @get_ss_kind1(%out: !llvm.ptr) {
-  %p = llvm.mlir.constant(5 : i32) : i32
-  %0 = "xllvm.intr.aie4.get.ss"(%p) {kind = 1 : i32} : (i32) -> vector<32xi32>
-  llvm.store %0, %out : vector<32xi32>, !llvm.ptr
-  llvm.return
-}
-
-// CHECK-LABEL: <get_ss_kind2>:
-// CHECK-DAG: mova{{[[:blank:]]+}}[[P:p[0-9]+]], #0x2{{([[:blank:]]|;|$)}}
-// CHECK-DAG: vmovb{{[[:blank:]]+}}y{{[0-9]+}}, ss[[[P]]]{{([[:blank:]]|;|$)}}
-llvm.func @get_ss_kind2(%out: !llvm.ptr) {
-  %p = llvm.mlir.constant(2 : i32) : i32
-  %0 = "xllvm.intr.aie4.get.ss"(%p) {kind = 2 : i32} : (i32) -> vector<32xi32>
+llvm.func @get_ss(%out: !llvm.ptr) {
+  %p = llvm.mlir.constant(1 : i32) : i32
+  %0 = "xllvm.intr.aie4.get.ss"(%p) : (i32) -> vector<32xi32>
   llvm.store %0, %out : vector<32xi32>, !llvm.ptr
   llvm.return
 }

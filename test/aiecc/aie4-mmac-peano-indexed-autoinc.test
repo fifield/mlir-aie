@@ -1,0 +1,48 @@
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// combine_indexed_to_autoinc can confuse a constant staging slot of 1 with
+// the increment in kt + 1, making the next loop counter 2 instead of kt + 1.
+// Run without aiecc's workaround so a backend fix is reported as XPASS.
+// aie4-mmac-codegen.test checks the workaround; npu3_mmac_flat_aievec checks
+// numerical results for the affected L1 and stream-port-0 paths.
+//
+// REQUIRES: peano
+// XFAIL: *
+//
+// RUN: split-file %s %t
+// RUN: llc -O2 --mtriple=aie4 --mcpu=aie4b -filetype=obj %t/input.ll -o %t.o
+// RUN: llvm-objdump -d %t.o | FileCheck %s
+// CHECK-LABEL: <f>:
+// CHECK-NOT: za[i{{[0-9]+}}++]
+// CHECK-NOT: mov{{[[:blank:]]+}}r{{[0-9]+}}, i{{[0-9]+}}{{([[:blank:]]|;|$)}}
+
+//--- input.ll
+; Copyright (C) 2026 Advanced Micro Devices, Inc.
+; SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+;
+; Minimized: combine_indexed_to_autoinc folds an unrelated "add %kt, 1" into
+; the insert.staging whose *slot index* is the constant 1. %kt.next becomes
+; (1 + 1) = 2 instead of %kt + 1.  Expected out[i] = i for i = 0..7.
+target datalayout = "e-m:e-p:20:32-i1:8:32-i8:8:32-i16:16:32-i32:32:32-f32:32:32-i64:32-f64:32-i248:8:32-i264:8:32-a:0:32-n32"
+target triple = "aie4"
+
+declare void @llvm.aie4.insert.staging.int.I1024(<128 x i8>, i32, i32)
+
+define void @f(ptr %out, ptr %w) {
+entry:
+  br label %loop
+loop:
+  %kt = phi i32 [ 0, %entry ], [ %kt.next, %loop ]
+  %n = phi i32 [ 8, %entry ], [ %n.next, %loop ]
+  %v = load <128 x i8>, ptr %w, align 128
+  tail call void @llvm.aie4.insert.staging.int.I1024(<128 x i8> %v, i32 1, i32 3)
+  %p = getelementptr i32, ptr %out, i32 %kt
+  store i32 %kt, ptr %p, align 4
+  %kt.next = add nuw nsw i32 %kt, 1
+  %n.next = add i32 %n, -1
+  %c = icmp ne i32 %n.next, 0
+  br i1 %c, label %loop, label %exit
+exit:
+  ret void
+}

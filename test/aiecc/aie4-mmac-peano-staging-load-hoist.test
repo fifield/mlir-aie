@@ -13,4 +13,4 @@
 //
 // RUN: llc -O2 --mtriple=aie4 --mcpu=aie4b -filetype=obj %S/Inputs/aie4_staging_load_hoist.ll -o %t.o
 // RUN: llvm-objdump -d %t.o > %t.dis
-// RUN: %python %S/Inputs/check_aie4_mmac_schedule.py %t.dis --inserts-per-tile 1 --mmacs-per-tile 1,1,1
+// RUN: %python %S/aie4-mmac-schedule-checker.py %t.dis --inserts-per-tile 1 --mmacs-per-tile 1,1,1

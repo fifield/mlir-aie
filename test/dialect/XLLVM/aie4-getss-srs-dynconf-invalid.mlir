@@ -3,26 +3,10 @@
 
 // RUN: aie-opt %s -split-input-file -verify-diagnostics
 
-func.func @get_ss_kind_out_of_range(%p: i32) -> vector<32xi32> {
-  // expected-error @+1 {{attribute 'kind' failed to satisfy constraint: AIE4 1024-bit stream read kind}}
-  %0 = "xllvm.intr.aie4.get.ss"(%p) {kind = 3 : i32} : (i32) -> vector<32xi32>
-  return %0 : vector<32xi32>
-}
-
-// -----
-
-func.func @get_ss_missing_kind(%p: i32) -> vector<32xi32> {
-  // expected-error @+1 {{requires attribute 'kind'}}
-  %0 = "xllvm.intr.aie4.get.ss"(%p) : (i32) -> vector<32xi32>
-  return %0 : vector<32xi32>
-}
-
-// -----
-
 // The result must match aie.get_stream's <32 x i32> declaration.
 func.func @get_ss_byte_result(%p: i32) -> vector<128xi8> {
   // expected-error @+1 {{failed to verify that 'res' is fixed-length vector of 32-bit signless integer values of length 32}}
-  %0 = "xllvm.intr.aie4.get.ss"(%p) {kind = 0 : i32} : (i32) -> vector<128xi8>
+  %0 = "xllvm.intr.aie4.get.ss"(%p) : (i32) -> vector<128xi8>
   return %0 : vector<128xi8>
 }
 
@@ -30,7 +14,7 @@ func.func @get_ss_byte_result(%p: i32) -> vector<128xi8> {
 
 func.func @get_ss_index_port(%p: index) -> vector<32xi32> {
   // expected-error @+1 {{operand #0 must be 32-bit signless integer}}
-  %0 = "xllvm.intr.aie4.get.ss"(%p) {kind = 0 : i32} : (index) -> vector<32xi32>
+  %0 = "xllvm.intr.aie4.get.ss"(%p) : (index) -> vector<32xi32>
   return %0 : vector<32xi32>
 }
 
