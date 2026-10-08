@@ -1642,6 +1642,7 @@ const SwitchSettings &PacketFlowRouting::settingsOf(const PathEndPoint &src,
 }
 
 void PacketFlowRouting::findCircuitHops() {
+  const bool useShimMux = !isa<AIE4TargetModel>(targetModel);
   // Seed the reserved set from the packet-switch configuration the switchboxes
   // already carry, so this run allocates around it instead of over it.
   reservedAmsels = configuredAmsels(device);
@@ -1726,7 +1727,8 @@ void PacketFlowRouting::findCircuitHops() {
   }
   for (auto &[tileId, connects] : switchboxes) {
     if (!circuitSwitchHops ||
-        targetModel.isShimNOCorPLTile(tileId.col, tileId.row))
+        (useShimMux &&
+         targetModel.isShimNOCorPLTile(tileId.col, tileId.row)))
       continue;
     std::set<Port> masters;
     for (const auto &[conn, flowID] : connects)
@@ -1862,10 +1864,11 @@ std::optional<ArbiterPlan> PacketFlowRouting::planTile(
     return sub;
   };
   auto keepPinned = [&]() -> std::optional<ArbiterPlan> {
+    const bool useShimMux = !isa<AIE4TargetModel>(targetModel);
     ArbiterPlan kept;
     for (size_t f : priority) {
       Port slave = flows[f].slave;
-      if (slave.bundle == WireBundle::DMA &&
+      if (useShimMux && slave.bundle == WireBundle::DMA &&
           targetModel.isShimNOCTile(tileId.col, tileId.row))
         slave = {WireBundle::South, shimMuxChannelFrom(slave)};
       auto rules = pinned.rules.find({tileId, slave});
@@ -3022,11 +3025,13 @@ llvm::Expected<PacketPlan> AIEPathfinderPass::route(
   constraints.prioritize = prioritize;
   if (clRoutePacket && !d.getOps<PacketFlowOp>().empty()) {
     const AIETargetModel &targetModel = d.getTargetModel();
+    const bool useShimMux = !isa<AIE4TargetModel>(targetModel);
     if (llvm::Error err = unroutableArbiters(
             d, conflicts,
             [&](TileID tile) {
               return !circuitSwitchHops ||
-                     targetModel.isShimNOCorPLTile(tile.col, tile.row);
+                     (useShimMux &&
+                      targetModel.isShimNOCorPLTile(tile.col, tile.row));
             },
             pinned.trees))
       return std::move(err);

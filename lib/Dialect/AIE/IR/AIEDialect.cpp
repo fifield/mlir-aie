@@ -3982,10 +3982,6 @@ LogicalResult PacketFlowOp::verify() {
       ++numDests;
     else if (!isa<EndOp>(ops))
       return ops.emitOpError("cannot be contained in a PacketFlow op");
-    if (isa<PacketSourceOp>(ops))
-      ++numSources;
-    if (isa<PacketDestOp>(ops))
-      ++numDests;
   }
 
   if (numSources < 1)

@@ -1,9 +1,9 @@
 # Medusa router rebase — 2026-10-07
 
-Work branch: `rebase/medusa-router-20261007`, prepared for a draft PR against
-`medusa-dev` so CI can validate the integration. Publishing this branch does not
-update `medusa-dev`; its eventual history integration is deferred. The original
-checkout remains on its original branch.
+Work branch: `rebase/medusa-router-20261007`, published as draft PR #376 against
+`medusa-dev`. On 2026-10-08, the integration was rebased onto current Medusa
+`64a7ab07d11aa0731aac22d3f811f6cc182e1161`. The target branch and original
+checkout remain unchanged; the PR remains a draft.
 
 ## Compared revisions
 
@@ -17,6 +17,23 @@ same-ID routing-golden refresh `423e14a9ac8` became empty. Its four fixtures hav
 identical non-comment IR before and after that original commit. Assertions are
 validated against the combined router rather than the obsolete route choices.
 The range-diff is retained in the adjacent validation build directory.
+
+For the 2026-10-08 base update, the exact reviewed tree at
+`337e26db6aca27081a14f823c3557268207823da` was consolidated into one integration
+commit relative to original Medusa, then rebased onto current Medusa. This avoids
+replaying Medusa commits already present on the target branch. Original replayed
+history is retained locally at
+`backup/medusa-router-before-base-update-20261008`.
+
+Current Medusa adds #362 (AIE4 staging). The rebase applied cleanly. Its only
+shared path is `tools/aiecc/IRTransforms.h`: #362 adds staging checks/expansion in
+the address-assignment pipeline, while this integration supplies deadlock policy
+to the routing pipeline. Both changes are retained. Independent review verified every source blob and
+file mode: 314 disjoint integration paths match the reviewed draft, 70 disjoint
+#362 paths match current Medusa, and the shared file contains both edits exactly.
+Before this report update, the original and rebased deltas had the same stable
+patch ID, `4fc22da5c1d23d00cf4616dc28e980a68fcbeebb`. No new local build or test
+suite was run for this base update; CI validates the combined tree.
 
 ## Upstream behavior retained
 
@@ -131,3 +148,84 @@ Its `BUILD_SETUP.md`, `run-lit.sh`, and `hardware-validation.py` document the
 isolated toolchain and reproduction commands. CMake normally patches five
 aie-rt files from tracked patches; the generated edits were byte-compared with
 those patches before cleanup. Reconfiguration reapplies them for another build.
+
+## CI follow-up
+
+The original draft's first CI run found a missing NPU3 variant in the new upstream
+`memtile_dma_starts_at_load` test. The fixture now selects `npu3_1col` and uses the
+supported full-ELF compile/launch path. Existing NPU1/NPU2 commands, initialized
+lock, static DMA start, and all 256 payload checks are preserved. Independent
+review approved this fix and the single targeted NPU3 hardware test passed.
+
+[CI run 3837802](https://gitenterprise.xilinx.com/XRLabs/mlir-aie/actions/runs/3837802)
+succeeded on the previous draft tip `337e26db6ac`. That result predates the
+2026-10-08 base update and is not a test result for the newly combined tree.
+
+## PR #376 review findings — 2026-10-08
+
+1. **AIE4 shim arbiter pressure: confirmed.** Both optional circuit-hop extraction
+   and the upfront arbiter check excluded all shim tiles. They now exclude only
+   legacy shims with a mux. The new
+   `aie4_shim_circuit_hop_reserved_arbiters.mlir` reserves every shim amsel: a
+   packet can still cross the shim through an exclusive circuit hop, and routing
+   with that optimization disabled must report no free arbiter. The old compiler
+   rejects the valid default case before routing.
+2. **Pinned direct-DMA overlay lookup: confirmed.** The pinned-rule lookup still
+   translated an AIE4 shim DMA input into a legacy South mux port. It now uses
+   DMA directly on AIE4. The new `aie4_pinned_overlay_direct_shim_dma.mlir` compares
+   an overlay routed alone with a reload containing application traffic. Its
+   data-DMA source reaches both tile controllers, and the old compiler reproduces
+   the exact reported “takes no packet rule there alone” failure. This regression
+   checks the installed channel, amsel, and rule with circuit-hop extraction both
+   enabled and disabled.
+3. **Missing ordering regression and duplicate verifier counts: confirmed.**
+   Source and destination collection already uses separate passes, so the original
+   ordering bug is fixed. The upstream `packet_flow_dest_before_source.mlir` was
+   nevertheless missing; it is restored byte-for-byte from `c5e495`. Duplicate
+   increments are removed from `PacketFlowOp::verify`, retaining multiple-source
+   support, required endpoints, and packet-mask checks.
+4. **Duplicate shim-row fan-in fixture: confirmed.**
+   `same_id_fanin_5way_shimrow_npu2.mlir` had identical executable MLIR and RUN
+   instructions to `same_id_fanin_5way_memtile_dest.mlir`. The duplicate is removed;
+   the retained fixture checks all five complete source paths more precisely.
+5. **Destination pressure affecting legacy targets: confirmed, retained with
+   explicit justification.** Historical Medusa #226 deliberately applied this
+   rule globally; it was not newly broadened by this rebase. The rule is retained
+   for the following reasons:
+
+   - AIE4 regression `aie4_width_change_congestion.mlir` exercises two circuits
+     competing for the only free North:0 output, requiring a bridge fallback,
+     and mixed packet/circuit contention. #226 originally fixed multi-stream
+     memtile/shim DMA routing, including the four-weight-stream GEMV case.
+   - Gating all destination legality to AIE4 would weaken correctness elsewhere:
+     upstream's per-wire accounting cannot cover every terminal-output collision
+     or a flow ending at a directional port used by another stream.
+   - We tried the narrower alternative of preserving global legality and actual
+     overuse history while making only proactive destination pressure AIE4-only.
+     `packet_shared_ids_split_last.mlir` then failed to find a deadlock-safe route
+     on NPU2, rather than merely choosing a different channel. The diagnostic
+     identifies id24 from (0,4) DMA:0 holding arbiter 0 at (0,3), needed by id9
+     from (0,4) DMA:1, with receiver/DMA waits completing a cycle. This fixture
+     passes with the retained rule. The tentative change was reverted.
+   - The congested NPU1 fixture also still differed from its original upstream
+     golden under that attempted narrowing. We therefore retain the three
+     previously reviewed golden updates and their endpoint-preservation evidence
+     instead of claiming that the same legality constraint restores all original
+     route choices. This is an intentional, documented deviation in routing cost;
+     it preserves the design's endpoints and strict deadlock checks.
+
+Independent review approved the shim fixes and fixtures, the ordering/fan-in
+cleanup, and retaining global destination pressure after the failed narrowing
+experiment. The exact NPU2 diagnostic is retained in the adjacent build directory
+as `pr376-r11-aie4-only-regression.log`. No hardware or broad compiler suite was
+rerun for these review fixes.
+
+Final review validation: rebuilt `aie-opt` and passed all **19 selected lit
+fixtures** on the final source. This includes both new shim regressions, the
+restored ordering test, retained fan-in coverage, legacy arbiter/overlay cases,
+AIE4 width/bridge/control cases, and all three cited generic routing tests. Each
+fixture's existing RUN lines were executed, including strict and disabled-hop
+variants where present. Logs/results: `pr376-review-final-build.log`,
+`pr376-review-final-focused.log`, and `pr376-review-final-focused.json` in the
+adjacent build directory. No further local testing is planned; CI covers the
+broader checks.
