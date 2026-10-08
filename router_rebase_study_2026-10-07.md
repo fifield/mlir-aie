@@ -1,8 +1,8 @@
 # Router rebase study — 2026-10-07
 
 This records the pre-rebase study. See
-[the validation report](router_rebase_validation_2026-10-07.md) for implementation
-and execution results from the fresh worktree.
+[PR #376](https://gitenterprise.xilinx.com/XRLabs/mlir-aie/pull/376) for
+implementation and validation results.
 
 The recommended approach is to adopt upstream's new routing and packet-planning
 architecture, then port Medusa's remaining hardware semantics into it. Keeping
