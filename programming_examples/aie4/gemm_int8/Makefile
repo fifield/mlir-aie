@@ -57,7 +57,7 @@ $(cfg)/gemm_int8.elf: $(cfg)/gemm_int8.mlir $(kcfg)/kernel.o
 	# Lower FIFOs before tracing to avoid counting C FIFOs as trace channels.
 	cd $(cfg) && $(if $(filter 1,$(trace_on)),aie-opt --aie-objectFifo-stateful-transform \
 		gemm_int8.mlir -o gemm_int8_in.mlir,cp gemm_int8.mlir gemm_int8_in.mlir)
-	cd $(cfg) && aiecc -v -j4 --tmpdir=project --xchesscc --xbridge --dump-intermediates \
+	cd $(cfg) && aiecc -v --tmpdir=project --xchesscc --xbridge --dump-intermediates \
 		--get-full-elf --full-elf-name=gemm_int8.elf gemm_int8_in.mlir \
 		> aiecc.log 2>&1 || (grep -i error aiecc.log | head -20; false)
 

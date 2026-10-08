@@ -126,6 +126,9 @@ jobs:
           # Cap aiecc's internal per-design scheduler independently of lit's
           # test-level -j setting to stay within this runner's memory limit.
           AIECC_JOBS: "1"
+          # Same cap for the Python/IRON external-kernel compiles, which run
+          # before aiecc and default to os.cpu_count() workers.
+          AIE_KERNEL_COMPILE_JOBS: "1"
           TMPDIR: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
           TEMP: ${{ runner.temp }}
