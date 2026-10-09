@@ -42,11 +42,17 @@ def build(
     a_split=2,
     c_reasm=1,
     c_run=1024,
+    kernel="extern",
+    shift=12,
 ):
     assert K % TILE == 0 and K >= 2 * TILE, "K must be a multiple of 64, >= 128"
     assert M % (N_ROWS * TILE) == 0, "M must be a multiple of 256"
     assert N % (N_COLS * TILE) == 0, "N must be a multiple of 192"
     MB = M // (N_ROWS * TILE)  # M-blocks
+    assert kernel in ("extern", "aievec")
+    # aievec: a C objectfifo acquire inside the group loop would make
+    # objectfifo lowering unroll the loop and copy the tile body.
+    assert kernel == "extern" or c_reasm, "--kernel aievec requires --c-reasm 1"
     if wbuf > 1 and 2 * MB > 16:
         wbuf = 1  # replay chain would exceed the memtile channel's 16 BDs
     NT = N // (N_COLS * TILE)  # output tiles per core per M-block
@@ -97,19 +103,20 @@ def build(
         w_host_ty = np.ndarray[(N * K // 4,), np.dtype[np.int32]]
         c_host_ty = np.ndarray[(M * N * out_bytes // 4,), np.dtype[np.int32]]
 
-        gemm_stage_b = external_func(
-            "gemm_stage_b", inputs=[], link_with="project/kernel.o"
-        )
-        gemm_tile = external_func(
-            "gemm_tile",
-            inputs=[a_part_ty, a_part_ty, c_core_ty, np.int32],
-            link_with="project/kernel.o",
-        )
-        gemm_tile_last = external_func(
-            "gemm_tile_last",
-            inputs=[a_part_ty, a_part_ty, c_core_ty, np.int32],
-            link_with="project/kernel.o",
-        )
+        if kernel == "extern":
+            gemm_stage_b = external_func(
+                "gemm_stage_b", inputs=[], link_with="project/kernel.o"
+            )
+            gemm_tile = external_func(
+                "gemm_tile",
+                inputs=[a_part_ty, a_part_ty, c_core_ty, np.int32],
+                link_with="project/kernel.o",
+            )
+            gemm_tile_last = external_func(
+                "gemm_tile_last",
+                inputs=[a_part_ty, a_part_ty, c_core_ty, np.int32],
+                link_with="project/kernel.o",
+            )
 
         shims = [tile(c, 0) for c in range(N_COLS)]
         mems = [tile(c, 1) for c in range(N_COLS)]
@@ -417,7 +424,21 @@ def build(
 
         for c in range(N_COLS):
             for r in range(N_ROWS):
-                make_core(c, r)
+                if kernel == "aievec":
+                    aievec_core(
+                        cores[c][r],
+                        a_core[c][r],
+                        c_l1[c][r],
+                        K=K,
+                        NG=NG,
+                        ct=ct,
+                        a_split=a_split,
+                        out_i8=out_i8,
+                        shift=shift,
+                        trace=bool(trace_size),
+                    )
+                else:
+                    make_core(c, r)
 
         # Trace column 0 on one broadcast timeline; packet IDs >=8 avoid
         # the DMA completion return flows (IDs 0..N_COLS-1).
@@ -597,6 +618,251 @@ def build(
                 inputs = next_inputs
 
 
+def aievec_core(core_tile, a_fifos, c_l1, *, K, NG, ct, a_split, out_i8, shift, trace):
+    """Emit core (c, r)'s body in flat AIEVec (KERNEL=aievec).
+
+    Same schedule as kernel.cc: prime 32 W pops per strip, then each 64x64
+    output tile runs KT K-tiles of commit + 64 row MMACs, popping the next
+    K-tile's W after every odd row. The K-loop covers K-tiles 0..KT-2 with a
+    dynamic zero_if(kt == 0); the last K-tile is peeled and pre-stages the
+    next output tile unless it ends the strip. The tile body is emitted
+    twice: in the runtime output-tile loop and as the peeled strip end. The
+    C buffer parity is computed at run time from the M-block count.
+    """
+    from aie.dialects import arith as arith_d, scf as scf_d, ub as ub_d
+    from aie.dialects import vector as vector_d
+    from aie.dialects.aie import event as aie_event
+    from aie.helpers.dialects.scf import if_, yield_
+    from aie.helpers.dialects.aievec_aie4 import (
+        INT8,
+        POS_INF,
+        SAT,
+        commit,
+        mmac_active,
+        srs,
+        stage_stream,
+    )
+    from aie.ir import (
+        Attribute,
+        IndexType,
+        InsertionPoint,
+        IntegerAttr,
+        IntegerType,
+        MemRefType,
+        Operation,
+        Type,
+        VectorType,
+    )
+
+    KT = K // TILE
+    # KT == 1 would make the peeled K-tile accumulate onto the poison init.
+    assert KT >= 2, "--kernel aievec needs K >= 128"
+    out_bytes = 1 if out_i8 else 4
+    i32 = IntegerType.get_signless(32)
+    V64I8 = VectorType.get([64], IntegerType.get_signless(8))
+    V16I32 = VectorType.get([16], i32)
+    V64I32 = VectorType.get([64], i32)
+    KT_WORDS = (TILE // a_split) * TILE // 4  # one K-tile of one A part
+    C_ROW_WORDS = ct * TILE * out_bytes // 4  # C buffer row stride
+    C_TILE_WORDS = TILE * out_bytes // 4  # C tile j step
+    bufs, prod, cons = c_l1
+
+    def idx(v):
+        return arith_d.constant(IndexType.get(), v)
+
+    def c32(v):
+        return arith_d.constant(i32, v)
+
+    # A rows are addressed from one pointer per A part (ptr dialect), carried
+    # across K-tiles as a K-loop iter_arg and advanced by one K-tile per
+    # iteration. Peano then keeps it in a pointer register and walks the rows
+    # with post-increment loads, as the C kernel's pLo/pHi do. Indexing the
+    # buffer by kt instead makes Peano rebuild the K-tile address from the
+    # loop counter at the top of every iteration.
+    PTR = Type.parse("!ptr.ptr<#ptr.generic_space>")
+    GEN_SPACE = Attribute.parse("#ptr.generic_space")
+
+    def to_ptr(buf):
+        """(pointer to buf, its generic-space memref type, its metadata)"""
+        mt = MemRefType(buf.type)
+        gty = MemRefType.get(mt.shape, mt.element_type, memory_space=GEN_SPACE)
+        # ptr.to_ptr needs a #ptr.generic_space memref. memref.memory_space_cast
+        # is not a drop-in (memref-to-LLVM cannot map that space); this cast
+        # folds away in reconcile-unrealized-casts after the LLVM lowering.
+        g = Operation.create(
+            "builtin.unrealized_conversion_cast", results=[gty], operands=[buf]
+        ).result
+        p = Operation.create("ptr.to_ptr", results=[PTR], operands=[g]).result
+        md_ty = Type.parse(f"!ptr.ptr_metadata<{gty}>")
+        md = Operation.create("ptr.get_metadata", results=[md_ty], operands=[g])
+        return p, gty, md.result
+
+    def ptr_add(p, nbytes):
+        return Operation.create(
+            "ptr.ptr_add",
+            results=[PTR],
+            operands=[p, idx(nbytes)],
+            # The flags property is a plain i32 in the generic form (no Python
+            # enum binding for the ptr dialect); 3 is what `ptr_add inbounds`
+            # parses to.
+            attributes={"flags": IntegerAttr.get(i32, 3)},
+        ).result
+
+    def a_row(ptrs, meta, r):
+        # A part layout [kt][rows][64 int8]; a_split == 1 keeps all 64 rows
+        # in a_lo (= a_hi).
+        rows = TILE // a_split
+        part, rr = (1, r - rows) if r >= rows else (0, r)
+        if a_split == 1:
+            part = 0
+        gty, md = meta[part]
+        q = ptr_add(ptrs[part], rr * 64) if rr else ptrs[part]
+        m = Operation.create("ptr.from_ptr", results=[gty], operands=[q, md]).result
+        w = vector_d.load(V16I32, m, [idx(0)], alignment=64)
+        return vector_d.bitcast(V64I8, w)
+
+    def ktile(ptrs, meta, accs, *, zero_if, prefetch):
+        commit(INT8, rhs_signed=True)
+        out = []
+        for r in range(TILE):
+            out.append(
+                mmac_active(
+                    INT8,
+                    a_row(ptrs, meta, r),
+                    accs[r],
+                    zero_if=zero_if,
+                    lhs_signed=True,
+                    rhs_signed=True,
+                )
+            )
+            if prefetch and r & 1:
+                stage_stream(INT8, W_STREAM_PORT, r // 2, rhs_signed=True)
+        return out
+
+    def emit_tile(a_lo, a_hi, c_buf, j_words, *, prefetch_last):
+        if trace:
+            aie_event(0)
+        parts = [to_ptr(a_lo)] + ([] if a_split == 1 else [to_ptr(a_hi)])
+        meta = [(gty, md) for _, gty, md in parts]
+        # zero_if(kt == 0) ignores the accumulator, so the init is never read.
+        init = [ub_d.poison(V64I32)] * TILE + [p for p, _, _ in parts]
+        for kt, args, res in range_(0, KT - 1, iter_args=init, insert_yield=False):
+            accs, ptrs = list(args[:TILE]), list(args[TILE:])
+            yield_(
+                ktile(
+                    ptrs,
+                    meta,
+                    accs,
+                    zero_if=arith_d.cmpi(arith_d.CmpIPredicate.eq, kt, idx(0)),
+                    prefetch=True,
+                )
+                + [ptr_add(p, KT_WORDS * 4) for p in ptrs]
+            )
+        last = ktile(
+            list(res[TILE:]),
+            meta,
+            list(res[:TILE]),
+            zero_if=None,
+            prefetch=prefetch_last,
+        )
+        for r in range(TILE):
+            off = arith_d.addi(j_words, idx(r * C_ROW_WORDS))
+            if out_i8:
+                y = srs(
+                    last[r], shift=shift, signed=True, rounding=POS_INF, saturation=SAT
+                )
+                vector_d.store(vector_d.bitcast(V16I32, y), c_buf, [off], alignment=64)
+            else:
+                vector_d.store(last[r], c_buf, [off], alignment=64)
+        if trace:
+            aie_event(1)
+
+    def c_select(sel):
+        # sel: a Python int, or an i32 Value (nonzero selects bufs[1]).
+        if isinstance(sel, int):
+            return bufs[sel].result
+        op = scf_d.IfOp(
+            arith_d.cmpi(arith_d.CmpIPredicate.ne, sel, c32(0)),
+            [bufs[0].result.type],
+            has_else=True,
+        )
+        with InsertionPoint(op.then_block):
+            scf_d.yield_([bufs[1].result])
+        with InsertionPoint(op.else_block):
+            scf_d.yield_([bufs[0].result])
+        return op.results[0]
+
+    def xor_parity(a, b):
+        # Each operand: None (= 0), a Python int, or an i32 Value.
+        a = 0 if a is None else a
+        b = 0 if b is None else b
+        if isinstance(a, int) and isinstance(b, int):
+            return (a ^ b) & 1
+        if isinstance(a, int):
+            a, b = b, a
+        if isinstance(b, int):
+            return arith_d.xori(a, c32(1)) if b & 1 else a
+        return arith_d.xori(a, b)
+
+    def eq(v, n):
+        return arith_d.cmpi(arith_d.CmpIPredicate.eq, v, idx(n))
+
+    # With KT == 2 both K-tiles are straight-line code and Peano spills
+    # accumulators: the spill slots fill the default 2 KiB stack exactly.
+    stack = 0x1000 if KT == 2 else 0x800
+
+    # Lock values are plain constants (use_lock's wrapper), so objectfifo
+    # lowering never peels these loops.
+    @core(core_tile, stack_size=stack)
+    def _():
+        for m in range_(sys.maxsize):
+            a = [f.acquire(ObjectFifoPort.Consume, 1) for f in a_fifos]
+            a_lo, a_hi = a[0], a[-1]  # same buffer when a_split == 1
+            for i in range(32):  # prime the strip's first K-tile
+                stage_stream(INT8, W_STREAM_PORT, i, rhs_signed=True)
+            # Buffer of group g in M-block m: (m*NG + g) & 1.
+            base = arith_d.andi(arith_d.index_cast(i32, m), c32(1)) if NG % 2 else None
+            n_loop = NG * ct - 1  # every tile but the strip's last
+            if n_loop:
+                for t in range_(0, n_loop):
+                    g = arith_d.divui(t, idx(ct))
+                    j = arith_d.remui(t, idx(ct))
+                    if ct > 1:
+                        with if_(eq(j, 0), hasElse=False):
+                            use_lock(prod, LockAction.AcquireGreaterEqual, 1)
+                    else:
+                        use_lock(prod, LockAction.AcquireGreaterEqual, 1)
+                    g_par = (
+                        None
+                        if NG == 1
+                        else arith_d.andi(arith_d.index_cast(i32, g), c32(1))
+                    )
+                    emit_tile(
+                        a_lo,
+                        a_hi,
+                        c_select(xor_parity(base, g_par)),
+                        arith_d.muli(j, idx(C_TILE_WORDS)),
+                        prefetch_last=True,
+                    )
+                    if ct > 1:
+                        with if_(eq(j, ct - 1), hasElse=False):
+                            use_lock(cons, LockAction.Release, 1)
+                    else:
+                        use_lock(cons, LockAction.Release, 1)
+            if ct == 1:  # else the last group was acquired at j == 0
+                use_lock(prod, LockAction.AcquireGreaterEqual, 1)
+            emit_tile(
+                a_lo,
+                a_hi,
+                c_select(xor_parity(base, (NG - 1) & 1)),
+                idx((ct - 1) * C_TILE_WORDS),
+                prefetch_last=False,
+            )
+            use_lock(cons, LockAction.Release, 1)
+            for f in a_fifos:
+                f.release(ObjectFifoPort.Consume, 1)
+
+
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description="int8 GEMM for npu3")
     p.add_argument("-M", type=int, default=2048)
@@ -630,7 +896,24 @@ if __name__ == "__main__":
         default=1,
         help="1: fetch A once and broadcast across columns; 0: per column",
     )
+    p.add_argument(
+        "--kernel",
+        choices=["extern", "aievec"],
+        default="extern",
+        help="extern: link kernel.o; aievec: emit the core in flat AIEVec",
+    )
+    p.add_argument(
+        "--shift",
+        type=int,
+        default=12,
+        choices=range(60),
+        metavar="0..59",
+        help="OUT=i8 SRS right shift (--kernel aievec only)",
+    )
     args = p.parse_args()
+    if args.kernel == "aievec":
+        # A C acquire in the group loop would be unrolled with the tile body.
+        assert args.c_reasm, "--kernel aievec requires --c-reasm 1"
     N_COLS = args.cols
     with mlir_mod_ctx() as ctx:
         build(
@@ -646,6 +929,8 @@ if __name__ == "__main__":
             args.a_split,
             args.c_reasm,
             args.c_run,
+            args.kernel,
+            args.shift,
         )
         res = ctx.module.operation.verify()
         if res is not True:

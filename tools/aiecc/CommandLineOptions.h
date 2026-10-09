@@ -172,6 +172,12 @@ inline cl::opt<bool> enableAie4Vectorization(
              "AIE4 vectorization is incomplete; default off."));
 inline cl::opt<std::string> peanoInstallDir("peano",
                                             cl::desc("Peano install dir"));
+// Extra Peano llc arguments, appended to every core's llc command after the
+// workaround flags (e.g. --peano-llc-arg=-aie-force-postpipeliner).
+inline cl::list<std::string>
+    peanoLlcArgs("peano-llc-arg",
+                 cl::desc("Extra argument for Peano llc, appended after the "
+                          "automatic workaround flags (repeatable)"));
 // Optimization level (0-3), default 2. The peano compile flow caps the
 // `opt` mid-end at O1 (higher levels make the SLP vectorizer emit types that
 // crash GlobalISel) while `llc` and the peano link step use the raw value;

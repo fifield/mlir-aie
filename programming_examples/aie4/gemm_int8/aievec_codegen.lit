@@ -1,0 +1,32 @@
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// KERNEL=aievec static gate (check_aievec_core.py): .text budget, exact
+// commit / MMAC / pop / insert (and OUT=i8 vst.srs) counts, one crRnd /
+// crSat write, no lda.s8 or vector stack traffic, no post-incremented
+// staging index, and the zb/za timing check around each K-loop of core
+// (0,2). Config A is #358's lit size (OUT=i8); config C (OUT=i32) with
+// trace events is the largest core. Config B (K = 128) has no K-loop (it is
+// inlined) and Peano spills accumulators there, so vector stack traffic is
+// allowed and its timing is covered by hardware only.
+//
+// REQUIRES: peano
+//
+// The default AIEVEC_LLC_ARGS software-pipeline both K-loops of a core:
+// each adds one K-tile copy (prologue/epilogue) to the exact counts, and
+// the timing check covers the straight-line block around each K-loop
+// (entry, two iterations, exit and the peeled last K-tile).
+//
+// RUN: mkdir -p test_aievec_codegen
+// RUN: cd test_aievec_codegen
+// RUN: make -f %S/Makefile check_aievec KERNEL=aievec M=512 N=768 K=1024 OUT=i8 CT=4 ITERS=1 | FileCheck %s --check-prefixes=CHECK,I8
+// RUN: make -f %S/Makefile check_aievec KERNEL=aievec M=512 N=576 K=256 OUT=i32 CT=1 ITERS=2 TRACE_SIZE=8192 | FileCheck %s --check-prefixes=CHECK,I32
+// RUN: make -f %S/Makefile check_aievec KERNEL=aievec M=512 N=576 K=128 OUT=i8 CT=1 ITERS=2 | FileCheck %s --check-prefix=KT2
+// I8: core_0_2: {{.*}} commit 6 mmac 384 pop 192 insert 192 {{.*}} vst.srs 128 crrnd 1 crsat 1; {{.*}}; 2 pipelined
+// I32: core_0_2: {{.*}} commit 6 mmac 384 pop 192 insert 192 {{.*}}; 2 pipelined
+// I8: core_0_2 K-loop {{.*}}: ORDER OK: 5 tiles, 128 inserts, 256 MMACs, no accumulator spills (loop body checked twice)
+// I32: core_0_2 K-loop {{.*}}: ORDER OK: 5 tiles, 160 inserts, 256 MMACs, no accumulator spills (loop body checked twice)
+// CHECK: core_0_2 K-loop {{.*}}: ORDER OK: 5 tiles, 96 inserts, 256 MMACs, no accumulator spills (loop body checked twice)
+// CHECK: CHECK_AIEVEC OK: 12 cores
+// KT2: core_0_2: {{.*}} vst.srs 128 crrnd 1 crsat 1 (vector [sp {{[0-9]+}}, allowed); ZOLs 1; no K-loop
+// KT2: CHECK_AIEVEC OK: 12 cores

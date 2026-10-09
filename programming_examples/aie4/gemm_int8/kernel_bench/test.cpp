@@ -55,7 +55,8 @@ int main(int argc, const char *argv[]) {
     unsigned mm = KT * MR;
     printf("call %u: mmac-phase %d cyc (eff %.1f%%), with store %d cyc (eff "
            "%.1f%%)\n",
-           c, Y[0], 100.0 * mm / Y[0], Y[1], 100.0 * mm / Y[1]);
+           c, Y[0], Y[0] ? 100.0 * mm / Y[0] : 0.0, Y[1],
+           Y[1] ? 100.0 * mm / Y[1] : 0.0);
   }
   printf("%s (%u errs)\n", errs ? "FAIL" : "PASS", errs);
   return errs != 0;

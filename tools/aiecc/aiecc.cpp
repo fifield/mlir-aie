@@ -396,6 +396,7 @@ buildObjectSubgraph(EdgeWithTypedOutput<ModRef> &lowered,
   // The unguarded regressions in test/aiecc/aie4-mmac-peano-*.test track
   // the first two defects; aie4-mmac-codegen.test checks loop increments.
   // The corresponding *-guard tests check flag scoping.
+  // --peano-llc-arg flags follow the workarounds in the same list.
   auto &llcWorkaroundFlags =
       opted
           .map<std::vector<std::string>>(
@@ -427,6 +428,11 @@ buildObjectSubgraph(EdgeWithTypedOutput<ModRef> &lowered,
                         "combine_staging_upd_load,combine_indexed_to_autoinc");
                   }
                 }
+                // User flags go last. A later value overrides scalar llc
+                // options only; list-valued *-disable-rule= workarounds
+                // accumulate and cannot be undone here.
+                flags.insert(flags.end(), peanoLlcArgs.begin(),
+                             peanoLlcArgs.end());
                 out.value = std::move(flags);
                 return mlir::success();
               })

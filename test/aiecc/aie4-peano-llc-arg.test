@@ -1,0 +1,24 @@
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// --peano-llc-arg appends its values, in order, to every core's llc command
+// after the automatic workaround flags. Here -aie-force-postpipeliner
+// software-pipelines the flat-AIEVec K-loop of
+// ../Target/LLVMIR/aie4_flat_kloop_poison.py (trip count 3): the first K-loop
+// iteration's commit and most of its MMACs move into a prologue, and each
+// loop iteration issues the next commit before the previous K-tile's last
+// MMACs (early commit). The zb/za timing checker must accept the result:
+// prime + prologue, two loop iterations, epilogue = 4 commits.
+//
+// REQUIRES: peano
+// RUN: %python %S/../Target/LLVMIR/aie4_flat_kloop_poison.py > %t.mlir
+// RUN: %aiecc -v --get-core-elfs --tmpdir %t.prj --output-dir %t.out --peano-llc-arg=-aie-force-postpipeliner --peano-llc-arg=-aie-postpipeliner-maxii=100 %t.mlir 2>&1 | FileCheck %s --check-prefix=FLAGS
+// RUN: llvm-objdump -d --no-show-raw-insn %t.out/elfs_main_core_0_2/elfs_main_core_0_2.elf > %t.s
+// RUN: %python %S/aie4-mmac-schedule-checker.py %t.s --mmacs-per-tile 64,64,64,64 --inserts-per-tile 32,32,32,32 --pops-per-tile 32,32,32,32 --forbid-lda-s8 | FileCheck %s --check-prefix=ORDER
+// RUN: %aiecc -v --get-core-elfs --tmpdir %t.dprj --output-dir %t.dout %t.mlir 2>&1 | FileCheck %s --check-prefix=DEFAULT
+
+// FLAGS: exec: {{.*}}llc {{.*}}combine_indexed_to_autoinc -aie-force-postpipeliner -aie-postpipeliner-maxii=100 --function-sections
+
+// DEFAULT: exec: {{.*}}llc {{.*}}combine_indexed_to_autoinc --function-sections
+
+// ORDER: ORDER OK: 4 tiles, 128 inserts, 256 MMACs, 128 pops, no accumulator spills (loop body checked twice)
