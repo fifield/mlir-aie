@@ -5633,6 +5633,7 @@ struct ConvertAIEVecToLLVMPass
   ConvertAIEVecToLLVMPass(const xilinx::ConvertAIEVecToLLVMOptions &options) {
     aieTarget = options.aieTarget;
     aie2Fp32Emulation = options.aie2Fp32Emulation;
+    aie4AssumeModes = options.aie4AssumeModes;
   }
 
   void runOnOperation() override {
@@ -5645,6 +5646,13 @@ struct ConvertAIEVecToLLVMPass
       return;
     }
     AIEVecTargetInfo targetInfo = *maybeTargetInfo;
+
+    if (!aie4AssumeModes.empty() && !targetInfo.isAIE4()) {
+      module.emitError() << "aie4-assume-modes requires an AIE4 target, got "
+                         << getCanonicalAIEVecTargetName(targetInfo);
+      signalPassFailure();
+      return;
+    }
 
     if (!isAIEVecToLLVMLoweringEnabled(targetInfo)) {
       // Only fail if the module actually contains an AIEVec op to lower.
@@ -5669,6 +5677,18 @@ struct ConvertAIEVecToLLVMPass
                                 failed(expandAIE4MatrixRegionOps(module)))) {
       signalPassFailure();
       return;
+    }
+
+    // Explicit-mode SRS relies on modes established at function entry;
+    // check them once per op here rather than failing inside the pattern.
+    if (targetInfo.isAIE4()) {
+      FailureOr<AIE4AssumedModes> assumed =
+          parseAIE4AssumeModes(aie4AssumeModes, module);
+      if (failed(assumed) ||
+          failed(verifyAIE4SRSEntryModes(module, *assumed))) {
+        signalPassFailure();
+        return;
+      }
     }
 
     RewritePatternSet patterns(&getContext());

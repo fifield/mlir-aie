@@ -9,6 +9,7 @@
 #include "aie/Dialect/AIE/IR/AIECoreSymbols.h"
 #include "aie/Dialect/AIE/IR/AIEDialect.h"
 #include "aie/Dialect/AIE/Transforms/AIEPasses.h"
+#include "aie/Dialect/AIEVec/IR/AIE4EntryModes.h"
 #include "aie/Dialect/AIEVec/IR/AIEVecDialect.h"
 #include "aie/Dialect/AIEVec/IR/AIEVecOps.h"
 
@@ -30,6 +31,8 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Tools/mlir-translate/MlirTranslateMain.h"
 #include "mlir/Transforms/DialectConversion.h"
+
+#include "llvm/ADT/SetVector.h"
 
 namespace xilinx::AIE {
 #define GEN_PASS_DEF_AIECORETOSTANDARD
@@ -655,25 +658,27 @@ struct AIEBufferToStandard : OpConversionPattern<BufferOp> {
 };
 
 //===----------------------------------------------------------------------===//
-// AIE4 core-entry control writes (decision D19)
+// AIE4 core-entry control writes
 //===----------------------------------------------------------------------===//
 //
-// Control-register ids for llvm.aie4.set.ctrl.reg, from Peano's
-// aie4/aie4_defines.h; reset values and encodings from ISA 2.10 (pp. 39-44).
+// Control-register IDs for llvm.aie4.set.ctrl.reg (Peano aie4_defines.h).
 constexpr int32_t kAIE4CrVecRnd = 24;     // VMAC-unit rounding, reset 0 (floor)
+constexpr int32_t kAIE4CrSat = 45;        // SRS/UPS/pack saturation, reset 0
 constexpr int32_t kAIE4CrRnd = 46;        // SRS/conversion rounding, reset 0
 constexpr int32_t kAIE4CrF2BConvSat = 53; // MX conversion saturation, reset 3
 constexpr int32_t kAIE4RndConvEven = 12;  // convergent rounding to even (RNE)
 constexpr int32_t kAIE4RndSymFloor = 2;   // symmetric floor: toward zero
 constexpr int32_t kAIE4F2BConvSatMax = 3; // Inf and Huge -> max representable
+constexpr int32_t kAIE4SatSymmetric = 3;  // symmetric saturation
 
 struct AIE4CoreEntryModes {
-  // Write crRnd = rndMode, unless the core reads the ambient crRnd through an
-  // explicit op (see scanAIE4CoreEntryModes).
+  // Preserve crRnd when the core has ambient readers; otherwise write rndMode.
   bool rnd = true;
   int32_t rndMode = kAIE4RndConvEven;
-  // crF2BConvSat = 3: the core has an MX conversion. No op in the tree
-  // reads it yet; aie4-r2-mx-backend adds the readers.
+  // Write crSat only when SRS explicitly requires a saturation mode.
+  bool sat = false;
+  int32_t satMode = 0;
+  // Reserved for MX conversions requiring crF2BConvSat = 3.
   bool f2bConvSat = false;
 };
 
@@ -693,52 +698,130 @@ static bool isGenericAIE4RndReader(Operation *op) {
   return isa<math::MathDialect>(op->getDialect());
 }
 
-// Walk `root` and every function body it calls, transitively. aiecc inlines
-// device-level helpers into the core, so their readers count as the core's.
-static void walkAIE4CoreAndCallees(Operation *root,
-                                   function_ref<WalkResult(Operation *)> fn) {
-  SmallVector<Operation *> worklist{root};
-  llvm::SmallPtrSet<Operation *, 8> visited{root};
-  while (!worklist.empty()) {
-    Operation *region = worklist.pop_back_val();
-    WalkResult r = region->walk([&](Operation *op) -> WalkResult {
-      if (auto call = dyn_cast<func::CallOp>(op)) {
-        auto callee = SymbolTable::lookupNearestSymbolFrom<func::FuncOp>(
-            call, call.getCalleeAttr());
-        if (callee && !callee.isExternal() && visited.insert(callee).second)
-          worklist.push_back(callee);
-      }
-      return fn(op);
-    });
-    if (r.wasInterrupted())
-      return;
-  }
+// The `aie4.entry_modes` value for `m`: the registers the entry writes.
+static DictionaryAttr entryModesAttr(MLIRContext *ctx,
+                                     const AIE4CoreEntryModes &m) {
+  Builder b(ctx);
+  SmallVector<NamedAttribute> kv;
+  if (m.rnd)
+    kv.push_back(b.getNamedAttr("rnd", b.getI32IntegerAttr(m.rndMode)));
+  if (m.sat)
+    kv.push_back(b.getNamedAttr("sat", b.getI32IntegerAttr(m.satMode)));
+  return b.getDictionaryAttr(kv);
 }
 
-// D19's per-core modes for an AIE4 core (crVecRnd = 12 always).
+// A function reached from several cores keeps only the modes they agree on.
+static DictionaryAttr mergeEntryModes(DictionaryAttr old, DictionaryAttr in) {
+  if (!old)
+    return in;
+  SmallVector<NamedAttribute> kv;
+  for (NamedAttribute a : old)
+    if (in.get(a.getName()) == a.getValue())
+      kv.push_back(a);
+  return DictionaryAttr::get(old.getContext(), kv);
+}
+
+static std::optional<int32_t> explicitRnd(Operation *op) {
+  if (auto srs = dyn_cast<aievec::AIE4SRSOp>(op))
+    if (auto mode = srs.getRounding())
+      return static_cast<int32_t>(*mode);
+  return std::nullopt;
+}
+static std::optional<int32_t> explicitSat(Operation *op) {
+  if (auto srs = dyn_cast<aievec::AIE4SRSOp>(op))
+    if (auto mode = srs.getSaturation())
+      return static_cast<int32_t>(*mode);
+  return std::nullopt;
+}
+
+// Recognize the same hardware readers before and after AIEVec lowering.
+// Low-level intrinsics have no explicit mode contract: their callers supply
+// the ambient modes, including float -> int (unlike aievec's truncation op).
+static StringRef getAIE4IntrinsicName(Operation *op) {
+  StringRef name = op->getName().getStringRef();
+  if (name.consume_front("xllvm.intr.aie4."))
+    return name;
+  if (auto call = dyn_cast<func::CallOp>(op))
+    name = call.getCallee();
+  else if (auto call = dyn_cast<LLVM::CallIntrinsicOp>(op))
+    name = call.getIntrin();
+  else if (auto call = dyn_cast<LLVM::CallOp>(op)) {
+    if (!call.getCallee())
+      return {};
+    name = *call.getCallee();
+  }
+  if (name.consume_front("llvm.aie4."))
+    return name;
+  return {};
+}
+
+static bool isAIE4SRSIntrinsic(StringRef name) {
+  return name == "I512.v32.acc32.srs" || name == "I512.v64.acc32.srs";
+}
+
+// XLLVM keeps the UPS shift in an attribute; LLVM intrinsics take it as
+// operand 1. An unknown shift may overflow and must retain ambient crSat.
+static bool hasZeroAIE4UPSShift(Operation *op) {
+  if (auto shift = op->getAttrOfType<IntegerAttr>("shift"))
+    return shift.getValue().isZero();
+  return op->getNumOperands() > 1 && matchPattern(op->getOperand(1), m_Zero());
+}
+
+// Ops defined to read whatever crRnd / crSat the core holds.
+static bool readsAmbientRnd(Operation *op) {
+  if (auto srs = dyn_cast<aievec::AIE4SRSOp>(op))
+    return !srs.getRounding();
+  StringRef name = getAIE4IntrinsicName(op);
+  return isa<aievec::AIE4SRSI32I16Op, aievec::AIE4ConvF32BF16Op>(op) ||
+         isAIE4SRSIntrinsic(name) || name == "v32accfloat.to.v32bfloat16" ||
+         name == "v32float.to.v32int32";
+}
+static bool readsAmbientSat(Operation *op) {
+  if (auto srs = dyn_cast<aievec::AIE4SRSOp>(op))
+    return !srs.getSaturation();
+  // A shift-0 widening cannot overflow, so saturation never acts.
+  if (auto ups = dyn_cast<aievec::AIE4UPSI16I32Op>(op))
+    return ups.getShift() != 0;
+  StringRef name = getAIE4IntrinsicName(op);
+  return isa<aievec::AIE4SRSI32I16Op>(op) || isAIE4SRSIntrinsic(name) ||
+         name == "v32float.to.v32int32" ||
+         (name == "acc32.v32.I512.ups" && !hasZeroAIE4UPSShift(op));
+}
+
+// VCONV float -> int always saturates and reads crSat bit 1 to pick the
+// symmetric bound, which would clip the in-range INT32_MIN.
+static bool needsNonSymmetricSat(Operation *op) {
+  return isa<aievec::AIE4ConvF32I32Op>(op);
+}
+
+static bool holdsExplicitModes(Operation *op) {
+  auto srs = dyn_cast<aievec::AIE4SRSOp>(op);
+  return srs && (srs.getRounding() || srs.getSaturation());
+}
+
+// Use one mode per register across the core and its callees. Generic bf16/f16
+// operations require crRnd = 12 (nearest even), float-to-int requires 2 (toward
+// zero), and ambient readers prohibit entry writes. With no readers, crRnd
+// defaults to 12; crVecRnd is always 12.
 //
-// crRnd = 12 by default: every generic bf16/f16 rounding op (arith
-// arithmetic, int -> float, f32 truncation, math) assumes round to nearest
-// even, and the loader leaves crRnd at its reset value, 0 (floor). The
-// explicit aievec.aie4.srs_i32_i16 and aievec.aie4.conv_f32_bf16 ops are
-// defined to read the ambient crRnd (release-1 references assume floor), so a
-// core containing one keeps the ambient mode.
-//
-// aievec.aie4.conv_f32_i32 implements arith.fptosi/fptoui, which truncate
-// toward zero, so a core containing it gets crRnd = 2. The mode cannot be
-// switched around each conversion instead: when the result feeds a store,
-// Peano fuses the two into vst.conv and drops the adjacent set.ctrl.reg
-// calls (FaaSApps/llvm-aie#3175).
-//
-// A core with two of these requirements is rejected: no single crRnd serves
-// both.
+// Explicit SRS modes must agree with every reader of the same register and
+// prohibit mode clobbers anywhere in the call graph. Write crSat only when
+// explicitly required. Entry writes avoid mode changes around conversions,
+// which Peano may fuse with stores.
 static FailureOr<AIE4CoreEntryModes> scanAIE4CoreEntryModes(CoreOp core) {
   AIE4CoreEntryModes modes;
   Operation *genericRnd = nullptr;
   Operation *ambientRnd = nullptr;
   Operation *truncRnd = nullptr;
+  // The first explicit requirement on each register, and the first one that
+  // differs from it.
+  Operation *explicitRndOp[2] = {nullptr, nullptr};
+  Operation *explicitSatOp[2] = {nullptr, nullptr};
+  Operation *ambientSat = nullptr;
+  Operation *nonSymSat = nullptr;
+  Operation *clobber = nullptr;
   bool failedScan = false;
-  walkAIE4CoreAndCallees(core, [&](Operation *op) -> WalkResult {
+  aievec::walkAIE4ModesAndCallees(core, [&](Operation *op) -> WalkResult {
     if (auto truncOp = dyn_cast<arith::TruncFOp>(op)) {
       if (auto mode = truncOp.getRoundingmode();
           mode && *mode != arith::RoundingMode::to_nearest_even &&
@@ -753,15 +836,34 @@ static FailureOr<AIE4CoreEntryModes> scanAIE4CoreEntryModes(CoreOp core) {
     }
     if (!genericRnd && isGenericAIE4RndReader(op))
       genericRnd = op;
-    if (!ambientRnd &&
-        isa<aievec::AIE4SRSI32I16Op, aievec::AIE4ConvF32BF16Op>(op))
+    if (!ambientRnd && readsAmbientRnd(op))
       ambientRnd = op;
     if (!truncRnd && isa<aievec::AIE4ConvF32I32Op>(op))
       truncRnd = op;
+    if (std::optional<int32_t> rnd = explicitRnd(op)) {
+      if (!explicitRndOp[0])
+        explicitRndOp[0] = op;
+      else if (!explicitRndOp[1] && *explicitRnd(explicitRndOp[0]) != *rnd)
+        explicitRndOp[1] = op;
+    }
+    if (std::optional<int32_t> sat = explicitSat(op)) {
+      if (!explicitSatOp[0])
+        explicitSatOp[0] = op;
+      else if (!explicitSatOp[1] && *explicitSat(explicitSatOp[0]) != *sat)
+        explicitSatOp[1] = op;
+    }
+    if (!ambientSat && readsAmbientSat(op))
+      ambientSat = op;
+    if (!nonSymSat && needsNonSymmetricSat(op))
+      nonSymSat = op;
+    if (!clobber && aievec::mayWriteAIE4Modes(op))
+      clobber = op;
     return WalkResult::advance();
   });
   if (failedScan)
     return failure();
+  // SRS can resolve an ambient-rounding conflict by stating its mode.
+  bool ambientIsModelessSRS = isa_and_nonnull<aievec::AIE4SRSOp>(ambientRnd);
   if (genericRnd && ambientRnd) {
     auto diag = core.emitOpError(
         "mixes ops that need round-to-nearest-even (crRnd = 12) with an "
@@ -769,11 +871,17 @@ static FailureOr<AIE4CoreEntryModes> scanAIE4CoreEntryModes(CoreOp core) {
         "would change the other's numerics");
     diag.attachNote(genericRnd->getLoc()) << "needs crRnd = 12";
     diag.attachNote(ambientRnd->getLoc()) << "reads the ambient crRnd";
-    diag.attachNote()
-        << "split them into separate cores, or use "
-           "aievec.aie4.conv_f32_bf16 if floor rounding is acceptable; "
-           "explicit ops will get a rounding attribute (bead "
-           "aie4-r2-explicit-rnd)";
+    if (ambientIsModelessSRS)
+      diag.attachNote()
+          << "add 'rounding = #aievec.aie4_rnd<conv_even>' to this "
+             "aievec.aie4.srs so it shares crRnd = 12 with the other ops, "
+             "or split them into separate cores";
+    else
+      diag.attachNote()
+          << "split them into separate cores, or use "
+             "aievec.aie4.conv_f32_bf16 if floor rounding is acceptable; "
+             "explicit ops will get a rounding attribute (bead "
+             "aie4-r2-explicit-rnd)";
     return failure();
   }
   if (truncRnd && (genericRnd || ambientRnd)) {
@@ -789,12 +897,161 @@ static FailureOr<AIE4CoreEntryModes> scanAIE4CoreEntryModes(CoreOp core) {
     diag.attachNote(other->getLoc())
         << (genericRnd ? "needs crRnd = 12" : "reads the ambient crRnd");
     diag.attachNote() << "split them into separate cores";
+    if (!genericRnd && ambientIsModelessSRS)
+      diag.attachNote() << "or add 'rounding = #aievec.aie4_rnd<sym_floor>' "
+                           "to this aievec.aie4.srs";
     return failure();
   }
-  modes.rnd = ambientRnd == nullptr;
-  if (truncRnd)
-    modes.rndMode = kAIE4RndSymFloor;
+
+  // Check explicit rounding against other readers.
+  std::optional<int32_t> rndValue;
+  if (explicitRndOp[0])
+    rndValue = explicitRnd(explicitRndOp[0]);
+  if (explicitRndOp[1]) {
+    int32_t other = *explicitRnd(explicitRndOp[1]);
+    auto diag = core.emitOpError(
+                    "has explicit-mode SRS ops that need different rounding "
+                    "modes (crRnd = ")
+                << *rndValue << " and crRnd = " << other
+                << "); a core has one crRnd";
+    diag.attachNote(explicitRndOp[0]->getLoc())
+        << "needs " << aievec::describeAIE4Rnd(*rndValue);
+    diag.attachNote(explicitRndOp[1]->getLoc())
+        << "needs " << aievec::describeAIE4Rnd(other);
+    diag.attachNote() << "split them into separate cores";
+    return failure();
+  }
+  if (rndValue && ambientRnd) {
+    auto diag = core.emitOpError("mixes an explicit-mode SRS, which needs ")
+                << aievec::describeAIE4Rnd(*rndValue)
+                << ", with an op that reads the ambient crRnd; setting crRnd "
+                   "for one would change the other's numerics";
+    diag.attachNote(explicitRndOp[0]->getLoc())
+        << "needs " << aievec::describeAIE4Rnd(*rndValue);
+    diag.attachNote(ambientRnd->getLoc()) << "reads the ambient crRnd";
+    diag.attachNote() << "give every crRnd reader in the core an explicit "
+                         "rounding attribute, or split them into separate "
+                         "cores";
+    return failure();
+  }
+  if (rndValue && *rndValue != kAIE4RndConvEven && genericRnd) {
+    auto diag = core.emitOpError("mixes an explicit-mode SRS, which needs ")
+                << aievec::describeAIE4Rnd(*rndValue)
+                << ", with ops that need round-to-nearest-even (crRnd = 12)";
+    diag.attachNote(explicitRndOp[0]->getLoc())
+        << "needs " << aievec::describeAIE4Rnd(*rndValue);
+    diag.attachNote(genericRnd->getLoc()) << "needs crRnd = 12";
+    diag.attachNote() << "use rounding = conv_even on the SRS, or split them "
+                         "into separate cores";
+    return failure();
+  }
+  if (rndValue && *rndValue != kAIE4RndSymFloor && truncRnd) {
+    auto diag = core.emitOpError("mixes an explicit-mode SRS, which needs ")
+                << aievec::describeAIE4Rnd(*rndValue)
+                << ", with a float -> int conversion, which needs crRnd = 2 "
+                   "(toward zero)";
+    diag.attachNote(explicitRndOp[0]->getLoc())
+        << "needs " << aievec::describeAIE4Rnd(*rndValue);
+    diag.attachNote(truncRnd->getLoc()) << "needs crRnd = 2";
+    diag.attachNote() << "split them into separate cores";
+    return failure();
+  }
+
+  // Check explicit saturation against other readers.
+  std::optional<int32_t> satValue;
+  if (explicitSatOp[0])
+    satValue = explicitSat(explicitSatOp[0]);
+  if (explicitSatOp[1]) {
+    int32_t other = *explicitSat(explicitSatOp[1]);
+    auto diag = core.emitOpError(
+                    "has explicit-mode SRS ops that need different saturation "
+                    "modes (crSat = ")
+                << *satValue << " and crSat = " << other
+                << "); a core has one crSat";
+    diag.attachNote(explicitSatOp[0]->getLoc())
+        << "needs " << aievec::describeAIE4Sat(*satValue);
+    diag.attachNote(explicitSatOp[1]->getLoc())
+        << "needs " << aievec::describeAIE4Sat(other);
+    diag.attachNote() << "split them into separate cores";
+    return failure();
+  }
+  if (satValue && ambientSat) {
+    auto diag = core.emitOpError("mixes an explicit-mode SRS, which needs ")
+                << aievec::describeAIE4Sat(*satValue)
+                << ", with an op that reads the ambient crSat; setting crSat "
+                   "for one would change the other's numerics";
+    diag.attachNote(explicitSatOp[0]->getLoc())
+        << "needs " << aievec::describeAIE4Sat(*satValue);
+    diag.attachNote(ambientSat->getLoc()) << "reads the ambient crSat";
+    diag.attachNote() << "give every crSat reader in the core an explicit "
+                         "saturation attribute, or split them into separate "
+                         "cores";
+    return failure();
+  }
+  if (satValue && *satValue == kAIE4SatSymmetric && nonSymSat) {
+    auto diag = core.emitOpError("mixes an explicit-mode SRS, which needs ")
+                << aievec::describeAIE4Sat(*satValue)
+                << ", with a float -> int conversion, which needs asymmetric "
+                   "saturation (crSat bit 1 clear) to keep INT32_MIN exact";
+    diag.attachNote(explicitSatOp[0]->getLoc())
+        << "needs " << aievec::describeAIE4Sat(*satValue);
+    diag.attachNote(nonSymSat->getLoc()) << "needs crSat bit 1 clear";
+    diag.attachNote() << "split them into separate cores";
+    return failure();
+  }
+
+  // Reject clobbers for explicit modes regardless of instruction order.
+  if ((rndValue || satValue) && clobber) {
+    Operation *srs = explicitRndOp[0] ? explicitRndOp[0] : explicitSatOp[0];
+    auto diag = core.emitOpError(
+        "has an explicit-mode SRS that relies on modes written at core "
+        "entry, and a call that may change them");
+    Diagnostic &note = diag.attachNote(srs->getLoc());
+    note << "needs ";
+    std::optional<int32_t> srsRnd = explicitRnd(srs);
+    std::optional<int32_t> srsSat = explicitSat(srs);
+    if (srsRnd)
+      note << aievec::describeAIE4Rnd(*srsRnd);
+    if (srsRnd && srsSat)
+      note << " and ";
+    if (srsSat)
+      note << aievec::describeAIE4Sat(*srsSat);
+    note << " from core entry";
+    diag.attachNote(clobber->getLoc()) << "may write crRnd and crSat";
+    diag.attachNote() << "external calls, indirect calls and inline assembly "
+                         "are mode clobbers (D19); remove the call from this "
+                         "core";
+    return failure();
+  }
+
+  if (rndValue) {
+    modes.rnd = true;
+    modes.rndMode = *rndValue;
+  } else {
+    modes.rnd = ambientRnd == nullptr;
+    if (truncRnd)
+      modes.rndMode = kAIE4RndSymFloor;
+  }
+  if (satValue) {
+    modes.sat = true;
+    modes.satMode = *satValue;
+  }
   return modes;
+}
+
+// Find the core and callees that directly contain explicit-mode SRS ops.
+static void collectAIE4ExplicitHolders(CoreOp core, bool &coreHolds,
+                                       llvm::SetVector<func::FuncOp> &callees) {
+  coreHolds = false;
+  aievec::walkAIE4ModesAndCallees(core, [&](Operation *op) -> WalkResult {
+    if (holdsExplicitModes(op)) {
+      if (auto f = op->getParentOfType<func::FuncOp>())
+        callees.insert(f);
+      else
+        coreHolds = true;
+    }
+    return WalkResult::advance();
+  });
 }
 
 // Write the modes at the start of the core function, as the AIE2/AIE2P setup
@@ -820,6 +1077,8 @@ static void emitAIE4CoreEntryModes(func::FuncOp coreFunc,
   write(kAIE4CrVecRnd, kAIE4RndConvEven);
   if (modes.rnd)
     write(kAIE4CrRnd, modes.rndMode);
+  if (modes.sat)
+    write(kAIE4CrSat, modes.satMode);
   if (modes.f2bConvSat)
     write(kAIE4CrF2BConvSat, kAIE4F2BConvSatMax);
 }
@@ -830,7 +1089,7 @@ static void emitAIE4CoreEntryModes(func::FuncOp coreFunc,
 // Peano cannot select.
 static void dropAIE4RNETruncAttrs(CoreOp core,
                                   ConversionPatternRewriter &rewriter) {
-  walkAIE4CoreAndCallees(core, [&](Operation *op) -> WalkResult {
+  aievec::walkAIE4ModesAndCallees(core, [&](Operation *op) -> WalkResult {
     if (auto truncOp = dyn_cast<arith::TruncFOp>(op))
       if (truncOp.getRoundingmode() == arith::RoundingMode::to_nearest_even)
         rewriter.modifyOpInPlace(truncOp, [&] {
@@ -862,18 +1121,46 @@ struct AIECoreToStandardFunc : OpConversionPattern<CoreOp> {
     int col = op.colIndex();
     int row = op.rowIndex();
 
+    auto coreDevice = op->getParentOfType<DeviceOp>();
+    bool isAIE4 = coreDevice &&
+                  coreDevice.getTargetModel().getTargetArch() == AIEArch::AIE4;
+
+    // Functions holding an explicit-mode aievec.aie4.srs get the entry
+    // modes of every core that reaches them, intersected across cores.
+    bool coreHolds = false;
+    llvm::SetVector<func::FuncOp> holderCallees;
+    if (isAIE4)
+      collectAIE4ExplicitHolders(op, coreHolds, holderCallees);
+    auto annotateCallees = [&](const AIE4CoreEntryModes &modes) {
+      DictionaryAttr in = entryModesAttr(rewriter.getContext(), modes);
+      for (func::FuncOp f : holderCallees) {
+        DictionaryAttr merged = mergeEntryModes(
+            f->getAttrOfType<DictionaryAttr>(aievec::kAIE4EntryModesAttr), in);
+        rewriter.modifyOpInPlace(
+            f, [&] { f->setAttr(aievec::kAIE4EntryModesAttr, merged); });
+      }
+    };
+
     // Only pull code for the indicated function
     if ((tileRow != row && tileRow != -1) ||
         (tileCol != col && tileCol != -1)) {
+      // Filtered cores still contribute helper entry modes. Defer their
+      // diagnostics to their own compilation and ignore failed scans.
+      if (!holderCallees.empty()) {
+        FailureOr<AIE4CoreEntryModes> scanned = failure();
+        {
+          ScopedDiagnosticHandler silence(
+              rewriter.getContext(), [](Diagnostic &) { return success(); });
+          scanned = scanAIE4CoreEntryModes(op);
+        }
+        if (succeeded(scanned))
+          annotateCallees(*scanned);
+      }
       rewriter.eraseOp(op);
       return success();
     }
 
-    // AIE4 cores get D19's control writes at entry; check first that the
-    // core's crRnd requirements are consistent.
-    auto coreDevice = op->getParentOfType<DeviceOp>();
-    bool isAIE4 = coreDevice &&
-                  coreDevice.getTargetModel().getTargetArch() == AIEArch::AIE4;
+    // Validate mode requirements before emitting AIE4 entry writes.
     AIE4CoreEntryModes aie4Modes;
     if (isAIE4) {
       FailureOr<AIE4CoreEntryModes> scanned = scanAIE4CoreEntryModes(op);
@@ -882,6 +1169,7 @@ struct AIECoreToStandardFunc : OpConversionPattern<CoreOp> {
       aie4Modes = *scanned;
       if (aie4Modes.rnd && aie4Modes.rndMode == kAIE4RndConvEven)
         dropAIE4RNETruncAttrs(op, rewriter);
+      annotateCallees(aie4Modes);
     }
 
     // The parent should be an AIE.device op.
@@ -894,6 +1182,9 @@ struct AIECoreToStandardFunc : OpConversionPattern<CoreOp> {
 
     rewriter.cloneRegionBefore(op.getBody(), coreFunc.getBody(),
                                coreFunc.getBody().begin(), mapper);
+    if (coreHolds)
+      coreFunc->setAttr(aievec::kAIE4EntryModesAttr,
+                        entryModesAttr(rewriter.getContext(), aie4Modes));
 
     // Set saturation and rounding modes at core entry for AIE2/AIE2p, but
     // only if the core body contains aievec.srs or bf16 aievec.matmul ops.

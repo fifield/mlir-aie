@@ -12,49 +12,28 @@
 //===----------------------------------------------------------------------===//
 
 #include "aie/Conversion/AIEVecToLLVM/AIEVecToLLVM.h"
+#include "aie/Dialect/AIEVec/IR/AIE4EntryModes.h"
 #include "aie/Dialect/AIEVec/IR/AIEVecOps.h"
 #include "aie/Dialect/XLLVM/XLLVMDialect.h"
 #include "mlir/Conversion/LLVMCommon/Pattern.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/Interfaces/FunctionInterfaces.h"
 #include "mlir/Support/LogicalResult.h"
+
+#include "llvm/ADT/DenseMap.h"
 
 using namespace mlir;
 
 namespace xilinx::aievec {
 
-// aievec.aie4.mul_ewise_f32 -> llvm.aie4.I1024.I1024.ACC1024.fp.mul.ewise.conf
-//
-// Both sides are <32 x float>, so there is no accumulator widening, no
-// UPS/SRS pair and no bitcasting to do: the only thing this pattern adds is
-// the multiplier configuration word.
-//
-// Config word defined by the ISA (see XLLVMAIE4IntrOps.td for the field layout):
-//   zeroAcc = true         -- dynamically zero the accumulator; this is a
-//                             plain multiply, not a multiply-accumulate, so
-//                             nothing must be carried in.
-//   amode   = Float        -- floating-point arithmetic mode.
-//   bmode   = Mode32x32    -- 32-bit x 32-bit operand lanes.
-// Together these encode 0b11011 == 27.
-//
-// IMPORTANT: the Peano backend does not validate this word. Every value
-// produces the same `vmul.f` instruction, with the word materialized verbatim
-// into a register (`mova r8, #0x1b`). There is no verifier, no selection
-// failure and no diagnostic for a wrong field -- only the numerical result
-// changes. That is why the fields are modelled as verified attributes rather
-// than an opaque i32, and why a numerical check on hardware is the only real
-// validation.
-//
-// This was measured, not assumed. Flipping amode from Float(1) to Int(0)
-// (conf 27 -> 25) still compiles clean, still emits the identical `vmul.f`,
-// still exits 0 -- and silently returns garbage on NPU3 (e.g. 7.09 * -2.39
-// gave -0 instead of -16.96), because the multiplier reinterprets the f32
-// bit patterns as integers. That both confirms the ISA decode of
-// amode and demonstrates that the only thing standing between a wrong field
-// and wrong numbers is this MLIR-level typing.
+// Floating-point multiply uses zeroAcc=true, amode=Float and bmode=Mode32x32
+// (configuration 27). Peano emits the configuration verbatim without validating
+// it, so verified attributes prevent incorrect modes from changing the result.
 struct AIE4MulEwiseF32OpConversion
     : mlir::ConvertOpToLLVMPattern<aievec::AIE4MulEwiseF32Op> {
   using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
@@ -208,6 +187,27 @@ struct AIE4SRSI32I16OpConversion
   }
 };
 
+// shift and isSigned become intrinsic operands. Rounding and saturation are
+// entry-mode contracts, checked by verifyAIE4SRSEntryModes before conversion.
+struct AIE4SRSOpConversion : mlir::ConvertOpToLLVMPattern<aievec::AIE4SRSOp> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(aievec::AIE4SRSOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto sign = op.getIsSigned() ? xllvm::AIE4SRSSign::Signed
+                                 : xllvm::AIE4SRSSign::Unsigned;
+    Type resTy = op.getResult().getType();
+    if (cast<VectorType>(resTy).getNumElements() == 64)
+      rewriter.replaceOpWithNewOp<xllvm::I512V64Acc32SrsAIE4IntrOp>(
+          op, resTy, adaptor.getSource(), op.getShift(), sign);
+    else
+      rewriter.replaceOpWithNewOp<xllvm::I512V32Acc32SrsAIE4IntrOp>(
+          op, resTy, adaptor.getSource(), op.getShift(), sign);
+    return success();
+  }
+};
+
 // aievec.aie4.ups_i16_i32 -> llvm.aie4.acc32.v32.I512.ups
 //
 // Mirrors AIE4SRSI32I16OpConversion: shift and sign are attribute-resident
@@ -222,7 +222,7 @@ struct AIE4UPSI16I32OpConversion
     rewriter.replaceOpWithNewOp<xllvm::Acc32V32I512UpsAIE4IntrOp>(
         op, op.getResult().getType(), adaptor.getSource(), op.getShift(),
         op.getIsSigned() ? xllvm::AIE4UPSSign::Signed
-                          : xllvm::AIE4UPSSign::Unsigned);
+                         : xllvm::AIE4UPSSign::Unsigned);
     return success();
   }
 };
@@ -351,8 +351,8 @@ static FailureOr<AIE4VAddFamily> classifyAIE4VAddShape(VectorType vecTy) {
 }
 
 // Bridge scalar i64 masks and the intrinsic's vector<2xi32> mask type.
-static Value bitcastIfNeeded(ConversionPatternRewriter &rewriter,
-                              Location loc, Value v, Type destTy) {
+static Value bitcastIfNeeded(ConversionPatternRewriter &rewriter, Location loc,
+                             Value v, Type destTy) {
   if (v.getType() == destTy)
     return v;
   return rewriter.create<LLVM::BitcastOp>(loc, destTy, v);
@@ -371,35 +371,37 @@ buildAIE4VCmp(ConversionPatternRewriter &rewriter, Location loc,
   switch (family) {
   case AIE4VAddFamily::I8x64:
     res = rewriter.create<xllvm::VAdd8I512CmpAIE4IntrOp>(
-        loc, LLVM::LLVMStructType::getLiteral(rewriter.getContext(),
-                                               {lhs.getType(), vec2xi32Ty}),
+        loc,
+        LLVM::LLVMStructType::getLiteral(rewriter.getContext(),
+                                         {lhs.getType(), vec2xi32Ty}),
         lhs, rhs, sign, opsel);
     break;
   case AIE4VAddFamily::I16x32:
     res = rewriter.create<xllvm::VAdd16I512CmpAIE4IntrOp>(
         loc,
         LLVM::LLVMStructType::getLiteral(rewriter.getContext(),
-                                          {lhs.getType(), i32Ty}),
+                                         {lhs.getType(), i32Ty}),
         lhs, rhs, sign, opsel);
     break;
   case AIE4VAddFamily::I16x64:
     res = rewriter.create<xllvm::VAdd16I1024CmpAIE4IntrOp>(
-        loc, LLVM::LLVMStructType::getLiteral(rewriter.getContext(),
-                                               {lhs.getType(), vec2xi32Ty}),
+        loc,
+        LLVM::LLVMStructType::getLiteral(rewriter.getContext(),
+                                         {lhs.getType(), vec2xi32Ty}),
         lhs, rhs, sign, opsel);
     break;
   case AIE4VAddFamily::I32x16:
     res = rewriter.create<xllvm::VAdd32I512CmpAIE4IntrOp>(
         loc,
         LLVM::LLVMStructType::getLiteral(rewriter.getContext(),
-                                          {lhs.getType(), i32Ty}),
+                                         {lhs.getType(), i32Ty}),
         lhs, rhs, sign, opsel);
     break;
   case AIE4VAddFamily::I32x32:
     res = rewriter.create<xllvm::VAdd32I1024CmpAIE4IntrOp>(
         loc,
         LLVM::LLVMStructType::getLiteral(rewriter.getContext(),
-                                          {lhs.getType(), i32Ty}),
+                                         {lhs.getType(), i32Ty}),
         lhs, rhs, sign, opsel);
     break;
   }
@@ -418,19 +420,19 @@ static Value buildAIE4VSel(ConversionPatternRewriter &rewriter, Location loc,
   switch (family) {
   case AIE4VAddFamily::I8x64:
     return rewriter.create<xllvm::VAdd8I512SelAIE4IntrOp>(loc, lhs.getType(),
-                                                           lhs, rhs, sel);
+                                                          lhs, rhs, sel);
   case AIE4VAddFamily::I16x32:
     return rewriter.create<xllvm::VAdd16I512SelAIE4IntrOp>(loc, lhs.getType(),
-                                                            lhs, rhs, sel);
+                                                           lhs, rhs, sel);
   case AIE4VAddFamily::I16x64:
-    return rewriter.create<xllvm::VAdd16I1024SelAIE4IntrOp>(
-        loc, lhs.getType(), lhs, rhs, sel);
+    return rewriter.create<xllvm::VAdd16I1024SelAIE4IntrOp>(loc, lhs.getType(),
+                                                            lhs, rhs, sel);
   case AIE4VAddFamily::I32x16:
     return rewriter.create<xllvm::VAdd32I512SelAIE4IntrOp>(loc, lhs.getType(),
-                                                            lhs, rhs, sel);
+                                                           lhs, rhs, sel);
   case AIE4VAddFamily::I32x32:
-    return rewriter.create<xllvm::VAdd32I1024SelAIE4IntrOp>(
-        loc, lhs.getType(), lhs, rhs, sel);
+    return rewriter.create<xllvm::VAdd32I1024SelAIE4IntrOp>(loc, lhs.getType(),
+                                                            lhs, rhs, sel);
   }
   llvm_unreachable("unhandled AIE4VAddFamily");
 }
@@ -442,12 +444,13 @@ struct AIE4MinMaxOpConversion
   LogicalResult
   matchAndRewrite(aievec::AIE4MinMaxOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    auto family = classifyAIE4VAddShape(cast<VectorType>(op.getLhs().getType()));
+    auto family =
+        classifyAIE4VAddShape(cast<VectorType>(op.getLhs().getType()));
     if (failed(family))
       return rewriter.notifyMatchFailure(op, "unsupported AIE4 vector shape");
 
     auto sign = op.getIsSigned() ? xllvm::AIE4OperandSign::Signed
-                                  : xllvm::AIE4OperandSign::Unsigned;
+                                 : xllvm::AIE4OperandSign::Unsigned;
     auto opsel = op.getKind() == aievec::AIE4MinMaxKind::Min
                      ? xllvm::AIE4VCmpOpSel::MinGe
                      : xllvm::AIE4VCmpOpSel::MaxLt;
@@ -461,19 +464,19 @@ struct AIE4MinMaxOpConversion
   }
 };
 
-struct AIE4CmpOpConversion
-    : mlir::ConvertOpToLLVMPattern<aievec::AIE4CmpOp> {
+struct AIE4CmpOpConversion : mlir::ConvertOpToLLVMPattern<aievec::AIE4CmpOp> {
   using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
 
   LogicalResult
   matchAndRewrite(aievec::AIE4CmpOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    auto family = classifyAIE4VAddShape(cast<VectorType>(op.getLhs().getType()));
+    auto family =
+        classifyAIE4VAddShape(cast<VectorType>(op.getLhs().getType()));
     if (failed(family))
       return rewriter.notifyMatchFailure(op, "unsupported AIE4 vector shape");
 
     auto sign = op.getIsSigned() ? xllvm::AIE4OperandSign::Signed
-                                  : xllvm::AIE4OperandSign::Unsigned;
+                                 : xllvm::AIE4OperandSign::Unsigned;
     auto opsel = op.getPredicate() == aievec::AIE4CmpPredicate::Lt
                      ? xllvm::AIE4VCmpOpSel::Lt
                      : xllvm::AIE4VCmpOpSel::Ge;
@@ -491,14 +494,14 @@ struct AIE4CmpOpConversion
   }
 };
 
-struct AIE4SelOpConversion
-    : mlir::ConvertOpToLLVMPattern<aievec::AIE4SelOp> {
+struct AIE4SelOpConversion : mlir::ConvertOpToLLVMPattern<aievec::AIE4SelOp> {
   using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
 
   LogicalResult
   matchAndRewrite(aievec::AIE4SelOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    auto family = classifyAIE4VAddShape(cast<VectorType>(op.getLhs().getType()));
+    auto family =
+        classifyAIE4VAddShape(cast<VectorType>(op.getLhs().getType()));
     if (failed(family))
       return rewriter.notifyMatchFailure(op, "unsupported AIE4 vector shape");
 
@@ -526,7 +529,14 @@ struct AIE4SelOpConversion
 // also depend on the format; resolveAIE4VFCmpOpsel centralizes that mapping.
 
 namespace {
-enum class AIE4VFCmpFamily { Bf16x32, Bf16x64, Fp16x32, Fp16x64, Fp32x16, Fp32x32 };
+enum class AIE4VFCmpFamily {
+  Bf16x32,
+  Bf16x64,
+  Fp16x32,
+  Fp16x64,
+  Fp32x16,
+  Fp32x32
+};
 // Native operations use the ordering selected by ambient crFPOrder.
 enum class AIE4VFCmpOp { MinGe, MaxLt, Lt, Ge };
 } // namespace
@@ -553,7 +563,7 @@ static FailureOr<AIE4VFCmpFamily> classifyAIE4VFCmpShape(VectorType vecTy) {
 
 // FP32 uses Ge=48 and Lt=49, reversing the selector order of BF16 and FP16.
 static xllvm::AIE4VFCmpOpSel resolveAIE4VFCmpOpsel(AIE4VFCmpFamily family,
-                                                    AIE4VFCmpOp op) {
+                                                   AIE4VFCmpOp op) {
   switch (family) {
   case AIE4VFCmpFamily::Bf16x32:
   case AIE4VFCmpFamily::Bf16x64:
@@ -598,7 +608,8 @@ static xllvm::AIE4VFCmpOpSel resolveAIE4VFCmpOpsel(AIE4VFCmpFamily family,
   llvm_unreachable("unhandled AIE4VFCmpFamily/AIE4VFCmpOp");
 }
 
-// Build the XLLVM operation for this float shape and extract its vector and mask.
+// Build the XLLVM operation for this float shape and extract its vector and
+// mask.
 static std::pair<Value, Value>
 buildAIE4VFCmp(ConversionPatternRewriter &rewriter, Location loc,
                AIE4VFCmpFamily family, Value lhs, Value rhs,
@@ -611,40 +622,42 @@ buildAIE4VFCmp(ConversionPatternRewriter &rewriter, Location loc,
     res = rewriter.create<xllvm::VAddBf16I512CmpAIE4IntrOp>(
         loc,
         LLVM::LLVMStructType::getLiteral(rewriter.getContext(),
-                                          {lhs.getType(), i32Ty}),
+                                         {lhs.getType(), i32Ty}),
         lhs, rhs, opsel);
     break;
   case AIE4VFCmpFamily::Bf16x64:
     res = rewriter.create<xllvm::VAddBf16I1024CmpAIE4IntrOp>(
-        loc, LLVM::LLVMStructType::getLiteral(rewriter.getContext(),
-                                               {lhs.getType(), vec2xi32Ty}),
+        loc,
+        LLVM::LLVMStructType::getLiteral(rewriter.getContext(),
+                                         {lhs.getType(), vec2xi32Ty}),
         lhs, rhs, opsel);
     break;
   case AIE4VFCmpFamily::Fp16x32:
     res = rewriter.create<xllvm::VAddFp16I512CmpAIE4IntrOp>(
         loc,
         LLVM::LLVMStructType::getLiteral(rewriter.getContext(),
-                                          {lhs.getType(), i32Ty}),
+                                         {lhs.getType(), i32Ty}),
         lhs, rhs, opsel);
     break;
   case AIE4VFCmpFamily::Fp16x64:
     res = rewriter.create<xllvm::VAddFp16I1024CmpAIE4IntrOp>(
-        loc, LLVM::LLVMStructType::getLiteral(rewriter.getContext(),
-                                               {lhs.getType(), vec2xi32Ty}),
+        loc,
+        LLVM::LLVMStructType::getLiteral(rewriter.getContext(),
+                                         {lhs.getType(), vec2xi32Ty}),
         lhs, rhs, opsel);
     break;
   case AIE4VFCmpFamily::Fp32x16:
     res = rewriter.create<xllvm::VAddFp32I512CmpAIE4IntrOp>(
         loc,
         LLVM::LLVMStructType::getLiteral(rewriter.getContext(),
-                                          {lhs.getType(), i32Ty}),
+                                         {lhs.getType(), i32Ty}),
         lhs, rhs, opsel);
     break;
   case AIE4VFCmpFamily::Fp32x32:
     res = rewriter.create<xllvm::VAddFp32I1024CmpAIE4IntrOp>(
         loc,
         LLVM::LLVMStructType::getLiteral(rewriter.getContext(),
-                                          {lhs.getType(), i32Ty}),
+                                         {lhs.getType(), i32Ty}),
         lhs, rhs, opsel);
     break;
   }
@@ -673,17 +686,16 @@ struct AIE4FMinMaxOpConversion
                     : AIE4VFCmpOp::MaxLt;
     auto opsel = resolveAIE4VFCmpOpsel(*family, vfOp);
 
-    auto [vecResult, maskResult] = buildAIE4VFCmp(
-        rewriter, op.getLoc(), *family, adaptor.getLhs(), adaptor.getRhs(),
-        opsel);
+    auto [vecResult, maskResult] =
+        buildAIE4VFCmp(rewriter, op.getLoc(), *family, adaptor.getLhs(),
+                       adaptor.getRhs(), opsel);
     (void)maskResult;
     rewriter.replaceOp(op, vecResult);
     return success();
   }
 };
 
-struct AIE4FCmpOpConversion
-    : mlir::ConvertOpToLLVMPattern<aievec::AIE4FCmpOp> {
+struct AIE4FCmpOpConversion : mlir::ConvertOpToLLVMPattern<aievec::AIE4FCmpOp> {
   using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
 
   LogicalResult
@@ -699,9 +711,9 @@ struct AIE4FCmpOpConversion
                     : AIE4VFCmpOp::Ge;
     auto opsel = resolveAIE4VFCmpOpsel(*family, vfOp);
 
-    auto [vecResult, maskResult] = buildAIE4VFCmp(
-        rewriter, op.getLoc(), *family, adaptor.getLhs(), adaptor.getRhs(),
-        opsel);
+    auto [vecResult, maskResult] =
+        buildAIE4VFCmp(rewriter, op.getLoc(), *family, adaptor.getLhs(),
+                       adaptor.getRhs(), opsel);
     // As with the integer compare, the vector result of a Lt/Ge opsel is
     // architecturally undefined; only the mask is meaningful.
     (void)vecResult;
@@ -727,8 +739,7 @@ struct AIE4ReduceOpConversion
   matchAndRewrite(aievec::AIE4ReduceOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
-    Type elemTy =
-        cast<VectorType>(op.getSource().getType()).getElementType();
+    Type elemTy = cast<VectorType>(op.getSource().getType()).getElementType();
     Type resTy = op.getResult().getType();
     Value src = adaptor.getSource();
     Value seed = adaptor.getSeed();
@@ -736,50 +747,50 @@ struct AIE4ReduceOpConversion
     if (elemTy.isInteger(32)) {
       if (!seed)
         seed = LLVM::ConstantOp::create(rewriter, loc, rewriter.getI32Type(),
-                                         (int32_t)0);
+                                        (int32_t)0);
       switch (op.getKind()) {
       case aievec::AIE4ReduceKind::Add:
-        rewriter.replaceOpWithNewOp<xllvm::AddReduceI1024AIE4IntrOp>(
-            op, resTy, src, seed);
+        rewriter.replaceOpWithNewOp<xllvm::AddReduceI1024AIE4IntrOp>(op, resTy,
+                                                                     src, seed);
         break;
       case aievec::AIE4ReduceKind::Min:
-        rewriter.replaceOpWithNewOp<xllvm::MinReduceI1024AIE4IntrOp>(
-            op, resTy, src, seed);
+        rewriter.replaceOpWithNewOp<xllvm::MinReduceI1024AIE4IntrOp>(op, resTy,
+                                                                     src, seed);
         break;
       case aievec::AIE4ReduceKind::Max:
-        rewriter.replaceOpWithNewOp<xllvm::MaxReduceI1024AIE4IntrOp>(
-            op, resTy, src, seed);
+        rewriter.replaceOpWithNewOp<xllvm::MaxReduceI1024AIE4IntrOp>(op, resTy,
+                                                                     src, seed);
         break;
       }
       return success();
     }
 
     assert(elemTy.isF32() && "AIE4ReduceOp::verify() should have rejected "
-                              "any other element type");
+                             "any other element type");
     switch (op.getKind()) {
     case aievec::AIE4ReduceKind::Add:
       if (seed)
         rewriter.replaceOpWithNewOp<xllvm::AddReduceFP1024SclAIE4IntrOp>(
             op, resTy, src, seed);
       else
-        rewriter.replaceOpWithNewOp<xllvm::AddReduceFP1024AIE4IntrOp>(
-            op, resTy, src);
+        rewriter.replaceOpWithNewOp<xllvm::AddReduceFP1024AIE4IntrOp>(op, resTy,
+                                                                      src);
       break;
     case aievec::AIE4ReduceKind::Min:
       if (seed)
         rewriter.replaceOpWithNewOp<xllvm::MinReduceFP1024SclAIE4IntrOp>(
             op, resTy, src, seed);
       else
-        rewriter.replaceOpWithNewOp<xllvm::MinReduceFP1024AIE4IntrOp>(
-            op, resTy, src);
+        rewriter.replaceOpWithNewOp<xllvm::MinReduceFP1024AIE4IntrOp>(op, resTy,
+                                                                      src);
       break;
     case aievec::AIE4ReduceKind::Max:
       if (seed)
         rewriter.replaceOpWithNewOp<xllvm::MaxReduceFP1024SclAIE4IntrOp>(
             op, resTy, src, seed);
       else
-        rewriter.replaceOpWithNewOp<xllvm::MaxReduceFP1024AIE4IntrOp>(
-            op, resTy, src);
+        rewriter.replaceOpWithNewOp<xllvm::MaxReduceFP1024AIE4IntrOp>(op, resTy,
+                                                                      src);
       break;
     }
     return success();
@@ -821,13 +832,13 @@ struct AIE4ShuffleOpConversion
     Value xsrc0 = bitcastIfNeeded(rewriter, loc, adaptor.getLhs(), xllvmVecTy);
     Value rhs = adaptor.getRhs();
     Value xsrc1 = bitcastIfNeeded(rewriter, loc, rhs ? rhs : adaptor.getLhs(),
-                                   xllvmVecTy);
+                                  xllvmVecTy);
 
     Value shuffled = rewriter.create<xllvm::ShuffleAIE4IntrOp>(
         loc, xllvmVecTy, xsrc0, xsrc1, translateAIE4ShuffleMode(op.getMode()));
 
-    rewriter.replaceOp(op, bitcastIfNeeded(rewriter, loc, shuffled,
-                                            op.getResult().getType()));
+    rewriter.replaceOp(
+        op, bitcastIfNeeded(rewriter, loc, shuffled, op.getResult().getType()));
     return success();
   }
 };
@@ -877,7 +888,7 @@ struct AIE4TanhOpConversion : mlir::ConvertOpToLLVMPattern<aievec::AIE4TanhOp> {
 // INVSQRT is approximate and reads a subnormal input as zero, so, like
 // exp2/tanh, it requires afn. There is no strict lowering.
 //
-// The vector case unrolls into scalar calls because the ISA has no vector
+// The vector case unrolls into scalar calls because AIE4 has no vector
 // invsqrt. Expensive per lane, and the only form available.
 struct AIE4RsqrtOpConversion : mlir::ConvertOpToLLVMPattern<math::RsqrtOp> {
   using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
@@ -920,12 +931,10 @@ struct AIE4RsqrtOpConversion : mlir::ConvertOpToLLVMPattern<math::RsqrtOp> {
 
     Value result = LLVM::PoisonOp::create(rewriter, loc, flatTy);
     for (int64_t i = 0, n = flatTy.getNumElements(); i < n; ++i) {
-      Value index = LLVM::ConstantOp::create(rewriter, loc, rewriter.getI64Type(),
-                                             rewriter.getI64IntegerAttr(i));
-      Value elem =
-          LLVM::ExtractElementOp::create(rewriter, loc, source, index);
-      Value inv =
-          xllvm::InvsqrtAIE4IntrOp::create(rewriter, loc, f32Ty, elem);
+      Value index = LLVM::ConstantOp::create(
+          rewriter, loc, rewriter.getI64Type(), rewriter.getI64IntegerAttr(i));
+      Value elem = LLVM::ExtractElementOp::create(rewriter, loc, source, index);
+      Value inv = xllvm::InvsqrtAIE4IntrOp::create(rewriter, loc, f32Ty, elem);
       result = LLVM::InsertElementOp::create(rewriter, loc, flatTy, result, inv,
                                              index);
     }
@@ -953,21 +962,190 @@ struct AIE4InvOpConversion : mlir::ConvertOpToLLVMPattern<aievec::AIE4InvOp> {
 void populateAIEVecToLLVMAIE4ConversionPatterns(
     mlir::LLVMTypeConverter &converter, mlir::RewritePatternSet &patterns) {
   patterns.add<AIE4RsqrtOpConversion, AIE4MulEwiseF32OpConversion,
-               AIE4MacEwiseF32OpConversion,
-               AIE4MacEwiseI16I32OpConversion,
+               AIE4MacEwiseF32OpConversion, AIE4MacEwiseI16I32OpConversion,
                AIE4MulEwiseBf16F32OpConversion, AIE4MacEwiseBf16F32OpConversion,
                AIE4MscEwiseF32OpConversion, AIE4MscEwiseBf16F32OpConversion,
                AIE4SRSI32I16OpConversion, AIE4UPSI16I32OpConversion,
-               AIE4UnpackI8I16OpConversion,
-               AIE4ConvBF16F32OpConversion, AIE4ConvF32BF16OpConversion,
-               AIE4ConvF32I32OpConversion,
-               AIE4MinMaxOpConversion, AIE4CmpOpConversion,
-               AIE4SelOpConversion, AIE4FMinMaxOpConversion,
-               AIE4FCmpOpConversion, AIE4ReduceOpConversion,
-               AIE4ShuffleOpConversion, AIE4BiasedExp2OpConversion,
-               AIE4TanhOpConversion, AIE4InvOpConversion>(converter);
+               AIE4UnpackI8I16OpConversion, AIE4ConvBF16F32OpConversion,
+               AIE4ConvF32BF16OpConversion, AIE4ConvF32I32OpConversion,
+               AIE4MinMaxOpConversion, AIE4CmpOpConversion, AIE4SelOpConversion,
+               AIE4FMinMaxOpConversion, AIE4FCmpOpConversion,
+               AIE4ReduceOpConversion, AIE4ShuffleOpConversion,
+               AIE4BiasedExp2OpConversion, AIE4TanhOpConversion,
+               AIE4InvOpConversion>(converter);
+  patterns.add<AIE4SRSOpConversion>(converter);
   patterns.add<AIE4TruncFBF16Conversion>(converter);
   populateAIEVecToLLVMAIE4MmacPatterns(converter, patterns);
+}
+
+//===----------------------------------------------------------------------===//
+// Explicit-mode SRS entry checks
+//===----------------------------------------------------------------------===//
+
+FailureOr<AIE4AssumedModes> parseAIE4AssumeModes(StringRef spec,
+                                                 ModuleOp module) {
+  AIE4AssumedModes modes;
+  if (spec.empty())
+    return modes;
+  SmallVector<StringRef> items;
+  spec.split(items, ',');
+  for (StringRef item : items) {
+    auto [key, value] = item.trim().split(':');
+    key = key.trim();
+    value = value.trim();
+    int32_t n;
+    if ((key != "rnd" && key != "sat") || value.empty() ||
+        value.getAsInteger(10, n)) {
+      module.emitError() << "invalid aie4-assume-modes '" << spec
+                         << "': expected rnd:<mode> and/or sat:<mode>, "
+                            "comma-separated";
+      return failure();
+    }
+    std::optional<int32_t> &slot = key == "rnd" ? modes.rnd : modes.sat;
+    if (slot) {
+      module.emitError() << "invalid aie4-assume-modes: '" << key
+                         << "' given twice";
+      return failure();
+    }
+    if (key == "rnd" && !symbolizeAIE4RoundingMode(n)) {
+      module.emitError() << "invalid aie4-assume-modes: crRnd mode " << n
+                         << " is not a valid encoding (0-3, 8-13)";
+      return failure();
+    }
+    if (key == "sat" && !symbolizeAIE4SaturationMode(n)) {
+      module.emitError() << "invalid aie4-assume-modes: crSat mode " << n
+                         << " is not a valid encoding (0, 1, 3)";
+      return failure();
+    }
+    slot = n;
+  }
+  return modes;
+}
+
+LogicalResult verifyAIE4SRSEntryModes(ModuleOp module,
+                                      const AIE4AssumedModes &assumed) {
+  bool ok = true;
+  bool haveAssumed = assumed.rnd || assumed.sat;
+  // Check callers too: they may clobber modes before entering an SRS helper.
+  // Keep the first clobber per SRS to avoid duplicate diagnostics. Skip
+  // attribute-backed contracts, which core lowering has already validated.
+  llvm::DenseMap<Operation *, Operation *> assumedClobbers;
+  if (haveAssumed) {
+    module.walk([&](FunctionOpInterface root) {
+      if (root->getAttrOfType<DictionaryAttr>(kAIE4EntryModesAttr) ||
+          root.isExternal())
+        return;
+      SmallVector<AIE4SRSOp> holders;
+      Operation *clobber = nullptr;
+      walkAIE4ModesAndCallees(root, [&](Operation *nested) {
+        if (!clobber && mayWriteAIE4Modes(nested))
+          clobber = nested;
+        if (auto srs = dyn_cast<AIE4SRSOp>(nested)) {
+          auto holder = srs->getParentOfType<FunctionOpInterface>();
+          if (holder &&
+              !holder->getAttrOfType<DictionaryAttr>(kAIE4EntryModesAttr) &&
+              (srs.getRounding() || srs.getSaturation()))
+            holders.push_back(srs);
+        }
+        return WalkResult::advance();
+      });
+      if (clobber)
+        for (AIE4SRSOp srs : holders)
+          assumedClobbers.try_emplace(srs, clobber);
+    });
+  }
+
+  module.walk([&](AIE4SRSOp op) {
+    std::optional<int32_t> needRnd, needSat;
+    if (auto r = op.getRounding())
+      needRnd = static_cast<int32_t>(*r);
+    if (auto s = op.getSaturation())
+      needSat = static_cast<int32_t>(*s);
+    if (!needRnd && !needSat)
+      return;
+
+    auto func = op->getParentOfType<FunctionOpInterface>();
+    DictionaryAttr entry =
+        func ? func->getAttrOfType<DictionaryAttr>(kAIE4EntryModesAttr)
+             : DictionaryAttr();
+    if (!func && haveAssumed) {
+      op.emitOpError("aie4-assume-modes requires an enclosing function; "
+                     "outline AIE cores before converting explicit-mode SRS");
+      ok = false;
+      return;
+    }
+    if (!entry && !haveAssumed) {
+      auto diag = op.emitOpError("needs ");
+      if (needRnd)
+        diag << describeAIE4Rnd(*needRnd);
+      if (needRnd && needSat)
+        diag << " and ";
+      if (needSat)
+        diag << describeAIE4Sat(*needSat);
+      diag << " at entry to ";
+      if (func)
+        diag << "'@" << SymbolTable::getSymbolName(func).getValue() << "'";
+      else
+        diag << "its enclosing function";
+      diag << ", which is not reached from an AIE4 core (no "
+           << kAIE4EntryModesAttr << "); pass aie4-assume-modes=";
+      if (needRnd)
+        diag << "rnd:" << *needRnd;
+      if (needRnd && needSat)
+        diag << ",";
+      if (needSat)
+        diag << "sat:" << *needSat;
+      diag << " to convert-aievec-to-llvm to assert the caller's modes";
+      ok = false;
+      return;
+    }
+
+    // The entry attribute takes precedence over the assumption option.
+    auto check = [&](StringRef key, StringRef reg, int32_t need,
+                     std::optional<int32_t> optionValue,
+                     std::string (*describe)(int32_t)) {
+      std::optional<int32_t> have;
+      if (entry) {
+        if (auto v = entry.getAs<IntegerAttr>(key))
+          have = v.getInt();
+      } else {
+        have = optionValue;
+      }
+      if (have && *have == need)
+        return;
+      auto diag = op.emitOpError("needs ") << describe(need) << ", but ";
+      if (entry) {
+        diag << "the entry modes of '@"
+             << SymbolTable::getSymbolName(func).getValue() << "' ";
+        if (have)
+          diag << "give " << describe(*have);
+        else
+          diag << "do not fix " << reg
+               << " (its callers disagree or read it ambient)";
+      } else {
+        diag << "aie4-assume-modes ";
+        if (have)
+          diag << "gives " << describe(*have);
+        else
+          diag << "does not set " << reg;
+      }
+      ok = false;
+    };
+    if (needRnd)
+      check("rnd", "crRnd", *needRnd, assumed.rnd, describeAIE4Rnd);
+    if (needSat)
+      check("sat", "crSat", *needSat, assumed.sat, describeAIE4Sat);
+
+    if (Operation *clobber = assumedClobbers.lookup(op)) {
+      auto diag = op.emitOpError(
+          "relies on aie4-assume-modes at function entry, but its function "
+          "or a caller and their callees contain an operation that may "
+          "change crRnd or crSat (D19)");
+      diag.attachNote(clobber->getLoc()) << "may write crRnd and crSat";
+      ok = false;
+    }
+  });
+  return success(ok);
 }
 
 void configureAIEVecToLLVMAIE4Legalizations(ConversionTarget &target) {

@@ -344,13 +344,14 @@ def I512V32Acc32SrsAIE4IntrOp
           "I512.v32.acc32.srs",
           [TypeIs<"res", FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>>]>,
       Arguments<(ins FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>:$acc,
-          ConfinedAttr<I32Attr, [IntMinValue<0>, IntMaxValue<31>]>:$shift,
+          ConfinedAttr<I32Attr, [IntMinValue<0>, IntMaxValue<59>]>:$shift,
           AIE4_SRSSign:$sign)> {
   let summary = "AIE4 shift-round-saturate i32 accumulator -> i16 (vsrs.2x)";
   let description = [{
     Narrows the accumulator using SRS. The verified attributes `shift`
-    (0..31) and `sign` (unsigned=0, signed=1) become trailing i32 arguments
-    in that order.
+    (0..59) and `sign` (unsigned=0, signed=1) become trailing i32 arguments
+    in that order. The hardware encodes left shifts as 60..63; they are not
+    exposed.
 
     Rounding and saturation depend on `crRnd` and `crSat`; this op does not
     establish or restore those modes. It reads the mode registers and writes

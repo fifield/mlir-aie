@@ -46,6 +46,17 @@ llvm.func @srs_v64(%acc: vector<64xi32>) -> vector<64xi8> {
 
 // -----
 
+// The v32 form accepts the full right-shift range 0..59, like the v64 form.
+// CHECK-LABEL: define <32 x i16> @srs_v32_shift59
+llvm.func @srs_v32_shift59(%acc: vector<32xi32>) -> vector<32xi16> {
+  // CHECK: call <32 x i16> @llvm.aie4.I512.v32.acc32.srs(<32 x i32> %{{[0-9]+}}, i32 59, i32 1)
+  %0 = "xllvm.intr.aie4.I512.v32.acc32.srs"(%acc) {shift = 59 : i32, sign = 1 : i32} : (vector<32xi32>) -> vector<32xi16>
+  llvm.return %0 : vector<32xi16>
+}
+// CHECK: declare <32 x i16> @llvm.aie4.I512.v32.acc32.srs(<32 x i32>, i32, i32)
+
+// -----
+
 // Static and dynamic conf forms must share one intrinsic declaration.
 // CHECK-LABEL: define <64 x i32> @mmac_dyn_conf
 llvm.func @mmac_dyn_conf(%acc: vector<64xi32>, %a: vector<64xi8>, %first: i1) -> vector<64xi32> {

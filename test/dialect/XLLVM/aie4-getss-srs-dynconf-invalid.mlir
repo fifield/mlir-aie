@@ -29,6 +29,15 @@ func.func @srs_v64_shift_too_large(%acc: vector<64xi32>) -> vector<64xi8> {
 
 // -----
 
+// The v32 form has the same 0..59 range.
+func.func @srs_v32_shift_too_large(%acc: vector<32xi32>) -> vector<32xi16> {
+  // expected-error @+1 {{attribute 'shift' failed to satisfy constraint: 32-bit signless integer attribute whose minimum value is 0 whose maximum value is 59}}
+  %0 = "xllvm.intr.aie4.I512.v32.acc32.srs"(%acc) {shift = 60 : i32, sign = 1 : i32} : (vector<32xi32>) -> vector<32xi16>
+  return %0 : vector<32xi16>
+}
+
+// -----
+
 func.func @srs_v64_negative_shift(%acc: vector<64xi32>) -> vector<64xi8> {
   // expected-error @+1 {{attribute 'shift' failed to satisfy constraint}}
   %0 = "xllvm.intr.aie4.I512.v64.acc32.srs"(%acc) {shift = -1 : i32, sign = 1 : i32} : (vector<64xi32>) -> vector<64xi8>

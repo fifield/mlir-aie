@@ -181,7 +181,7 @@ def AIEVec_AIE4ReduceKindAttr
 // AIE4 shuffle
 //===----------------------------------------------------------------------===//
 //
-// AIE4 encodings from Peano's aie4/aie4_enums.h, checked against the ISA.
+// AIE4 encodings from Peano's aie4/aie4_enums.h.
 // AIE2 uses different encodings, so these modes need a separate enum.
 // Keep values in sync with the XLLVM AIE4ShuffleMode enum.
 //
@@ -228,5 +228,50 @@ def AIEVec_AIE4MatrixFormatAttr
     : EnumAttr<AIEVec_Dialect, AIE4MatrixFormat, "aie4_matrix_format"> {
   let assemblyFormat = "$value";
 }
+
+//===----------------------------------------------------------------------===//
+// AIE4 SRS rounding and saturation modes (crRnd / crSat encodings)
+//===----------------------------------------------------------------------===//
+
+// Values are written directly to crRnd (46) and crSat (45).
+// Stochastic rounding (16) requires an LFSR seed and is not exposed.
+def AIE4_Rnd_Floor : I32EnumAttrCase<"Floor", 0, "floor">;
+def AIE4_Rnd_Ceil : I32EnumAttrCase<"Ceil", 1, "ceil">;
+def AIE4_Rnd_SymFloor : I32EnumAttrCase<"SymFloor", 2, "sym_floor">;
+def AIE4_Rnd_SymCeil : I32EnumAttrCase<"SymCeil", 3, "sym_ceil">;
+def AIE4_Rnd_NegInf : I32EnumAttrCase<"NegInf", 8, "neg_inf">;
+def AIE4_Rnd_PosInf : I32EnumAttrCase<"PosInf", 9, "pos_inf">;
+def AIE4_Rnd_SymZero : I32EnumAttrCase<"SymZero", 10, "sym_zero">;
+def AIE4_Rnd_SymInf : I32EnumAttrCase<"SymInf", 11, "sym_inf">;
+def AIE4_Rnd_ConvEven : I32EnumAttrCase<"ConvEven", 12, "conv_even">;
+def AIE4_Rnd_ConvOdd : I32EnumAttrCase<"ConvOdd", 13, "conv_odd">;
+def AIE4RoundingMode
+    : I32EnumAttr<"AIE4RoundingMode",
+                  "AIE4 SRS/conversion rounding mode (crRnd encoding)",
+                  [AIE4_Rnd_Floor, AIE4_Rnd_Ceil, AIE4_Rnd_SymFloor,
+                   AIE4_Rnd_SymCeil, AIE4_Rnd_NegInf, AIE4_Rnd_PosInf,
+                   AIE4_Rnd_SymZero, AIE4_Rnd_SymInf, AIE4_Rnd_ConvEven,
+                   AIE4_Rnd_ConvOdd]> {
+  let cppNamespace = "::xilinx::aievec";
+  let genSpecializedAttr = 0;
+}
+
+def AIEVec_AIE4RoundingModeAttr
+    : EnumAttr<AIEVec_Dialect, AIE4RoundingMode, "aie4_rnd">;
+
+// Encoding 0 truncates the MSBs (SAT_MODE_TRUNC); 2 is not a valid mode.
+def AIE4_Sat_Truncate : I32EnumAttrCase<"Truncate", 0, "truncate">;
+def AIE4_Sat_Saturate : I32EnumAttrCase<"Saturate", 1, "saturate">;
+def AIE4_Sat_Symmetric : I32EnumAttrCase<"Symmetric", 3, "symmetric">;
+def AIE4SaturationMode
+    : I32EnumAttr<"AIE4SaturationMode",
+                  "AIE4 SRS saturation mode (crSat encoding; 2 is invalid)",
+                  [AIE4_Sat_Truncate, AIE4_Sat_Saturate, AIE4_Sat_Symmetric]> {
+  let cppNamespace = "::xilinx::aievec";
+  let genSpecializedAttr = 0;
+}
+
+def AIEVec_AIE4SaturationModeAttr
+    : EnumAttr<AIEVec_Dialect, AIE4SaturationMode, "aie4_sat">;
 
 #endif // AIE_DIALECT_AIEVEC_IR_AIEVECATTRIBUTES_TD

@@ -1,10 +1,7 @@
 //===- chess_intrinsic_wrapper.cpp ------------------------------*- C++ -*-===//
 //
-// This file is licensed under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
+// Copyright (C) 2024-2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-// (c) Copyright 2024 Advanced Micro Devices, Inc.
 //
 //===----------------------------------------------------------------------===//
 
@@ -28,13 +25,14 @@ extern "C" void llvm___aie4___release(unsigned id, unsigned val) {
 extern "C" void llvm___aie___event0() { event0(); }
 extern "C" void llvm___aie___event1() { event1(); }
 
-// Core-entry control writes (aie-standard-lowering, decision D19) call
-// llvm.aie4.set.ctrl.reg with the Peano register ids (aie4/aie4_defines.h).
-// Map the ids the compiler emits onto the Chess setters (me_set_mode.h).
+// Map the Peano register IDs emitted by core lowering to Chess setters.
 extern "C" void llvm___aie4___set___ctrl___reg(int reg, int val) {
   switch (reg) {
   case 24: // crVecRnd
     set_vec_rnd(val);
+    break;
+  case 45: // crSat
+    set_satmode(val);
     break;
   case 46: // crRnd
     set_rnd(val);

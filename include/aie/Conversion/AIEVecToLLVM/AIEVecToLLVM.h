@@ -13,6 +13,7 @@
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/Pass.h"
 #include <memory>
+#include <optional>
 
 namespace mlir {
 class ConversionTarget;
@@ -43,6 +44,23 @@ void populateAIEVecToLLVMAIE4ConversionPatterns(
     mlir::LLVMTypeConverter &converter, mlir::RewritePatternSet &patterns);
 
 void configureAIEVecToLLVMAIE4Legalizations(mlir::ConversionTarget &target);
+
+/// crRnd / crSat values a caller asserts with `aie4-assume-modes`.
+struct AIE4AssumedModes {
+  std::optional<int32_t> rnd, sat;
+};
+
+/// Parse optional `rnd:<n>` and/or `sat:<n>` entries, separated by commas.
+/// Errors are reported on `module`.
+mlir::FailureOr<AIE4AssumedModes> parseAIE4AssumeModes(llvm::StringRef spec,
+                                                       mlir::ModuleOp module);
+
+/// Verify explicit SRS modes against `aie4.entry_modes`, falling back to
+/// `assumed` when absent. Assumptions require the function, its callers and
+/// their transitive callees to preserve modes. Core lowering validates
+/// attribute-backed contracts before inserting entry writes.
+mlir::LogicalResult verifyAIE4SRSEntryModes(mlir::ModuleOp module,
+                                            const AIE4AssumedModes &assumed);
 
 /// Lower flat matrix operations to XLLVM after matmul and region expansion.
 void populateAIEVecToLLVMAIE4MmacPatterns(mlir::LLVMTypeConverter &converter,

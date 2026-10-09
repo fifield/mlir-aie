@@ -33,21 +33,36 @@ def ConvertAIEVecToLLVM : Pass<"convert-aievec-to-llvm", "mlir::ModuleOp"> {
                            "mlir::memref::MemRefDialect",
                            "mlir::vector::VectorDialect",
                            "xilinx::xllvm::XLLVMDialect"];
-  let options = [
-      Option<"aieTarget", "aie-target", "std::string",
-             /*default=*/"\"aie2\"",
-             "Select AIE version: \\\"aie\\\", \\\"aieml\\\"/\\\"aie2\\\", \\\"aie2p\\\", or \\\"aie4b\\\". This will determine which XLLVM intrinsics to use. Unrecognized spellings, and \\\"aie4b\\\" when the module contains AIEVec ops, are rejected with a diagnostic.">,
-      Option<"aie2Fp32Emulation", "aie2-fp32-emulation-strategy", "xilinx::aievec::Aie2Fp32Emulation",
-             /*default=*/"xilinx::aievec::Aie2Fp32Emulation::AccuracySafe",
-             "Set the AIE2 FP32 emulation strategy. Elementwise multiplication and matrix multiplication intrinsics for FP32 input type are emulated using bfloat16 data-path.",
-             [{::llvm::cl::values(
+  let options =
+      [Option<
+           "aieTarget", "aie-target", "std::string",
+           /*default=*/"\"aie2\"",
+           "Select AIE version: \\\"aie\\\", \\\"aieml\\\"/\\\"aie2\\\", "
+           "\\\"aie2p\\\", or \\\"aie4b\\\". This will determine which XLLVM "
+           "intrinsics to use. Unrecognized spellings, and \\\"aie4b\\\" when "
+           "the module contains AIEVec ops, are rejected with a diagnostic.">,
+       Option<"aie2Fp32Emulation", "aie2-fp32-emulation-strategy",
+              "xilinx::aievec::Aie2Fp32Emulation",
+              /*default=*/"xilinx::aievec::Aie2Fp32Emulation::AccuracySafe",
+              "Set the AIE2 FP32 emulation strategy. Elementwise "
+              "multiplication and matrix multiplication intrinsics for FP32 "
+              "input type are emulated using bfloat16 data-path.",
+              [{::llvm::cl::values(
                clEnumValN(xilinx::aievec::Aie2Fp32Emulation::AccuracySafe, "accuracy-safe",
                 "Most accurate option since input fp32 number is split into 3 bfloat16 numbers. float a*b would require 9 mac operations due to 3 bfloat16 splits each."),
                clEnumValN(xilinx::aievec::Aie2Fp32Emulation::AccuracyFast, "accuracy-fast",
                 "Fast and Accurate option. Input fp32 number is split in to 3 bfloat16 numbers. In the 9 mac operations to emulate fp32 mul, mac operations with LSBs are ignored. (3 last terms)."),
                clEnumValN(xilinx::aievec::Aie2Fp32Emulation::AccuracyLow, "accuracy-low",
                 "Fast and least accurate option. Input fp32 number is split in to 2 bfloat16 numbers. In the 4 mac operations to emulate fp32 mul, mac operations with LSBs are ignored. (1 last term).")
-              )}]>];
+              )}]>,
+       Option<"aie4AssumeModes", "aie4-assume-modes", "std::string",
+              /*default=*/"\"\"",
+              "AIE4 only: modes a caller guarantees at entry to functions that "
+              "carry no aie4.entry_modes (functions not reached from an "
+              "aie.core), as rnd:<crRnd>[,sat:<crSat>], e.g. rnd:9,sat:1. "
+              "Explicit-mode aievec.aie4.srs in such functions is rejected "
+              "without it, or when the function, its callers or their callees "
+              "may clobber the modes.">];
 }
 
 def AIEVecAIE4ExpandMatMul : Pass<"aievec-aie4-expand-matmul"> {

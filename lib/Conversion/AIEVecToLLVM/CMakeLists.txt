@@ -18,6 +18,7 @@ add_mlir_conversion_library(MLIRAIEVecToLLVM
   LINK_LIBS PUBLIC
   MLIRAIEVecDialect
   MLIRAIEVecUtils
+  MLIRFuncDialect
   MLIRLLVMCommonConversion
   MLIRLLVMDialect
   MLIRMemRefDialect

@@ -1,0 +1,78 @@
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// poison.o sets crRnd = 13 and crSat = 3 before core entry. Compare signed
+// and unsigned SRS results with the NumPy reference at shifts 0, 1, 12, 32
+// and 59 to verify explicit writes and ambient-mode preservation.
+//
+//   posinf_sat       pos_inf / saturate     -> crRnd 9,  crSat 1
+//   conveven_symsat  conv_even / symmetric  -> crRnd 12, crSat 3
+//   symzero_trunc    sym_zero / truncate    -> crRnd 10, crSat 0
+//   ambient          neither                -> 13, 3 (the poison), read back
+//   sat_only         saturate only          -> 13 (ambient), crSat 1
+//
+// Explicit variants use core-level link_with to install the poison main()
+// without an external call in the core; expect a deprecation warning.
+//
+// REQUIRES: ryzen_ai_npu3, peano
+//
+// RUN: %PEANO_INSTALL_DIR/bin/clang --target=aie4-none-unknown-elf -O2 -fstack-size-section -c %S/poison.c -o poison.o
+// RUN: %run_on_npu3% python %S/srs_modes.py --variant posinf_sat -o posinf_sat.mlir --golden posinf_sat.golden --input input.bin
+// RUN: %run_on_npu3% python %S/srs_modes.py --variant conveven_symsat -o conveven_symsat.mlir --golden conveven_symsat.golden --input input.bin
+// RUN: %run_on_npu3% python %S/srs_modes.py --variant symzero_trunc -o symzero_trunc.mlir --golden symzero_trunc.golden --input input.bin
+// RUN: %run_on_npu3% python %S/srs_modes.py --variant ambient -o ambient.mlir --golden ambient.golden --input input.bin
+// RUN: %run_on_npu3% python %S/srs_modes.py --variant sat_only -o sat_only.mlir --golden sat_only.golden --input input.bin
+// RUN: %aiecc --get-full-elf --full-elf-name=posinf_sat.elf posinf_sat.mlir
+// RUN: %aiecc --get-full-elf --full-elf-name=conveven_symsat.elf conveven_symsat.mlir
+// RUN: %aiecc --get-full-elf --full-elf-name=symzero_trunc.elf symzero_trunc.mlir
+// RUN: %aiecc --get-full-elf --full-elf-name=ambient.elf ambient.mlir
+// RUN: %aiecc --get-full-elf --full-elf-name=sat_only.elf sat_only.mlir
+//
+// Every ELF's main is poison.o's, so the core is core_0_2. Keep only its
+// disassembly: from <core_0_2> to the next symbol that is not a local .L label.
+// RUN: llvm-objdump -dr --no-show-raw-insn posinf_sat.mlir.prj/elfs_main_core_0_2/elfs_main_core_0_2.elf | awk '/^[0-9a-f]+ <[^.]/ { p = ($2 == "<core_0_2>:") } p' > ps.txt
+// RUN: FileCheck %s --check-prefix=PSAT --input-file=ps.txt
+// RUN: grep -c "movx[[:space:]]*crrnd" ps.txt | FileCheck %s --check-prefix=ONE
+// RUN: grep -c "movx[[:space:]]*crsat," ps.txt | FileCheck %s --check-prefix=ONE
+// PSAT-LABEL: <core_0_2>:
+// PSAT-DAG: movx crrnd, #0x9{{([[:blank:]]|;|$)}}
+// PSAT-DAG: movx crsat, #0x1{{([[:blank:]]|;|$)}}
+// PSAT-DAG: srs.4x
+// PSAT-DAG: srs.2x
+//
+// RUN: llvm-objdump -dr --no-show-raw-insn conveven_symsat.mlir.prj/elfs_main_core_0_2/elfs_main_core_0_2.elf | awk '/^[0-9a-f]+ <[^.]/ { p = ($2 == "<core_0_2>:") } p' > ces.txt
+// RUN: FileCheck %s --check-prefix=CES --input-file=ces.txt
+// RUN: grep -c "movx[[:space:]]*crrnd" ces.txt | FileCheck %s --check-prefix=ONE
+// RUN: grep -c "movx[[:space:]]*crsat," ces.txt | FileCheck %s --check-prefix=ONE
+// CES-LABEL: <core_0_2>:
+// CES-DAG: movx crrnd, #0xc{{([[:blank:]]|;|$)}}
+// CES-DAG: movx crsat, #0x3{{([[:blank:]]|;|$)}}
+// CES-DAG: srs.4x
+// CES-DAG: srs.2x
+//
+// RUN: llvm-objdump -dr --no-show-raw-insn symzero_trunc.mlir.prj/elfs_main_core_0_2/elfs_main_core_0_2.elf | awk '/^[0-9a-f]+ <[^.]/ { p = ($2 == "<core_0_2>:") } p' > szt.txt
+// RUN: FileCheck %s --check-prefix=SZT --input-file=szt.txt
+// RUN: grep -c "movx[[:space:]]*crrnd" szt.txt | FileCheck %s --check-prefix=ONE
+// RUN: grep -c "movx[[:space:]]*crsat," szt.txt | FileCheck %s --check-prefix=ONE
+// SZT-LABEL: <core_0_2>:
+// SZT-DAG: movx crrnd, #0xa{{([[:blank:]]|;|$)}}
+// SZT-DAG: movx crsat, #0x0{{([[:blank:]]|;|$)}}
+// SZT-DAG: srs.4x
+// SZT-DAG: srs.2x
+//
+// ONE: {{^1$}}
+//
+// sat_only writes crSat but never crRnd.
+// RUN: llvm-objdump -dr --no-show-raw-insn sat_only.mlir.prj/elfs_main_core_0_2/elfs_main_core_0_2.elf | awk '/^[0-9a-f]+ <[^.]/ { p = ($2 == "<core_0_2>:") } p' > so.txt
+// RUN: FileCheck %s --check-prefix=SATONLY --input-file=so.txt --implicit-check-not=crrnd
+// SATONLY-LABEL: <core_0_2>:
+// SATONLY: movx crsat, #0x1
+//
+// ambient writes neither register.
+// RUN: llvm-objdump -dr --no-show-raw-insn ambient.mlir.prj/elfs_main_core_0_2/elfs_main_core_0_2.elf | awk '/^[0-9a-f]+ <[^.]/ { p = ($2 == "<core_0_2>:") } p' > amb.txt
+// RUN: FileCheck %s --check-prefix=AMB --input-file=amb.txt --implicit-check-not=crrnd --implicit-check-not="crsat,"
+// AMB-LABEL: <core_0_2>:
+// AMB: srs.4x
+//
+// RUN: clang %S/test.cpp -o test.exe -std=c++17 -Wall %xrt_flags -lrt -lstdc++ %test_utils_flags
+// RUN: %run_on_npu3% ./test.exe input.bin posinf_sat.elf posinf_sat.golden conveven_symsat.elf conveven_symsat.golden symzero_trunc.elf symzero_trunc.golden ambient.elf ambient.golden sat_only.elf sat_only.golden

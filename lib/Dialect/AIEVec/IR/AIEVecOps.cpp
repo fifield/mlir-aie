@@ -1987,6 +1987,19 @@ LogicalResult AIE4ReduceOp::verify() {
   return success();
 }
 
+// The ODS type sets admit only i32 sources and i8/i16 results, so equal lane
+// counts force one of the two supported pairs.
+LogicalResult AIE4SRSOp::verify() {
+  auto src = cast<VectorType>(getSource().getType());
+  auto res = cast<VectorType>(getResult().getType());
+  if (src.getNumElements() != res.getNumElements())
+    return emitOpError("result must have as many lanes as the source: "
+                       "vector<64xi32> -> vector<64xi8> or "
+                       "vector<32xi32> -> vector<32xi16>, got ")
+           << src << " -> " << res;
+  return success();
+}
+
 #define GET_ATTRDEF_CLASSES
 #include "aie/Dialect/AIEVec/IR/AIEVecAttributes.cpp.inc"
 

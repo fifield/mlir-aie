@@ -5,15 +5,20 @@
 
 Formats are INT8, UINT8, INT4, BF16 and FP8. UINT8 means INT8 with
 rhs_signed=False. Plain integer slots and ports become i32 constants.
+
+`srs` narrows i32 accumulators with optional rounding and saturation modes.
 """
 
 from ...dialects.aievec import (  # pyright: ignore[reportMissingImports]
     AIE4MatrixFormat,
     AIE4MatrixRegionOp,
+    AIE4RoundingMode,
+    AIE4SaturationMode,
     aie4_commit,
     aie4_matrix_yield,
     aie4_mmac,
     aie4_mmac_active,
+    aie4_srs,
     aie4_stage,
     aie4_stage_stream,
 )
@@ -251,3 +256,92 @@ def matrix_region(b, inits, fmt, *, rhs_signed=None, results=None, loc=None, ip=
         return list(values) if len(values) > 1 else op
 
     return decorator
+
+
+# ===----------------------------------------------------------------------=== #
+# SRS rounding and saturation
+# ===----------------------------------------------------------------------=== #
+
+# crRnd encodings.
+FLOOR = AIE4RoundingMode.Floor
+CEIL = AIE4RoundingMode.Ceil
+SYM_FLOOR = AIE4RoundingMode.SymFloor
+SYM_CEIL = AIE4RoundingMode.SymCeil
+NEG_INF = AIE4RoundingMode.NegInf
+POS_INF = AIE4RoundingMode.PosInf
+SYM_ZERO = AIE4RoundingMode.SymZero
+SYM_INF = AIE4RoundingMode.SymInf
+CONV_EVEN = AIE4RoundingMode.ConvEven
+CONV_ODD = AIE4RoundingMode.ConvOdd
+
+# crSat encodings.
+TRUNCATE = AIE4SaturationMode.Truncate
+SAT = AIE4SaturationMode.Saturate
+SYM_SAT = AIE4SaturationMode.Symmetric
+
+# Accumulator lane count -> result element width.
+_SRS_SHAPES = {64: 8, 32: 16}
+_SRS_MAX_SHIFT = 59
+
+
+def srs(
+    acc,
+    *,
+    shift,
+    signed,
+    rounding=None,
+    saturation=None,
+    loc=None,
+    ip=None,
+) -> Value:
+    """aievec.aie4.srs: vector<64xi32> -> vector<64xi8> or
+    vector<32xi32> -> vector<32xi16>.
+
+    `shift` is a right shift in 0..59. `signed` selects the signed or
+    unsigned output range. `rounding` / `saturation` are an
+    `AIE4RoundingMode` / `AIE4SaturationMode` (e.g. POS_INF, SAT) or None,
+    which means ambient: the op reads the core's current mode.
+    """
+    acc_ty = acc.type
+    lanes = None
+    if isinstance(acc_ty, VectorType):
+        elt = acc_ty.element_type
+        if (
+            acc_ty.rank == 1
+            and not acc_ty.scalable
+            and isinstance(elt, IntegerType)
+            and elt.is_signless
+            and elt.width == 32
+            and acc_ty.shape[0] in _SRS_SHAPES
+        ):
+            lanes = acc_ty.shape[0]
+    if lanes is None:
+        raise ValueError(
+            f"srs: acc must be vector<64xi32> or vector<32xi32>, got {acc_ty}"
+        )
+    if isinstance(shift, bool) or not isinstance(shift, int):
+        raise ValueError(f"srs: shift must be an int in [0, 59], got {shift!r}")
+    if not 0 <= shift <= _SRS_MAX_SHIFT:
+        raise ValueError(f"srs: shift must be in [0, 59], got {shift}")
+    if not isinstance(signed, bool):
+        raise TypeError(f"srs: signed must be a bool, got {signed!r}")
+    if rounding is not None and not isinstance(rounding, AIE4RoundingMode):
+        raise TypeError(
+            f"srs: rounding must be an AIE4RoundingMode or None, got {rounding!r}"
+        )
+    if saturation is not None and not isinstance(saturation, AIE4SaturationMode):
+        raise TypeError(
+            "srs: saturation must be an AIE4SaturationMode or None, got "
+            f"{saturation!r}"
+        )
+    result_ty = VectorType.get([lanes], IntegerType.get_signless(_SRS_SHAPES[lanes]))
+    return aie4_srs(
+        result_ty,
+        acc,
+        shift,
+        signed,
+        rounding=rounding,
+        saturation=saturation,
+        loc=loc,
+        ip=ip,
+    )

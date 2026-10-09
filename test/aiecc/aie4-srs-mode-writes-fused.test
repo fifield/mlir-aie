@@ -1,0 +1,19 @@
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// Mode writes must survive at entry and around store-fused SRS (vst.srs.4x).
+//
+// REQUIRES: peano
+//
+// RUN: llc -O2 --mtriple=aie4 --mcpu=aie4b %S/Inputs/aie4_srs_mode_writes.ll -o %t.s
+// RUN: FileCheck %s --input-file=%t.s
+//
+// CHECK-LABEL: entry_fused:
+// CHECK:       movx crrnd, #9
+// CHECK:       movx crsat, #1
+// CHECK:       vst.srs.4x
+//
+// CHECK-LABEL: switch_around_fused:
+// CHECK:       movx crrnd, #9
+// CHECK:       vst.srs.4x
+// CHECK:       movx crrnd, #12

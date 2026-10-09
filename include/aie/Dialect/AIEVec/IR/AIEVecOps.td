@@ -81,6 +81,10 @@ def AIEVec_AIE4MulEwiseF32Op
 //
 // Share the MAC resource identity with XLLVM through AIE4CtrlRegResources.h.
 def AIEVec_AIE4CRVecSatRes : Resource<"::xilinx::xllvm::AIE4CRVecSatResource">;
+def AIEVec_AIE4CRRndRes : Resource<"::xilinx::xllvm::AIE4CRRndResource">;
+def AIEVec_AIE4CRSatRes : Resource<"::xilinx::xllvm::AIE4CRSatResource">;
+def AIEVec_AIE4SRSStatusRes
+    : Resource<"::xilinx::xllvm::AIE4SRSStatusResource">;
 
 //===----------------------------------------------------------------------===//
 // AIE4 integer MAC
@@ -132,8 +136,7 @@ def AIEVec_AIE4MacEwiseF32Op
     multiply lowers to `aievec.aie4.mul_ewise_f32` and the add stays separate.
 
     Reads `crFPVMask` and `crVecRnd` and updates `srFPVFlags`; not `Pure`.
-    The VMAC unit is IEEE-compliant with two exceptions (AIE4 ISA v1.1
-    section 18.4): subnormal inputs are clamped to a signed zero for every
+    The VMAC unit is IEEE-compliant with two exceptions: subnormal inputs are clamped to a signed zero for every
     float type but fp8 and fp16, and subnormal results return zero. A
     consequence worth knowing is that subnormal times infinity becomes zero
     times infinity, which is NaN. `contract` permits contraction; it does
@@ -164,8 +167,7 @@ def AIEVec_AIE4MulEwiseBf16F32Op
     bf16-to-f32 widening is exact, and the product is still rounded to f32.
 
     Reads `crFPVMask` and `crVecRnd` and updates `srFPVFlags`; not `Pure`.
-    The VMAC unit is IEEE-compliant with two exceptions (AIE4 ISA v1.1
-    section 18.4): subnormal inputs are clamped to a signed zero for every
+    The VMAC unit is IEEE-compliant with two exceptions: subnormal inputs are clamped to a signed zero for every
     float type but fp8 and fp16, and subnormal results return zero. A
     consequence worth knowing is that subnormal times infinity becomes zero
     times infinity, which is NaN. `contract` permits contraction; it does
@@ -197,8 +199,7 @@ def AIEVec_AIE4MacEwiseBf16F32Op
     (or `fast`) on both the multiply and add, as for `aie4.mac_ewise_f32`.
 
     Reads `crFPVMask` and `crVecRnd` and updates `srFPVFlags`; not `Pure`.
-    The VMAC unit is IEEE-compliant with two exceptions (AIE4 ISA v1.1
-    section 18.4): subnormal inputs are clamped to a signed zero for every
+    The VMAC unit is IEEE-compliant with two exceptions: subnormal inputs are clamped to a signed zero for every
     float type but fp8 and fp16, and subnormal results return zero. A
     consequence worth knowing is that subnormal times infinity becomes zero
     times infinity, which is NaN. `contract` permits contraction; it does
@@ -230,8 +231,7 @@ def AIEVec_AIE4MscEwiseF32Op
     is a multiply-subtract, while `%a * %b - %acc` is not.
 
     Reads `crFPVMask` and `crVecRnd` and updates `srFPVFlags`; not `Pure`.
-    The VMAC unit is IEEE-compliant with two exceptions (AIE4 ISA v1.1
-    section 18.4): subnormal inputs are clamped to a signed zero for every
+    The VMAC unit is IEEE-compliant with two exceptions: subnormal inputs are clamped to a signed zero for every
     float type but fp8 and fp16, and subnormal results return zero. A
     consequence worth knowing is that subnormal times infinity becomes zero
     times infinity, which is NaN. `contract` permits contraction; it does
@@ -262,8 +262,7 @@ def AIEVec_AIE4MscEwiseBf16F32Op
     on the right-hand side, as for `aie4.msc_ewise_f32`.
 
     Reads `crFPVMask` and `crVecRnd` and updates `srFPVFlags`; not `Pure`.
-    The VMAC unit is IEEE-compliant with two exceptions (AIE4 ISA v1.1
-    section 18.4): subnormal inputs are clamped to a signed zero for every
+    The VMAC unit is IEEE-compliant with two exceptions: subnormal inputs are clamped to a signed zero for every
     float type but fp8 and fp16, and subnormal results return zero. A
     consequence worth knowing is that subnormal times infinity becomes zero
     times infinity, which is NaN. `contract` permits contraction; it does
@@ -306,9 +305,71 @@ def AIEVec_AIE4SRSI32I16Op
 
     The op reads the mode registers and writes the SRS overflow status flag;
     it must not be treated as pure.
+
+    This op is mode-less: core-entry setup treats it as an ambient crRnd and
+    crSat reader. To state the modes, use `aievec.aie4.srs` with `rounding`
+    and `saturation`.
   }];
   let assemblyFormat = "$source attr-dict `:` type($source) `,` type($result)";
   let hasVerifier = 0;
+}
+
+def AIEVec_AIE4SRSOp
+    : AIEVec_Op<
+          "aie4.srs", [MemoryEffects<[MemRead<AIEVec_AIE4CRRndRes>,
+                                      MemRead<AIEVec_AIE4CRSatRes>,
+                                      MemWrite<AIEVec_AIE4SRSStatusRes>]>]>,
+      Arguments<(
+          ins AnyTypeOf<
+              [FixedVectorOfRankAndLengthAndType<[1], [64], [I32]>,
+               FixedVectorOfRankAndLengthAndType<[1], [32], [I32]>]>:$source,
+          ConfinedAttr<I32Attr, [IntMinValue<0>, IntMaxValue<59>]>:$shift,
+          BoolAttr:$isSigned,
+          OptionalAttr<AIEVec_AIE4RoundingModeAttr>:$rounding,
+          OptionalAttr<AIEVec_AIE4SaturationModeAttr>:$saturation)>,
+      Results<(outs AnyTypeOf<
+          [FixedVectorOfRankAndLengthAndType<[1], [64], [I8]>,
+           FixedVectorOfRankAndLengthAndType<[1], [32], [I16]>]>:$result)> {
+  let summary =
+      "AIE4 shift-round-saturate with stated rounding and saturation modes";
+  let description = [{
+    Narrows an i32 accumulator: `vector<64xi32> -> vector<64xi8>`
+    (`llvm.aie4.I512.v64.acc32.srs`) or `vector<32xi32> -> vector<32xi16>`
+    (`llvm.aie4.I512.v32.acc32.srs`). Each lane is multiplied by
+    2^-`shift` (`shift` in 0..59, a right shift), rounded by crRnd, then
+    saturated or truncated by crSat into the signed (`isSigned`) or
+    unsigned output range. The accumulator lanes are always read
+    as signed; `isSigned` selects only the output range.
+
+    `rounding` and `saturation` require the corresponding crRnd and crSat
+    values; omitting either attribute reads that register's ambient mode.
+    `AIECoreToStandard` writes required modes once at core entry and rejects
+    conflicting requirements. The attributes are not instruction operands.
+
+    Conversion requires `aie4.entry_modes` on the enclosing function to
+    guarantee each explicit mode. Without that attribute, `aie4-assume-modes`
+    can assert entry values for standalone `func.func` or `llvm.func` ops;
+    AIE cores must be outlined first. These assertions do not restore modes.
+
+    Explicit modes require the core, or a standalone function and its callers,
+    to preserve modes throughout their transitive callees. External calls,
+    indirect calls, LLVM calls, inline assembly, `aie.debug` and direct
+    control-register writes are conservatively rejected. Internal `func.call`
+    helpers that preserve modes are allowed. Core-generated guarantees cover
+    only call paths from AIE4 cores.
+
+    Reads crRnd and crSat and writes srSRS_of; it is not `Pure`.
+
+    Example:
+    ```mlir
+    %y = aievec.aie4.srs %acc {shift = 12 : i32, isSigned = true,
+           rounding = #aievec.aie4_rnd<pos_inf>,
+           saturation = #aievec.aie4_sat<saturate>}
+         : vector<64xi32> -> vector<64xi8>
+    ```
+  }];
+  let assemblyFormat = "$source attr-dict `:` type($source) `->` type($result)";
+  let hasVerifier = 1;
 }
 
 //===----------------------------------------------------------------------===//
@@ -415,6 +476,11 @@ def AIEVec_AIE4ConvF32I32Op
     at core entry for any core holding this op, and sets it to 2
     (`rnd_sym_floor`, always toward zero) to match `arith.fptosi` and
     `arith.fptoui`. Emitting this op elsewhere inherits the same mode.
+
+    The instruction always saturates and reads `crSat` bit 1 to choose the
+    symmetric bound, which would clip the in-range -2^31. `AIECoreToStandard`
+    therefore rejects a core that also holds an `aievec.aie4.srs` requiring
+    `saturation = symmetric`.
 
     Lowers to `llvm.aie4.v32float.to.v32int32`, one instruction for 32 lanes.
   }];
