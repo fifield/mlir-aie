@@ -123,24 +123,21 @@ jobs:
           PYTHON_VERSION: ${{ matrix.python_version }}
         run: echo "name=mlir_aie_rtti_${ENABLE_RTTI}-${PYTHON_VERSION}" >> "${GITHUB_OUTPUT}"
 
-      - uses: uraimo/run-on-arch-action@fd7aa8593480287702b446a273a68f788a9bad3a  # v3
+      - uses: ./.github/actions/run_x86_container
         name: Build mlir-aie
         id: runcmd
         with:
-          distro: none
-          arch: none
-          base_image: ghcr.io/xilinx/mlir-aie/ubuntu22-ryzenai-1.3.0ea:1.2
-          githubToken: ${{ github.token }}
-          dockerRunArgs: |
-            --mac-address 02:42:ac:11:00:02
+          image: ghcr.io/xilinx/mlir-aie/ubuntu22-ryzenai-1.3.0ea:1.2
+          github-token: ${{ github.token }}
+          mac-address: 02:42:ac:11:00:02
           env: |
-            VITIS: ${{ env.VITIS }}
-            XILINXD_LICENSE_FILE: ${{ env.XILINXD_LICENSE_FILE }}
-            PIP_RETRIES: ${{ env.PIP_RETRIES }}
-            PIP_RESUME_RETRIES: ${{ env.PIP_RESUME_RETRIES }}
-            PIP_TIMEOUT: ${{ env.PIP_TIMEOUT }}
-            PIP_DISABLE_PIP_VERSION_CHECK: ${{ env.PIP_DISABLE_PIP_VERSION_CHECK }}
-            AIE_WHEEL_VERSION: ${{ steps.wheel_version.outputs.version }}
+            VITIS=${{ env.VITIS }}
+            XILINXD_LICENSE_FILE=${{ env.XILINXD_LICENSE_FILE }}
+            PIP_RETRIES=${{ env.PIP_RETRIES }}
+            PIP_RESUME_RETRIES=${{ env.PIP_RESUME_RETRIES }}
+            PIP_TIMEOUT=${{ env.PIP_TIMEOUT }}
+            PIP_DISABLE_PIP_VERSION_CHECK=${{ env.PIP_DISABLE_PIP_VERSION_CHECK }}
+            AIE_WHEEL_VERSION=${{ steps.wheel_version.outputs.version }}
           run: |
             git config --global --add safe.directory $PWD
             MLIR_VERSION=$(git rev-parse --short HEAD)
@@ -166,6 +163,20 @@ jobs:
             pip install --upgrade pip
             pip install -r python/requirements_ml.txt
             python -m pip install --require-hashes -r python/requirements_dev.lock
+
+            # This container's XRT does not ship aiebu's library, so build it for
+            # aiecc to link (in-process ELF assembly, no aiebu-asm needed). Pinned
+            # to the aiebu submodule of XRT 2.25.0 so the ELFs match its aiebu-asm.
+            apt-get update
+            apt-get install -y --no-install-recommends libboost-dev pkg-config
+            AIEBU_COMMIT=c108cc4bc7d68021b53bac08235258512d24188c
+            git clone --filter=blob:none https://github.com/Xilinx/aiebu.git /tmp/aiebu-src
+            git -C /tmp/aiebu-src checkout -q $AIEBU_COMMIT
+            git -C /tmp/aiebu-src submodule update --init --recursive --depth 1
+            cmake -S /tmp/aiebu-src -B /tmp/aiebu-build -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/aiebu
+            cmake --build /tmp/aiebu-build --target install
+            export CMAKE_ARGS="-Daiebu_DIR=/opt/aiebu/share/cmake/AIEBU"
 
             export ENABLE_RTTI=${{ matrix.ENABLE_RTTI }}
 
@@ -453,6 +464,14 @@ jobs:
           "OPENSSL_ROOT_DIR=$($vcpkgRoot.Replace('\','/'))/installed/x64-windows-static" |
             Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
+      # Puts ccache on PATH, which is what makes setup.py pass
+      # CMAKE_<LANG>_COMPILER_LAUNCHER=ccache.
+      - uses: ./.github/actions/setup_ccache
+        with:
+          MATRIX_OS: windows-2022
+          MATRIX_ARCH: AMD64
+          EXTRA_KEY: ryzen-wheels-rtti-${{ matrix.ENABLE_RTTI }}
+
       - name: Stage XRT SDK
         shell: pwsh
         run: |
@@ -641,9 +660,10 @@ jobs:
     # build-windows wheel via iron_setup.py (runtime mode, so the installed
     # wheel is exercised, not a from-source build) and run a few @iron.jit
     # designs on the self-hosted Windows NPU. Only npu2 Windows runners exist.
-    # 3.13 matches the runner's pre-provisioned interpreter (docs/buildHostWinNative.md).
+    # 3.13 matches the XRT SDK's pyxrt.pyd (built for CPython 3.13);
+    # setup-python provides it since the runner's system Python is 3.12.
     needs: build-windows
-    runs-on: [self-hosted, windows, ryzenai, npu2]
+    runs-on: [self-hosted, windows, devlab-dispatch, strix-halo]
     # Normal exec is 3-6 min; observed hang 192.6 min on this job (2026-08-04).
     timeout-minutes: 20
     env:
@@ -660,6 +680,12 @@ jobs:
         with:
           name: mlir_aie_windows_rtti_ON-3.13
           path: wheelhouse
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - uses: ./.github/actions/setup_windows_xrt
 
       - name: Install wheel and run an example on the NPU
         shell: cmd
