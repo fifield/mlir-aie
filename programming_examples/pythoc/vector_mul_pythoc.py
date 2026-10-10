@@ -15,8 +15,8 @@
 """End-to-end example: External PythoC kernel with IRON.
 
 This example demonstrates how to:
-1. Compile an external PythoC kernel to LLVM IR
-2. Create an IRON Kernel from the compiled IR
+1. Compile an external PythoC kernel to an AIE object file
+2. Create an IRON Kernel from the compiled object
 3. Build and compile a complete MLIR design
 4. Run on NPU hardware using pyxrt
 """
@@ -28,6 +28,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pythoc
 from ml_dtypes import bfloat16
 
 from aie.iron import ObjectFifo, Program, Runtime, Worker
@@ -61,7 +62,7 @@ def parse_args():
         "--tensor-size",
         type=int,
         default=1024,
-        help="Total vector length processed (must be divisible by 4 and 16)",
+        help="Total vector length processed (must be a positive multiple of 64)",
     )
     parser.add_argument(
         "--verbose",
@@ -81,10 +82,10 @@ def pick_device(name: str):
 def build_mlir_module(device, target_arch: str, tensor_size: int, verbose: bool):
     """Build IRON program with external PythoC kernel."""
     tiles_per_factor = 4
-    if tensor_size % tiles_per_factor:
-        raise ValueError("tensor_size must be divisible by 4 for this example")
-    if tensor_size % 16:
-        raise ValueError("tensor_size must be divisible by 16 for vectorization")
+    if tensor_size <= 0 or tensor_size % (tiles_per_factor * 16):
+        raise ValueError(
+            "tensor_size must be a positive multiple of 64 so each tile is vector-aligned"
+        )
 
     tile_size = tensor_size // tiles_per_factor
 
@@ -92,12 +93,14 @@ def build_mlir_module(device, target_arch: str, tensor_size: int, verbose: bool)
     tensor_ty = np.ndarray[(tensor_size,), np.dtype[np.uint16]]
     tile_ty = np.ndarray[(tile_size,), np.dtype[np.uint16]]
 
-    # Step 1: Compile external PythoC kernel to LLVM IR
+    # Step 1: Compile the kernel shipped with the active PythoC checkout.
     if verbose:
         print(f"  Compiling PythoC kernel (eltwise_mul_vectorized, {target_arch})...")
-    pythoc_kernel_path = Path("/work/npu-dev/PythoC/pythoc_kernels/mul.py")
+    pythoc_kernel_path = (
+        Path(pythoc.__file__).resolve().parents[1] / "pythoc_kernels" / "mul.py"
+    )
 
-    ll_file = compile_pythoc_kernel(
+    obj_file = compile_pythoc_kernel(
         str(pythoc_kernel_path),
         function_name="eltwise_mul_vectorized",
         target_arch=target_arch,
@@ -105,13 +108,14 @@ def build_mlir_module(device, target_arch: str, tensor_size: int, verbose: bool)
     )
 
     if verbose:
-        print(f"  LLVM IR: {ll_file}")
+        print(f"  AIE object: {obj_file}")
 
-    # Step 2: Create IRON Kernel from compiled IR
+    # Step 2: Create IRON Kernel from the compiled object.
     mul_kernel = PythocKernel(
         "eltwise_mul_vectorized",
-        str(ll_file),
+        str(obj_file),
         [tile_ty, tile_ty, tile_ty, np.int32],  # Types: input_a, input_b, output, size
+        target_arch=target_arch,
     )
 
     # Define ObjectFifos for data movement
@@ -204,8 +208,11 @@ def run_with_xrt(xclbin_path: Path, insts_path: Path, tensor_size: int, verbose:
     output_bf16 = np.array(output_u16, dtype=np.uint16).view(bfloat16)
     output_f32 = output_bf16.astype(np.float32)
 
-    # Compute expected result in float32, truncate to bf16, back to float32
-    expected_bf16 = (a_data * b_data).astype(bfloat16)
+    # Multiply the quantized inputs actually sent to the device. Multiplication
+    # by two is exact in bf16 for these finite values.
+    expected_bf16 = (
+        a_bf16.astype(np.float32) * b_bf16.astype(np.float32)
+    ).astype(bfloat16)
     expected_f32 = expected_bf16.astype(np.float32)
 
     # Return float32 arrays for readable comparison
@@ -248,12 +255,12 @@ def main():
         print(f"      Output (f32):   {preview_out}")
         print(f"      Expected (f32): {preview_exp}")
 
-        # Use approximate comparison (bf16 has limited precision)
-        if np.allclose(output_vec, expected_vec, rtol=1e-2, atol=1e-2):
+        # Multiplication by two is exact; do not hide wrong lanes with a tolerance.
+        if np.array_equal(output_vec, expected_vec):
             print("PASS!")
             return 0
         else:
-            mismatches = ~np.isclose(output_vec, expected_vec, rtol=1e-2, atol=1e-2)
+            mismatches = output_vec != expected_vec
             n_mismatch = np.sum(mismatches)
             print(f"FAILED: {n_mismatch}/{len(output_vec)} mismatches")
             # Show first few mismatches
