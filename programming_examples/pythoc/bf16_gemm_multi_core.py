@@ -23,7 +23,7 @@ Architecture:
   - Each core computes (m, n) output tiles with K//k k-reduction steps
   - BFP16 emulation: bf16 → accfloat → bfp16ebs8, with 8×8×8 MAC
 
-Buffer layouts in L1 (set by dims_to_stream):
+Buffer layouts in L1 (set by to_stream):
   A: [M_BLOCKS, K_MICRO, 8, 8]  (M_BLOCKS = m/8, K_MICRO = k/8)
   B: [K_MICRO, N_BLOCKS, 8, 8]  (N_BLOCKS = n/8)
   C: [M_BLOCKS, N_BLOCKS, 8, 8]
@@ -48,7 +48,7 @@ from aie.utils.compile import compile_mlir_module
 from aie.utils import DefaultNPURuntime, NPUKernel
 from aie.utils.trace import TraceConfig
 from aie.utils.trace.utils import get_cycles_summary
-from aie.helpers.taplib import TensorTiler2D
+from aie.helpers.taplib import TensorAccessPattern
 
 # PythoC types and intrinsics
 from pythoc import ptr, i32, f32, bf16, void
@@ -93,7 +93,7 @@ def add_pythoc_llc_flag(flag: str):
 # Accumulates C += A × B for one (m, k) × (k, n) tile.
 # All *_CONST names are injected via extra_globals at PythocKernel compile time.
 #
-# Buffer layouts (produced by dims_to_stream DMA retiling):
+# Buffer layouts (produced by to_stream DMA retiling):
 #   A: [M_BLOCKS, K_MICRO, 8, 8]  →  A[m_blk, k_blk] at (m*K_MICRO + k)*64
 #   B: [K_MICRO, N_BLOCKS, 8, 8]  →  B[k_blk, n_blk] at (k*N_BLOCKS + n)*64
 #   C: [M_BLOCKS, N_BLOCKS, 8, 8] →  C[m_blk, n_blk] at (m*N_BLOCKS + n)*64
@@ -317,7 +317,7 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols, trace_size=0):
     C_l1_ty = np.ndarray[(m, n), np.dtype[dtype_out]]
 
     # ── PythoC kernels ───────────────────────────────────────────────────
-    # Stride constants for the L1 tiled layout produced by dims_to_stream:
+    # Stride constants for the L1 tiled layout produced by to_stream:
     #   A: [M_BLOCKS, K_MICRO, 8, 8] → A_M_STRIDE = K_MICRO*64, A_K_STRIDE = 64
     #   B: [K_MICRO, N_BLOCKS, 8, 8] → B_K_STRIDE = N_BLOCKS*64, B_N_STRIDE = 64
     #   C: [M_BLOCKS, N_BLOCKS, 8, 8] → C_M_STRIDE = N_BLOCKS*64, C_N_STRIDE = 64
@@ -377,13 +377,8 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols, trace_size=0):
         start_row = i * n_A_tiles_per_shim
         stop_row = start_row + n_A_tiles_per_shim
         of_offsets = [m * k * j for j in range(stop_row - start_row)]
-        dims_to_stream = [
-            [
-                (m // r, r * k),
-                (k // s, s),
-                (r, k),
-                (s, 1),
-            ]
+        to_stream = [
+            TensorAccessPattern.full((m, k)).tile((r, s))
         ] * (stop_row - start_row)
         a_tmp_fifos = (
             A_l3l2_fifos[i]
@@ -392,7 +387,7 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols, trace_size=0):
                 of_offsets,
                 obj_types=[A_l1_ty] * (stop_row - start_row),
                 names=[f"A_L2L1_{row}" for row in range(start_row, stop_row)],
-                dims_to_stream=dims_to_stream,
+                to_stream=to_stream,
                 tile=Tile(2 * i if n_aie_cols == 8 else i, 1),
             )
         )
@@ -402,14 +397,14 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols, trace_size=0):
     # Input B: forward/broadcast to columns
     for col in range(n_aie_cols):
         B_l3l2_fifos[col] = ObjectFifo(B_l2_ty, name=f"B_L3L2_{col}", depth=fifo_depth)
-        b_dims_to_stream = [(k // s, s * n), (n // t, t), (s, n), (t, 1)]
+        b_to_stream = TensorAccessPattern.full((k, n)).tile((s, t))
         B_l2l1_fifos[col] = (
             B_l3l2_fifos[col]
             .cons()
             .forward(
                 obj_type=B_l1_ty,
                 name=f"B_L2L1_{col}",
-                dims_to_stream=b_dims_to_stream,
+                to_stream=b_to_stream,
                 tile=Tile(col, 1),
             )
         )
@@ -419,7 +414,11 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols, trace_size=0):
             C_l2_ty,
             name=f"C_L2L3_{col}",
             depth=fifo_depth,
-            dims_to_stream=[(m // r, r * n), (r, t), (n // t, r * t), (t, 1)],
+            to_stream=TensorAccessPattern(
+                (m, n), offset=0,
+                sizes=[m // r, r, n // t, t],
+                strides=[r * n, t, r * t, 1],
+            ),
         )
         of_offsets = [m * n * i for i in range(n_aie_rows)]
         c_tmp_fifos = (
@@ -487,28 +486,19 @@ def build_mlir_module(M, K, N, m, k, n, n_aie_cols, trace_size=0):
     tb_max_n_rows = 4
     tb_n_rows = min(tb_max_n_rows // 2, M // (m * n_aie_rows))
 
-    A_tiles = TensorTiler2D.group_tiler(
-        (M, K),
-        (m * n_A_tiles_per_shim, k),
-        (1, K // k),
-        pattern_repeat=N // n // n_aie_cols,
-        prune_step=False,
-    )
-    B_tiles = TensorTiler2D.step_tiler(
-        (K, N),
-        (k, n),
-        tile_group_repeats=(K // k, N // n // n_aie_cols),
-        tile_group_steps=(1, n_aie_cols),
-        tile_group_col_major=True,
-        prune_step=False,
-    )
-    C_tiles = TensorTiler2D.step_tiler(
-        (M, N),
-        (m * n_aie_rows, n),
-        tile_group_repeats=(tb_n_rows, N // n // n_aie_cols),
-        tile_group_steps=(1, n_aie_cols),
-        prune_step=False,
-    )
+    A_grid = TensorAccessPattern.full((M, K)).tile((m * n_A_tiles_per_shim, k))
+    A_tiles = [
+        A_grid[row].repeat(N // n // n_aie_cols)
+        for row in range(A_grid.sizes[0])
+    ]
+    B_grid = TensorAccessPattern.full((K, N)).tile((k, n)).permute((1, 0, 2, 3))
+    B_tiles = [B_grid[col::n_aie_cols] for col in range(n_aie_cols)]
+    C_grid = TensorAccessPattern.full((M, N)).tile((m * n_aie_rows, n))
+    C_tiles = [
+        C_grid[row : row + tb_n_rows, col::n_aie_cols]
+        for row in range(0, C_grid.sizes[0], tb_n_rows)
+        for col in range(n_aie_cols)
+    ]
 
     # The shim tile each transfer runs on is picked when the handle is taken
     # now (`prod(tile=)` / `cons(tile=)`), not per fill/drain (#3387).
@@ -717,7 +707,7 @@ def main():
         B_f32 = np.random.randn(K, N).astype(np.float32) * 0.1
 
         # Convert to bfloat16 (host data stays flat row-major;
-        # ObjectFifo dims_to_stream handles retiling into kernel layout)
+        # ObjectFifo to_stream handles retiling into kernel layout)
         A_bf16 = A_f32.astype(bfloat16).flatten()
         B_bf16 = B_f32.astype(bfloat16).flatten()
 
@@ -760,7 +750,7 @@ def main():
         else:
             DefaultNPURuntime.run(kernel_handle, [in_a, in_b, out_c])
 
-        # Output is row-major (dims_to_stream on C handles retiling)
+        # Output is row-major (to_stream on C handles retiling)
         C_npu = np.array(out_c.numpy()).reshape(M, N)
 
         max_err = np.max(np.abs(C_npu - C_ref))
