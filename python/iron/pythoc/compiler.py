@@ -625,6 +625,8 @@ def compile_pythoc_source(
             f"-march={target_arch}",
             *_get_extra_llc_flags(),
             "-filetype=obj",
+            # Let aiecc include the external kernel in core stack sizing.
+            "-stack-size-section",
             f"-o={obj_file}",
             str(opt_ll_file),
         ]
