@@ -40,9 +40,11 @@ NB_MODULE(_aie, m) {
         MlirDialectHandle aieHandle = mlirGetDialectHandle__aie__();
         MlirDialectHandle aiexHandle = mlirGetDialectHandle__aiex__();
         MlirDialectHandle aievecHandle = mlirGetDialectHandle__aievec__();
+        MlirDialectHandle xllvmHandle = mlirGetDialectHandle__xllvm__();
         mlirDialectHandleInsertDialect(aieHandle, registry);
         mlirDialectHandleInsertDialect(aiexHandle, registry);
         mlirDialectHandleInsertDialect(aievecHandle, registry);
+        mlirDialectHandleInsertDialect(xllvmHandle, registry);
       },
       "registry"_a);
 

@@ -3,29 +3,36 @@
 //
 // Verify translated XLLVM operand/result types against Peano's intrinsic table.
 // These inputs cover the vadd/select/reduce, elementwise/conversion, shuffle,
-// dense MMAC/staging/commit, and stream/SRS/dynamic-conf families. Coverage is checked against TableGen.
+// dense MMAC/staging/commit, stream/SRS/dynamic-conf, and tile-mapped
+// access/scheduling-barrier families. Coverage is checked against TableGen.
 // Separate translation and verification steps expose each stage's diagnostics.
 //
 // REQUIRES: peano
-// RUN: aie-translate %S/../Target/LLVMIR/aievec-aie4.mlir -mlir-to-llvmir -o %t.vadd.ll
-// RUN: %PEANO_INSTALL_DIR/bin/opt -S -mtriple=aie4 %t.vadd.ll -o %t.vadd.opt.ll
-// RUN: aie-translate %S/../Target/LLVMIR/aievec-aie4-ewise.mlir -mlir-to-llvmir -o %t.ewise.ll
-// RUN: %PEANO_INSTALL_DIR/bin/opt -S -mtriple=aie4 %t.ewise.ll -o %t.ewise.opt.ll
-// RUN: aie-translate %S/../Target/LLVMIR/shuffle-aie4.mlir -mlir-to-llvmir -o %t.shuffle.ll
-// RUN: %PEANO_INSTALL_DIR/bin/opt -S -mtriple=aie4 %t.shuffle.ll -o %t.shuffle.opt.ll
-// RUN: aie-translate %S/../Target/LLVMIR/aievec-aie4-mmac.mlir -mlir-to-llvmir -o %t.mmac.ll
-// RUN: %PEANO_INSTALL_DIR/bin/opt -S -mtriple=aie4 %t.mmac.ll -o %t.mmac.opt.ll
-// RUN: aie-translate %S/../Target/LLVMIR/aievec-aie4-getss-srs-dynconf.mlir -mlir-to-llvmir -o %t.stream.ll
-// RUN: %PEANO_INSTALL_DIR/bin/opt -S -mtriple=aie4 %t.stream.ll -o %t.stream.opt.ll
+// RUN: aie-translate %S/../Target/LLVMIR/aievec-aie4.mlir -mlir-to-llvmir -o xllvm_verify_vadd.ll
+// RUN: %PEANO_INSTALL_DIR/bin/opt -S -mtriple=aie4 xllvm_verify_vadd.ll -disable-output
+// RUN: aie-translate %S/../Target/LLVMIR/aievec-aie4-ewise.mlir -mlir-to-llvmir -o xllvm_verify_ewise.ll
+// RUN: %PEANO_INSTALL_DIR/bin/opt -S -mtriple=aie4 xllvm_verify_ewise.ll -disable-output
+// RUN: aie-translate %S/../Target/LLVMIR/shuffle-aie4.mlir -mlir-to-llvmir -o xllvm_verify_shuffle.ll
+// RUN: %PEANO_INSTALL_DIR/bin/opt -S -mtriple=aie4 xllvm_verify_shuffle.ll -disable-output
+// RUN: aie-translate %S/../Target/LLVMIR/aievec-aie4-mmac.mlir -mlir-to-llvmir -o xllvm_verify_mmac.ll
+// RUN: %PEANO_INSTALL_DIR/bin/opt -S -mtriple=aie4 xllvm_verify_mmac.ll -disable-output
+// RUN: aie-translate %S/../Target/LLVMIR/aievec-aie4-getss-srs-dynconf.mlir -mlir-to-llvmir -o xllvm_verify_stream.ll
+// RUN: %PEANO_INSTALL_DIR/bin/opt -S -mtriple=aie4 xllvm_verify_stream.ll -disable-output
+// RUN: aie-translate %S/../Target/LLVMIR/tile-mapped-intrinsics.mlir -mlir-to-llvmir -o xllvm_verify_tm.ll
+// RUN: %PEANO_INSTALL_DIR/bin/opt -S -mtriple=aie4 xllvm_verify_tm.ll -disable-output
 // RUN: %python %S/check_xllvm_coverage.py \
 // RUN:     %aie_obj_root/include/aie/Dialect/XLLVM/IR/XLLVMConversions.inc \
-// RUN:     %t.vadd.ll %t.ewise.ll %t.shuffle.ll %t.mmac.ll %t.stream.ll | FileCheck %s
+// RUN:     xllvm_verify_vadd.ll xllvm_verify_ewise.ll xllvm_verify_shuffle.ll \
+// RUN:     xllvm_verify_mmac.ll xllvm_verify_stream.ll xllvm_verify_tm.ll \
+// RUN:     | FileCheck %s
 // CHECK: PASS: all {{[1-9][0-9]*}} generated AIE4 XLLVM intrinsic names have translated calls
 
 // Omitting the elementwise input must fail coverage, including the MSC/unpack cases.
 // RUN: not %python %S/check_xllvm_coverage.py \
 // RUN:     %aie_obj_root/include/aie/Dialect/XLLVM/IR/XLLVMConversions.inc \
-// RUN:     %t.vadd.ll %t.shuffle.ll %t.mmac.ll %t.stream.ll | FileCheck %s --check-prefix=MISSING
+// RUN:     xllvm_verify_vadd.ll xllvm_verify_shuffle.ll xllvm_verify_mmac.ll \
+// RUN:     xllvm_verify_stream.ll xllvm_verify_tm.ll \
+// RUN:     | FileCheck %s --check-prefix=MISSING
 // MISSING-DAG: MISSING XLLVM CALL: llvm.aie4.I1024.I1024.ACC1024.fp.msc.ewise.conf
 // MISSING-DAG: MISSING XLLVM CALL: llvm.aie4.bf16.I512.bf16.I512.ACC1024.fp.msc.ewise.conf
 // MISSING-DAG: MISSING XLLVM CALL: llvm.aie4.unpack.I512.I16.I8

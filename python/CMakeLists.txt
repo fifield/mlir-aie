@@ -174,6 +174,17 @@ declare_mlir_dialect_python_bindings(
     aie-headers
 )
 
+declare_mlir_dialect_python_bindings(
+  ADD_TO_PARENT AIEPythonSources.Dialects
+  ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
+  TD_FILE dialects/XLLVMBinding.td
+  SOURCES
+    dialects/xllvm.py
+  DIALECT_NAME xllvm
+  DEPENDS
+    aie-headers
+)
+
 configure_file(utils/configure.py.in aie/utils/configure.py)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_BINARY_DIR}/aie/utils/configure.py"

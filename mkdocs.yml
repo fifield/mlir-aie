@@ -278,6 +278,7 @@ nav:
       - AIE Dialect: AIEDialect.md
       - AIEX Dialect: AIEXDialect.md
       - AIEVec Dialect: AIEVecDialect.md
+      - Core tile-mapped register access: TileMappedAccess.md
       - AIE Passes: AIEPasses.md
       - AIEX Passes: AIEXPasses.md
       - AIEVec Passes: AIEVecPasses.md

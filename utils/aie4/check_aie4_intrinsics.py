@@ -120,6 +120,15 @@ _TD_MNEMONIC_CLASS_RE = re.compile(
     r'\b(?:AIEVec4_IntrOp|AIE4\w*IntrOp)\s*<\s*"([^"]+)"'
 )
 
+# Arch-parameterized classes build the name from their argument, e.g.
+# `class ReadTmIntrOp<string arch> : ExtIntrOpBase<..., arch#".read.tm", ...>`
+# instantiated as `def ... : ReadTmIntrOp<"aie4">`.
+_TD_ARCH_CLASS_RE = re.compile(
+    r"\bclass\s+(\w+)\s*<\s*string\s+(\w+)\s*>\s*:\s*ExtIntrOpBase\s*<"
+    r'[^,]*,\s*(\w+)\s*#\s*"([^"]+)"'
+)
+_TD_ARCH_DEF_RE = re.compile(r'\b(\w+)\s*<\s*"aie4"\s*>')
+
 _TD_DEF_SPLIT_RE = re.compile(r"^(?=def\s)", re.MULTILINE)
 
 # Trailing-dot prefixes such as "llvm.aie4.put." are skipped below;
@@ -164,7 +173,18 @@ def find_referenced_names(repo_root: Path) -> tuple[set[str], list[str], set[str
                 # An op with a custom llvmBuilder emits the names spelled in
                 # that builder (e.g. one op selecting among several intrinsics,
                 # or reusing another op's); only the others emit the mnemonic.
+                arch_suffix = {
+                    m.group(1): m.group(4)
+                    for m in _TD_ARCH_CLASS_RE.finditer(text)
+                    if m.group(2) == m.group(3)
+                }
                 for block in _TD_DEF_SPLIT_RE.split(text):
+                    arch_def = _TD_ARCH_DEF_RE.search(block)
+                    if arch_def and arch_def.group(1) in arch_suffix:
+                        derived = {"llvm.aie4" + arch_suffix[arch_def.group(1)]}
+                        names |= derived
+                        td_derived_names |= derived
+                        continue
                     mnemonic = _TD_MNEMONIC_CLASS_RE.search(block)
                     if mnemonic is None:
                         continue

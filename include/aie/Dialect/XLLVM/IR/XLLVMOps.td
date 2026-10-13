@@ -19,4 +19,7 @@ include "aie/Dialect/XLLVM/IR/XLLVMAIE2IntrOps.td"
 // `AIEVecIntrOpBase` class defined there.
 include "aie/Dialect/XLLVM/IR/XLLVMAIE4IntrOps.td"
 
+// Core-side tile-mapped accesses and compiler scheduling barriers.
+include "aie/Dialect/XLLVM/IR/XLLVMTileMemoryIntrOps.td"
+
 #endif

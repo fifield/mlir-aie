@@ -12,6 +12,7 @@
 #include "aie/Dialect/AIEVec/IR/AIE4EntryModes.h"
 #include "aie/Dialect/AIEVec/IR/AIEVecDialect.h"
 #include "aie/Dialect/AIEVec/IR/AIEVecOps.h"
+#include "aie/Dialect/XLLVM/XLLVMDialect.h"
 
 #include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVM.h"
 #include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVMPass.h"
@@ -1453,7 +1454,7 @@ struct AIECoreToStandardPass
     target.addLegalDialect<ptr::PtrDialect>();
     // A core body may already hold LLVM ops: aie.dma_push_queue lowers to the
     // stores that push a task before the body is outlined.
-    target.addLegalDialect<LLVM::LLVMDialect>();
+    target.addLegalDialect<LLVM::LLVMDialect, xllvm::XLLVMDialect>();
     target.addLegalOp<func::FuncOp, ModuleOp, UnrealizedConversionCastOp>();
     // Ops this pass lowers must be illegal: a failed rewrite of an op with
     // unknown legality is silently left in place.
