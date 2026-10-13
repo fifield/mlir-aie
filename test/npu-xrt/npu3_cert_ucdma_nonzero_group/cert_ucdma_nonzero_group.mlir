@@ -59,7 +59,7 @@ module {
     aiex.cert.attach_to_group(2) {
       aiex.cert.job(7) {
         // Wait until group 0 has initialized memory, locks, and the shim DMA.
-        aiex.cert.remote_barrier(1, 0x5)
+        aiex.cert.remote_barrier(rb1, 0x5)
         aiex.cert.uc_dma_write_des_sync(@sync_chain)
         aiex.cert.uc_dma_write_des(0, @async_chain)
         aiex.cert.wait_uc_dma(0)
@@ -67,7 +67,7 @@ module {
         aiex.cert.write32(0x026AE000, 1)
         // Column 1's completion token is consumed by its own controller.
         aiex.cert.wait_tcts(32, 0, 1)
-        aiex.cert.remote_barrier(2, 0x5)
+        aiex.cert.remote_barrier(rb2, 0x5)
       }
     }
 
@@ -80,9 +80,9 @@ module {
     }
     aiex.cert.attach_to_group(0) {
       aiex.cert.job(8) {
-        aiex.cert.remote_barrier(1, 0x5)
+        aiex.cert.remote_barrier(rb1, 0x5)
         // Keep the host invocation active until group 2 finishes readback.
-        aiex.cert.remote_barrier(2, 0x5)
+        aiex.cert.remote_barrier(rb2, 0x5)
       }
     }
   }
