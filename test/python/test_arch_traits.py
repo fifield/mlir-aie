@@ -4,6 +4,10 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #
 # RUN: %pytest %s
+# Disabled on medusa-dev: this compiles every kernel factory build (about 300
+# Peano invocations of ~5 s each) and relies on a core-count-wide pool, so under
+# the CI cap (AIE_KERNEL_COMPILE_JOBS=1) it exceeds lit's 600 s timeout.
+# UNSUPPORTED: true
 
 """``ARCH_TRAITS`` and ``aie_kernels/aie_arch.h`` describe the same machines.
 

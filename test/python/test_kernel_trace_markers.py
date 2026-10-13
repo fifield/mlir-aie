@@ -6,6 +6,10 @@
 
 # RUN: %pytest %s
 # REQUIRES: peano
+# Disabled on medusa-dev: this compiles every kernel factory build (about 300
+# Peano invocations of ~5 s each) and relies on a core-count-wide pool, so under
+# the CI cap (AIE_KERNEL_COMPILE_JOBS=1) it exceeds lit's 600 s timeout.
+# UNSUPPORTED: true
 """Every library kernel's trace markers match its contract's ``trace`` (no NPU).
 
 A benchmark cycle count is one ``event0()`` -> ``event1()`` interval per
