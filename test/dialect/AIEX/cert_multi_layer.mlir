@@ -65,7 +65,7 @@ module {
       aiex.cert.page {
         // CHECK: aiex.cert.job(3)
         aiex.cert.job(3) {
-          aiex.cert.remote_barrier(3, 0x3)
+          aiex.cert.remote_barrier(rb3, 0x3)
           aiex.cert.apply_offset_57(@shim00_bd0, 1, 0xFFFF)
           aiex.cert.uc_dma_write_des_sync(@uc_dma_bd0)
         }

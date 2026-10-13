@@ -41,6 +41,7 @@ from ..ir import (
     Attribute,
     AttrBuilder,
     Value,
+    register_attribute_builder,
 )
 
 # noinspection PyUnresolvedReferences
@@ -53,6 +54,25 @@ from ..helpers.taplib.utils import zero_leading_unit_strides
 
 # Comes from _aie
 register_dialect(get_dialect_registry())
+
+
+def _cert_barrier_id_builder(prefix, count):
+    """Build a CERT barrier-id attribute from its assembler name, e.g. "rb1"."""
+
+    def build(name, context=None):
+        ok = isinstance(name, str) and name.startswith(prefix)
+        num = name[len(prefix) :] if ok else ""
+        if not (num.isdigit() and int(num) < count):
+            raise ValueError(
+                f"expected a barrier name {prefix}0..{prefix}{count - 1}, got {name!r}"
+            )
+        return IntegerAttr.get(IntegerType.get_signless(32, context=context), int(num))
+
+    return build
+
+
+register_attribute_builder("CertLocalBarrierId")(_cert_barrier_id_builder("lb", 16))
+register_attribute_builder("CertRemoteBarrierId")(_cert_barrier_id_builder("rb", 7))
 
 
 def shim_dims(tap: TensorAccessPattern, ndims: int = 4):

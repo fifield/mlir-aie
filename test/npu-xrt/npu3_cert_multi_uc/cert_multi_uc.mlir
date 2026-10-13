@@ -72,13 +72,13 @@ module {
       aiex.cert.job(1) {
         // Without the barrier, configuration of column 1 locks by column 0
         // will race with the write32
-        aiex.cert.remote_barrier (1, 0x5)
+        aiex.cert.remote_barrier (rb1, 0x5)
         // col 1 row 2 lock 5 - release the core
         %addr_c1 = arith.constant 0x26AE050 : i32
         %val_c1 = arith.constant 0x2 : i32
         aiex.npu.write32(%addr_c1, %val_c1) : i32, i32
         aiex.cert.wait_tcts(32, 0, 1)
-        aiex.cert.remote_barrier (2, 0x5)
+        aiex.cert.remote_barrier (rb2, 0x5)
       }
     }
 
@@ -104,12 +104,12 @@ module {
       aiex.cert.job(0) {
         // This barrier will be reached after the implicit configuration job has
         // completed, because they will be on different pages
-        aiex.cert.remote_barrier (1, 0x5)
+        aiex.cert.remote_barrier (rb1, 0x5)
         // col 0 row 3 lock 5 - release the core
         %addr_c0 = arith.constant 0x7AE050 : i32
         %val_c0 = arith.constant 0x2 : i32
         aiex.npu.write32(%addr_c0, %val_c0) : i32, i32
-        aiex.cert.remote_barrier (2, 0x5)
+        aiex.cert.remote_barrier (rb2, 0x5)
       }
     }
   }

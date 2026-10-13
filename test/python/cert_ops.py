@@ -110,8 +110,8 @@ def certScalarOps():
 
 
 # CHECK-LABEL: TEST: certSyncOps
-# CHECK: aiex.cert.local_barrier(1, 2)
-# CHECK: aiex.cert.remote_barrier(1, 5)
+# CHECK: aiex.cert.local_barrier(lb1, 2)
+# CHECK: aiex.cert.remote_barrier(rb1, 5)
 # CHECK: aiex.cert.rel_acq_sync(90116, 90632)
 # CHECK: aiex.cert.wait_tcts(0, 0, 1)
 @construct_and_print_module
@@ -123,9 +123,9 @@ def certSyncOps():
             @cert_job(0)
             def _():
                 # 2 jobs on this uC meet here.
-                cert_local_barrier(1, 2)
+                cert_local_barrier("lb1", 2)
                 # uCs 0 and 2 (mask bits 0 and 2) meet here.
-                cert_remote_barrier(1, 0x5)
+                cert_remote_barrier("rb1", 0x5)
                 # rel(+1) then acq_eq(2) on one lock -- see CERTOps.td for the
                 # address encoding.
                 cert_rel_acq_sync(0x00016004, 0x00016208)

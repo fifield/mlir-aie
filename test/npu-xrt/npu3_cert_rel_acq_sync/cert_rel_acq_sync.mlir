@@ -117,7 +117,7 @@ module {
         // Barrier B. Must precede the wait_tcts: see the note in the header.
         aiex.cert.rel_acq_sync(0x16404, 0x16608)
         aiex.cert.wait_tcts(32, 0, 1)
-        aiex.cert.remote_barrier (2, 0x5)
+        aiex.cert.remote_barrier (rb2, 0x5)
       }
     }
 
@@ -149,7 +149,7 @@ module {
         %val_c0 = arith.constant 0x2 : i32
         aiex.npu.write32(%addr_c0, %val_c0) : i32, i32
         aiex.cert.rel_acq_sync(0x16404, 0x16608)
-        aiex.cert.remote_barrier (2, 0x5)
+        aiex.cert.remote_barrier (rb2, 0x5)
       }
     }
   }

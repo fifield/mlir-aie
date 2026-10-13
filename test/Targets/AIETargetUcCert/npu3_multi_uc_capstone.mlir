@@ -36,11 +36,11 @@
 // ASM: START_JOB 2
 // ASM: WRITE_32{{.*}}0x007ae050
 // ASM-NOT: .eop
-// ASM: REMOTE_BARRIER
+// ASM: REMOTE_BARRIER $rb1, 5
 // ASM: WAIT_TCTS
 // uC2 stream: rendezvous then release col1's core.
 // ASM: .attach_to_group 2
-// ASM: REMOTE_BARRIER
+// ASM: REMOTE_BARRIER $rb1, 5
 // ASM: WRITE_32{{.*}}0x026ae050
 
 aie.device(npu3) {
@@ -53,7 +53,7 @@ aie.device(npu3) {
   aiex.cert.page {
     aiex.cert.job(2) {
       aiex.cert.write32(0x7AE050, 1)
-      aiex.cert.remote_barrier(1, 0x5)
+      aiex.cert.remote_barrier(rb1, 0x5)
       aiex.cert.wait_tcts(0, 0, 1)
     }
   }
@@ -61,7 +61,7 @@ aie.device(npu3) {
   // uC2 (col1 controller): rendezvous, then release col1 core.
   aiex.cert.page {
     aiex.cert.job(3) {
-      aiex.cert.remote_barrier(1, 0x5)
+      aiex.cert.remote_barrier(rb1, 0x5)
       aiex.cert.write32(0x26AE050, 1)
     }
   } {placement = 2 : i32}
