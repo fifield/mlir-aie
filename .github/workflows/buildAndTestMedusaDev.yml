@@ -139,8 +139,8 @@ jobs:
           export PEANO_INSTALL_DIR="$(pip show llvm-aie | grep ^Location: | awk '{print $2}')/lnx64.o/tools/peano/"
 
           pushd build
-          export LIT_OPTS="-sv --time-tests -j4 --timeout 600 --show-unsupported --show-pass --order=random"
-          ninja -j4 check-aie-cpp
-          ninja -j4 check-aie
-          ninja -j4 check-reference-designs
+          export LIT_OPTS="-sv --time-tests -j8 --timeout 600 --show-unsupported --show-pass --order=random"
+          ninja check-aie-cpp
+          ninja check-aie
+          ninja check-reference-designs
           popd
