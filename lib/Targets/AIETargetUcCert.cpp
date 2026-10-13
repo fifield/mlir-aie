@@ -23,6 +23,7 @@
 #include "llvm/Support/Path.h"
 
 #include <map>
+#include <set>
 #include <vector>
 
 using namespace mlir;
@@ -552,7 +553,7 @@ LogicalResult xilinx::AIE::AIETranslateToUcDma(ModuleOp module,
   std::vector<std::string> text;
   std::vector<std::string> data;
   std::vector<std::string> chains;
-  llvm::StringSet<> emittedGlobals;
+  std::map<uint32_t, llvm::StringSet<>> emittedGlobals;
 
   text.emplace_back("\n;\n; Code\n;\n\n");
   data.emplace_back("\n;\n; Data\n;\n\n");
@@ -614,14 +615,18 @@ LogicalResult xilinx::AIE::AIETranslateToUcDma(ModuleOp module,
     return {};
   };
 
-  llvm::StringSet<> namedOutsideSections;
+  // Definitions remain at device scope in IR, but AIEBU labels are local to
+  // each output group. Record every group that needs a copy of each chain.
+  std::map<std::string, std::set<uint32_t>> deviceChainUsers;
   for (Operation &op : *deviceOp.getBody()) {
     if (isa<CertSectionOp>(&op))
       continue;
     op.walk([&](Operation *inner) {
       StringRef name = chainNameOf(inner);
-      if (!name.empty())
-        namedOutsideSections.insert(name);
+      if (name.empty() || inner->getParentOfType<CertSectionOp>())
+        return;
+      auto group = inner->getParentOfType<CertAttachToGroupOp>();
+      deviceChainUsers[name.str()].insert(group ? group.getGroupId() : 0);
     });
   }
 
@@ -637,7 +642,7 @@ LogicalResult xilinx::AIE::AIETranslateToUcDma(ModuleOp module,
       if (it == chainByName.end())
         return;
       owned.push_back(it->second);
-      if (!namedOutsideSections.contains(name))
+      if (deviceChainUsers.find(name.str()) == deviceChainUsers.end())
         chainsCoveredBySections.insert(name);
     });
     return owned;
@@ -667,10 +672,19 @@ LogicalResult xilinx::AIE::AIETranslateToUcDma(ModuleOp module,
               emitAttachToGroupOp(grp, text[block], data[block], outputPath)))
         result = failure();
     } else if (auto chain = dyn_cast<CertUcDmaChainOp>(&op)) {
-      // Emitted into every section that names it; the main assembly keeps a
-      // copy only if something outside a section names it too.
-      if (!chainsCoveredBySections.contains(chain.getName()))
-        emitUcDmaChain(chain, chains[0], data[0], emittedGlobals);
+      // Chains used only in sections already live in those sections' files.
+      if (chainsCoveredBySections.contains(chain.getName()))
+        continue;
+      auto users = deviceChainUsers.find(chain.getName().str());
+      if (users == deviceChainUsers.end()) {
+        emitUcDmaChain(chain, chains[0], data[0], emittedGlobals[0]);
+        continue;
+      }
+      for (uint32_t groupId : users->second) {
+        size_t block = blockFor(groupId);
+        emitUcDmaChain(chain, chains[block], data[block],
+                       emittedGlobals[groupId]);
+      }
     }
   }
 

@@ -1,0 +1,11 @@
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// REQUIRES: ryzen_ai_npu3
+//
+// RUN: rm -rf build && mkdir -p build
+// RUN: cd build && %aiecc --get-full-elf --full-elf-name=control.elf %S/cert_ucdma_nonzero_group.mlir
+// RUN: clang %S/test.cpp -o test.exe -std=c++17 -Wall %xrt_flags -lrt -lstdc++
+// RUN: %run_on_npu3% ./test.exe control.elf | FileCheck %s
+//
+// CHECK: PASS: group 2 uC DMA payloads and guards match (64 words)
