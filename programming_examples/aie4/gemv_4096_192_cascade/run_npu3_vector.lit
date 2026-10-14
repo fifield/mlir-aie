@@ -9,7 +9,7 @@
 // RUN: mkdir -p test_npu3_vector
 // RUN: cd test_npu3_vector
 // RUN: make -f %S/Makefile clean
-// RUN: make -f %S/Makefile vector
+// RUN: make -f %S/Makefile gemv_4096_192_cascade_vector.elf test.exe
 //
 // Check one core per role (sink row 2, pass row 3, send row 5) for native
 // int8 widening and VMAC, with no external compute kernels.
