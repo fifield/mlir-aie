@@ -6,6 +6,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "aie/Dialect/AIE/IR/AIEDialect.h"
+#include "aie/Dialect/AIE/IR/AIETargetModel.h"
 #include "aie/Dialect/AIE/Util/AIERegisterDatabase.h"
 
 #include "mlir/IR/MLIRContext.h"
@@ -521,6 +522,80 @@ void test_aie4_nonexistent_register() {
   std::cout << "  ✓ Correctly returns nullptr for non-existent register\n";
 }
 
+void test_aie4_target_register_lookup() {
+  std::cout << "Test: AIE4 Target Register Lookup\n";
+  const auto &model = getTargetModel(AIEDevice::npu3);
+  // Exercise the target-model API, not just direct database access: Trace1
+  // and DMA use isMem=true but live in different register-database modules.
+  struct ExpectedRegister {
+    const char *name;
+    uint32_t offset;
+  };
+  for (const auto &expected : {ExpectedRegister{"Trace1_Control0", 0xA00F0},
+                               ExpectedRegister{"Timer_Control", 0xA0110},
+                               ExpectedRegister{"DMA_S2MM_0_Ctrl", 0xACE00},
+                               ExpectedRegister{"DMA_S2MM_1_Ctrl", 0xACE08},
+                               ExpectedRegister{"DMA_MM2S_0_Ctrl", 0xACE10}}) {
+    const auto *reg = model.lookupRegister(expected.name, {0, 2}, true);
+    if (!reg || reg->offset != expected.offset)
+      throw std::runtime_error(std::string("AIE4 target lookup failed: ") +
+                               expected.name);
+  }
+  if (model.lookupRegister("DMA_MM2S_0_Ctrl", {0, 2}, false) ||
+      model.lookupRegister("NONEXISTENT_REGISTER", {0, 2}, true))
+    throw std::runtime_error("AIE4 lookup accepted the wrong module or name");
+  for (TileID tile : {TileID{0, 0}, TileID{0, 1}}) {
+    const auto *reg = model.lookupRegister("DMA_MM2S_0_Ctrl", tile, true);
+    uint32_t expected = tile.row == 0 ? 0x18550 : 0x9E60;
+    if (!reg || reg->offset != expected)
+      throw std::runtime_error("AIE4 shim/memtile lookup changed");
+  }
+  // These fields exist even though the target currently rejects out-of-order
+  // tasks. Pin their masks as well as the channel addresses checked above.
+  for (const char *name : {"DMA_S2MM_0_Ctrl", "DMA_S2MM_1_Ctrl"}) {
+    const auto *reg = model.lookupRegister(name, {0, 2}, true);
+    const auto *field = reg->getField("Enable_Out_of_Order");
+    if (!field || model.getFieldMask(*field) != 8 ||
+        model.encodeFieldValue(*field, 1) != 8)
+      throw std::runtime_error("Incorrect AIE4 Enable_Out_of_Order field");
+  }
+  struct SharedName {
+    const char *name;
+    uint32_t coreOffset;
+    uint32_t memoryOffset;
+  };
+  for (TileID tile : {TileID{0, 2}, TileID{2, 5}}) {
+    for (const auto &expected :
+         {SharedName{"Memory_Control", 0xE0080, 0xF0030},
+          SharedName{"ECC_Scrubbing_Period", 0xE0014, 0xF0010},
+          SharedName{"ECC_Failing_Address", 0xE0018, 0xF0014},
+          SharedName{"Spare_Reg", 0xA3070, 0xA7120}}) {
+      for (bool isMem : {false, true}) {
+        uint32_t offset = isMem ? expected.memoryOffset : expected.coreOffset;
+        const auto *reg = model.lookupRegister(expected.name, tile, isMem);
+        if (!reg || reg->offset != offset)
+          throw std::runtime_error(std::string("Wrong module for ") +
+                                   expected.name);
+        if (model.lookupRegisterByAddress(
+                model.getTileAddress(tile.col, tile.row) + offset) != reg)
+          throw std::runtime_error("Name and address lookup disagree");
+      }
+    }
+  }
+  for (TileID tile : {TileID{1, 0}, TileID{1, 1}, TileID{1, 2}}) {
+    const auto *reg = model.lookupRegister("DMA_S2MM_0_Ctrl", tile, true);
+    if (!reg ||
+        model.lookupRegisterByAddress(model.getTileAddress(tile.col, tile.row) +
+                                      reg->offset) != reg)
+      throw std::runtime_error(
+          "AIE4 address lookup used the wrong tile module");
+  }
+  if (model.lookupRegisterByAddress(UINT64_MAX) ||
+      model.lookupRegisterByAddress(0xFFFFFFFF))
+    throw std::runtime_error("Accepted an invalid register address");
+  std::cout << "  ✓ Memory/core names and addresses resolve consistently\n";
+}
+
 int main() {
   try {
     std::cout << "==============================================\n";
@@ -542,6 +617,7 @@ int main() {
     // AIE4 tests
     test_aie4_load_database();
     test_aie4_lookup_register();
+    test_aie4_target_register_lookup();
     test_aie4_bitfield_parsing();
     test_aie4_encode_field_value();
     test_aie4_cross_module();

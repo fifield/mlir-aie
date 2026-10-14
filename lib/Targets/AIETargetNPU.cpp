@@ -275,62 +275,6 @@ LogicalResult appendUpdateRegFromScratchpad(std::vector<uint32_t> &instructions,
 
 namespace {
 
-// Lazy-loaded regdb for register-name decoration. Loaded once per process,
-// returns nullptr if the JSON files cannot be located (e.g. install dir not
-// set). Decoration is best-effort.
-static const xilinx::AIE::RegisterDatabase *getRegDB() {
-  static std::unique_ptr<xilinx::AIE::RegisterDatabase> db = []() {
-    return xilinx::AIE::RegisterDatabase::loadAIE2();
-  }();
-  return db.get();
-}
-
-// Decompose an absolute device address into (col, row, offset) using the
-// target model's column/row shifts, then derive the regdb module name from
-// the row's tile type. Looks the (module, offset) up in regdb. Returns the
-// register name on success and writes the module name to *outModule. On any
-// failure returns empty StringRef.
-static llvm::StringRef
-lookupRegisterByAddress(uint64_t address, const AIETargetModel &tm,
-                        const xilinx::AIE::RegisterDatabase *regdb,
-                        std::string &outModule) {
-  outModule.clear();
-  if (!regdb)
-    return {};
-  uint32_t colShift = tm.getColumnShift();
-  uint32_t rowShift = tm.getRowShift();
-  uint8_t col = static_cast<uint8_t>((address >> colShift) & 0xFF);
-  uint8_t row = static_cast<uint8_t>((address >> rowShift) & 0xFF);
-  uint64_t baseMask = (uint64_t{1} << rowShift) - 1;
-  uint32_t offset = static_cast<uint32_t>(address & baseMask);
-
-  // Determine module from tile type. Module names must match the JSON keys in
-  // aie_registers_aie2.json: "core", "memory", "memory_tile", "shim".
-  StringRef moduleName;
-  if (tm.isShimNOCTile(col, row) || tm.isShimPLTile(col, row)) {
-    moduleName = "shim";
-  } else if (tm.isMemTile(col, row)) {
-    moduleName = "memory_tile";
-  } else {
-    // For aie tiles, regdb has both core and memory modules. The offset alone
-    // disambiguates. Try core first then memory.
-    if (auto *r = regdb->lookupRegisterByOffset(offset, "core")) {
-      outModule = "core";
-      return r->name;
-    }
-    if (auto *r = regdb->lookupRegisterByOffset(offset, "memory")) {
-      outModule = "memory";
-      return r->name;
-    }
-    return {};
-  }
-  if (auto *r = regdb->lookupRegisterByOffset(offset, moduleName)) {
-    outModule = moduleName.str();
-    return r->name;
-  }
-  return {};
-}
-
 static void pushLocEntry(std::vector<TxnLocEntry> *locmap,
                          uint32_t byteOffsetBefore, uint32_t byteOffsetAfter,
                          StringRef opcodeName, StringRef sourceOpName,
@@ -346,10 +290,9 @@ static void pushLocEntry(std::vector<TxnLocEntry> *locmap,
   e.address = address;
   e.loc = op->getLoc();
   if (address) {
-    if (auto regName =
-            lookupRegisterByAddress(*address, tm, getRegDB(), e.registerModule);
-        !regName.empty()) {
-      e.registerName = regName.str();
+    if (const auto *reg = tm.lookupRegisterByAddress(*address)) {
+      e.registerName = reg->name;
+      e.registerModule = reg->module;
     }
   }
   locmap->push_back(std::move(e));
@@ -724,8 +667,7 @@ LogicalResult xilinx::AIE::AIETranslateControlPacketsToUI32Vec(
       uint32_t packetAddress = packetOp.getAddress();
       if (packetAddress < tileBase)
         return packetOp.emitError()
-               << "control packet address 0x"
-               << llvm::utohexstr(packetAddress)
+               << "control packet address 0x" << llvm::utohexstr(packetAddress)
                << " is below tile base address 0x" << llvm::utohexstr(tileBase);
 
       addr = packetAddress - tileBase;
@@ -740,9 +682,9 @@ LogicalResult xilinx::AIE::AIETranslateControlPacketsToUI32Vec(
       //
       // This is the encodability bound, deliberately looser than the address
       // space a tile actually owns (PoR: 1MiB for core/shim tiles, 5MiB for MEM
-      // tiles, according to the architecture specification). Addresses within the field but
-      // outside the tile's allocation are a runtime SLVERR, not an encoding
-      // error, so they are not rejected here.
+      // tiles, according to the architecture specification). Addresses within
+      // the field but outside the tile's allocation are a runtime SLVERR, not
+      // an encoding error, so they are not rejected here.
       if (addr > 0x1fffff)
         return packetOp.emitError()
                << "AIE4 control packet tile-local address 0x"
@@ -761,8 +703,8 @@ LogicalResult xilinx::AIE::AIETranslateControlPacketsToUI32Vec(
     if (size > maxWords)
       return packetOp.emitError()
              << "control packet payload of " << size
-             << " 32-bit words cannot be encoded; expected at most "
-             << maxWords << " (run aie-legalize-ctrl-packet to split large writes)";
+             << " 32-bit words cannot be encoded; expected at most " << maxWords
+             << " (run aie-legalize-ctrl-packet to split large writes)";
 
     uint32_t beats = size - 1;
     uint32_t opc = packetOp.getOpcode();

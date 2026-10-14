@@ -814,6 +814,10 @@ public:
   const RegisterInfo *lookupRegister(llvm::StringRef name, TileID tile,
                                      bool isMem = false) const;
 
+  /// Resolve an absolute device address using this target's register database
+  /// and physical-to-logical tile mapping. Return nullptr if not found.
+  const RegisterInfo *lookupRegisterByAddress(uint64_t address) const;
+
   /// Lookup event number by name and tile.
   /// Return Event number if found, nullopt otherwise
   std::optional<uint32_t> lookupEvent(llvm::StringRef name, TileID tile,

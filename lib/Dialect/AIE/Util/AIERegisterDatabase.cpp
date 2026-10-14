@@ -103,6 +103,7 @@ std::unique_ptr<RegisterDatabase> RegisterDatabase::loadAIE4() {
                         "aie4"))
     return nullptr;
 
+  db->buildOffsetIndex();
   return db;
 }
 

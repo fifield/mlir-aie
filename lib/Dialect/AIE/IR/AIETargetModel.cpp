@@ -20,17 +20,22 @@ namespace AIE {
 
 namespace {
 
-std::string getModuleForTile(const AIETargetModel &model, TileID tile,
-                             bool isMem) {
+// AIE4 memory-side trace registers share the core module, but memory
+// registers take precedence when the same name exists in both modules.
+// Use the same module selection for name and address lookup.
+template <typename Lookup>
+const RegisterInfo *lookupRegisterForTile(const AIETargetModel &model,
+                                          TileID tile, bool isMem,
+                                          Lookup lookup) {
   if (model.isShimNOCorPLTile(tile.col, tile.row))
-    return "shim";
+    return lookup("shim");
   if (model.isMemTile(tile.col, tile.row))
-    return "memory_tile";
-  // In AIE4, core tiles have no separate memory module; Trace1 registers
-  // are in the "core" module of the register database.
+    return lookup("memory_tile");
+  if (const auto *reg = lookup(isMem ? "memory" : "core"))
+    return reg;
   if (isMem && isa<AIE4TargetModel>(model))
-    return "core";
-  return isMem ? std::string("memory") : std::string("core");
+    return lookup("core");
+  return nullptr;
 }
 
 // Get module name for event lookups (events database uses different names)
@@ -41,8 +46,8 @@ std::string getModuleForTileEvents(const AIETargetModel &model, TileID tile,
   if (model.isMemTile(tile.col, tile.row))
     return "mem_tile"; // Events database uses "mem_tile" instead of
                        // "memory_tile"
-  // In AIE4, core tiles have no separate memory module; both trace units
-  // (Trace0 and Trace1) use core module events.
+  // Both AIE4 compute-tile trace units (Trace0 and Trace1) use core
+  // module events, including events from the tile's memory/DMA hardware.
   if (isMem && isa<AIE4TargetModel>(model))
     return "core";
   return isMem ? std::string("memory") : std::string("core");
@@ -115,7 +120,30 @@ const RegisterInfo *AIETargetModel::lookupRegister(llvm::StringRef name,
   const auto *db = getRegisterDatabase();
   if (!db)
     return nullptr;
-  return db->lookupRegister(name, getModuleForTile(*this, tile, isMem));
+  return lookupRegisterForTile(*this, tile, isMem, [&](StringRef module) {
+    return db->lookupRegister(name, module);
+  });
+}
+
+const RegisterInfo *
+AIETargetModel::lookupRegisterByAddress(uint64_t address) const {
+  const auto *db = getRegisterDatabase();
+  if (!db || address > UINT32_MAX)
+    return nullptr;
+  int col = static_cast<int>(address >> getColumnShift());
+  int row = static_cast<int>(getRowFromAddress(static_cast<uint32_t>(address)));
+  if (col >= columns() || row >= rows())
+    return nullptr;
+  TileID tile{col, row};
+  uint32_t offset = address - getTileAddress(col, row);
+  auto lookup = [&](StringRef module) {
+    return db->lookupRegisterByOffset(offset, module);
+  };
+  // An absolute address has no module selector: search both compute-tile
+  // modules. The offset disambiguates same-named core/memory registers.
+  if (const auto *reg = lookupRegisterForTile(*this, tile, true, lookup))
+    return reg;
+  return lookupRegisterForTile(*this, tile, false, lookup);
 }
 
 std::optional<uint32_t> AIETargetModel::lookupEvent(llvm::StringRef name,

@@ -1,0 +1,12 @@
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// REQUIRES: ryzen_ai_npu3, peano
+
+// RUN: mkdir -p npu3_dma_channel_reset
+// RUN: cd npu3_dma_channel_reset
+// RUN: %aiecc --get-full-elf --full-elf-name=reset.elf %S/dma.mlir
+// RUN: %host_clang %S/test.cpp -o test.exe -std=c++17 -Wall -Wextra %xrt_flags %host_link_flags
+// RUN: %run_on_npu3% ./test.exe dma | FileCheck %s
+
+// CHECK: PASS: dma
