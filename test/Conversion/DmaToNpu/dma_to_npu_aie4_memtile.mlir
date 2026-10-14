@@ -10,7 +10,9 @@
 
 // RUN: aie-opt --aie-dma-to-npu %s | FileCheck %s
 
-// Verify WriteBdOp packing for an AIE4 memtile (11 words)
+// Verify WriteBdOp packing for an AIE4 memtile (11 words). Lock ids are
+// hardware ids: the memtile's own locks start at local index 448, so its
+// locks 12 and 11 are 460 and 459.
 // CHECK-LABEL: module
 // CHECK: memref.global "private" constant @blockwrite_data_0 : memref<11xi32> = dense<[291, 1409286981, 482519959, 1110, 801, 0, 499, 178716672, 0, 66586565, 1413464092]>
 // CHECK: aiex.npu.blockwrite(%{{.*}}) {address = 1081344 : ui32} : memref<11xi32>
@@ -46,9 +48,9 @@ module {
         iteration_stride = 499 : i32,
         iteration_size = 28 : i32,
         lock_acq_enable = 1 : i32,
-        lock_acq_id = 12 : i32,
+        lock_acq_id = 460 : i32,
         lock_acq_val = 42 : i32,
-        lock_rel_id = 11 : i32,
+        lock_rel_id = 459 : i32,
         lock_rel_val = 85 : i32,
         next_bd = 10 : i32,
         use_next_bd = 1 : i32,

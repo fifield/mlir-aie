@@ -885,15 +885,12 @@ public:
       // DMA_S2MM_0_BD0_2
       // Lock_Acq_ID [29:20], Lock_Rel_Value [17:11], Lock_Rel_ID [10:1],
       // Lock_Acq_Enable [0]
-      unsigned int acq_id = op.getLockAcqId();
-      unsigned int rel_id = op.getLockRelId();
-      if (auto base = tm.getLockLocalBaseIndex(col, row, col, row)) {
-        acq_id += *base;
-        rel_id += *base;
-      }
-      words[2] = (acq_id & 0x3ff) << 20;
+      // Lock ids are the BD's hardware lock ids, which already include the
+      // memtile's local lock base (getLockLocalBaseIndex), as on every other
+      // target; aie-dma-tasks-to-npu adds that base when it emits the writebd.
+      words[2] = (op.getLockAcqId() & 0x3ff) << 20;
       words[2] |= (op.getLockRelVal() & 0x7f) << 11;
-      words[2] |= (rel_id & 0x3ff) << 1;
+      words[2] |= (op.getLockRelId() & 0x3ff) << 1;
       words[2] |= op.getLockAcqEnable() & 0x1;
 
       // DMA_S2MM_0_BD0_3
