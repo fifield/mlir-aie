@@ -1471,9 +1471,12 @@ protected:
   static constexpr uint32_t TraceS2MMPoolBase = 300;
   static constexpr uint32_t PrivatePoolNamespaceSize = 100;
 
+  // Out-of-order S2MM uses the same mechanism as AIE2 in core, memory and
+  // shim tiles.
   static constexpr Properties properties =
       AIETargetModel::UsesSemaphoreLocks |
-      AIETargetModel::UsesMultiDimensionalBDs;
+      AIETargetModel::UsesMultiDimensionalBDs |
+      AIETargetModel::SupportsOutOfOrderDMA;
 
 public:
   AIE4TargetModel(TargetModelKind k, Properties p = None)
@@ -1519,6 +1522,10 @@ public:
   /// Out-of-order BD index is a 4-bit field ([8:5] of the stream packet
   /// header), matching the 4-bit
   /// Out_Of_Order_BD_ID in every AIE4 module's BD registers.
+  /// Every S2MM channel sees a 16-BD bank: all 16 core BDs, its private
+  /// memtile pool (local ids 0-15), or its shim half (BDs 0-15 or 16-31,
+  /// which the hardware indexes bank-locally like Next_BD and Start_BD_ID).
+  /// So the index names a BD local to the receiving channel's bank.
   uint32_t getMaxOutOfOrderId() const override { return 15; }
   /// Repeat count occupies the 12-bit field [27:16] of the DMA task word.
   uint32_t getMaxRepeatCount() const override { return 4095; }

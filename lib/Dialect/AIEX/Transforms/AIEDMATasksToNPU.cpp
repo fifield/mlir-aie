@@ -1354,8 +1354,8 @@ struct AIEDMATasksToNPUPass
         col, row, channel, AIE::DMAChannelDir::S2MM);
 
     std::string ctrlRegName = "DMA_S2MM_" + std::to_string(channel) + "_Ctrl";
-    // DMA control regs live in the memory module; memtile ignores isMem, shim
-    // is rejected by the verifier.
+    // DMA control regs live in the memory module of a core tile; memtile and
+    // shim lookups ignore isMem.
     const AIE::RegisterInfo *ctrlReg =
         tm.lookupRegister(ctrlRegName, tile.getTileID(), /*isMem=*/true);
     if (!ctrlReg)

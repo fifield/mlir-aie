@@ -103,3 +103,57 @@ module {
     }
   }
 }
+
+// -----
+
+// AIE4: the out-of-order BD lookup index is a 4-bit packet-header field.
+module {
+  aie.device(npu3) {
+    %tile_0_0 = aie.tile(0, 0)
+    aie.runtime_sequence(%arg0: memref<4xi32>) {
+      %t1 = aiex.dma_configure_task(%tile_0_0, MM2S, 0) {
+        // expected-error@+1 {{out_of_order_id must be in [0, 15]}}
+        aie.dma_bd(%arg0 : memref<4xi32> offset = 0 len = 4) {bd_id = 3 : i32, out_of_order_id = 16 : i32, packet = #aie.packet_info<pkt_type = 0, pkt_id = 1>}
+        aie.end
+      }
+      aiex.dma_start_task(%t1)
+    }
+  }
+}
+
+// -----
+
+// AIE4: out-of-order S2MM and task-complete tokens are mutually exclusive.
+module {
+  aie.device(npu3) {
+    %tile_0_1 = aie.tile(0, 1)
+    %buf = aie.buffer(%tile_0_1) {address = 0 : i32} : memref<4xi32>
+    aie.runtime_sequence() {
+      // expected-error@+2 {{out_of_order channel cannot issue a completion token}}
+      // expected-note@+1 {{set issue_token = false on this out-of-order task}}
+      %t = aiex.dma_configure_task(%tile_0_1, S2MM, 0, <pkt_type = 0, pkt_id = 0>) {
+        aie.dma_bd(%buf : memref<4xi32> offset = 0 len = 4) {bd_id = 0 : i32}
+        aie.end
+      } {issue_token = true, out_of_order}
+      aiex.dma_start_task(%t)
+    }
+  }
+}
+
+// -----
+
+// AIE4: an out-of-order receive BD must be packet-enabled.
+module {
+  aie.device(npu3) {
+    %tile_0_2 = aie.tile(0, 2)
+    %buf = aie.buffer(%tile_0_2) {address = 0 : i32} : memref<4xi32>
+    aie.runtime_sequence() {
+      %t = aiex.dma_configure_task(%tile_0_2, S2MM, 0) {
+        // expected-error@+1 {{out-of-order S2MM receive buffer descriptor must be packet-enabled}}
+        aie.dma_bd(%buf : memref<4xi32> offset = 0 len = 4) {bd_id = 0 : i32}
+        aie.end
+      } {out_of_order}
+      aiex.dma_start_task(%t)
+    }
+  }
+}
