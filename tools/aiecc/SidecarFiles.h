@@ -380,9 +380,13 @@ inline llvm::json::Value makeAie4PatchInfoJson(int xrtId,
 // is a single "cert" assembly shared by the whole module (produced by the
 // cert pipeline — convert-aie-to-transaction, aie-npu-to-cert,
 // cert-legalize-pages — then `--aie-cert-to-asm`), not a per-runtime-sequence
-// transaction binary, so every instance across every device points at the
-// same `certAsmPath` and there is no PDIs section (aie-npu-to-cert already
-// folded every device's load-pdi references into the cert control code).
+// transaction binary. That assembly is the program of one entry device
+// (`entryDevice`, the device aie-npu-to-cert emitted): every other device was
+// absorbed into it as cert sections reachable only through its load-pdi
+// references, so only `entryDevice` gets a kernel. Its instances are the
+// runtime sequences that became jobs -- all of them, or only `sequenceFilter`
+// when non-empty -- and all point at `certAsmPath`. There is no PDIs section
+// (aie-npu-to-cert already folded the load-pdi references into the code).
 // Argument count matches makeFullElfConfigJson: max(3, max runtime-seq
 // arity); AIE4 argument names are integers rather than "arg_N" strings.
 //
@@ -393,6 +397,7 @@ inline llvm::json::Value makeAie4PatchInfoJson(int xrtId,
 // section and relocates the shim control-MM2S BD onto it.
 inline llvm::json::Value
 makeAie4ConfigJson(const Node<OpInModule<xilinx::AIE::DeviceOp>> &devices,
+                   llvm::StringRef entryDevice, llvm::StringRef sequenceFilter,
                    llvm::StringRef certAsmPath,
                    const llvm::StringMap<std::string> &patchInfoPaths = {}) {
   using O = llvm::json::Object;
@@ -400,6 +405,8 @@ makeAie4ConfigJson(const Node<OpInModule<xilinx::AIE::DeviceOp>> &devices,
   llvm::json::Array xrtKernels;
   for (const auto &item : devices.items) {
     const std::string &devName = item.key;
+    if (devName != entryDevice)
+      continue;
     xilinx::AIE::DeviceOp devOp = item.get().op;
 
     int argCount = 3;
@@ -417,6 +424,8 @@ makeAie4ConfigJson(const Node<OpInModule<xilinx::AIE::DeviceOp>> &devices,
 
     llvm::json::Array instances;
     devOp.walk([&](xilinx::AIE::RuntimeSequenceOp seq) {
+      if (!sequenceFilter.empty() && seq.getSymName() != sequenceFilter)
+        return;
       O inst{{"id", seq.getSymName().str()},
              {"ctrl_code_file", certAsmPath.str()}};
       if (auto patchIt = patchInfoPaths.find(npuSeqKey(devName, seq.getSymName()));

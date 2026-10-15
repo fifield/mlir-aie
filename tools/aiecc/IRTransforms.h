@@ -123,6 +123,38 @@ inline bool moduleHasAie4Device(mlir::ModuleOp m) {
   return false;
 }
 
+// True if `d` is the device named `root`, or a device `root` loads --
+// directly or through another loaded device. Only `aiex.configure` and
+// `aiex.npu.load_pdi` reference loaded devices; other symbol uses (for example,
+// `aiex.run`) can name symbols local to a device instead.
+inline bool isDeviceReachableFrom(xilinx::AIE::DeviceOp d,
+                                  llvm::StringRef root) {
+  auto m = d->getParentOfType<mlir::ModuleOp>();
+  llvm::SmallVector<llvm::StringRef> work{root};
+  llvm::StringSet<> seen;
+  seen.insert(root);
+  while (!work.empty()) {
+    llvm::StringRef name = work.pop_back_val();
+    if (name == d.getSymName())
+      return true;
+    auto dev = m.lookupSymbol<xilinx::AIE::DeviceOp>(name);
+    if (!dev)
+      continue;
+    dev.walk([&](mlir::Operation *op) {
+      xilinx::AIE::DeviceOp loaded;
+      if (auto configure = mlir::dyn_cast<xilinx::AIExilinx::AIEX::ConfigureOp>(op))
+        loaded = configure.getReferencedDeviceOp();
+      else if (auto loadPdi = mlir::dyn_cast<xilinx::AIExilinx::AIEX::NpuLoadPdiOp>(op)) {
+        if (auto ref = loadPdi.getDeviceRefAttr())
+          loaded = m.lookupSymbol<xilinx::AIE::DeviceOp>(ref);
+      }
+      if (loaded && seen.insert(loaded.getSymName()).second)
+        work.push_back(loaded.getSymName());
+    });
+  }
+  return false;
+}
+
 // Per-core key `"<devName>_core_<col>_<row>"` — shared across compiled-elfs /
 // pre-baked-elfs / ldscripts nodes for bundle-by-key zips.
 inline std::string coreKey(xilinx::AIE::CoreOp coreOp) {
@@ -176,7 +208,7 @@ inline mlir::LogicalResult addEmptySequences(mlir::ModuleOp module) {
 
 // Propagate each device's `aiecc.pdi_id` onto every load_pdi referencing it.
 inline void assignLoadPdiIds(mlir::ModuleOp module) {
-  module.walk([&](xilinx::AIEX::NpuLoadPdiOp lp) {
+  module.walk([&](xilinx::AIExilinx::AIEX::NpuLoadPdiOp lp) {
     auto ref = lp.getDeviceRefAttr();
     if (!ref) {
       return;
@@ -1394,7 +1426,7 @@ getPlacementPipeline(mlir::MLIRContext *ctx, int coresPerCol,
   opts.clCoresPerCol = coresPerCol;
   opts.clSASeed = saSeed;
   opts.clSAEffort = saEffort;
-  xilinx::AIEX::addPlacementStage(*pm, opts);
+  xilinx::AIExilinx::AIEX::addPlacementStage(*pm, opts);
   return pm;
 }
 
@@ -1402,7 +1434,7 @@ getPlacementPipeline(mlir::MLIRContext *ctx, int coresPerCol,
 inline std::unique_ptr<mlir::PassManager>
 getTracePipeline(mlir::MLIRContext *ctx) {
   auto pm = std::make_unique<mlir::PassManager>(ctx);
-  xilinx::AIEX::addTraceStage(*pm);
+  xilinx::AIExilinx::AIEX::addTraceStage(*pm);
   return pm;
 }
 
@@ -1436,7 +1468,7 @@ inline std::unique_ptr<mlir::PassManager> getInputWithAddressesPipeline(
     // Operates on scf.for loops inside aie.core, so it must run before
     // SCF-to-CF lowering.
     if (aie2Family && optLevel >= 3) {
-      pm->addPass(createAIEHoistVectorTransferPointersPass());
+      pm->addPass(xilinx::AIE::createAIEHoistVectorTransferPointersPass());
     }
     if (mlir::failed(mlir::parsePassPipeline(
             llvm::formatv("convert-vector-to-aievec{{aie-target={0}{1}}",
@@ -1448,28 +1480,28 @@ inline std::unique_ptr<mlir::PassManager> getInputWithAddressesPipeline(
   }
   // params.txt is materialized as a separate graph edge, so the scratchpad
   // lowering in this stage writes no `outputParamsFile`.
-  X::addLoweringStage(*pm, dynamicObjFifos, packetSwObjFifos, ctrlPktOverlay,
+  xilinx::AIEX::addLoweringStage(*pm, dynamicObjFifos, packetSwObjFifos, ctrlPktOverlay,
                       loadPdiToCtrlPkt, skipObjectFifoVerify, coverColumns,
                       adaptiveOverlay, checkQueueSpace);
 
   mlir::OpPassManager &dpm2 = pm->nest<DeviceOp>();
   if (assignAddresses) {
-    dpm2.addPass(createAIEAssignBufferAddressesPass());
+    dpm2.addPass(xilinx::AIE::createAIEAssignBufferAddressesPass());
   }
-  dpm2.addPass(createAIEAssignCoreLinkFilesPass());
-  dpm2.addPass(createAIEVectorTransferLoweringPass());
+  dpm2.addPass(xilinx::AIE::createAIEAssignCoreLinkFilesPass());
+  dpm2.addPass(xilinx::AIE::createAIEVectorTransferLoweringPass());
   // Consumes the vector.load/store produced by the transfer lowering above,
   // and needs scf.for loops.
   if (optLevel >= 3) {
-    dpm2.addPass(createAIEVectorToPointerLoopsPass());
+    dpm2.addPass(xilinx::AIE::createAIEVectorToPointerLoopsPass());
   }
   // `index` lowers to i64, so narrow core loops and index math to i32 where
   // that is provably safe. Needs scf.for loops, and runs after the passes
   // above, which expect `index` induction variables.
   if (optLevel >= 1) {
-    dpm2.addPass(createAIECoreIntRangeNarrowingPass());
+    dpm2.addPass(xilinx::AIE::createAIECoreIntRangeNarrowingPass());
   }
-  dpm2.addPass(createAIENarrowCoreLoopsPass());
+  dpm2.addPass(xilinx::AIE::createAIENarrowCoreLoopsPass());
   // Check provenance before expanding regions; expand before SCF lowering and
   // core outlining. Recheck coexistence after vectorization can create matmuls.
   if (hasAie4) {
@@ -1481,7 +1513,7 @@ inline std::unique_ptr<mlir::PassManager> getInputWithAddressesPipeline(
     pm->addPass(xilinx::aievec::createAIEVecAIE4CheckStaging(provenance));
     pm->addPass(xilinx::aievec::createAIEVecAIE4ExpandMatrixRegionPass());
   }
-  pm->addPass(xilinx::AIEX::createAIESCFToControlFlowPass());
+  pm->addPass(xilinx::AIExilinx::AIEX::createAIESCFToControlFlowPass());
   return pm;
 }
 
@@ -1637,12 +1669,11 @@ inline bool runtimeCodeReferencesCoreTile(xilinx::AIE::CoreOp core) {
 inline std::unique_ptr<mlir::PassManager>
 getAssignBufferAddressesPipeline(mlir::MLIRContext *ctx,
                                  int64_t placementBudget) {
-  using namespace xilinx::AIE;
-  auto pm =
-      std::make_unique<mlir::PassManager>(ctx, DeviceOp::getOperationName());
-  AIEAssignBufferAddressesOptions opts;
+  auto pm = std::make_unique<mlir::PassManager>(
+      ctx, xilinx::AIE::DeviceOp::getOperationName());
+  xilinx::AIE::AIEAssignBufferAddressesOptions opts;
   opts.clPlacementBudget = placementBudget;
-  pm->addPass(createAIEAssignBufferAddressesPass(opts));
+  pm->addPass(xilinx::AIE::createAIEAssignBufferAddressesPass(opts));
   return pm;
 }
 
@@ -1650,7 +1681,7 @@ getAssignBufferAddressesPipeline(mlir::MLIRContext *ctx,
 inline std::unique_ptr<mlir::PassManager>
 getRoutingPipeline(mlir::MLIRContext *ctx) {
   auto pm = std::make_unique<mlir::PassManager>(ctx);
-  xilinx::AIEX::addRoutingStage(*pm, cli::allowDeadlockProneRouting);
+  xilinx::AIExilinx::AIEX::addRoutingStage(*pm, cli::allowDeadlockProneRouting);
   return pm;
 }
 
@@ -1735,7 +1766,7 @@ getCoreLLVMLoweringPipeline(mlir::MLIRContext *ctx, llvm::StringRef deviceName,
   mlir::OpPassManager &devicePm = pm->nest<xilinx::AIE::DeviceOp>();
   devicePm.addPass(xilinx::AIE::createAIELocalizeLocksPass());
   devicePm.addPass(xilinx::AIE::createAIENormalizeAddressSpacesPass());
-  devicePm.addPass(xilinx::AIEX::createAIETransformBfpTypesPass());
+  devicePm.addPass(xilinx::AIExilinx::AIEX::createAIETransformBfpTypesPass());
 
   xilinx::AIE::AIECoreToStandardOptions coreOpts;
   coreOpts.deviceName = deviceName.str();
@@ -1743,7 +1774,7 @@ getCoreLLVMLoweringPipeline(mlir::MLIRContext *ctx, llvm::StringRef deviceName,
   coreOpts.tileRow = row;
   pm->addPass(xilinx::AIE::createAIECoreToStandardPass(coreOpts));
 
-  pm->addPass(xilinx::AIEX::createAIEXToStandardPass());
+  pm->addPass(xilinx::AIExilinx::AIEX::createAIEXToStandardPass());
 
   // Matches aievec.ups, so it must run before the AIEVec-to-LLVM lowering.
   bool chains = optLevel >= 3;
@@ -1999,7 +2030,6 @@ splitLoweredCores(mlir::ModuleOp mod,
 // (getMaterializeRuntimeSeqPipeline).
 inline std::unique_ptr<mlir::PassManager>
 getNpuDmaLoweringPipeline(mlir::MLIRContext *ctx) {
-  namespace X = xilinx::AIEX;
   auto pm = std::make_unique<mlir::PassManager>(ctx);
   auto &dpm = pm->nest<xilinx::AIE::DeviceOp>();
   // Region simplification stays off: a runtime sequence is one block of
@@ -2008,31 +2038,31 @@ getNpuDmaLoweringPipeline(mlir::MLIRContext *ctx) {
   mlir::GreedyRewriteConfig canonicalize;
   canonicalize.setRegionSimplificationLevel(
       mlir::GreedySimplifyRegionLevel::Disabled);
-  dpm.addPass(X::createAIEResolveAddressPatchBuffersPass());
-  dpm.addPass(X::createAIEMaterializeBDChainsPass());
-  dpm.addPass(X::createAIESubstituteShimDMAAllocationsPass());
-  dpm.addPass(X::createAIEUnrollRuntimeSequenceLoopsPass());
+  dpm.addPass(xilinx::AIExilinx::AIEX::createAIEResolveAddressPatchBuffersPass());
+  dpm.addPass(xilinx::AIExilinx::AIEX::createAIEMaterializeBDChainsPass());
+  dpm.addPass(xilinx::AIExilinx::AIEX::createAIESubstituteShimDMAAllocationsPass());
+  dpm.addPass(xilinx::AIExilinx::AIEX::createAIEUnrollRuntimeSequenceLoopsPass());
   dpm.addPass(mlir::createCanonicalizerPass(canonicalize));
   dpm.addPass(xilinx::AIE::createAIENormalizeDmaBdDimsPass());
   // Decompose oversized non-contiguous ND transfers (wrap/stride exceeding the
   // hardware BD field limits) into legal sub-transfers before BD lowering.
-  dpm.addPass(X::createAIEDecomposeLargeDmaBdPass());
-  dpm.addPass(X::createAIESplitLongRepeatsPass());
+  dpm.addPass(xilinx::AIExilinx::AIEX::createAIEDecomposeLargeDmaBdPass());
+  dpm.addPass(xilinx::AIExilinx::AIEX::createAIESplitLongRepeatsPass());
   // A runtime-bound scf.for that survived unroll takes the dynamic BD pool path
   // (rewritten to pool pop/push, ids drawn at runtime); the static allocator
   // below skips it. Straight-line sequences fall through unchanged.
-  X::AIELowerDynamicBDPoolOptions poolOpts;
+  xilinx::AIExilinx::AIEX::AIELowerDynamicBDPoolOptions poolOpts;
   poolOpts.enforceQueueDepth = !cli::noEnforceDmaQueueDepth;
   poolOpts.warnUnsafeBdReuse = cli::warnUnsafeBdReuse;
-  dpm.addPass(X::createAIELowerDynamicBDPoolPass(poolOpts));
+  dpm.addPass(xilinx::AIExilinx::AIEX::createAIELowerDynamicBDPoolPass(poolOpts));
   dpm.addPass(mlir::createCanonicalizerPass(canonicalize));
-  X::AIEAssignRuntimeSequenceBDIDsOptions bdIdOpts;
+  xilinx::AIExilinx::AIEX::AIEAssignRuntimeSequenceBDIDsOptions bdIdOpts;
   bdIdOpts.enforceQueueDepth = !cli::noEnforceDmaQueueDepth;
   bdIdOpts.reclaimBds = cli::reclaimRuntimeBds;
   bdIdOpts.warnUnsafeBdReuse = cli::warnUnsafeBdReuse;
   bdIdOpts.warnUnreleasedTransfers = cli::warnUnreleasedTransfers;
-  dpm.addPass(X::createAIEAssignRuntimeSequenceBDIDsPass(bdIdOpts));
-  dpm.addPass(X::createAIEDMATasksToNPUPass());
+  dpm.addPass(xilinx::AIEX::createAIEAssignRuntimeSequenceBDIDsPass(bdIdOpts));
+  dpm.addPass(xilinx::AIEX::createAIEDMATasksToNPUPass());
   // Expand dma_channel_reset_for into its re-arm trio (dma_channel_reset +
   // set_lock + a START_QUEUE re-push) and lower the resulting dma_channel_reset
   // ops to maskwrite32 -- one pass. Runs before aie-dma-to-npu so the emitted
@@ -2040,12 +2070,12 @@ getNpuDmaLoweringPipeline(mlir::MLIRContext *ctx) {
   // aie-lower-set- lock so the emitted set_lock ops are lowered too. The head
   // bd_id + repeat it re-pushes were folded into the objectfifo_rearm_binding
   // by aie-assign-bd-ids.
-  dpm.addPass(X::createAIELowerDmaChannelResetPass());
-  X::AIEDmaToNpuOptions dmaToNpuOpts;
+  dpm.addPass(xilinx::AIExilinx::AIEX::createAIELowerDmaChannelResetPass());
+  xilinx::AIExilinx::AIEX::AIEDmaToNpuOptions dmaToNpuOpts;
   dmaToNpuOpts.enforceQueueDepth = !cli::noEnforceDmaQueueDepth;
-  dpm.addPass(X::createAIEDmaToNpuPass(dmaToNpuOpts));
-  dpm.addPass(X::createAIELowerSetLockPass());
-  dpm.addPass(X::createAIELowerCoreResetPass());
+  dpm.addPass(xilinx::AIExilinx::AIEX::createAIEDmaToNpuPass(dmaToNpuOpts));
+  dpm.addPass(xilinx::AIExilinx::AIEX::createAIELowerSetLockPass());
+  dpm.addPass(xilinx::AIExilinx::AIEX::createAIELowerCoreResetPass());
   // The lowerings give each write its own constants; shared, the sequence
   // carries about half the ops into every later edge.
   dpm.addPass(mlir::createCSEPass());
@@ -2072,7 +2102,7 @@ getExpandLoadPdiPipeline(mlir::MLIRContext *ctx, bool ctrlPkt = false) {
   }
   if (ctrlPkt) {
     pm->nest<xilinx::AIE::DeviceOp>().addPass(
-        xilinx::AIEX::createAIELegalizeControlPacketPass());
+        xilinx::AIExilinx::AIEX::createAIELegalizeControlPacketPass());
   }
   return pm;
 }
@@ -2080,9 +2110,8 @@ getExpandLoadPdiPipeline(mlir::MLIRContext *ctx, bool ctrlPkt = false) {
 // Runtime-sequence materialization (module-level).
 inline std::unique_ptr<mlir::PassManager>
 getMaterializeRuntimeSeqPipeline(mlir::MLIRContext *ctx) {
-  namespace X = xilinx::AIEX;
   auto pm = std::make_unique<mlir::PassManager>(ctx);
-  pm->addPass(X::createAIEMaterializeRuntimeSequencesPass());
+  pm->addPass(xilinx::AIExilinx::AIEX::createAIEMaterializeRuntimeSequencesPass());
   return pm;
 }
 
@@ -2090,30 +2119,29 @@ getMaterializeRuntimeSeqPipeline(mlir::MLIRContext *ctx) {
 // from control packets.
 inline std::unique_ptr<mlir::PassManager>
 getPerDeviceDmaLoweringPipeline(mlir::MLIRContext *ctx) {
-  namespace X = xilinx::AIEX;
   auto pm = std::make_unique<mlir::PassManager>(ctx);
   auto &dpm = pm->nest<xilinx::AIE::DeviceOp>();
-  dpm.addPass(X::createAIEResolveAddressPatchBuffersPass());
-  dpm.addPass(X::createAIEMaterializeBDChainsPass());
-  dpm.addPass(X::createAIESubstituteShimDMAAllocationsPass());
-  dpm.addPass(X::createAIESplitLongRepeatsPass());
-  X::AIEAssignRuntimeSequenceBDIDsOptions bdIdOpts;
+  dpm.addPass(xilinx::AIExilinx::AIEX::createAIEResolveAddressPatchBuffersPass());
+  dpm.addPass(xilinx::AIExilinx::AIEX::createAIEMaterializeBDChainsPass());
+  dpm.addPass(xilinx::AIExilinx::AIEX::createAIESubstituteShimDMAAllocationsPass());
+  dpm.addPass(xilinx::AIExilinx::AIEX::createAIESplitLongRepeatsPass());
+  xilinx::AIExilinx::AIEX::AIEAssignRuntimeSequenceBDIDsOptions bdIdOpts;
   bdIdOpts.enforceQueueDepth = !cli::noEnforceDmaQueueDepth;
   bdIdOpts.reclaimBds = cli::reclaimRuntimeBds;
   bdIdOpts.warnUnsafeBdReuse = cli::warnUnsafeBdReuse;
   bdIdOpts.warnUnreleasedTransfers = cli::warnUnreleasedTransfers;
-  dpm.addPass(X::createAIEAssignRuntimeSequenceBDIDsPass(bdIdOpts));
+  dpm.addPass(xilinx::AIEX::createAIEAssignRuntimeSequenceBDIDsPass(bdIdOpts));
   // Without region simplification; see getNpuDmaLoweringPipeline.
   mlir::GreedyRewriteConfig canonicalize;
   canonicalize.setRegionSimplificationLevel(
       mlir::GreedySimplifyRegionLevel::Disabled);
   dpm.addPass(mlir::createCanonicalizerPass(canonicalize));
   dpm.addPass(xilinx::AIE::createAIENormalizeDmaBdDimsPass());
-  dpm.addPass(X::createAIEDMATasksToNPUPass());
-  X::AIEDmaToNpuOptions dmaToNpuOpts;
+  dpm.addPass(xilinx::AIExilinx::AIEX::createAIEDMATasksToNPUPass());
+  xilinx::AIExilinx::AIEX::AIEDmaToNpuOptions dmaToNpuOpts;
   dmaToNpuOpts.enforceQueueDepth = !cli::noEnforceDmaQueueDepth;
-  dpm.addPass(X::createAIEDmaToNpuPass(dmaToNpuOpts));
-  dpm.addPass(X::createAIELowerSetLockPass());
+  dpm.addPass(xilinx::AIExilinx::AIEX::createAIEDmaToNpuPass(dmaToNpuOpts));
+  dpm.addPass(xilinx::AIExilinx::AIEX::createAIELowerSetLockPass());
   return pm;
 }
 
@@ -2123,7 +2151,7 @@ inline std::unique_ptr<mlir::PassManager>
 getCtrlPktToDmaPipeline(mlir::MLIRContext *ctx) {
   auto pm = std::make_unique<mlir::PassManager>(ctx);
   pm->nest<xilinx::AIE::DeviceOp>().addPass(
-      xilinx::AIEX::createAIECtrlPacketToDmaPass());
+      xilinx::AIExilinx::AIEX::createAIECtrlPacketToDmaPass());
   return pm;
 }
 
@@ -2152,30 +2180,32 @@ getTransactionPipeline(mlir::MLIRContext *ctx, llvm::StringRef elfDir,
 // `builtin.module(aie.device(convert-aie-to-transaction{elf-dir=<elfDir>}),
 // aie-npu-to-cert, aie.device(cert-legalize-pages, aie-cert-verify))`.
 // `aie-npu-to-cert` runs
-// module-wide (its `device-name` option defaults to "main" and absorbs every
-// other device's load-pdi references into that device's cert sections), so
-// this pipeline is meant to run once over the whole module, not per device.
-// Feeds `--aie-cert-to-asm` (AIETranslateToUcDma) to produce the control-code
+// module-wide (it emits `entryDevice` and absorbs every other device's
+// load-pdi references into that device's cert sections), so this pipeline is
+// meant to run once over the whole module, not per device. Feeds
+// `--aie-cert-to-asm` (AIETranslateToUcDma) to produce the control-code
 // assembly consumed by `aiebu-asm -t aie4_config`. Returns nullptr on parse
 // failure.
 inline std::unique_ptr<mlir::PassManager>
-getAie4CertPipeline(mlir::MLIRContext *ctx, llvm::StringRef elfDir) {
-  namespace X = xilinx::AIEX;
+getAie4CertPipeline(mlir::MLIRContext *ctx, llvm::StringRef elfDir,
+                    llvm::StringRef entryDevice) {
   auto pm = std::make_unique<mlir::PassManager>(ctx);
   std::string txnPipelineStr =
       ("convert-aie-to-transaction{elf-dir=" + elfDir + "}").str();
   auto &dpm = pm->nest<xilinx::AIE::DeviceOp>();
   if (mlir::failed(mlir::parsePassPipeline(txnPipelineStr, dpm)))
     return nullptr;
-  pm->addPass(X::createAIENpuToCertPass());
+  xilinx::AIExilinx::AIEX::AIENpuToCertOptions certOptions;
+  certOptions.deviceName = entryDevice.str();
+  pm->addPass(xilinx::AIExilinx::AIEX::createAIENpuToCertPass(certOptions));
   auto &certDpm = pm->nest<xilinx::AIE::DeviceOp>();
-  certDpm.addPass(X::createAIECertPagesPass());
+  certDpm.addPass(xilinx::AIExilinx::AIEX::createAIECertPagesPass());
   // aie-cert-verify runs last, after page legalization and placement lowering,
   // where final pages and uC (group) assignments are known. It turns CERT
   // firmware constraints (barrier co-location, one wait_tcts per actor, remote
   // barrier rendezvous, preempt-count parity, id budgets) into compile-time
   // diagnostics instead of hardware hangs.
-  certDpm.addPass(X::createAIECertVerifyPass());
+  certDpm.addPass(xilinx::AIExilinx::AIEX::createAIECertVerifyPass());
   return pm;
 }
 
@@ -2194,8 +2224,8 @@ getControlPacketPipeline(mlir::MLIRContext *ctx, llvm::StringRef elfDir,
   if (mlir::failed(mlir::parsePassPipeline(pipelineStr, dpm))) {
     return nullptr;
   }
-  dpm.addPass(xilinx::AIEX::createAIETxnToControlPacketPass());
-  dpm.addPass(xilinx::AIEX::createAIELegalizeControlPacketPass());
+  dpm.addPass(xilinx::AIExilinx::AIEX::createAIETxnToControlPacketPass());
+  dpm.addPass(xilinx::AIExilinx::AIEX::createAIELegalizeControlPacketPass());
   return pm;
 }
 
@@ -2205,15 +2235,15 @@ inline std::unique_ptr<mlir::PassManager>
 getControlPacketDmaPipeline(mlir::MLIRContext *ctx) {
   auto pm = std::make_unique<mlir::PassManager>(ctx);
   auto &dpm = pm->nest<xilinx::AIE::DeviceOp>();
-  dpm.addPass(xilinx::AIEX::createAIECtrlPacketToDmaPass());
+  dpm.addPass(xilinx::AIExilinx::AIEX::createAIECtrlPacketToDmaPass());
   // Not the user's queue-depth setting: this sequence is generated one push and
   // one sync at a time, so the queue never fills. If that ever regresses, a
   // warning against compiler-generated IR is the right diagnostic for a
   // compiler bug -- a poll would paper over it, and a build failure would blame
   // the user for IR they cannot edit.
-  xilinx::AIEX::AIEDmaToNpuOptions ctrlPktOpts;
+  xilinx::AIExilinx::AIEX::AIEDmaToNpuOptions ctrlPktOpts;
   ctrlPktOpts.enforceQueueDepth = false;
-  dpm.addPass(xilinx::AIEX::createAIEDmaToNpuPass(ctrlPktOpts));
+  dpm.addPass(xilinx::AIExilinx::AIEX::createAIEDmaToNpuPass(ctrlPktOpts));
   return pm;
 }
 

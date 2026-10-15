@@ -994,6 +994,11 @@ struct SplitNpuBlockWriteOpPattern : OpRewritePattern<AIEX::NpuBlockWriteOp> {
 
 struct AIENpuToCertPass
     : xilinx::AIEX::impl::AIENpuToCertBase<AIENpuToCertPass> {
+  using Base = xilinx::AIEX::impl::AIENpuToCertBase<AIENpuToCertPass>;
+  AIENpuToCertPass() = default;
+  AIENpuToCertPass(const xilinx::AIEX::AIENpuToCertOptions &options)
+      : Base(options) {}
+
   void runOnOperation() override {
     auto moduleOp = getOperation();
     if (failed(AIE::inlineWriteConfigs(moduleOp)))
@@ -2500,6 +2505,11 @@ struct AIECertPagesPass
 
 std::unique_ptr<OperationPass<mlir::ModuleOp>> AIEX::createAIENpuToCertPass() {
   return std::make_unique<AIENpuToCertPass>();
+}
+
+std::unique_ptr<OperationPass<mlir::ModuleOp>>
+AIEX::createAIENpuToCertPass(const AIENpuToCertOptions &options) {
+  return std::make_unique<AIENpuToCertPass>(options);
 }
 
 std::unique_ptr<OperationPass<AIE::DeviceOp>> AIEX::createAIECertPagesPass() {

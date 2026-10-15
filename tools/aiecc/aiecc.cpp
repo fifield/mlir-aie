@@ -993,6 +993,7 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
   using xilinx::AIE::TileOp;
   using ModRef = mlir::OwningOpRef<mlir::ModuleOp>;
 
+  const std::string &devFilter = deviceName.getValue();
   std::string inputFile = getInputFilename();
 
   std::string workDirStr = getWorkDir();
@@ -1046,6 +1047,13 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
                (reconfigInitEntry &&
                 s.getSymName() == xilinx::AIEX::initEntrySequenceName);
       };
+
+  // Cores to compile: those of the --device-name device and of every device it
+  // loads. A loaded device's configuration carries its cores' programs, so
+  // filtering them out would configure those cores without code.
+  auto compilesDevice = [devFilter, matchesDeviceFilter](DeviceOp d) {
+    return matchesDeviceFilter(d) || isDeviceReachableFrom(d, devFilter);
+  };
 
   // Split a whole-module edge into one item per DeviceOp (keyed by bare device
   // name), then drop devices that don't match --device-name.
@@ -1188,10 +1196,10 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
   auto &compileInput =
       cache ? static_cast<EdgeWithTypedOutput<ModRef> &>(unplaced.filter(
                   "deviceCacheLookup",
-                  [cache, matchesDeviceFilter, inputFile,
+                  [cache, compilesDevice, inputFile,
                    workDirStr](const ModRef &mod) {
                     cache->lookup(
-                        mod.get(), matchesDeviceFilter, [&](llvm::StringRef f) {
+                        mod.get(), compilesDevice, [&](llvm::StringRef f) {
                           return resolveExternalPath(f, inputFile, workDirStr);
                         });
                     return true;
@@ -1204,11 +1212,10 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
           .split<OpInModule<CoreOp>>(
               "perCore_{0}.mlir",
               SplitIRAction<CoreOp>([](CoreOp c) { return coreKey(c); }))
-          .filter("perCoreInDevice",
-                  [matchesDeviceFilter](const OpInModule<CoreOp> &x) {
-                    return matchesDeviceFilter(
-                        CoreOp(x.op)->getParentOfType<DeviceOp>());
-                  });
+          .filter("perCoreInDevice", [compilesDevice](
+                                         const OpInModule<CoreOp> &x) {
+            return compilesDevice(CoreOp(x.op)->getParentOfType<DeviceOp>());
+          });
 
   // Cores whose MLIR we must compile. A core without an `elf_file` attribute is
   // always compiled. A core that already carries an `elf_file` normally needs
@@ -1336,10 +1343,10 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
   // carved set to match or the object subgraph joins on a key its other inputs
   // do not have.
   auto &unifiedPerCoreLowered = compileInput.split<ModRef>(
-      "lowered_{0}.mlir", [matchesDeviceFilter, compilesCore,
+      "lowered_{0}.mlir", [compilesDevice, compilesCore,
                            opt = optLevel.getValue()](const Item<ModRef> &mod) {
-        return splitLoweredCores(mod.get().get(), matchesDeviceFilter,
-                                 compilesCore, opt);
+        return splitLoweredCores(mod.get().get(), compilesDevice, compilesCore,
+                                 opt);
       });
 
   // Per-core strategy
@@ -2626,24 +2633,54 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
   // Combined ELF: all PDIs + NPU insts bundled
   // + control packet data, if any.
   // AIE4 "cert" control code: convert-aie-to-transaction + aie-npu-to-cert +
-  // cert-legalize-pages over the *whole* module (aie-npu-to-cert's
-  // device-name option defaults to "main" and folds every other device's
-  // load-pdi references into that device's cert sections), then
-  // `--aie-cert-to-asm` to text. Every AIE4 device's full-elf instances share
-  // this single assembly file (see makeAie4ConfigJson). Non-AIE4 modules
-  // never reach the (expensive, AIE4-specific) pipeline: the value is empty
-  // and unused, since fullElfConfig only reads it under moduleHasAie4Device.
+  // cert-legalize-pages over the *whole* module, then `--aie-cert-to-asm` to
+  // text. The result is the program of one entry device -- --device-name, or
+  // "main" by default -- with every other device folded into it through its
+  // load-pdi references. Each of the entry device's runtime sequences becomes
+  // a job of that program; --sequence-name keeps only the named one. The
+  // entry device's full-elf instances share this single assembly file (see
+  // makeAie4ConfigJson). Non-AIE4 modules never reach the (expensive,
+  // AIE4-specific) pipeline: the value is empty and unused, since
+  // fullElfConfig only reads it under moduleHasAie4Device.
+  std::string aie4EntryDevice = devFilter.empty() ? "main" : devFilter;
   auto &certAsm = npuLowered.map<std::string>(
       "full_elf_cert.mlir.asm",
-      [workDirStr](const Item<ModRef> &item,
-                   Item<std::string> &out) -> mlir::LogicalResult {
+      [workDirStr, aie4EntryDevice, seqFilter = sequenceName.getValue()](
+          const Item<ModRef> &item,
+          Item<std::string> &out) -> mlir::LogicalResult {
         mlir::ModuleOp mod = item.get().get();
         if (!moduleHasAie4Device(mod)) {
           out.value = std::string{};
           return mlir::success();
         }
         ModRef clone = mod.clone();
-        auto pm = getAie4CertPipeline(clone->getContext(), /*elfDir=*/"");
+        if (!seqFilter.empty()) {
+          auto entry = clone->lookupSymbol<DeviceOp>(aie4EntryDevice);
+          if (!entry) {
+            llvm::errs() << "aiecc: no device found matching --device-name \""
+                         << aie4EntryDevice << "\"\n";
+            return mlir::failure();
+          }
+          llvm::SmallVector<RuntimeSequenceOp> toErase;
+          bool found = false;
+          for (auto seq : entry.getOps<RuntimeSequenceOp>()) {
+            if (seq.getSymName() == seqFilter)
+              found = true;
+            else
+              toErase.push_back(seq);
+          }
+          if (!found) {
+            llvm::errs() << "aiecc: no runtime sequence matching "
+                            "--sequence-name \""
+                         << seqFilter << "\" in device \"" << aie4EntryDevice
+                         << "\"\n";
+            return mlir::failure();
+          }
+          for (RuntimeSequenceOp seq : toErase)
+            seq.erase();
+        }
+        auto pm = getAie4CertPipeline(clone->getContext(), /*elfDir=*/"",
+                                      aie4EntryDevice);
         if (!pm || mlir::failed(pm->run(*clone)))
           return mlir::failure();
         std::string asmText;
@@ -2678,17 +2715,18 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
 
   // Combined ELF config: AIE2/AIE2P bundle all PDIs + per-sequence NPU insts +
   // control-packet data (+ patch info) into an aie2_config JSON; AIE4 has no
-  // PDIs and folds load-pdi references into the cert control code, so every
-  // instance points at the shared cert assembly instead (aie4_config JSON) --
-  // see makeAie4ConfigJson / certAsm above. AIE4 control-packet payloads are
-  // referenced through the per-sequence patch-info file.
+  // PDIs and folds load-pdi references into the cert control code, so the
+  // entry device's instances point at the cert assembly instead (aie4_config
+  // JSON) -- see makeAie4ConfigJson / certAsm above. AIE4 control-packet
+  // payloads are referenced through the per-sequence patch-info file.
   auto &fullElfConfig =
       bundle(npuLoweredPerDeviceFullElf.out, pdi.out, npuInstsFullElf.out,
              fullElfCtrlpkt.out, fullElfPatchInfo.out, certAsm.out,
              fullElfAie4PatchInfo.out)
           .join<llvm::json::Value>(
               "full_elf_config.json",
-              [fullElfInputPath](
+              [fullElfInputPath, aie4EntryDevice,
+               seqFilter = sequenceName.getValue()](
                   const Node<OpInModule<DeviceOp>> &devices,
                   const Node<File> &pdis,
                   const Node<std::vector<char>> &instsBins,
@@ -2711,7 +2749,8 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
                   for (const auto &item : aie4PatchInfos.items)
                     aie4PatchInfoPaths[item.key] = absolutePath(item.asFile());
                   out.value = makeAie4ConfigJson(
-                      devices, absolutePath(certAsmNode.items.front().asFile()),
+                      devices, aie4EntryDevice, seqFilter,
+                      absolutePath(certAsmNode.items.front().asFile()),
                       aie4PatchInfoPaths);
                   return mlir::success();
                 }
