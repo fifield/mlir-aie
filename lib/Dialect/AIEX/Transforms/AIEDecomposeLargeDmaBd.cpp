@@ -61,6 +61,60 @@ static std::optional<NdDmaPattern> constantPattern(NpuDmaMemcpyNdOp op) {
   return pattern;
 }
 
+// MemTiles and AIE4 shim NOC tiles have a D3 addressing dimension besides
+// the iteration one (see AIEDMATasksToNPU), so a descriptor there may hold
+// five entries, [iteration, d3, d2, d1, d0].
+static bool tileHasD3AddressDim(const AIE::AIETargetModel &tm, int col,
+                                int row) {
+  return tm.isMemTile(col, row) ||
+         (isa<AIE::AIE4TargetModel>(tm) && tm.isShimNOCTile(col, row));
+}
+
+// A constant five-entry descriptor on a D3 tile is lowered as it is when the
+// hardware takes it: its length covers d3 too, as AIEDMATasksToNPU checks, and
+// its sizes and strides verify. NdDmaPattern has no d3 slot, so reducing it
+// here would turn d3 into the iteration dimension and shrink the length to one
+// d3 step.
+static bool lowerableWithD3(AIE::DMABDOp op, BaseMemRefType bufferType,
+                            const AIE::AIETargetModel &tm, int col, int row) {
+  if (op.getMixedSizes().size() != kNdDmaDims + 1 ||
+      op.getMixedStrides().size() != kNdDmaDims + 1 ||
+      !tileHasD3AddressDim(tm, col, row) || !allConstant(op))
+    return false;
+  SmallVector<int64_t, 5> sizes, strides;
+  for (OpFoldResult s : llvm::reverse(op.getMixedSizes())) {
+    auto size = getConstantIntValue(s);
+    if (!size)
+      return false;
+    sizes.push_back(*size);
+  }
+  for (OpFoldResult s : llvm::reverse(op.getMixedStrides())) {
+    auto stride = getConstantIntValue(s);
+    if (!stride)
+      return false;
+    strides.push_back(*stride);
+  }
+  std::optional<int64_t> len;
+  if (op.hasLen())
+    len = op.getConstantLen();
+  else if (bufferType.hasStaticShape())
+    len = bufferType.getNumElements();
+  if (!len || *len != sizes[0] * sizes[1] * sizes[2] * sizes[3])
+    return false;
+  // Match AIEDMATasksToNPU: linear transfers and contiguous shim transfers
+  // use buffer_length instead of the ND wrap fields.
+  bool treatAsLinear =
+      isLinearTransfer(sizes, strides) ||
+      (tm.isShimNOCTile(col, row) && isContiguousTransfer(sizes, strides));
+  SmallVector<int64_t, 5> hwSizes(5), hwStrides(5);
+  getHardwareStridesWraps(tm, op, bufferType, sizes, strides, hwSizes,
+                          hwStrides);
+  ScopedDiagnosticHandler handler(op->getContext(),
+                                  [](Diagnostic &) { return success(); });
+  return succeeded(verifyStridesWraps(op, bufferType, col, row, sizes, strides,
+                                      hwSizes, hwStrides, treatAsLinear));
+}
+
 static SmallVector<int64_t, 4> toOuter(ArrayRef<int64_t> inner) {
   return llvm::map_to_vector(llvm::reverse(inner), [](int64_t v) { return v; });
 }
@@ -578,18 +632,28 @@ static LogicalResult decomposeTaskBd(RewriterBase &rewriter, AIE::DMABDOp op,
   AIE::TileOp tile = taskAndTile->first;
   DMAConfigureTaskLike taskOp = taskAndTile->second;
 
+  int col = tile.getCol();
+  int row = tile.getRow();
+  const AIE::AIETargetModel &targetModel = AIE::getTargetModel(op);
+  auto bufferType = cast<BaseMemRefType>(op.getBuffer().getType());
+
   // A descriptor with more dimensions than a BD has cannot be lowered as it
-  // is, so where this pass cannot reduce it, it says why.
-  bool tooManyDims = op.getMixedSizes().size() > kNdDmaDims;
+  // is, so where this pass cannot reduce it, it says why. On a D3 tile a BD
+  // has a fifth: a five-entry descriptor with runtime values or padding is
+  // left to AIEDMATasksToNPU to check, and a constant one fits when the
+  // hardware takes it as it is.
+  size_t numDims = op.getMixedSizes().size();
+  bool fitsWithD3 = numDims == kNdDmaDims + 1 &&
+                    tileHasD3AddressDim(targetModel, col, row) &&
+                    (!allConstant(op) ||
+                     lowerableWithD3(op, bufferType, targetModel, col, row));
+  bool tooManyDims = numDims > kNdDmaDims && !fitsWithD3;
   auto cannotReduce = [&]() {
     return op.emitOpError()
            << "has " << op.getMixedSizes().size()
            << " dimensions, and a buffer descriptor holds " << kNdDmaDims
            << "; the extra ones can only be split off ";
   };
-  int col = tile.getCol();
-  int row = tile.getRow();
-  const AIE::AIETargetModel &targetModel = AIE::getTargetModel(op);
   FailureOr<TaskBdDecomposition> plan =
       decomposeTaskBdPattern(op, targetModel, col, row);
   if (failed(plan)) {
@@ -617,6 +681,8 @@ static LogicalResult decomposeTaskBd(RewriterBase &rewriter, AIE::DMABDOp op,
   if (op.getLengthParameterAttr() || op.getLengthStateTableIdxAttr())
     return success();
 
+  if (fitsWithD3)
+    return success();
   if (plan->legal) // NOLINT(bugprone-unchecked-optional-access)
     return success();
 
