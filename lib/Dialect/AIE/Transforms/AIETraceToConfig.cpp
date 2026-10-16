@@ -265,7 +265,7 @@ struct AIETraceToConfigPass
             uint32_t broadcastNum = *broadcast;
             // Resolve broadcast channel to hardware event ID
             std::string eventName;
-            if (tile.isShimTile()) {
+            if (tile.isShimTile() && !isa<AIE4TargetModel>(targetModel)) {
               eventName = "BROADCAST_A_" + std::to_string(broadcastNum);
             } else {
               eventName = "BROADCAST_" + std::to_string(broadcastNum);
@@ -311,7 +311,7 @@ struct AIETraceToConfigPass
             uint32_t broadcastNum = *broadcast;
             // Resolve broadcast channel to hardware event ID
             std::string eventName;
-            if (tile.isShimTile()) {
+            if (tile.isShimTile() && !isa<AIE4TargetModel>(targetModel)) {
               eventName = "BROADCAST_A_" + std::to_string(broadcastNum);
             } else {
               eventName = "BROADCAST_" + std::to_string(broadcastNum);

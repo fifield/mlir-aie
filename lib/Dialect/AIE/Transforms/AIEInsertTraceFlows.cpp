@@ -806,7 +806,7 @@ struct AIEInsertTraceFlowsPass
           computeTimerCtrlAddress(info.tile, targetModel, isMemTrace);
 
       std::string broadcastEventName;
-      if (info.tile.isShimTile()) {
+      if (info.tile.isShimTile() && !isa<AIE4TargetModel>(targetModel)) {
         broadcastEventName =
             "BROADCAST_A_" + std::to_string(*info.startBroadcast);
       } else {
