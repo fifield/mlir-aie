@@ -270,6 +270,7 @@ struct NpuMaskPollToCertMaskPoll32 : OpConversionPattern<AIEX::NpuMaskPollOp> {
 
 struct NpuBlockWriteToCertUcDma : OpConversionPattern<AIEX::NpuBlockWriteOp> {
   using OpConversionPattern::OpConversionPattern;
+  mutable unsigned nextChainId = 0;
 
   LogicalResult
   matchAndRewrite(AIEX::NpuBlockWriteOp op, OpAdaptor adaptor,
@@ -280,12 +281,18 @@ struct NpuBlockWriteToCertUcDma : OpConversionPattern<AIEX::NpuBlockWriteOp> {
     if (!dataOperand)
       return failure();
     MemRefType dataType = cast<MemRefType>(dataOperand.getResult().getType());
+    // Empty copies are no-ops; emitting a uC DMA descriptor would reference
+    // an empty payload that the assembler cannot resolve.
+    if (dataType.getNumElements() == 0) {
+      rewriter.eraseOp(op);
+      return success();
+    }
     uint32_t dataSize = dataType.getNumElements();
 
-    int id = 0;
-    std::string symbolName = "chain_" + std::to_string(id);
+    // Continue past previously allocated names instead of rescanning them.
+    std::string symbolName = "chain_" + std::to_string(nextChainId++);
     while (op->getParentOfType<AIE::DeviceOp>().lookupSymbol(symbolName))
-      symbolName = "chain_" + std::to_string(++id);
+      symbolName = "chain_" + std::to_string(nextChainId++);
 
     // Create a new uc_dma_write_des_sync operation
     rewriter.replaceOpWithNewOp<AIEX::CertUcDmaWriteDesSyncOp>(op, symbolName);
