@@ -111,8 +111,9 @@ static bool lowerableWithD3(AIE::DMABDOp op, BaseMemRefType bufferType,
                           hwStrides);
   ScopedDiagnosticHandler handler(op->getContext(),
                                   [](Diagnostic &) { return success(); });
-  return succeeded(verifyStridesWraps(op, bufferType, col, row, sizes, strides,
-                                      hwSizes, hwStrides, treatAsLinear));
+  return succeeded(verifyStridesWraps(
+      op, [&] { return mlir::emitError(op->getLoc()); }, bufferType, col, row,
+      sizes, strides, hwSizes, hwStrides, treatAsLinear));
 }
 
 static SmallVector<int64_t, 4> toOuter(ArrayRef<int64_t> inner) {
