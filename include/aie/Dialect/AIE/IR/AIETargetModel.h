@@ -1476,6 +1476,7 @@ protected:
   static constexpr Properties properties =
       AIETargetModel::UsesSemaphoreLocks |
       AIETargetModel::UsesMultiDimensionalBDs |
+      AIETargetModel::UsesBDIteration |
       AIETargetModel::SupportsOutOfOrderDMA;
 
 public:
@@ -1533,8 +1534,12 @@ public:
   /// register via getDmaTaskQueueSizeMask), so report "unsupported".
   uint32_t getDmaTaskQueueDepth() const override { return 0; }
 
-  /// Iteration_Wrap is a 6-bit field, as on AIE1/AIE2.
-  uint32_t getDmaBdIterBits(AIETileType tileType) const override { return 6; }
+  /// Iteration_Wrap and Iteration_Current are 8-bit fields in mem tile BDs
+  /// and 6-bit fields in core and shim tile BDs (aie-rt IterWrapMax /
+  /// IterCurrMax for all AIE4 devices).
+  uint32_t getDmaBdIterBits(AIETileType tileType) const override {
+    return tileType == AIETileType::MemTile ? 8 : 6;
+  }
 
   /// AIE4 has two microcontrollers (CERT job-runners) per column; the CERT
   /// group/uC id for column `col` is `2*col + half` (half in {0,1}).

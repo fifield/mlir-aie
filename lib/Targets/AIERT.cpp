@@ -561,7 +561,7 @@ configureBdInBlock(const AIE::AIETargetModel &targetModel,
           static_cast<double>(bdOp.getBufferElementTypeWidthInBytes()) / 4.0;
       uint32_t stepInWords =
           static_cast<uint32_t>(iter->getStride() * elementWidthIn32bWords);
-      uint8_t wrap = static_cast<uint8_t>(iter->getSize());
+      uint16_t wrap = static_cast<uint16_t>(iter->getSize());
       uint8_t iterCurr = static_cast<uint8_t>(iter->getCurrent());
       TRY_XAIE_API_EMIT_ERROR(bdOp, XAie_DmaSetBdIteration, &dmaTileBd,
                               stepInWords, wrap, iterCurr);
