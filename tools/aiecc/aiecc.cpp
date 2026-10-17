@@ -557,6 +557,34 @@ buildObjectSubgraph(EdgeWithTypedOutput<ModRef> &lowered,
                   llvm::errs() << "aiecc: '" << path << "' is not ELF\n";
                   return mlir::failure();
                 }
+                // Internal Peano objects can carry AIE memory tables whose
+                // entries reference section indices and string-table offsets.
+                // Generic LLVM objcopy does not update those references when
+                // renaming symbols/sections and rebuilding the string table.
+                // Keep the original metadata by compiling this core directly.
+                // The canonical compilation is unused on this path; objects
+                // without these tables still benefit from sharing.
+                for (llvm::object::ELFSectionRef section : elf->sections()) {
+                  auto name = section.getName();
+                  if (!name) {
+                    llvm::errs()
+                        << "aiecc: cannot read section name in '" << path
+                        << "': " << llvm::toString(name.takeError()) << '\n';
+                    return mlir::failure();
+                  }
+                  if (*name != ".tctmemtab")
+                    continue;
+                  if (mlir::failed(compile(ir, out.key, out)))
+                    return mlir::failure();
+                  if (ShellCommand::verbose) {
+                    std::lock_guard<std::mutex> lock(logMutex());
+                    llvm::outs() << "aiecc: " << out.key << ": " << path
+                                 << " recompiled as " << out.filePath
+                                 << " (preserving AIE memory table metadata; "
+                                    "canonical compilation unused)\n";
+                  }
+                  return mlir::success();
+                }
                 llvm::objcopy::ConfigManager config;
                 config.Common.InputFilename = path;
                 for (size_t i = 0; i < canonical->names.size(); ++i) {

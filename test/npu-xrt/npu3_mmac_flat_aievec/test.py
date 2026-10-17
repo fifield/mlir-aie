@@ -10,10 +10,10 @@ The MLIR design is constructed below with the Python bindings.
 # int8 weights. Prime before A/C acquires; interleave prefetch with row MMACs.
 # A nonzero initial accumulator makes first-tile zero_if observable.
 #
-# Peano peels the first K iteration. KT=3 leaves one hardware-loop iteration;
-# KT=5 leaves three and exercises back edges. The schedule checker simulates
-# two iterations, so it expects four tiles regardless of KT: 32 inserts and
-# 16 MMACs per tile, plus 32 pops for stream feeds.
+# The schedule checker simulates two hardware-loop iterations. Stream feeds
+# have a peeled tile and a final tile, giving four checked tiles. L1 feeds
+# have one tile per loop iteration plus a final tile, giving three. Each
+# tile has 32 inserts and 16 MMACs, plus 32 pops for stream feeds.
 #
 # REQUIRES: ryzen_ai_npu3, peano, xrt_python_bindings
 #
@@ -38,16 +38,16 @@ The MLIR design is constructed below with the Python bindings.
 # RUN: %python %s --emit --feed l1 --rhs int8 --kt 5 -o l1-int8.mlir
 # RUN: %aiecc --get-full-elf --full-elf-name=l1-int8.elf --tmpdir l1-int8.prj l1-int8.mlir
 # RUN: llvm-objdump -d l1-int8.prj/elfs_main_core_0_2/elfs_main_core_0_2.elf > l1-int8.dis
-# RUN: %python %S/../../aiecc/aie4-mmac-schedule-checker.py l1-int8.dis --inserts-per-tile 32,32,32,32 --mmacs-per-tile 16,16,16,16 --forbid-lda-s8 | FileCheck %s --check-prefix=L1-ORDER
+# RUN: %python %S/../../aiecc/aie4-mmac-schedule-checker.py l1-int8.dis --inserts-per-tile 32,32,32 --mmacs-per-tile 16,16,16 --forbid-lda-s8 | FileCheck %s --check-prefix=L1-ORDER
 # RUN: %run_on_npu3% %python %s l1-int8.elf --feed l1 --rhs int8 --kt 5 | FileCheck %s --check-prefix=L1-INT8
-# L1-ORDER: ORDER OK: 4 tiles, 128 inserts, 64 MMACs, no accumulator spills (loop body checked twice)
+# L1-ORDER: ORDER OK: 3 tiles, 96 inserts, 48 MMACs, no accumulator spills (loop body checked twice)
 # L1-INT8: l1 int8 KT=5: 1024/1024 exact
 # L1-INT8: PASS
 #
 # RUN: %python %s --emit --feed l1 --rhs uint8 --kt 3 -o l1-uint8.mlir
 # RUN: %aiecc --get-full-elf --full-elf-name=l1-uint8.elf --tmpdir l1-uint8.prj l1-uint8.mlir
 # RUN: llvm-objdump -d l1-uint8.prj/elfs_main_core_0_2/elfs_main_core_0_2.elf > l1-uint8.dis
-# RUN: %python %S/../../aiecc/aie4-mmac-schedule-checker.py l1-uint8.dis --inserts-per-tile 32,32,32,32 --mmacs-per-tile 16,16,16,16 --forbid-lda-s8 | FileCheck %s --check-prefix=L1-ORDER
+# RUN: %python %S/../../aiecc/aie4-mmac-schedule-checker.py l1-uint8.dis --inserts-per-tile 32,32,32 --mmacs-per-tile 16,16,16 --forbid-lda-s8 | FileCheck %s --check-prefix=L1-ORDER
 # RUN: %run_on_npu3% %python %s l1-uint8.elf --feed l1 --rhs uint8 --kt 3 | FileCheck %s --check-prefix=L1-UINT8
 # L1-UINT8: l1 uint8 KT=3: 1024/1024 exact
 # L1-UINT8: PASS

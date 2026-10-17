@@ -133,6 +133,10 @@ def served(ci):
         s.server.shutdown()
 
 
+@pytest.mark.skipif(
+    not (WORKFLOWS / "buildRyzenWheels.yml").exists(),
+    reason="this fork does not carry the upstream CI workflow set",
+)
 def test_the_workflow_lists_name_real_workflows(ci):
     config = ci.load_workflows()
     for wf in config["workflows"]:

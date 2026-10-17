@@ -16,6 +16,10 @@
 // each adds one K-tile copy (prologue/epilogue) to the exact counts, and
 // the timing check covers the straight-line block around each K-loop
 // (entry, two iterations, exit and the peeled last K-tile).
+// In config A, Peano schedules three staging inserts after the preceding
+// branch, before the second K-loop's first commit. They are included in
+// that loop's checked block, giving 99 inserts; config C still has 96.
+// The whole-core insert count remains 192 in both configurations.
 //
 // RUN: mkdir -p test_aievec_codegen
 // RUN: cd test_aievec_codegen
@@ -26,7 +30,8 @@
 // I32: core_0_2: {{.*}} commit 6 mmac 384 pop 192 insert 192 {{.*}}; 2 pipelined
 // I8: core_0_2 K-loop {{.*}}: ORDER OK: 5 tiles, 128 inserts, 256 MMACs, no accumulator spills (loop body checked twice)
 // I32: core_0_2 K-loop {{.*}}: ORDER OK: 5 tiles, 160 inserts, 256 MMACs, no accumulator spills (loop body checked twice)
-// CHECK: core_0_2 K-loop {{.*}}: ORDER OK: 5 tiles, 96 inserts, 256 MMACs, no accumulator spills (loop body checked twice)
+// I8: core_0_2 K-loop {{.*}}: ORDER OK: 5 tiles, 99 inserts, 256 MMACs, no accumulator spills (loop body checked twice)
+// I32: core_0_2 K-loop {{.*}}: ORDER OK: 5 tiles, 96 inserts, 256 MMACs, no accumulator spills (loop body checked twice)
 // CHECK: CHECK_AIEVEC OK: 12 cores
 // KT2: core_0_2: {{.*}} vst.srs 128 crrnd 1 crsat 1 (vector [sp {{[0-9]+}}, allowed); ZOLs 1; no K-loop
 // KT2: CHECK_AIEVEC OK: 12 cores

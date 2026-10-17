@@ -6,8 +6,10 @@
 //===----------------------------------------------------------------------===//
 
 // Cores running one program over their own buffers compile it once. Cores 0
-// and 1 copy; core 2 adds one. Opt and llc run on two canonical modules, and
-// every core's object carries its own names again before it links.
+// and 1 copy; core 2 adds one. There are two candidate canonical modules.
+// Objects with AIE memory tables fall back to independent compilation because
+// generic objcopy cannot preserve that metadata. Either path must produce
+// exactly the same per-core ELF as independent compilation.
 
 // REQUIRES: peano
 
@@ -25,9 +27,9 @@
 // RUN: cmp %t/elfs_main_core_1_2/elfs_main_core_1_2.elf %t/own/elfs_main_core_1_2/elfs_main_core_1_2.elf
 // RUN: cmp %t/elfs_main_core_2_2/elfs_main_core_2_2.elf %t/own/elfs_main_core_2_2/elfs_main_core_2_2.elf
 
-// LOG-DAG: aiecc: main_core_0_2: {{.*}}canonical_{{[0-9A-F]+}}.o renamed to {{.*}}objects_main_core_0_2.o
-// LOG-DAG: aiecc: main_core_1_2: {{.*}}canonical_{{[0-9A-F]+}}.o renamed to {{.*}}objects_main_core_1_2.o
-// LOG-DAG: aiecc: main_core_2_2: {{.*}}canonical_{{[0-9A-F]+}}.o renamed to {{.*}}objects_main_core_2_2.o
+// LOG-DAG: aiecc: main_core_0_2: {{.*}}canonical_{{[0-9A-F]+}}.o {{renamed to|recompiled as}} {{.*}}objects_main_core_0_2.o
+// LOG-DAG: aiecc: main_core_1_2: {{.*}}canonical_{{[0-9A-F]+}}.o {{renamed to|recompiled as}} {{.*}}objects_main_core_1_2.o
+// LOG-DAG: aiecc: main_core_2_2: {{.*}}canonical_{{[0-9A-F]+}}.o {{renamed to|recompiled as}} {{.*}}objects_main_core_2_2.o
 
 // CORE02-DAG: FUNC GLOBAL DEFAULT {{.*}} core_0_2
 // CORE02-DAG: in0__cons__buf0

@@ -219,6 +219,10 @@ def test_seed_sweep_provisions_python_before_creating_the_environment():
     assert setup_index < env_index
 
 
+@pytest.mark.skipif(
+    not (WORKFLOWS / "buildRyzenWheels.yml").exists(),
+    reason="this fork does not carry buildRyzenWheels.yml",
+)
 def test_ryzen_wheel_publish_workflow_gates_on_both_os_builds():
     publish = workflow("buildRyzenWheels.yml")
     assert "pull_request" not in publish["on"]
@@ -873,6 +877,10 @@ def test_a_hosted_job_runs_the_page_tests_instead_of_skipping_them():
     assert job["env"]["MLIR_AIE_REQUIRE_NODE"] == "1"
 
 
+@pytest.mark.skipif(
+    not (WORKFLOWS / "generateDocs.yml").exists(),
+    reason="this fork does not carry generateDocs.yml",
+)
 def test_the_docs_deploy_keeps_what_the_nightlies_publish(tmp_path):
     """The docs deploy clears the gh-pages root of everything mike does not
     own; the nightlies' directories must survive it."""

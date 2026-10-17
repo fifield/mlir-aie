@@ -14,10 +14,16 @@
 // RUN: %aiecc -v --no-unified --get-core-elfs --tmpdir %t.p.prj --output-dir %t.p.out %s 2>&1 | FileCheck %s
 // RUN: %aiecc -v --unified --get-core-elfs --tmpdir %t.u.prj --output-dir %t.u.out %s 2>&1 | FileCheck %s
 //
-// CHECK-DAG: exec: {{.*}}/llc {{.*}}main_core_0_2.ll -O2 --march=aie4 --mcpu=aie4b -disable-machine-cse -aie4postlegalizergenericcombiner-disable-rule=combine_indexed_to_autoinc -aie4postlegalizercustomcombiner-disable-rule=combine_staging_upd_load,combine_indexed_to_autoinc --function-sections
-// CHECK-DAG: exec: {{.*}}/llc {{.*}}main_core_1_2.ll -O2 --march=aie4 --mcpu=aie4b -aie4postlegalizergenericcombiner-disable-rule=combine_indexed_to_autoinc -aie4postlegalizercustomcombiner-disable-rule=combine_staging_upd_load,combine_indexed_to_autoinc --function-sections
+// CHECK-DAG: exec: {{.*}}/llc {{.*}}peano-opted_[[FP8:canonical_[0-9A-F_]+]].ll -O2 --march=aie4 --mcpu=aie4b -disable-machine-cse -aie4postlegalizergenericcombiner-disable-rule=combine_indexed_to_autoinc -aie4postlegalizercustomcombiner-disable-rule=combine_staging_upd_load,combine_indexed_to_autoinc --function-sections
+// CHECK-DAG: exec: {{.*}}/llc {{.*}}peano-opted_[[INT8:canonical_[0-9A-F_]+]].ll -O2 --march=aie4 --mcpu=aie4b -aie4postlegalizergenericcombiner-disable-rule=combine_indexed_to_autoinc -aie4postlegalizercustomcombiner-disable-rule=combine_staging_upd_load,combine_indexed_to_autoinc --function-sections
 
-// CHECK-DAG: exec: {{.*}}/llc {{.*}}main_core_2_2.ll -O2 --march=aie4 --mcpu=aie4b --function-sections
+// CHECK-DAG: exec: {{.*}}/llc {{.*}}peano-opted_[[PLAIN:canonical_[0-9A-F_]+]].ll -O2 --march=aie4 --mcpu=aie4b --function-sections
+
+// Match each canonical object back to its core, so the flag sets cannot
+// accidentally pass when assigned to the wrong core.
+// CHECK-DAG: aiecc: main_core_0_2: {{.*}}/[[FP8]].o {{renamed to|recompiled as}} {{.*}}/objects_main_core_0_2.o
+// CHECK-DAG: aiecc: main_core_1_2: {{.*}}/[[INT8]].o {{renamed to|recompiled as}} {{.*}}/objects_main_core_1_2.o
+// CHECK-DAG: aiecc: main_core_2_2: {{.*}}/[[PLAIN]].o {{renamed to|recompiled as}} {{.*}}/objects_main_core_2_2.o
 
 module {
   aie.device(npu3) {

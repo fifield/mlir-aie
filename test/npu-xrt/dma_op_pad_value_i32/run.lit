@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 // REQUIRES: ryzen_ai
+// UNSUPPORTED: ryzen_ai_npu3
+// This runner uses the NPU1/NPU2 XCLBIN path, not NPU3 full ELF.
 //
 // RUN: cp %S/aie.mlir aie_arch.mlir
 // RUN: sed 's/NPUDEVICE/npu2_1col/g' -i aie_arch.mlir
