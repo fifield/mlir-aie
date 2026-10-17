@@ -583,24 +583,23 @@ struct AIEDMATasksToNPUPass
           id += *offset;
       return id;
     };
+    // Semaphore-lock BDs may acquire, release, or do both.
+    if (acquire_op) {
+      AIE::LockOp acq_lock = acquire_op.getLockOp();
+      if (std::optional<int32_t> acqLockId = acq_lock.getLockID()) {
+        f.lock_acq_id = lockIdFor(acq_lock, *acqLockId);
+        if (failed(lockValue(acquire_op, f.lock_acq_val, f.lock_acq_val_val)))
+          return failure();
+        f.lock_acq_enable = 1;
+      }
+    }
     if (release_op) {
       AIE::LockOp rel_lock = release_op.getLockOp();
-
-      // Acquire is optional under out-of-order (release-only completion).
-      if (acquire_op) {
-        AIE::LockOp acq_lock = acquire_op.getLockOp();
-        if (std::optional<int32_t> acqLockId = acq_lock.getLockID()) {
-          f.lock_acq_id = lockIdFor(acq_lock, *acqLockId);
-          if (failed(lockValue(acquire_op, f.lock_acq_val, f.lock_acq_val_val)))
-            return failure();
-          f.lock_acq_enable = 1;
-        }
-      }
-
       if (std::optional<int32_t> relLockId = rel_lock.getLockID()) {
         f.lock_rel_id = lockIdFor(rel_lock, *relLockId);
         if (failed(lockValue(release_op, f.lock_rel_val, f.lock_rel_val_val)))
           return failure();
+
       }
     }
     return f;

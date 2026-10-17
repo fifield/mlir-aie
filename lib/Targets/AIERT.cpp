@@ -412,12 +412,20 @@ configureLocksInBdBlock(const AIE::AIETargetModel &targetModel,
   }
 
 
+
   bool relEn = false;
-  if (outOfOrder && !acqLockId) {
-    // Release-only out-of-order BD: point the disabled acquire lock at the
-    // release lock so XAie_LockInit gets a valid id.
+  if (!acqLockId) {
+    // Release-only BD (out-of-order, or a semaphore-lock sync BD): point the
+    // disabled acquire lock at the release lock so XAie_LockInit gets a valid
+    // id.
     acqLockId = relLockId;
     acqValue = 0;
+    acqEn = false;
+  }
+  if (!relLockId) {
+    // Acquire-only BD: a release value of 0 releases nothing.
+    relLockId = acqLockId;
+    relValue = 0;
   }
   assert(acqLockId && acqValue && relLockId && relValue &&
          "lock values must be resolved before init");

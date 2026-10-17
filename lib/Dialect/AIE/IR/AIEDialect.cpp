@@ -4591,6 +4591,13 @@ LogicalResult xilinx::AIE::verifyBdLockPair(Block &block, bool outOfOrder,
     return success();
   if (release && (acquire || outOfOrder))
     return success();
+  // AIE4 BDs enable the acquire with its own bit (Lock_Acq_Enable) and release
+  // nothing when Lock_Rel_Value is 0, so an acquire-only or release-only BD is
+  // expressible. Zero-length sync BDs and multi-BD transfers that acquire on
+  // their first BD and release on their last use it.
+  if (Operation *parent = block.getParentOp())
+    if (getTargetModel(parent).getTargetArch() == AIEArch::AIE4)
+      return success();
   return reject(acquire ? acquire : release);
 }
 

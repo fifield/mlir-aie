@@ -525,9 +525,10 @@ verifyOutOfOrderChannel(mlir::Operation *op, DMAChannelDir dir, bool outOfOrder,
                         bool packetEnabledByContext = false);
 
 // Validate the use_locks of one BD block and return them. A BD has one acquire
-// field and one release field; by convention the block uses either no lock or
-// both, except that an out-of-order BD may release alone. Either result is
-// null when the block has no such lock.
+// field and one release field; the block uses at most one of each. By
+// convention it uses either no lock or both, except that an out-of-order BD may
+// release alone, and on AIE4 an acquire-only or release-only BD is allowed.
+// Either result is null when the block has no such lock.
 mlir::LogicalResult verifyBdLockPair(mlir::Block &block, bool outOfOrder,
                                      UseLockOp &acquire, UseLockOp &release);
 
