@@ -1,14 +1,13 @@
 # Copyright (C) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-# Baseline copied from the superproject's utils/aie4_intrinsics_snapshot.yaml.
-# Source: llvm-aie e73e9ffae72bb28f1435319b503ec4e0de99e7c3 (2026-09-12).
+# Source: llvm-aie ee34ee9e960e28f47f617ff4e8647dd505873086 (2026-10-17).
 # The source revision is independent of utils/aie4-peano-requirements.txt.
 # Regenerate manually with gen_aie4_intrinsics_snapshot.py; see README.md.
 schema_version: 1
 description: Signature snapshot of AIE4 LLVM IR intrinsics (int_aie4_* records), generated from the pinned
-  llvm-aie submodule. Used for drift detection against a weekly-floating toolchain pin -- see utils/aie4/check_aie4_intrinsics.py.
-  Do not hand-edit; regenerate with utils/aie4/gen_aie4_intrinsics_snapshot.py.
+  llvm-aie submodule. Used for drift detection against a weekly-floating toolchain pin -- see check_aie4_intrinsics.py.
+  Do not hand-edit; regenerate with gen_aie4_intrinsics_snapshot.py.
 count: 527
 intrinsics:
 - name: llvm.aie4.I1024.ACC2048.mac.c
@@ -7742,5 +7741,5 @@ intrinsics:
   - llvm_i32_ty
   - llvm_ptr_ty
   properties:
-  - IntrWriteMem
+  - IntrArgMemOnly
   disable_default_attributes: 0
