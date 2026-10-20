@@ -238,6 +238,10 @@ def test_ryzen_wheel_publish_workflow_gates_on_both_os_builds():
     assert set(jobs["publish"]["needs"]) == {"linux-wheels", "windows-wheels"}
 
 
+@pytest.mark.skipif(
+    not (WORKFLOWS / "buildRyzenWheelsLinux.yml").exists(),
+    reason="this fork does not carry buildRyzenWheelsLinux.yml",
+)
 def test_ryzen_linux_npu_smoke_depends_only_on_its_wheel():
     jobs = workflow("buildRyzenWheelsLinux.yml")["jobs"]
 
@@ -249,6 +253,10 @@ def test_ryzen_linux_npu_smoke_depends_only_on_its_wheel():
     assert jobs["smoke-test-npu"]["needs"] == "build-linux-npu-wheel"
 
 
+@pytest.mark.skipif(
+    not (WORKFLOWS / "buildRyzenWheelsWindows.yml").exists(),
+    reason="this fork does not carry buildRyzenWheelsWindows.yml",
+)
 def test_ryzen_windows_smoke_tests_are_per_wheel():
     jobs = workflow("buildRyzenWheelsWindows.yml")["jobs"]
 
