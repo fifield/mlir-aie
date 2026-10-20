@@ -1,7 +1,7 @@
 # Copyright (C) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Generate npu3 int8 GEMM: C = A @ W.T, with int8 or int32 output.
+"""Generate npu3 GEMM: C = A @ W.T for int8, fp8 or bf16 inputs.
 
 A stays in L1; W streams from the memtile into MMAC staging. See README.md
 for data layouts, configuration constraints and usage.
@@ -18,9 +18,23 @@ from aie.dialects.aiex import *
 from aie.extras.context import mlir_mod_ctx
 from aie.helpers.dialects.scf import _for as range_
 
+# Input type -> (bytes per element, allowed outputs with the default first).
+# Int types accumulate in int32; fp8 and bf16 in fp32. u8 is unsigned x
+# unsigned; i8u8 / u8i8 are A x W with the given signedness; i4 is signed.
+DTYPES = {
+    "i8": (1, ("i8", "i32")),
+    "u8": (1, ("u8", "i32")),
+    "i8u8": (1, ("i8", "i32")),
+    "u8i8": (1, ("i8", "i32")),
+    "i4": (0.5, ("i8", "i32")),
+    "fp8": (1, ("fp8", "bf16", "f32")),
+    "bf16": (2, ("bf16", "f32")),
+}
+OUT_BYTES = {"i8": 1, "u8": 1, "fp8": 1, "bf16": 2, "i32": 4, "f32": 4}
+
 N_COLS = 3  # active columns, overridden by --cols
 N_ROWS = 4
-TILE = 64  # MMAC tile edge (int8: 1x64 . 64x64)
+TILE = 64  # MMAC tile edge, also bytes per K-tile (int8 1x64 . 64x64)
 W_STREAM_PORT = 1  # must match W_STREAM in kernel.cc
 MT_BYTES = 3 << 20  # memtile data memory
 MT_MM2S_W = 6  # memtile MM2S: W replay (hand-written)
@@ -33,7 +47,7 @@ def build(
     M,
     N,
     K,
-    out_i8,
+    out,
     iters,
     a_bcast,
     ct,
@@ -44,12 +58,22 @@ def build(
     c_run=1024,
     kernel="extern",
     shift=12,
+    dtype="i8",
 ):
-    assert K % TILE == 0 and K >= 2 * TILE, "K must be a multiple of 64, >= 128"
+    # Element size of A and W. K is in elements; Kb is the row length in
+    # bytes, which sets all DMA geometry (a K-tile is always 64 bytes).
+    esize, outs = DTYPES[dtype]
+    Kb = int(K * esize)
+    assert out in outs, f"--dtype {dtype} outputs {', '.join(outs)}"
+    assert Kb % TILE == 0 and Kb >= 2 * TILE, (
+        f"K must be a multiple of {int(TILE / esize)} (one 64-byte K-tile of "
+        f"{dtype}), with >= 2 K-tiles"
+    )
     assert M % (N_ROWS * TILE) == 0, "M must be a multiple of 256"
     assert N % (N_COLS * TILE) == 0, "N must be a multiple of 192"
     MB = M // (N_ROWS * TILE)  # M-blocks
     assert kernel in ("extern", "aievec")
+    assert kernel != "aievec" or dtype == "i8", "--kernel aievec requires --dtype i8"
     # aievec: a C objectfifo acquire inside the group loop would make
     # objectfifo lowering unroll the loop and copy the tile body.
     assert kernel == "extern" or c_reasm, "--kernel aievec requires --c-reasm 1"
@@ -58,7 +82,7 @@ def build(
     NT = N // (N_COLS * TILE)  # output tiles per core per M-block
     assert NT % ct == 0, "N / (cols*64) must be a multiple of CT"
     NG = NT // ct  # C buffers per core per M-block (CT tiles each)
-    out_bytes = 1 if out_i8 else 4
+    out_bytes = OUT_BYTES[out]
     # FIFO channels must stay below the reserved W replay and C drain channels.
     a_rows_per_src = -(-N_ROWS // N_COLS) if a_bcast else N_ROWS
     fifo_mm2s = a_rows_per_src * a_split + (0 if c_reasm else 2)
@@ -77,8 +101,8 @@ def build(
     NGS = RW // grp_b  # core buffers per sub-block
 
     # Memtile capacity (the column sourcing the most A row-blocks).
-    a_mt_b = 2 * a_rows_per_src * TILE * K  # A_mt, depth 2
-    w_b = wbuf * NT * TILE * K  # W strip buffers
+    a_mt_b = 2 * a_rows_per_src * TILE * Kb  # A_mt, depth 2
+    w_b = wbuf * NT * TILE * Kb  # W strip buffers
     c_b = 2 * N_ROWS * TILE * (RW if c_reasm else grp_b)  # C ping/pong
     mt_b = a_mt_b + w_b + c_b
     assert mt_b <= MT_BYTES, (
@@ -88,9 +112,9 @@ def build(
     )
 
     # All host buffers and FIFO element types are i32 words; the kernel
-    # reinterprets them as int8 (or int32 for C).
-    a_core_w = TILE * K // 4  # one core's A slice (64 x K int8)
-    w_strip_w = NT * TILE * K // 4  # one column's W strip
+    # reinterprets them as the A/W element type (and the output type for C).
+    a_core_w = TILE * Kb // 4  # one core's A slice (64 rows x Kb bytes)
+    w_strip_w = NT * TILE * Kb // 4  # one column's W strip
     c_core_w = TILE * ct * TILE * out_bytes // 4  # 64 rows x CT tiles
 
     @device(AIEDevice.npu3)
@@ -99,8 +123,8 @@ def build(
         a_part_ty = np.ndarray[(a_core_w // a_split,), np.dtype[np.int32]]
         w_strip_ty = np.ndarray[(w_strip_w,), np.dtype[np.int32]]
         c_core_ty = np.ndarray[(c_core_w,), np.dtype[np.int32]]
-        a_host_ty = np.ndarray[(M * K // 4,), np.dtype[np.int32]]
-        w_host_ty = np.ndarray[(N * K // 4,), np.dtype[np.int32]]
+        a_host_ty = np.ndarray[(M * Kb // 4,), np.dtype[np.int32]]
+        w_host_ty = np.ndarray[(N * Kb // 4,), np.dtype[np.int32]]
         c_host_ty = np.ndarray[(M * N * out_bytes // 4,), np.dtype[np.int32]]
 
         if kernel == "extern":
@@ -152,8 +176,8 @@ def build(
                     (empty[b], per * reps),
                     (full[b], per * reps),
                     dict(
-                        sizes=[NT, TILE, K // TILE, TILE // 4],
-                        strides=[TILE * K // 4, TILE // 4, TILE * TILE // 4, 1],
+                        sizes=[NT, TILE, Kb // TILE, TILE // 4],
+                        strides=[TILE * Kb // 4, TILE // 4, TILE * TILE // 4, 1],
                     ),
                 )
                 for b in range(nb)
@@ -198,7 +222,7 @@ def build(
         # Retile A from [row][K] to [kt][row][64]. Broadcast mode distributes
         # DDR reads across shims and sends each row group to all columns.
         # a_split=2 feeds two 32-row halves through separate core S2MM channels.
-        a_dims = [(K // TILE, TILE // 4), (a_part_rows, K // 4), (TILE // 4, 1)]
+        a_dims = [(Kb // TILE, TILE // 4), (a_part_rows, Kb // 4), (TILE // 4, 1)]
         if a_bcast:
             bounds = [round(i * N_ROWS / N_COLS) for i in range(N_COLS + 1)]
             a_srcs = [
@@ -227,7 +251,7 @@ def build(
                         dimensionsToStream=a_dims,
                     )
                     fifos.append(f)
-                    offsets.append(i * a_core_w + h * a_part_rows * K // 4)
+                    offsets.append(i * a_core_w + h * a_part_rows * Kb // 4)
                     parts.append(f)
                 for c in dests:
                     a_core[c][r] = parts
@@ -433,7 +457,7 @@ def build(
                         NG=NG,
                         ct=ct,
                         a_split=a_split,
-                        out_i8=out_i8,
+                        out_i8=out == "i8",
                         shift=shift,
                         trace=bool(trace_size),
                     )
@@ -552,8 +576,8 @@ def build(
                             f"W_in{c}",
                             W,
                             offset=c * w_strip_w,
-                            sizes=[1, NT, TILE, K // 4],
-                            strides=[0, TILE * K // 4, K // 4, 1],
+                            sizes=[1, NT, TILE, Kb // 4],
+                            strides=[0, TILE * Kb // 4, Kb // 4, 1],
                             issue_token=True,
                         )
                     )
@@ -563,9 +587,9 @@ def build(
                             shim_dma_single_bd_task(
                                 a_mt[c],
                                 A,
-                                offset=rows[0] * TILE * K // 4,
-                                sizes=[1, MB, len(rows) * TILE, K // 4],
-                                strides=[0, N_ROWS * TILE * K // 4, K // 4, 1],
+                                offset=rows[0] * TILE * Kb // 4,
+                                sizes=[1, MB, len(rows) * TILE, Kb // 4],
+                                strides=[0, N_ROWS * TILE * Kb // 4, Kb // 4, 1],
                                 issue_token=True,
                             )
                         )
@@ -864,11 +888,18 @@ def aievec_core(core_tile, a_fifos, c_l1, *, K, NG, ct, a_split, out_i8, shift, 
 
 
 if __name__ == "__main__":
-    p = argparse.ArgumentParser(description="int8 GEMM for npu3")
+    p = argparse.ArgumentParser(description="GEMM for npu3")
     p.add_argument("-M", type=int, default=2048)
     p.add_argument("-N", type=int, default=3072)
     p.add_argument("-K", type=int, default=1024)
-    p.add_argument("--out", choices=["i8", "i32"], default="i8")
+    p.add_argument("--out", choices=sorted(OUT_BYTES), default=None)
+    p.add_argument(
+        "--dtype",
+        choices=list(DTYPES),
+        default="i8",
+        help="A/W type: int8 variants and int4 accumulate to int32; fp8 (E4M3) "
+        "and bf16 to fp32",
+    )
     p.add_argument("--iters", type=int, default=1, help="GEMMs per launch")
     p.add_argument("--cols", type=int, default=3, help="array columns (1-3)")
     p.add_argument(
@@ -912,15 +943,21 @@ if __name__ == "__main__":
     )
     args = p.parse_args()
     if args.kernel == "aievec":
+        if args.dtype != "i8":
+            p.error("--kernel aievec requires --dtype i8")
         # A C acquire in the group loop would be unrolled with the tile body.
         assert args.c_reasm, "--kernel aievec requires --c-reasm 1"
+    if args.out is None:
+        args.out = DTYPES[args.dtype][1][0]
+    if args.out not in DTYPES[args.dtype][1]:
+        p.error(f"--dtype {args.dtype} outputs {', '.join(DTYPES[args.dtype][1])}")
     N_COLS = args.cols
     with mlir_mod_ctx() as ctx:
         build(
             args.M,
             args.N,
             args.K,
-            args.out == "i8",
+            args.out,
             args.iters,
             bool(args.a_bcast),
             args.ct,
@@ -931,6 +968,7 @@ if __name__ == "__main__":
             args.c_run,
             args.kernel,
             args.shift,
+            args.dtype,
         )
         res = ctx.module.operation.verify()
         if res is not True:

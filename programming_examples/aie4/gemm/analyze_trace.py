@@ -133,7 +133,7 @@ def main():
         )
         ax.invert_yaxis()
         ax.set_xlabel("us")
-        ax.set_title("gemm_int8 event trace (column 0)")
+        ax.set_title("gemm event trace (column 0)")
         fig.tight_layout()
         fig.savefig(args.timeline, dpi=130)
         print(f"timeline -> {args.timeline}")

@@ -3,7 +3,7 @@
 
 # GEMM core in flat AIEVec
 
-`KERNEL=aievec` emits the core computation in `gemm_int8_placed.py` using
+`KERNEL=aievec` emits the core computation in `gemm_placed.py` using
 `stage_stream`, `commit`, `mmac_active` and `srs`. Peano compiles the core without
 an external `kernel.o`. Placement, DMA, routing, locks and the host reference are
 shared with the C kernel. See [README.md](README.md) for usage and performance

@@ -1,12 +1,26 @@
 <!-- Copyright (C) 2026 Advanced Micro Devices, Inc. -->
 <!-- SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception -->
 
-# int8 GEMM on npu3 (AIE4)
+# Integer and floating-point GEMM on npu3 (AIE4)
 
-This example computes `C = A × Wᵀ` with int8 inputs and int32 accumulation.
+This example computes `C = A × Wᵀ` for several input types, selected with
+`DTYPE`:
+
+| `DTYPE` | A × W | Accumulator | `OUT` choices (default first) | MMAC tile |
+|---|---|---|---|---|
+| `i8` | int8 × int8 | int32 | `i8`, `i32` | 1×64 · 64×64 |
+| `u8` | uint8 × uint8 | int32 | `u8`, `i32` | 1×64 · 64×64 |
+| `i8u8` | int8 × uint8 | int32 | `i8`, `i32` | 1×64 · 64×64 |
+| `u8i8` | uint8 × int8 | int32 | `i8`, `i32` | 1×64 · 64×64 |
+| `i4` | int4 × int4 | int32 | `i8`, `i32` | 1×128 · 128×64 |
+| `fp8` | fp8 E4M3 | fp32 | `fp8`, `bf16`, `f32` | 1×64 · 64×64 |
+| `bf16` | bfloat16 | fp32 | `bf16`, `f32` | 1×32 · 32×64 |
+
 `A[M][K]`, `W[N][K]` and `C[M][N]` are row-major host buffers; DMA programs
-handle tiling. Output is either int8, rounded with ties toward positive infinity
-and saturated after a right shift, or raw int32.
+handle tiling. `K` counts elements; int4 packs two per byte, low nibble first.
+Narrow integer output (`i8`, `u8`) is rounded with ties toward positive infinity
+and saturated after a right shift. fp8 and bf16 output round to nearest even.
+`i32` and `f32` are raw accumulators.
 
 ## Build and run
 
@@ -17,6 +31,11 @@ compiler (`AIETOOLS_DIR`), and XRT. Running requires an npu3 device.
 make run                       # M=2048 N=3072 K=1024, int8 output
 make run M=512 N=768 ITERS=10
 make run OUT=i32                # raw int32 output
+make run DTYPE=fp8              # fp8 inputs, fp8 output (K=1024)
+make run DTYPE=bf16             # bf16 inputs, bf16 output (K=512)
+make run DTYPE=bf16 OUT=f32     # raw fp32 output
+make run DTYPE=i4               # int4 inputs, int8 output (K=2048)
+make run DTYPE=u8i8             # uint8 A, int8 W
 make run WBUF=1                 # one W strip buffer
 make run ABCAST=0 ASPLIT=1       # fetch A separately for each column
 make run C_REASM=0              # drain C through two joins per column
@@ -28,14 +47,15 @@ in `kernel_K*` directories by their compilation parameters.
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `M`, `N`, `K` | 2048, 3072, 1024 | Matrix dimensions |
+| `DTYPE` | `i8` | Input type: `i8`, `fp8` or `bf16` |
+| `M`, `N`, `K` | 2048, 3072, 1024 (`K`=512 for `bf16`, 2048 for `i4`) | Matrix dimensions; `K` in elements |
 | `COLS` | 3 | Active columns (1–3), with four cores each |
-| `OUT` | `i8` | Output type: `i8` or `i32` |
-| `SHIFT` | 12 | Right shift for int8 output, in [0, 59] |
+| `OUT` | per `DTYPE` | Output type; see the table above |
+| `SHIFT` | 12 | Right shift for narrow integer output, in [0, 59]; unused for float types |
 | `ITERS` | 1 | GEMMs per launch |
 | `ABCAST` | 1 | Broadcast A across columns; 0 fetches A per column |
 | `ASPLIT` | 2 | Core DMA channels for A: 1 or 2 |
-| `CT` | 4 for `i8`, 1 for `i32` | C tiles per core buffer |
+| `CT` | 4 for 1-byte C, 2 for `bf16` output, 1 for 4-byte C | C tiles per core buffer |
 | `WBUF` | 2 | Memtile W strip buffers: 1 or 2 |
 | `C_REASM` | 1 | Reassemble C in the memtile; 0 uses two joins per column |
 | `C_RUN` | 1024 | Target maximum C write-run length in bytes with reassembly |
@@ -44,10 +64,12 @@ in `kernel_K*` directories by their compilation parameters.
 | `KERNEL_CC` | `chess` | Kernel compiler: `chess` or `peano` |
 
 The host verifies C against a CPU reference after the first and final timed
-launches. It poisons C before the final launch, outside the measured interval,
+launches. Integer results are bit-exact. Float results are checked against a double
+reference with a tolerance of 2⁻¹⁶ of Σ|a·w| for accumulation order, plus half
+an output ulp for `bf16` and `fp8` output. It poisons C before the final launch, outside the measured interval,
 to detect missing writes. `TIMING=1` also reports tile periods; its timestamps overwrite C values
 and cause verification mismatches. The host reports median and best time per GEMM, throughput, and the fraction
-of an estimated compute peak. Set `AIE_CLK_GHZ` to override the clock used for
+of an estimated compute peak (4096 MAC/cycle per core, 2048 for `bf16`, 8192 for `i4`). Set `AIE_CLK_GHZ` to override the clock used for
 that estimate. Increasing `ITERS` amortizes launch overhead.
 
 ## Design
@@ -80,10 +102,16 @@ Reassembly widens C write runs up to the column-strip width, subject to
 ### Configuration constraints
 
 - `M` must be a multiple of 256, `N` a multiple of `COLS × 64 × CT`, and
-  `K` a multiple of 64 with `K >= 128`.
-- Core L1 must fit `64 × K` bytes of A, two C buffers of
-  `64 × CT × 64 × sizeof(C element)` bytes each, and the stack. Keep
-  `K <= 1024`; larger C buffers can require a smaller K or CT.
+  `K` a multiple of 64 (32 for `bf16`, 128 for `i4`) with at least two K-tiles.
+  A K-tile is always 64 bytes per A row: 64 int8 or fp8 elements, 32 bf16
+  elements or 128 int4 elements.
+- Core L1 must fit `64 × K × sizeof(A element)` bytes of A, two C buffers of
+  `64 × CT × 64 × sizeof(C element)` bytes each, and the stack. Keep A at or
+  below 1024 bytes per row (`K <= 1024`, `K <= 512` for `bf16`, `K <= 2048`
+  for `i4`); larger C buffers can require a smaller K or CT.
+- The DMA programs depend only on byte counts, so the generator, the memtile
+  budget and the layouts below hold for all types with `K` replaced by bytes
+  per row.
 - `SHIFT=0` saturates the unshifted accumulator to int8.
 - The generator checks that A, W and C buffers fit in the memtile. If they
   do not, reduce `WBUF`, `N` or `C_RUN`. Two W buffers require
@@ -105,7 +133,10 @@ without it.
 
 ## Peano kernel (`KERNEL_CC=peano`)
 
-`kernel_peano.cc` is a faithful port of `kernel.cc` to Peano builtins (same entry points,
+The Peano and AIEVec paths support `DTYPE=i8` only. Use
+`KERNEL=extern KERNEL_CC=chess` (the defaults) for fp8 and bf16.
+
+`kernel_peano.cc` implements the int8 path of `kernel.cc` with Peano builtins (same entry points,
 macros and semantics; verified bit-exact for ASPLIT=2, SHIFT=12, K=1024, CT=4 (i8) and CT=1
 (i32)). `install/peano` is a symlink to the venv llvm-aie, i.e. the same Peano build. `KERNEL_CC=peano` builds it with Peano `clang++` and lets Peano compile
 and link the cores; the build directories carry a `_peano` suffix so chess and Peano artifacts
@@ -219,7 +250,5 @@ make -C ddr_write_bench run L=1024 COLS=3 CH=1 RD=1
 (cd ddr_write_bench && ./sweep.sh "256 3 1" "1024 3 1")
 ```
 
-`check_c_reassembly.lit` checks generated DMA scheduling with delayed producers
-and verifies FIFO lowering, lock/BD allocation, buffer placement and routing
-without hardware. `run_npu3_makefile.lit` builds and runs a GEMM with CPU
-verification and requires the `ryzen_ai_npu3` and `chess` lit features.
+`run_npu3_makefile.lit` builds and runs a GEMM with CPU verification and
+requires the `ryzen_ai_npu3` and `chess` lit features.

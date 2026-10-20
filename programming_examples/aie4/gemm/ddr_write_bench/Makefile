@@ -13,7 +13,7 @@ BURST ?= 0
 WB ?= 3072
 # Concurrent DDR read bytes per written byte.
 RD ?= 0
-# rows per shim task (gemm_int8 issues one task per 256-row M-block)
+# rows per shim task (gemm issues one task per 256-row M-block)
 BR ?= 256
 
 cfg := build_L$(L)_c$(COLS)_ch$(CH)_r$(REPS)_b$(BURST)_wb$(WB)_rd$(RD)_br$(BR)

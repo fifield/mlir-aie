@@ -5,8 +5,16 @@ srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 
 M ?= 2048
 N ?= 3072
-K ?= 1024
-OUT ?= i8
+# A/W element type; the first output listed is the default.
+#   i8, i8u8 (int8 A x uint8 W), u8i8, i4:  OUT=i8 or i32
+#   u8 (uint8 x uint8):                      OUT=u8 or i32
+#   fp8 (E4M3):                              OUT=fp8, bf16 or f32
+#   bf16:                                    OUT=bf16 or f32
+DTYPE ?= i8
+# K is in elements. Keep A at <= 1024 bytes per row: bf16 is 2 bytes per
+# element and i4 half a byte.
+K ?= $(if $(filter bf16,$(DTYPE)),512,$(if $(filter i4,$(DTYPE)),2048,1024))
+OUT ?= $(if $(filter fp8,$(DTYPE)),fp8,$(if $(filter bf16,$(DTYPE)),bf16,$(if $(filter u8,$(DTYPE)),u8,i8)))
 SHIFT ?= 12
 ITERS ?= 1
 COLS ?= 3
@@ -49,25 +57,41 @@ ksuf := _aievec$(if $(filter-out $(AIEVEC_LLC_ARGS_DEFAULT),$(AIEVEC_LLC_ARGS))$
 else
 ksuf := $(if $(filter peano,$(KERNEL_CC)),_peano)
 endif
+# The Peano and AIEVec kernels currently implement int8 inputs only.
+ifneq ($(DTYPE),i8)
+ifneq ($(filter aievec,$(KERNEL))$(filter peano,$(KERNEL_CC)),)
+$(error DTYPE=$(DTYPE) requires KERNEL=extern KERNEL_CC=chess)
+endif
+endif
 # C path: 1 reassembles wide runs; 0 joins row pairs onto two shim channels.
 C_REASM ?= 1
 C_RUN ?= 1024
 # Trace buffer bytes for column 0's cores, memtile and shim; 0 disables tracing.
 TRACE_SIZE ?= 0
 trace_on := $(if $(filter-out 0,$(TRACE_SIZE)),1,0)
-# C tiles per core buffer; int32 at K=1024 fits CT=1 in L1.
-CT ?= $(if $(filter i8,$(OUT)),4,1)
+# C tiles per core buffer; 4-byte C at 1 KiB of A per row fits CT=1 in L1.
+CT ?= $(if $(filter i8 u8 fp8,$(OUT)),4,$(if $(filter bf16,$(OUT)),2,1))
+# Non-int8 types get their own build directories; int8 names are unchanged.
+dt := $(if $(filter-out i8,$(DTYPE)),_$(DTYPE))
 
 # Cache device artifacts by configuration; kernel objects use only kernel knobs.
-cfg := build_$(M)x$(N)x$(K)_$(OUT)_s$(SHIFT)_it$(ITERS)_c$(COLS)_ab$(ABCAST)_ct$(CT)_wb$(WBUF)_as$(ASPLIT)_cr$(C_REASM)$(if $(filter-out 1024,$(C_RUN)),_run$(C_RUN))$(if $(filter 1,$(TIMING)),_tim)$(if $(filter 1,$(trace_on)),_tr$(TRACE_SIZE))$(ksuf)
-kcfg := kernel_K$(K)_$(OUT)_s$(SHIFT)_ct$(CT)_as$(ASPLIT)$(if $(filter 1,$(TIMING)),_tim)$(if $(filter 1,$(trace_on)),_tr)$(ksuf)
+cfg := build_$(M)x$(N)x$(K)_$(OUT)$(dt)_s$(SHIFT)_it$(ITERS)_c$(COLS)_ab$(ABCAST)_ct$(CT)_wb$(WBUF)_as$(ASPLIT)_cr$(C_REASM)$(if $(filter-out 1024,$(C_RUN)),_run$(C_RUN))$(if $(filter 1,$(TIMING)),_tim)$(if $(filter 1,$(trace_on)),_tr$(TRACE_SIZE))$(ksuf)
+kcfg := kernel_K$(K)_$(OUT)$(dt)_s$(SHIFT)_ct$(CT)_as$(ASPLIT)$(if $(filter 1,$(TIMING)),_tim)$(if $(filter 1,$(trace_on)),_tr)$(ksuf)
 out_i8 := $(if $(filter i8,$(OUT)),1,0)
-out_bits := $(if $(filter i8,$(OUT)),8,32)
+out_bits := $(if $(filter i8 u8 fp8,$(OUT)),8,$(if $(filter bf16,$(OUT)),16,32))
+out_u8 := $(if $(filter u8,$(OUT)),1,0)
+out_bf16 := $(if $(filter bf16,$(OUT)),1,0)
+out_fp8 := $(if $(filter fp8,$(OUT)),1,0)
+dtype_def := $(strip $(if $(filter fp8,$(DTYPE)),-DDTYPE_FP8) \
+	$(if $(filter bf16,$(DTYPE)),-DDTYPE_BF16) \
+	$(if $(filter i4,$(DTYPE)),-DDTYPE_I4) \
+	$(if $(filter u8 u8i8,$(DTYPE)),-DA_UNS=1) \
+	$(if $(filter u8 i8u8,$(DTYPE)),-DW_UNS=1))
 
 # A failed generator run must not leave an empty .mlir that looks up to date.
 .DELETE_ON_ERROR:
 
-all: $(cfg)/gemm_int8.elf test.exe
+all: $(cfg)/gemm.elf test.exe
 
 test.exe: ${srcdir}/test.cpp
 	clang++ -std=c++17 -O3 -I/opt/xilinx/xrt/include \
@@ -81,7 +105,7 @@ else
 kobj := $(kcfg)/kernel.o
 endif
 
-kdefs := -DK_DIM=$(K) -DOUT_I8=$(out_i8) -DOUT_SHIFT=$(SHIFT) -DCT=$(CT) -DTIMING=$(TIMING) -DTRACE=$(trace_on) -DA_SPLIT=$(ASPLIT)
+kdefs := -DK_DIM=$(K) $(dtype_def) -DOUT_I8=$(out_i8) -DOUT_U8=$(out_u8) -DOUT_BF16=$(out_bf16) -DOUT_FP8=$(out_fp8) -DOUT_SHIFT=$(SHIFT) -DCT=$(CT) -DTIMING=$(TIMING) -DTRACE=$(trace_on) -DA_SPLIT=$(ASPLIT)
 ifeq ($(KERNEL),aievec)
 else ifeq ($(KERNEL_CC),peano)
 $(if $(PEANO),,$(error PEANO_INSTALL_DIR not set))
@@ -103,22 +127,22 @@ endif
 # KERNEL=aievec also depends on the AIEVec helper builders.
 aievec_py := $(if $(filter aievec,$(KERNEL)),$(srcdir)/../../../python/helpers/dialects/aievec_aie4.py)
 
-$(cfg)/gemm_int8.mlir: ${srcdir}/gemm_int8_placed.py $(aievec_py)
+$(cfg)/gemm.mlir: ${srcdir}/gemm_placed.py $(aievec_py)
 	mkdir -p $(cfg)
-	python3 $< -M $(M) -N $(N) -K $(K) --out $(OUT) --iters $(ITERS) --cols $(COLS) --a-bcast $(ABCAST) --ct $(CT) --wbuf $(WBUF) --a-split $(ASPLIT) --c-reasm $(C_REASM) --c-run $(C_RUN) --trace-size $(TRACE_SIZE)$(if $(filter aievec,$(KERNEL)), --kernel aievec --shift $(SHIFT)) > $@
+	python3 $< -M $(M) -N $(N) -K $(K) --dtype $(DTYPE) --out $(OUT) --iters $(ITERS) --cols $(COLS) --a-bcast $(ABCAST) --ct $(CT) --wbuf $(WBUF) --a-split $(ASPLIT) --c-reasm $(C_REASM) --c-run $(C_RUN) --trace-size $(TRACE_SIZE)$(if $(filter aievec,$(KERNEL)), --kernel aievec --shift $(SHIFT)) > $@
 
-$(cfg)/gemm_int8.elf: $(cfg)/gemm_int8.mlir $(kobj)
+$(cfg)/gemm.elf: $(cfg)/gemm.mlir $(kobj)
 	mkdir -p $(cfg)/project
 	$(if $(kobj),cp $(kobj) $(cfg)/project/kernel.o)
 	# Lower FIFOs before tracing to avoid counting C FIFOs as trace channels.
 	cd $(cfg) && $(if $(filter 1,$(trace_on)),aie-opt --aie-objectFifo-stateful-transform \
-		gemm_int8.mlir -o gemm_int8_in.mlir,cp gemm_int8.mlir gemm_int8_in.mlir)
+		gemm.mlir -o gemm_in.mlir,cp gemm.mlir gemm_in.mlir)
 	cd $(cfg) && aiecc -v --tmpdir=project $(core_flags) --dump-intermediates \
-		--get-full-elf --full-elf-name=gemm_int8.elf gemm_int8_in.mlir \
+		--get-full-elf --full-elf-name=gemm.elf gemm_in.mlir \
 		> aiecc.log 2>&1 || (grep -i error aiecc.log | head -20; false)
 
 run: all
-	./test.exe $(cfg)/gemm_int8.elf $(M) $(N) $(K) $(out_bits) $(SHIFT) $(ITERS) $(COLS) $(if $(filter 1,$(TIMING)),timing) $(if $(filter 1,$(trace_on)),trace=$(TRACE_SIZE))
+	./test.exe $(cfg)/gemm.elf $(M) $(N) $(K) $(out_bits) $(SHIFT) $(ITERS) $(COLS) dtype=$(DTYPE) $(if $(filter 1,$(TIMING)),timing) $(if $(filter 1,$(trace_on)),trace=$(TRACE_SIZE))
 
 # Static gate for KERNEL=aievec: .text budget, exact instruction counts and
 # the zb/za timing check on each extracted K-loop (check_aievec_core.py).
@@ -128,7 +152,7 @@ run: all
 tile_copies := $(if $(filter $(N),$(shell expr $(COLS) \* 64)),1,2)
 kt2 := $(filter 128,$(K))
 ifeq ($(KERNEL),aievec)
-check_aievec: $(cfg)/gemm_int8.elf
+check_aievec: $(cfg)/gemm.elf
 	python3 $(srcdir)/check_aievec_core.py $(cfg)/project --out $(OUT) --max-text 16384 --schedule \
 		--tile-copies $(tile_copies) --expect-kloops $(if $(kt2),0,$(tile_copies)) $(if $(kt2),--allow-spills) \
 		$(if $(strip $(AIEVEC_LLC_ARGS)),--allow-pipelined)
@@ -143,8 +167,8 @@ TRACE_PY := $(srcdir)/../../../python/utils/trace
 # Example: make run_trace TRACE_SIZE=4194304 ITERS=2
 run_trace: all
 	@test "$(trace_on)" = 1 || (echo "set TRACE_SIZE=<bytes>"; false)
-	cd $(cfg) && ../test.exe gemm_int8.elf $(M) $(N) $(K) $(out_bits) $(SHIFT) \
-		$(ITERS) $(COLS) trace=$(TRACE_SIZE)
+	cd $(cfg) && ../test.exe gemm.elf $(M) $(N) $(K) $(out_bits) $(SHIFT) \
+		$(ITERS) $(COLS) dtype=$(DTYPE) trace=$(TRACE_SIZE)
 	cd $(cfg) && $(TRACE_PY)/parse.py --input trace.txt \
 		--mlir project/input_physical.mlir --output trace.json
 	cd $(cfg) && $(TRACE_PY)/get_trace_summary.py --input trace.json

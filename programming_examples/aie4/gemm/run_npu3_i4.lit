@@ -1,0 +1,13 @@
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// GEMM int4 to int8. Each input/output pair has its own test timeout and build
+// directory: compiling all designs in one test exceeds CI's per-test time limit.
+// REQUIRES: ryzen_ai_npu3, chess
+//
+// RUN: mkdir -p test_npu3_i4
+// RUN: cd test_npu3_i4
+// RUN: make -f %S/Makefile clean
+// RUN: env AIECC_JOBS=2 make -f %S/Makefile all DTYPE=i4 M=512 N=768
+// RUN: %run_on_npu3% make -f %S/Makefile run DTYPE=i4 M=512 N=768 | FileCheck %s
+// CHECK: PASS

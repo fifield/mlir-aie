@@ -20,7 +20,7 @@ from aie.dialects.aie import *
 from aie.dialects.aiex import *
 from aie.extras.context import mlir_mod_ctx
 
-BLOCK_ROWS = 256  # rows per shim task group (gemm_int8: one M-block)
+BLOCK_ROWS = 256  # rows per shim task group (gemm: one M-block)
 SRC_WORDS = 16384  # 64 KiB memtile source buffer per channel
 FILL = 0x5A5A5A5A
 
