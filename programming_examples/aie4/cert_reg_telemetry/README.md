@@ -1,13 +1,17 @@
 # CERT register telemetry
 
-This example uses CERT job-runner registers as a tiny control-code compute
-engine and uses the uC debug stream as telemetry. It contains two designs with
+This example uses CERT job-runner registers to move data with control code
+and uses the uC debug stream as telemetry. It contains two designs with
 different record formats:
 
-- `cert_reg_snapshot.mlir` performs a pointer-walking computation and captures
-  its two results with `cert.save_register`.
-- `cert_reg_profile.mlir` uses `cert.save_timestamps` to measure a register-only
-  arithmetic block and an AXI-MM read/modify/write block.
+- `cert_reg_snapshot.mlir` performs a pointer-chasing copy and captures its two
+  results with `cert.save_register`.
+- `cert_reg_profile.mlir` uses `cert.save_timestamps` to measure an AXI-MM read
+  block and an AXI-MM copy block.
+
+The ISA has no register arithmetic and no way to load an immediate into a
+register (`MOV` and `ADD` were removed in aiebu #397), so registers
+are only ever loaded from memory with `READ_32` / `READ_32_D`.
 
 These are application-shaped examples rather than another opcode-by-opcode
 test. The exhaustive semantic regressions for the individual operations live
@@ -36,29 +40,31 @@ path and serves as a liveness and value cross-check.
 
 ## Snapshot design
 
-`cert_reg_snapshot.mlir` uses registers as pointers and values:
+`cert_reg_snapshot.mlir` uses registers as pointers and values. The pointers
+and payloads are first seeded into `obuf` with `WRITE_32`:
 
 ```text
-r0 = &obuf[0]
-r1 = *r0
-r1 += 0x23
-r0 += 4
+r0 = obuf[0]        // &obuf[1]
+r3 = obuf[3]        // &obuf[4]
+r1 = *r3
 *r0 = r1
 SAVE_REGISTER(&obuf[1], 201)
 
-r2 = obuf[1]
-r2 += 0x100
+r2 = obuf[5]
 obuf[2] = r2
 SAVE_REGISTER(&obuf[2], 202)
 ```
 
-Starting from `obuf[0] = 0x100`, the final buffer is:
+The final buffer is:
 
 | Word | Value | Meaning |
 |---|---:|---|
-| `obuf[0]` | `0x100` | seed |
+| `obuf[0]` | `0x600404` | destination pointer (`&obuf[1]`) |
 | `obuf[1]` | `0x123` | dynamic-address/dynamic-value result |
 | `obuf[2]` | `0x223` | immediate-address/dynamic-value result |
+| `obuf[3]` | `0x600410` | source pointer (`&obuf[4]`) |
+| `obuf[4]` | `0x123` | first payload |
+| `obuf[5]` | `0x223` | second payload |
 
 The debug buffer contains two 8-byte records:
 
@@ -67,7 +73,7 @@ The debug buffer contains two 8-byte records:
 {202, 0x223}
 ```
 
-The host requires both paths to agree. A bad job-runner register computation,
+The host requires both paths to agree. A bad job-runner register load or store,
 a bad `SAVE_REGISTER`, and a missing DMA therefore produce distinct failures.
 
 ## Profiling design
@@ -75,16 +81,16 @@ a bad `SAVE_REGISTER`, and a missing DMA therefore produce distinct failures.
 `cert_reg_profile.mlir` places four timestamp records around two workloads:
 
 ```text
-101 --[ 32 x ADD ]-- 102 --[ adjacent-stamp baseline ]-- 103
-    --[ 8 x READ_32_D + ADD + WRITE_32_D ]-- 104
+101 --[ 32 x READ_32 ]-- 102 --[ adjacent-stamp baseline ]-- 103
+    --[ 8 x READ_32 + WRITE_32_D ]-- 104
 ```
 
 The host verifies `{101, 102, 103, 104}` ordering, checks that both workload
 gaps exceed the adjacent-stamp baseline, and prints the measured tick counts.
 It also checks the independently returned results:
 
-- the arithmetic register reaches 32 and is written to `obuf[1]`;
-- eight in-place AXI-MM increments change `obuf[0]` from 1 to 9.
+- eight AXI-MM copies propagate the `obuf[0]` seed through `obuf[1..8]`;
+- the value the read block last loaded into `r0` is written to `obuf[9]`.
 
 The comparison is intentionally descriptive, not a performance contract.
 Absolute uC timing varies by firmware and device, so the example does not

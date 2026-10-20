@@ -48,17 +48,22 @@ constexpr uint32_t VAL1 = 0x33334444u;
 // Register round-trips, all landed in obuf by WRITE_32_D.
 //   obuf[2]: READ_32 of obuf[0]   -> $r0 -> WRITE_32_D flags 2
 //   obuf[3]: READ_32_D of obuf[1] -> $r2 -> WRITE_32_D flags 2
-//   obuf[4]: $r2 + 0x1111               -> WRITE_32_D flags 3
+//   obuf[4]: $r1 (obuf[1] pointer) at $r3 -> WRITE_32_D flags 3
 //   obuf[5]: immediate at $r4           -> WRITE_32_D flags 1
 //   obuf[6]: immediate at immediate     -> WRITE_32_D flags 0
 //   obuf[7]: READ_32 of lock 1's value register, which WRITE_32_D (flags 1)
 //            had just changed from 5 to 21 -> WRITE_32_D flags 2
+//   obuf[8..11]: pointer table (WRITE_32), READ_32 into $r1/$r3/$r4/$r5
 constexpr uint32_t READ32_ECHO = VAL0;         // 0x11112222
 constexpr uint32_t READ32D_ECHO = VAL1;        // 0x33334444
-constexpr uint32_t ADD_RESULT = 0x33335555u;   // VAL1 + 0x1111
+constexpr uint32_t BOTHREG = 0x00600404u;      // $r1, the obuf[1] pointer
 constexpr uint32_t W32D_ADDRREG = 0x55556666u; // flags 1, immediate value
 constexpr uint32_t W32D_BOTHIMM = 0x77778888u; // flags 0
 constexpr uint32_t LOCK_ECHO = 21u;            // set by WRITE_32_D over a 5
+constexpr uint32_t PTR_TABLE[] = {0x00600404u, 0x00600410u, 0x00600414u,
+                                  0x006ae010u};
+constexpr size_t PTR_TABLE_BASE = 8;
+constexpr size_t PTR_TABLE_COUNT = sizeof(PTR_TABLE) / sizeof(PTR_TABLE[0]);
 
 // Device configuration zeroes core-tile data memory before the cert job runs,
 // so every word the job leaves alone must read back as 0.
@@ -117,10 +122,9 @@ int main(int argc, const char *argv[]) {
   errs += check("obuf[3] read32_d -> w32d f2", buf_out[3], READ32D_ECHO,
                 "cert.read32_d did not return the word at the address held in "
                 "$r1 (0x600404)");
-  errs += check("obuf[4] add -> w32d f3", buf_out[4], ADD_RESULT,
-                "cert.add did not fold 0x1111 into the read32_d result, or "
+  errs += check("obuf[4] w32d f3 (both reg)", buf_out[4], BOTHREG,
                 "cert.write32_d {address_is_reg, value_is_reg} misresolved a "
-                "register");
+                "register, or cert.read32 did not load the pointer table");
   errs += check("obuf[5] w32d f1 (addr reg)", buf_out[5], W32D_ADDRREG,
                 "cert.write32_d {address_is_reg} did not store the immediate "
                 "at the address held in $r4 (0x600414)");
@@ -130,7 +134,14 @@ int main(int argc, const char *argv[]) {
                 "cert.write32_d into tile CONTROL space did not take effect "
                 "(a 5 here means the earlier plain WRITE_32 stuck), or "
                 "cert.read32 did not read the lock value register back");
-  for (size_t i = 8; i < DATA_COUNT; i++) {
+  for (size_t i = 0; i < PTR_TABLE_COUNT; i++) {
+    char label[64];
+    snprintf(label, sizeof(label), "obuf[%zu] pointer table",
+             PTR_TABLE_BASE + i);
+    errs += check(label, buf_out[PTR_TABLE_BASE + i], PTR_TABLE[i],
+                  "uC WRITE_32 of a pointer-table entry did not land");
+  }
+  for (size_t i = PTR_TABLE_BASE + PTR_TABLE_COUNT; i < DATA_COUNT; i++) {
     char label[64];
     snprintf(label, sizeof(label), "obuf[%zu] untouched", i);
     errs += check(label, buf_out[i], UNTOUCHED,
@@ -141,11 +152,11 @@ int main(int argc, const char *argv[]) {
   // the job matched. Unlike earlier revisions of this test, the register ops
   // are no longer merely "seen not to fault": obuf[2..7] carry cert register
   // contents back to the host through cert.write32_d, so the checks above
-  // fail if cert.read32 / cert.read32_d / cert.mov / cert.add produce the
-  // wrong value, and none of them can be satisfied by a no-op.
+  // fail if cert.read32 / cert.read32_d produce the wrong value, and none of
+  // them can be satisfied by a no-op.
   std::cout << "cert.poll32 / cert.maskpoll32 matched (job completed)\n";
-  std::cout << "cert.read32 / cert.read32_d / cert.mov / cert.add VALUES "
-               "verified via cert.write32_d (all 4 flags encodings)\n";
+  std::cout << "cert.read32 / cert.read32_d VALUES verified via "
+               "cert.write32_d (all 4 flags encodings)\n";
 
   if (errs == 0) {
     std::cout << "PASS!" << std::endl;

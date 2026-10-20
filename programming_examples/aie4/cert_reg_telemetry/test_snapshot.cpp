@@ -88,10 +88,13 @@ int main(int argc, const char *argv[]) try {
   debug.refresh();
 
   Report report;
-  report.word("obuf[0] seed", output[0], 0x100);
-  report.word("obuf[1] pointer-walk result", output[1], 0x123);
+  report.word("obuf[0] destination pointer", output[0], 0x600404);
+  report.word("obuf[1] pointer-chase result", output[1], 0x123);
   report.word("obuf[2] second result", output[2], 0x223);
-  for (size_t i = 3; i < kOutputWords; ++i)
+  report.word("obuf[3] source pointer", output[3], 0x600410);
+  report.word("obuf[4] first payload", output[4], 0x123);
+  report.word("obuf[5] second payload", output[5], 0x223);
+  for (size_t i = 6; i < kOutputWords; ++i)
     report.word("obuf[" + std::to_string(i) + "] untouched", output[i], 0);
 
   std::cout << "--- SAVE_REGISTER records: {unq_id, value} ---\n";
@@ -106,7 +109,7 @@ int main(int argc, const char *argv[]) try {
                    ? "debug words 4..63 remain poisoned"
                    : "first unexpected word is " + std::to_string(firstExtra));
 
-  // The same computed words arrived through two independent paths: normal
+  // The same moved words arrived through two independent paths: normal
   // tile DMA and the firmware's uC debug-record DMA.
   report.check("record/DMA cross-check",
                debug[1] == output[1] && debug[3] == output[2],
@@ -116,7 +119,8 @@ int main(int argc, const char *argv[]) try {
     std::cout << "FAIL (" << report.errors() << " checks)\n";
     return 1;
   }
-  std::cout << "PASS: register computation and SAVE_REGISTER telemetry agree\n";
+  std::cout
+      << "PASS: register data movement and SAVE_REGISTER telemetry agree\n";
   return 0;
 } catch (const std::exception &error) {
   std::cerr << "FAIL: " << error.what() << '\n';

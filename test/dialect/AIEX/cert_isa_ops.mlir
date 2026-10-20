@@ -27,12 +27,6 @@ module {
       aiex.cert.read32(1, 34603008)
       // CHECK: aiex.cert.read32_d(0, 1)
       aiex.cert.read32_d(0, 1)
-      // CHECK: aiex.cert.mov(0, 16)
-      aiex.cert.mov(0, 16)
-      // CHECK: aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      // CHECK: aiex.cert.yield
-      aiex.cert.yield
       // CHECK: aiex.cert.write32_d(68157440, 5)
       aiex.cert.write32_d(68157440, 5)
       // CHECK: aiex.cert.write32_d(3, 5) {address_is_reg}
@@ -45,8 +39,6 @@ module {
       aiex.cert.poll32(34603008, 1)
       // CHECK: aiex.cert.maskpoll32(34603008, 15, 1)
       aiex.cert.maskpoll32(34603008, 15, 1)
-      // CHECK: aiex.cert.sleep(100)
-      aiex.cert.sleep(100)
       // CHECK: aiex.cert.save_timestamps(7)
       aiex.cert.save_timestamps(7)
       // CHECK: aiex.cert.save_register(34603008, 9)

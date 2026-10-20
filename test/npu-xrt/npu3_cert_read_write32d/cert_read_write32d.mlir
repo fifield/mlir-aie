@@ -6,9 +6,8 @@
 //===----------------------------------------------------------------------===//
 //
 // Tier-1 cert ISA register/scalar ops on real npu3 hardware: cert.read32,
-// cert.read32_d, cert.mov, cert.add, cert.poll32, cert.maskpoll32, plus uC
-// WRITE_32 and WRITE_32_D straight into core-tile *data* memory and into tile
-// control space.
+// cert.read32_d, cert.poll32, cert.maskpoll32, plus uC WRITE_32 and WRITE_32_D
+// straight into core-tile *data* memory and into tile control space.
 //
 // Coreless design (no aie.core): a single device-level `aiex.cert.job` writes
 // and inspects tile(0,2) data memory, then releases a gate lock that lets a
@@ -63,17 +62,28 @@
 //   obuf[1] = 0x33334444  WRITE_32 immediate
 //   obuf[2] = 0x11112222  READ_32 of obuf[0]   -> $r0 -> WRITE_32_D flags 2
 //   obuf[3] = 0x33334444  READ_32_D of obuf[1] -> $r2 -> WRITE_32_D flags 2
-//   obuf[4] = 0x33335555  $r2 + 0x1111               -> WRITE_32_D flags 3
+//   obuf[4] = 0x00600404  $r1 at $r3                 -> WRITE_32_D flags 3
 //   obuf[5] = 0x55556666  immediate at $r4           -> WRITE_32_D flags 1
 //   obuf[6] = 0x77778888  immediate at immediate     -> WRITE_32_D flags 0
 //   obuf[7] = 0x00000015  READ_32 of a lock value register that WRITE_32_D
 //                         (flags 1) had just set to 21 -> WRITE_32_D flags 2
+//   obuf[8..11]           pointer table, WRITE_32 immediates (see below)
+//
+// The ISA has no way to put an immediate into a register (MOV and ADD were
+// removed in aiebu #397), so every register-held address is first stored in
+// the obuf[8..11] pointer table with WRITE_32 and then loaded with READ_32:
+//
+//   obuf[8]  = 0x00600404  -> $r1, address of obuf[1]
+//   obuf[9]  = 0x00600410  -> $r3, address of obuf[4]
+//   obuf[10] = 0x00600414  -> $r4, address of obuf[5]
+//   obuf[11] = 0x006AE010  -> $r5, lock 1 value register
 //
 // obuf[2] and obuf[3] can only hold those words if READ_32 / READ_32_D really
-// returned the data at the addresses they were given, and obuf[4] can only
-// hold 0x33335555 if ADD folded into the value READ_32_D produced. All four
-// WRITE_32_D flags encodings appear above, so each one gets real hardware
-// coverage and not just a FileCheck line.
+// returned the data at the addresses they were given. Each register above
+// holds a distinct value, so obuf[4] also catches WRITE_32_D resolving the
+// wrong register for either operand. All four WRITE_32_D flags encodings
+// appear above, so each one gets real hardware coverage and not just a
+// FileCheck line.
 //
 //===----------------------------------------------------------------------===//
 module {
@@ -121,6 +131,12 @@ module {
       aiex.cert.write32(0x600404, 0x33334444)
       aiex.cert.poll32(0x600404, 0x33334444)
 
+      // --- obuf[8..11]: pointer table for the register-held addresses -------
+      aiex.cert.write32(0x600420, 0x600404)
+      aiex.cert.write32(0x600424, 0x600410)
+      aiex.cert.write32(0x600428, 0x600414)
+      aiex.cert.write32(0x60042C, 0x6AE010)
+
       // --- obuf[2]: READ_32 round-trip --------------------------------------
       // READ_32: constant address -> destination register (dest operand
       // first). Echo $r0 to obuf[2] with WRITE_32_D {value_is_reg} (flags 2):
@@ -130,24 +146,22 @@ module {
       aiex.cert.write32_d(0x600408, 0) {value_is_reg}
 
       // --- obuf[3]: READ_32_D round-trip ------------------------------------
-      // MOV a constant address into $r1, then READ_32_D: address register
-      // first, destination register second. Echo $r2 to obuf[3], again with
-      // flags 2.
-      aiex.cert.mov(1, 0x600404)
+      // READ_32 the address of obuf[1] from the pointer table into $r1, then
+      // READ_32_D: address register first, destination register second. Echo
+      // $r2 to obuf[3], again with flags 2.
+      aiex.cert.read32(1, 0x600420)
       aiex.cert.read32_d(1, 2)
       aiex.cert.write32_d(0x60040C, 2) {value_is_reg}
 
-      // --- obuf[4]: ADD folded into the READ_32_D result --------------------
-      // 0x33334444 + 0x1111 = 0x33335555, a value no other op in this job
-      // produces. Written through WRITE_32_D {address_is_reg, value_is_reg}
-      // (flags 3): both operands come from registers.
-      aiex.cert.add(2, 0x1111)
-      aiex.cert.mov(3, 0x600410)
-      aiex.cert.write32_d(3, 2) {address_is_reg, value_is_reg}
+      // --- obuf[4]: WRITE_32_D {address_is_reg, value_is_reg} (flags 3) ----
+      // Both operands come from registers: store $r1 (the obuf[1] pointer,
+      // 0x00600404) at the address loaded into $r3.
+      aiex.cert.read32(3, 0x600424)
+      aiex.cert.write32_d(3, 1) {address_is_reg, value_is_reg}
 
       // --- obuf[5]: WRITE_32_D {address_is_reg} (flags 1) -------------------
       // Register-held address, immediate value.
-      aiex.cert.mov(4, 0x600414)
+      aiex.cert.read32(4, 0x600428)
       aiex.cert.write32_d(4, 0x55556666) {address_is_reg}
 
       // --- obuf[6]: WRITE_32_D with no flags (flags 0) ----------------------
@@ -166,7 +180,7 @@ module {
       // and READ_32 the result out to obuf[7]. 21 != 5, so a WRITE_32_D that
       // silently did nothing here leaves 5 in obuf[7] and fails loudly rather
       // than looking untouched.
-      aiex.cert.mov(5, 0x6AE010)
+      aiex.cert.read32(5, 0x60042C)
       aiex.cert.write32_d(5, 21) {address_is_reg}
       aiex.cert.read32(6, 0x6AE010)
       aiex.cert.write32_d(0x60041C, 6) {value_is_reg}

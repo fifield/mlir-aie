@@ -6,14 +6,15 @@
 //===----------------------------------------------------------------------===//
 //
 // SAVE_TIMESTAMPS turns the uC debug buffer into a lightweight profiler. This
-// example measures a register-only arithmetic block and an AXI-MM read/modify/
-// write block in one dispatch. The host reports both gaps after checking the
-// record order and the independently DMA-read computation results.
+// example measures an AXI-MM read block and an AXI-MM copy block in one
+// dispatch. The host reports both gaps after checking the record order and the
+// independently DMA-read results.
 //
-//   101 --[ 32 x ADD ]-- 102 --[ baseline ]-- 103 --[ 8 x MMIO RMW ]-- 104
+//   101 --[ 32 x READ_32 ]-- 102 --[ baseline ]-- 103 --[ 8 x MMIO copy ]-- 104
 //
-// The result buffer proves both measured regions executed: r0 becomes 32 and
-// obuf[0] is incremented from 1 to 9.
+// The result buffer proves both measured regions executed: the copy chain
+// propagates the obuf[0] seed through obuf[1..8], and the last value read into
+// r0 is written to obuf[9].
 //
 //===----------------------------------------------------------------------===//
 module {
@@ -46,75 +47,65 @@ module {
     aie.shim_dma_allocation @out (%shim, S2MM, 0)
 
     aiex.cert.job(7) {
-      aiex.cert.write32(0x600400, 1)
-      aiex.cert.mov(0, 0)
+      aiex.cert.write32(0x600400, 0x5EED0001)
 
       aiex.cert.save_timestamps(101)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
-      aiex.cert.add(0, 1)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
       aiex.cert.save_timestamps(102)
 
       // Adjacent stamps provide the record/write overhead baseline.
       aiex.cert.save_timestamps(103)
 
-      aiex.cert.mov(1, 0x600400)
-      aiex.cert.read32_d(1, 2)
-      aiex.cert.add(2, 1)
-      aiex.cert.write32_d(1, 2) {address_is_reg, value_is_reg}
-      aiex.cert.read32_d(1, 2)
-      aiex.cert.add(2, 1)
-      aiex.cert.write32_d(1, 2) {address_is_reg, value_is_reg}
-      aiex.cert.read32_d(1, 2)
-      aiex.cert.add(2, 1)
-      aiex.cert.write32_d(1, 2) {address_is_reg, value_is_reg}
-      aiex.cert.read32_d(1, 2)
-      aiex.cert.add(2, 1)
-      aiex.cert.write32_d(1, 2) {address_is_reg, value_is_reg}
-      aiex.cert.read32_d(1, 2)
-      aiex.cert.add(2, 1)
-      aiex.cert.write32_d(1, 2) {address_is_reg, value_is_reg}
-      aiex.cert.read32_d(1, 2)
-      aiex.cert.add(2, 1)
-      aiex.cert.write32_d(1, 2) {address_is_reg, value_is_reg}
-      aiex.cert.read32_d(1, 2)
-      aiex.cert.add(2, 1)
-      aiex.cert.write32_d(1, 2) {address_is_reg, value_is_reg}
-      aiex.cert.read32_d(1, 2)
-      aiex.cert.add(2, 1)
-      aiex.cert.write32_d(1, 2) {address_is_reg, value_is_reg}
+      aiex.cert.read32(2, 0x600400)
+      aiex.cert.write32_d(0x600404, 2) {value_is_reg}
+      aiex.cert.read32(2, 0x600404)
+      aiex.cert.write32_d(0x600408, 2) {value_is_reg}
+      aiex.cert.read32(2, 0x600408)
+      aiex.cert.write32_d(0x60040C, 2) {value_is_reg}
+      aiex.cert.read32(2, 0x60040C)
+      aiex.cert.write32_d(0x600410, 2) {value_is_reg}
+      aiex.cert.read32(2, 0x600410)
+      aiex.cert.write32_d(0x600414, 2) {value_is_reg}
+      aiex.cert.read32(2, 0x600414)
+      aiex.cert.write32_d(0x600418, 2) {value_is_reg}
+      aiex.cert.read32(2, 0x600418)
+      aiex.cert.write32_d(0x60041C, 2) {value_is_reg}
+      aiex.cert.read32(2, 0x60041C)
+      aiex.cert.write32_d(0x600420, 2) {value_is_reg}
       aiex.cert.save_timestamps(104)
 
-      aiex.cert.write32_d(0x600404, 0) {value_is_reg}
+      aiex.cert.write32_d(0x600424, 0) {value_is_reg}
       aiex.cert.write32(0x6ae000, 1)
     }
 

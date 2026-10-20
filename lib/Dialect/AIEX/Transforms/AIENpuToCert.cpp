@@ -1471,20 +1471,12 @@ static void updateCostForOp(Operation &o, AIE::DeviceOp deviceOp,
     text_cost += 8; // ISA_OPSIZE_READ_32
   } else if (isa<AIEX::CertRead32DOp>(o)) {
     text_cost += 4; // ISA_OPSIZE_READ_32_D
-  } else if (isa<AIEX::CertAddOp>(o)) {
-    text_cost += 8; // ISA_OPSIZE_ADD
-  } else if (isa<AIEX::CertMovOp>(o)) {
-    text_cost += 8; // ISA_OPSIZE_MOV
-  } else if (isa<AIEX::CertYieldOp>(o)) {
-    text_cost += 4; // ISA_OPSIZE_YIELD
   } else if (isa<AIEX::CertWrite32DOp>(o)) {
     text_cost += 12; // ISA_OPSIZE_WRITE_32_D
   } else if (isa<AIEX::CertPoll32Op>(o)) {
     text_cost += 12; // ISA_OPSIZE_POLL_32
   } else if (isa<AIEX::CertMaskPoll32Op>(o)) {
     text_cost += 16; // ISA_OPSIZE_MASK_POLL_32
-  } else if (isa<AIEX::CertSleepOp>(o)) {
-    text_cost += 8; // ISA_OPSIZE_SLEEP
   } else if (isa<AIEX::CertSaveTimestampsOp>(o)) {
     text_cost += 8; // ISA_OPSIZE_SAVE_TIMESTAMPS
   } else if (isa<AIEX::CertSaveRegisterOp>(o)) {
@@ -1495,10 +1487,6 @@ static void updateCostForOp(Operation &o, AIE::DeviceOp deviceOp,
 // True if `o` reads or writes any job-private local register r0..r7.
 static bool opUsesLocalRegister(Operation &o) {
   auto isLocal = [](uint32_t r) { return r < 8; };
-  if (auto op = dyn_cast<AIEX::CertMovOp>(&o))
-    return isLocal(op.getDest());
-  if (auto op = dyn_cast<AIEX::CertAddOp>(&o))
-    return isLocal(op.getDest());
   if (auto op = dyn_cast<AIEX::CertRead32Op>(&o))
     return isLocal(op.getValue());
   if (auto op = dyn_cast<AIEX::CertRead32DOp>(&o))
@@ -1534,9 +1522,9 @@ static bool jobUsesLocalRegister(AIEX::CertJobOp job) {
 }
 
 // The job-private local registers r0..r7 that `o` reads, and those it writes.
-// A register that is both read and written (cert.add accumulates into $dest)
-// appears in both. Globals r8..r23 are deliberately excluded: they survive a
-// job boundary, so they never constrain a rewrite that splits a job.
+// A register that is both read and written (cert.read32_d(1, 1)) appears in
+// both. Globals r8..r23 are deliberately excluded: they survive a job
+// boundary, so they never constrain a rewrite that splits a job.
 static void collectLocalRegisterDefsUses(Operation &o,
                                          SmallVectorImpl<uint32_t> &uses,
                                          SmallVectorImpl<uint32_t> &defs) {
@@ -1544,12 +1532,7 @@ static void collectLocalRegisterDefsUses(Operation &o,
     if (r < 8)
       v.push_back(r);
   };
-  if (auto op = dyn_cast<AIEX::CertMovOp>(&o))
-    addLocal(defs, op.getDest());
-  else if (auto op = dyn_cast<AIEX::CertAddOp>(&o)) {
-    addLocal(uses, op.getDest()); // $dest += $value
-    addLocal(defs, op.getDest());
-  } else if (auto op = dyn_cast<AIEX::CertRead32Op>(&o))
+  if (auto op = dyn_cast<AIEX::CertRead32Op>(&o))
     addLocal(defs, op.getValue());
   else if (auto op = dyn_cast<AIEX::CertRead32DOp>(&o)) {
     addLocal(uses, op.getAddress());

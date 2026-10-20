@@ -746,7 +746,7 @@ def cert_uc_dma_chain(sym_name):
 # constrained attribute as `Any` rather than `int`, so the generated builders
 # reject a plain Python int with `std::bad_cast`. These wrappers accept an int
 # (or an already-built attribute) and do the conversion, so a register operand
-# reads as the register number it is: `cert_mov(3, 99)` targets `$r3`.
+# reads as the register number it is: `cert_read32(3, 99)` targets `$r3`.
 
 
 def _cert_reg(value):
@@ -769,22 +769,6 @@ _orig_cert_read32_d = cert_read32_d
 def cert_read32_d(address, value, **kwargs):
     """Read the address held in register `address` into register `value`."""
     return _orig_cert_read32_d(_cert_reg(address), _cert_reg(value), **kwargs)
-
-
-_orig_cert_add = cert_add
-
-
-def cert_add(dest, value, **kwargs):
-    """Add the constant `value` to register `dest`."""
-    return _orig_cert_add(_cert_reg(dest), value, **kwargs)
-
-
-_orig_cert_mov = cert_mov
-
-
-def cert_mov(dest, value, **kwargs):
-    """Move the constant `value` into register `dest`."""
-    return _orig_cert_mov(_cert_reg(dest), value, **kwargs)
 
 
 _orig_cert_uc_dma_write_des = cert_uc_dma_write_des

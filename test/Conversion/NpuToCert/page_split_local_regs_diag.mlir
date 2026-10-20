@@ -18,9 +18,9 @@
 // RUN: aie-opt -cert-legalize-pages --split-input-file --verify-diagnostics %s
 
 // Case 1: LOCAL registers (r0). Estimate = 32 (header) + 8 (START_JOB) +
-// 8 (mov) + 4 (uc_dma_write_des_sync) + (16 + 1300*4 = 5216 data for @c1) +
-// 8 (add) + 4 (uc_dma_write_des_sync) + (16 + 1300*4 = 5216 data for @c2) +
-// 4 (END_JOB) = 10500 bytes: over the 8192-byte hard limit. Every candidate
+// 8 (read32) + 4 (uc_dma_write_des_sync) + (16 + 1300*4 = 5216 data for @c1) +
+// 4 (read32_d) + 4 (uc_dma_write_des_sync) + (16 + 1300*4 = 5216 data for @c2)
+// + 4 (END_JOB) = 10496 bytes: over the 8192-byte hard limit. Every candidate
 // cut falls inside job 1, which uses local registers, so none is legal; the
 // page cannot be split and must error rather than emit an oversized page.
 module {
@@ -36,9 +36,9 @@ module {
     // expected-error@+1 {{cannot be split: job 1 uses job-private local registers r0..r7}}
     aiex.cert.page {
       aiex.cert.job(1) {
-        aiex.cert.mov(0, 16)
+        aiex.cert.read32(0, 16)
         aiex.cert.uc_dma_write_des_sync(@c1)
-        aiex.cert.add(0, 1)
+        aiex.cert.read32_d(0, 1)
         aiex.cert.uc_dma_write_des_sync(@c2)
       }
     }
@@ -47,7 +47,7 @@ module {
 
 // -----
 
-// Case 2: the control. Identical shape and identical estimated cost (10500
+// Case 2: the control. Identical shape and identical estimated cost (10496
 // bytes), but on GLOBAL registers (r8), which survive a split. The page
 // splits cleanly into two legal pages and emits NO diagnostic at all --
 // --verify-diagnostics failing on an unexpected diagnostic is the assertion.
@@ -63,9 +63,9 @@ module {
     }
     aiex.cert.page {
       aiex.cert.job(1) {
-        aiex.cert.mov(8, 16)
+        aiex.cert.read32(8, 16)
         aiex.cert.uc_dma_write_des_sync(@c1)
-        aiex.cert.add(8, 1)
+        aiex.cert.read32_d(8, 9)
         aiex.cert.uc_dma_write_des_sync(@c2)
       }
     }

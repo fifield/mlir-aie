@@ -5,9 +5,11 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// `aiex.cert.save_timestamps` on real npu3 hardware. Also exercises
-// `aiex.cert.sleep`, used below as the workload that produces a measurable
-// gap between two timestamps -- see the ratio assertion further down.
+// `aiex.cert.save_timestamps` on real npu3 hardware. A run of
+// `aiex.cert.read32` AXI-MM reads is used below as the workload that produces a
+// measurable gap between two timestamps -- see the ratio assertion further
+// down. (This used to be a `cert.sleep`, but SLEEP was removed from the ISA in
+// aiebu #397.)
 //
 // SAVE_TIMESTAMPS reads the microcontroller's 64-bit tick counter and appends
 // a 12-byte record `{unq_id, ts_high, ts_low}` to the uC's local debug staging
@@ -22,10 +24,11 @@
 // 12-byte and 8-byte records in one untagged buffer that no reader can decode.
 // `cert.save_register` has its own test in ../npu3_cert_save_register.
 //
-// The four stamps bracket one `cert.sleep(1000)`, i.e. a 1000 us busy-wait
-// (`control_op_sleep`, `dpu/dpu_control.c:1116`, target is in microseconds):
+// The four stamps bracket 128 back-to-back `cert.read32`s of a core-tile data
+// memory word. Each is a non-posted AXI-MM read, so the uC stalls for the full
+// round trip to the array on every one:
 //
-//   101 --------- 102 ===[ sleep 1000us ]=== 103 --------- 104
+//   101 --------- 102 ===[ 128 x READ_32 ]=== 103 --------- 104
 //        gap A               gap B                gap C
 //
 // so gap B must dwarf gaps A and C, which are back-to-back opcodes. test.cpp
@@ -89,11 +92,138 @@ module {
       aiex.cert.save_timestamps(101)
       aiex.cert.save_timestamps(102)
 
-      // --- gap B: the same two stamps with 1000 us of busy-wait between ------
-      aiex.cert.sleep(1000)
+      // --- gap B: the same two stamps with 128 AXI-MM reads between ---------
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(0, 0x600400)
       aiex.cert.save_timestamps(103)
 
-      // --- gap C: a second no-work baseline, after the sleep -----------------
+      // --- gap C: a second no-work baseline, after the reads -----------------
       // Having a baseline on both sides rules out "the gap grew because
       // everything after the first stamp is slower", and gives test.cpp two
       // independent baselines to compare gap B against.

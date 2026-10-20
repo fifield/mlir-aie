@@ -7,7 +7,7 @@
 # `aie.dialects.aiex` stay usable from Python.
 #
 # `aiex.cert_reg` is a plain 0..23 integer attribute, so registers are passed as
-# ints (`cert_mov(3, ...)` targets `$r3`).
+# ints (`cert_read32(3, ...)` targets `$r3`).
 
 # RUN: %PYTHON %s | FileCheck %s
 
@@ -77,13 +77,9 @@ def certRegions():
 # CHECK: aiex.cert.write32_d(3, 7) {address_is_reg, value_is_reg}
 # CHECK: aiex.cert.read32(3, 4096)
 # CHECK: aiex.cert.read32_d(3, 4)
-# CHECK: aiex.cert.add(3, 1)
-# CHECK: aiex.cert.mov(3, 99)
 # CHECK: aiex.cert.poll32(4096, 42)
 # CHECK: aiex.cert.maskpoll32(4096, 255, 16)
 # CHECK: aiex.cert.nop
-# CHECK: aiex.cert.sleep(100)
-# CHECK: aiex.cert.yield
 @construct_and_print_module
 def certScalarOps():
     @device(AIEDevice.npu3)
@@ -100,13 +96,9 @@ def certScalarOps():
                 cert_write32_d(3, 7, address_is_reg=True, value_is_reg=True)
                 cert_read32(3, 0x1000)
                 cert_read32_d(3, 4)
-                cert_add(3, 1)
-                cert_mov(3, 99)
                 cert_poll32(0x1000, 42)
                 cert_maskpoll32(0x1000, 0xFF, 0x10)
                 cert_nop()
-                cert_sleep(100)
-                cert_yield()
 
 
 # CHECK-LABEL: TEST: certSyncOps

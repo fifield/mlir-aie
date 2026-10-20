@@ -31,7 +31,7 @@ module {
     aiex.cert.page {
       // expected-error@+1 {{job 1 mixes cert.load_pdi with other operations and must be broken into separate jobs, but register r0 is written before it and read after it}}
       aiex.cert.job(1) {
-        aiex.cert.mov(0, 68157440)
+        aiex.cert.read32(0, 68157440)
         aiex.cert.load_pdi(1, @config)
         aiex.cert.write32_d(0, 7) {address_is_reg}
       }
@@ -42,7 +42,7 @@ module {
 // -----
 
 // Case 2: the same hazard around cert.preempt, with the crossing value carried
-// by a uC-DMA wait handle rather than a mov.
+// by a uC-DMA wait handle rather than a cert.read32.
 module {
   aie.device(npu2) {
     memref.global "private" constant @d1 : memref<4xi32> = dense<0>

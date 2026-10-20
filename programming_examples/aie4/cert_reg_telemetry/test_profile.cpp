@@ -26,6 +26,7 @@ constexpr size_t kDebugWords = 64;
 constexpr uint32_t kUcIndex = 0;
 constexpr uint32_t kOutputPoison = 0xdeadbeefu;
 constexpr uint32_t kDebugPoison = 0xa5a5a5a5u;
+constexpr uint32_t kSeed = 0x5eed0001u;
 constexpr std::array<uint32_t, 4> kIds{101, 102, 103, 104};
 
 struct Stamp {
@@ -83,13 +84,14 @@ int main(int argc, const char *argv[]) try {
   }
 
   Report report;
-  report.check("register arithmetic result", output[1] == 32,
-               "obuf[1]=" + std::to_string(output[1]) + " (expected 32)");
-  report.check("MMIO RMW result", output[0] == 9,
-               "obuf[0]=" + std::to_string(output[0]) + " (expected 9)");
-  const bool untouched = std::all_of(output + 2, output + kOutputWords,
+  // obuf[0] is the seed, obuf[1..8] the MMIO copy chain, and obuf[9] the last
+  // value the read block loaded into r0.
+  const bool propagated = std::all_of(
+      output, output + 10, [](uint32_t value) { return value == kSeed; });
+  report.check("MMIO read/copy result", propagated, "obuf[0..9] hold the seed");
+  const bool untouched = std::all_of(output + 10, output + kOutputWords,
                                      [](uint32_t value) { return value == 0; });
-  report.check("remaining output", untouched, "obuf[2..15] are zero");
+  report.check("remaining output", untouched, "obuf[10..15] are zero");
 
   for (size_t i = 0; i < stamps.size(); ++i)
     report.check("timestamp id " + std::to_string(i), stamps[i].id == kIds[i],
@@ -105,13 +107,13 @@ int main(int argc, const char *argv[]) try {
                    std::to_string(stamps[2].ticks) + " < " +
                    std::to_string(stamps[3].ticks));
 
-  const uint64_t addTicks = stamps[1].ticks - stamps[0].ticks;
+  const uint64_t readTicks = stamps[1].ticks - stamps[0].ticks;
   const uint64_t baselineTicks = stamps[2].ticks - stamps[1].ticks;
   const uint64_t mmioTicks = stamps[3].ticks - stamps[2].ticks;
-  report.check("measured arithmetic block", addTicks > baselineTicks,
-               std::to_string(addTicks) + " ticks vs " +
+  report.check("measured MMIO read block", readTicks > baselineTicks,
+               std::to_string(readTicks) + " ticks vs " +
                    std::to_string(baselineTicks) + " baseline");
-  report.check("measured MMIO block", mmioTicks > baselineTicks,
+  report.check("measured MMIO copy block", mmioTicks > baselineTicks,
                std::to_string(mmioTicks) + " ticks vs " +
                    std::to_string(baselineTicks) + " baseline");
 
@@ -121,15 +123,15 @@ int main(int argc, const char *argv[]) try {
                    ? "debug words 12..63 remain poisoned"
                    : "first unexpected word is " + std::to_string(firstExtra));
 
-  std::cout << "profile: 32 ADDs = " << addTicks
+  std::cout << "profile: 32 AXI-MM reads = " << readTicks
             << " ticks; timestamp baseline = " << baselineTicks
-            << " ticks; 8 AXI-MM RMWs = " << mmioTicks << " ticks\n";
+            << " ticks; 8 AXI-MM copies = " << mmioTicks << " ticks\n";
 
   if (report.errors()) {
     std::cout << "FAIL (" << report.errors() << " checks)\n";
     return 1;
   }
-  std::cout << "PASS: SAVE_TIMESTAMPS profiled both register workloads\n";
+  std::cout << "PASS: SAVE_TIMESTAMPS profiled both MMIO workloads\n";
   return 0;
 } catch (const std::exception &error) {
   std::cerr << "FAIL: " << error.what() << '\n';

@@ -7,8 +7,9 @@
 
 // Offline guard for the cert register round-trip that
 // test/npu-xrt/npu3_cert_read_write32d runs on npu3: read a known word into a
-// register with READ_32 / READ_32_D, transform it, and carry it back into the
-// array with WRITE_32_D so the host can see it.
+// register with READ_32 / READ_32_D and carry it back into the array with
+// WRITE_32_D so the host can see it. Register-held addresses are loaded with
+// READ_32 from a pointer table, since the ISA no longer has MOV/ADD.
 //
 // cert_write32_d_flags.mlir pins the four WRITE_32_D flags encodings in
 // isolation; this pins them in the exact op sequence and operand order the
@@ -35,6 +36,14 @@ module {
       // CHECK-NEXT: WRITE_32               0x00600404, 0x33334444
       aiex.cert.write32(0x600404, 0x33334444)
 
+      // Pointer table for the register-held addresses below.
+      // CHECK-NEXT: WRITE_32               0x00600420, 0x00600404
+      aiex.cert.write32(0x600420, 0x600404)
+      // CHECK-NEXT: WRITE_32               0x00600424, 0x00600410
+      aiex.cert.write32(0x600424, 0x600410)
+      // CHECK-NEXT: WRITE_32               0x00600428, 0x00600414
+      aiex.cert.write32(0x600428, 0x600414)
+
       // READ_32 into $r0, echoed out with an immediate address and a
       // register-held value -> flags 2.
       // CHECK-NEXT: READ_32                $r0, 0x00600400
@@ -43,25 +52,22 @@ module {
       aiex.cert.write32_d(0x600408, 0) {value_is_reg}
 
       // READ_32_D through an address register into $r2, same echo form.
-      // CHECK-NEXT: MOV                    $r1, 0x00600404
-      aiex.cert.mov(1, 0x600404)
+      // CHECK-NEXT: READ_32                $r1, 0x00600420
+      aiex.cert.read32(1, 0x600420)
       // CHECK-NEXT: READ_32_D              $r1, $r2
       aiex.cert.read32_d(1, 2)
       // CHECK-NEXT: WRITE_32_D             2, 0x0060040c, 0x00000002
       aiex.cert.write32_d(0x60040C, 2) {value_is_reg}
 
-      // ADD folded into the read-back value, stored with both operands in
-      // registers -> flags 3.
-      // CHECK-NEXT: ADD                    $r2, 0x00001111
-      aiex.cert.add(2, 0x1111)
-      // CHECK-NEXT: MOV                    $r3, 0x00600410
-      aiex.cert.mov(3, 0x600410)
-      // CHECK-NEXT: WRITE_32_D             3, 0x00000003, 0x00000002
-      aiex.cert.write32_d(3, 2) {address_is_reg, value_is_reg}
+      // Both operands in registers -> flags 3.
+      // CHECK-NEXT: READ_32                $r3, 0x00600424
+      aiex.cert.read32(3, 0x600424)
+      // CHECK-NEXT: WRITE_32_D             3, 0x00000003, 0x00000001
+      aiex.cert.write32_d(3, 1) {address_is_reg, value_is_reg}
 
       // Register-held address, immediate value -> flags 1.
-      // CHECK-NEXT: MOV                    $r4, 0x00600414
-      aiex.cert.mov(4, 0x600414)
+      // CHECK-NEXT: READ_32                $r4, 0x00600428
+      aiex.cert.read32(4, 0x600428)
       // CHECK-NEXT: WRITE_32_D             1, 0x00000004, 0x55556666
       aiex.cert.write32_d(4, 0x55556666) {address_is_reg}
 

@@ -12,7 +12,7 @@
 //
 //   (a) all four unq_ids appear, in program order, starting at word 0;
 //   (b) the 64-bit timestamps strictly increase;
-//   (c) the gap that brackets `cert.sleep(1000)` dwarfs the two adjacent
+//   (c) the gap that brackets 128 `cert.read32`s dwarfs the two adjacent
 //       no-work gaps.
 //
 // (c) is asserted as a *ratio*, never as an absolute cycle count: the tick
@@ -46,7 +46,8 @@
 //   ... T xrt_core::bo_int::config_bo(xrt::bo const&,
 //                                     std::map<unsigned int, unsigned long,
 //                                       std::less<unsigned int>,
-//                                       std::allocator<std::pair<unsigned int const,
+//                                       std::allocator<std::pair<unsigned int
+//                                       const,
 //                                         unsigned long>>> const&,
 //                                     xrt_core::hwctx_handle const*)
 //
@@ -132,12 +133,12 @@ constexpr uint32_t kUntouched = 0u;
 constexpr size_t kRecordWords = 3;
 constexpr std::array<uint32_t, 4> kIds{101, 102, 103, 104};
 
-// cert.sleep(1000) busy-waits 1000 us. The two no-work gaps around it are
-// back-to-back opcodes, measured at 260-290 ticks on npu3 against ~1.10e6 for
-// the sleep, so the real ratio is around 3900x. Requiring only 10x leaves a
-// very wide margin for a differently clocked part or a noisy uC, while still
-// failing hard if cert.sleep were compiled out or ignored.
-constexpr uint64_t kMinSleepRatio = 10;
+// Gap B brackets 128 non-posted AXI-MM reads (cert.read32). The two no-work
+// gaps around it are back-to-back opcodes, measured at 260-290 ticks on npu3;
+// each read costs ~95 ticks, so gap B is ~12000 ticks and the real ratio is
+// around 45x. Requiring only 10x leaves margin for a noisy uC while still
+// failing hard if the reads were compiled out.
+constexpr uint64_t kMinWorkRatio = 10;
 
 std::string hex32(uint32_t v) {
   std::ostringstream os;
@@ -375,28 +376,29 @@ int main(int argc, const char *argv[]) try {
                     "); the tick counter is stuck or the records are "
                     "misordered");
 
-  // (c) the sleep is measurable, expressed as a ratio.
+  // (c) the workload is measurable, expressed as a ratio.
   const uint64_t gap_a = stamps[1].ticks - stamps[0].ticks; // no work
-  const uint64_t gap_b = stamps[2].ticks - stamps[1].ticks; // the sleep
+  const uint64_t gap_b = stamps[2].ticks - stamps[1].ticks; // 128 x read32
   const uint64_t gap_c = stamps[3].ticks - stamps[2].ticks; // no work
   const uint64_t baseline = std::max(gap_a, gap_c);
-  std::cout << "gaps: A(101->102)=" << gap_a << "  B(102->103, sleep)=" << gap_b
+  std::cout << "gaps: A(101->102)=" << gap_a << "  B(102->103, reads)=" << gap_b
             << "  C(103->104)=" << gap_c << "  ticks\n";
 
   std::ostringstream ratio;
   ratio << std::fixed << std::setprecision(0)
         << (baseline ? double(gap_b) / double(baseline) : 0.0)
-        << "x the larger no-work gap (need >= " << kMinSleepRatio << "x)";
+        << "x the larger no-work gap (need >= " << kMinWorkRatio << "x)";
   if (baseline == 0)
-    report.fail("sleep is measurable",
+    report.fail("workload is measurable",
                 "both no-work gaps are 0 ticks; the counter has no usable "
                 "resolution");
-  else if (gap_b < baseline * kMinSleepRatio)
-    report.fail("sleep is measurable",
-                ratio.str() + " -- cert.sleep did not consume time, or the "
+  else if (gap_b < baseline * kMinWorkRatio)
+    report.fail("workload is measurable",
+                ratio.str() + " -- the cert.read32s did not consume time, or "
+                              "the "
                               "stamps are not where the program says");
   else
-    report.pass("sleep is measurable", ratio.str());
+    report.pass("workload is measurable", ratio.str());
 
   if (report.errors() == 0) {
     std::cout << "PASS!\n";

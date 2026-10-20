@@ -5,14 +5,19 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// A small pointer-walking computation performed entirely by CERT control code.
-// Job-runner registers carry both addresses and values; SAVE_REGISTER records
-// the two computed memory values in the uC debug buffer for the host to
+// A small pointer-chasing data movement performed entirely by CERT control
+// code. Job-runner registers carry both addresses and values; SAVE_REGISTER
+// records the two moved memory values in the uC debug buffer for the host to
 // cross-check against ordinary shim-DMA readback.
 //
-//   obuf[0] = 0x100                         seed
-//   obuf[1] = *(&obuf[0]) + 0x23 = 0x123   dynamic address + dynamic value
-//   obuf[2] = obuf[1] + 0x100 = 0x223      constant address + dynamic value
+// The ISA cannot load an immediate into a register, so every pointer starts
+// life in memory (WRITE_32) and is loaded with READ_32:
+//
+//   obuf[0] = &obuf[1]                 destination pointer
+//   obuf[3] = &obuf[4]                 source pointer
+//   obuf[4] = 0x123, obuf[5] = 0x223   payloads
+//   obuf[1] = *(obuf[3]) = 0x123       dynamic address + dynamic value
+//   obuf[2] = obuf[5]    = 0x223       constant address + dynamic value
 //
 // Debug records are `{201, 0x123}` and `{202, 0x223}`.
 //
@@ -48,20 +53,22 @@ module {
     aie.shim_dma_allocation @out (%shim, S2MM, 0)
 
     aiex.cert.job(7) {
-      aiex.cert.write32(0x600400, 0x100)
+      aiex.cert.write32(0x600400, 0x600404)
+      aiex.cert.write32(0x60040C, 0x600410)
+      aiex.cert.write32(0x600410, 0x123)
+      aiex.cert.write32(0x600414, 0x223)
 
-      // r0 walks the output buffer; r1 carries the first computed value.
-      aiex.cert.mov(0, 0x600400)
-      aiex.cert.read32_d(0, 1)
-      aiex.cert.add(1, 0x23)
-      aiex.cert.add(0, 4)
+      // r0 is the destination pointer, r3 the source pointer; r1 carries the
+      // first value from source to destination.
+      aiex.cert.read32(0, 0x600400)
+      aiex.cert.read32(3, 0x60040C)
+      aiex.cert.read32_d(3, 1)
       aiex.cert.write32_d(0, 1) {address_is_reg, value_is_reg}
       aiex.cert.save_register(0x600404, 201)
 
-      // Read the intermediate normally and write the second result through a
-      // register-held value. MASK_POLL_32 is the completion/liveness guard.
-      aiex.cert.read32(2, 0x600404)
-      aiex.cert.add(2, 0x100)
+      // Read the second payload normally and write it through a register-held
+      // value. MASK_POLL_32 is the completion/liveness guard.
+      aiex.cert.read32(2, 0x600414)
       aiex.cert.write32_d(0x600408, 2) {value_is_reg}
       aiex.cert.maskpoll32(0x600408, 0x00000fff, 0x223)
       aiex.cert.save_register(0x600408, 202)

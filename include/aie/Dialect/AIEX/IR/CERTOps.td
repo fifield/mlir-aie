@@ -491,59 +491,6 @@ def AIE_CertSaveRegisterOp
   }];
 }
 
-def AIE_CertAddOp: AIEX_Op<"cert.add", [HasParent<"CertJobOp">]> {
-  let summary = "Add a constant to a register";
-  let description = [{
-    Adds `value` to the content of register `dest` and stores the result back
-    in `dest`. `value` is UI32Attr, so to add -1 write `4294967295`/`0xffffffff`.
-
-    Example:
-    ```
-      cert.add(0, 1)
-    ```
-  }];
-  let arguments = (
-    ins AIEX_CertRegisterAttr:$dest,
-        UI32Attr:$value
-  );
-  let assemblyFormat = [{
-    `(` $dest `,` $value `)` attr-dict
-  }];
-}
-
-def AIE_CertMovOp: AIEX_Op<"cert.mov", [HasParent<"CertJobOp">]> {
-  let summary = "Move a constant into a register";
-  let description = [{
-    Stores the constant `value` in register `dest`.
-
-    Example:
-    ```
-      cert.mov(0, 16)
-    ```
-  }];
-  let arguments = (
-    ins AIEX_CertRegisterAttr:$dest,
-        UI32Attr:$value
-  );
-  let assemblyFormat = [{
-    `(` $dest `,` $value `)` attr-dict
-  }];
-}
-
-def AIE_CertYieldOp: AIEX_Op<"cert.yield", [HasParent<"CertJobOp">]> {
-  let summary = "Yield to another job";
-  let description = [{
-    Tells the scheduler to perform a context switch to the next available job.
-    The current job will be re-scheduled in the next scheduling cycle.
-
-    Example:
-    ```
-      cert.yield
-    ```
-  }];
-  let assemblyFormat = [{ attr-dict }];
-}
-
 def AIE_CertPoll32Op: AIEX_Op<"cert.poll32", [HasParent<"CertJobOp">]> {
   let summary = "Poll a constant address until it equals a value";
   let description = [{
@@ -561,26 +508,6 @@ def AIE_CertPoll32Op: AIEX_Op<"cert.poll32", [HasParent<"CertJobOp">]> {
   );
   let assemblyFormat = [{
     `(` $address `,` $value `)` attr-dict
-  }];
-}
-
-def AIE_CertSleepOp: AIEX_Op<"cert.sleep", [HasParent<"CertJobOp">]> {
-  let summary = "Busy-sleep for a number of microseconds";
-  let description = [{
-    Makes the current job busy-wait `target` microseconds without yielding to
-    another job. Per the spec this opcode is for test purposes only
-    (isa-spec.yaml).
-
-    Example:
-    ```
-      cert.sleep(100)
-    ```
-  }];
-  let arguments = (
-    ins UI32Attr:$target
-  );
-  let assemblyFormat = [{
-    `(` $target `)` attr-dict
   }];
 }
 

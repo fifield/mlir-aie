@@ -41,7 +41,7 @@ aie.device(npu2) {
   }
   aiex.cert.job(0) {
     aiex.cert.uc_dma_write_des(3, @chain)
-    aiex.cert.mov(4, 0)
+    aiex.cert.read32(4, 0x02100000)
     aiex.cert.wait_uc_dma(3)
   }
 }
@@ -75,7 +75,8 @@ aie.device(npu2) {
 
 // -----
 
-// Negative: the handle is clobbered by an intervening cert.mov.
+// Negative: the handle is clobbered by an intervening cert.read32_d, whose
+// second operand is its destination register.
 aie.device(npu2) {
   memref.global "private" constant @d : memref<8xi32> = dense<0>
   aiex.cert.uc_dma_chain @chain {
@@ -83,8 +84,8 @@ aie.device(npu2) {
   }
   aiex.cert.job(0) {
     aiex.cert.uc_dma_write_des(3, @chain)
-    aiex.cert.mov(3, 0)
-    // expected-error@+1 {{cert.wait_uc_dma waits on $r3, whose reaching definition is a 'aiex.cert.mov' that clobbers the uC-DMA wait handle}}
+    aiex.cert.read32_d(4, 3)
+    // expected-error@+1 {{cert.wait_uc_dma waits on $r3, whose reaching definition is a 'aiex.cert.read32_d' that clobbers the uC-DMA wait handle}}
     aiex.cert.wait_uc_dma(3)
   }
 }

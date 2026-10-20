@@ -17,8 +17,8 @@
 // Positive: the in-range extremes, 0 and 23.
 aie.device(npu2) {
   aiex.cert.job(0) {
-    aiex.cert.mov(0, 1)
-    aiex.cert.mov(23, 1)
+    aiex.cert.read32(0, 1)
+    aiex.cert.read32(23, 1)
   }
 }
 
@@ -27,8 +27,8 @@ aie.device(npu2) {
 // Negative: 24 is one past the maximum.
 aie.device(npu2) {
   aiex.cert.job(0) {
-    // expected-error@+1 {{attribute 'dest' failed to satisfy constraint}}
-    aiex.cert.mov(24, 1)
+    // expected-error@+1 {{attribute 'value' failed to satisfy constraint}}
+    aiex.cert.read32(24, 1)
   }
 }
 
@@ -57,7 +57,7 @@ aie.device(npu2) {
 // Negative: -1 is below the minimum (IntMinValue<0>).
 aie.device(npu2) {
   aiex.cert.job(0) {
-    // expected-error@+1 {{attribute 'dest' failed to satisfy constraint}}
-    aiex.cert.add(-1, 1)
+    // expected-error@+1 {{attribute 'value' failed to satisfy constraint}}
+    aiex.cert.read32(-1, 1)
   }
 }

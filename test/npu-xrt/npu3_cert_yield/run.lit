@@ -1,8 +1,0 @@
-// Copyright (C) 2026 Advanced Micro Devices, Inc.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-// REQUIRES: ryzen_ai_npu3
-//
-// RUN: aiecc --get-full-elf --full-elf-name=cert_yield.elf %S/cert_yield.mlir
-// RUN: clang %S/test.cpp -o test.exe -std=c++17 -Wall %xrt_flags -lrt -lstdc++
-// RUN: %run_on_npu3% ./test.exe

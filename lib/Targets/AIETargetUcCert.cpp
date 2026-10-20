@@ -176,29 +176,6 @@ void emitRead32D(CertRead32DOp op, std::string &text) {
   text += "$r" + std::to_string(op.getValue()) + "\n";
 }
 
-// ADD                    $r0, 0x00000001
-void emitAdd(CertAddOp op, std::string &text) {
-  std::string s;
-  llvm::raw_string_ostream ss(s);
-  ss << mn("ADD");
-  ss << "$r" << op.getDest() << ", ";
-  ss << llvm::format("0x%08x\n", op.getValue());
-  text += ss.str();
-}
-
-// MOV                    $r0, 0x00000010
-void emitMov(CertMovOp op, std::string &text) {
-  std::string s;
-  llvm::raw_string_ostream ss(s);
-  ss << mn("MOV");
-  ss << "$r" << op.getDest() << ", ";
-  ss << llvm::format("0x%08x\n", op.getValue());
-  text += ss.str();
-}
-
-// YIELD
-void emitYield(CertYieldOp op, std::string &text) { text += "  YIELD\n"; }
-
 // WRITE_32_D             3, 0x04100000, 0x00000005
 void emitWrite32D(CertWrite32DOp op, std::string &text) {
   // Polarity: despite isa-spec.yaml's prose ("1 : address is immediate" /
@@ -235,12 +212,6 @@ void emitMaskPoll32(CertMaskPoll32Op op, std::string &text) {
   ss << llvm::format("0x%08x, ", op.getMask());
   ss << llvm::format("0x%08x\n", op.getValue());
   text += ss.str();
-}
-
-// SLEEP                  100
-void emitSleep(CertSleepOp op, std::string &text) {
-  text += mn("SLEEP");
-  text += std::to_string(op.getTarget()) + "\n";
 }
 
 // SAVE_TIMESTAMPS        7
@@ -289,13 +260,9 @@ LogicalResult emitJob(CertJobOp jobOp, std::string &text, std::string &data) {
         .Case<CertWaitUcDmaOp>([&](auto op) { emitWaitUcDma(op, text); })
         .Case<CertRead32Op>([&](auto op) { emitRead32(op, text); })
         .Case<CertRead32DOp>([&](auto op) { emitRead32D(op, text); })
-        .Case<CertAddOp>([&](auto op) { emitAdd(op, text); })
-        .Case<CertMovOp>([&](auto op) { emitMov(op, text); })
-        .Case<CertYieldOp>([&](auto op) { emitYield(op, text); })
         .Case<CertWrite32DOp>([&](auto op) { emitWrite32D(op, text); })
         .Case<CertPoll32Op>([&](auto op) { emitPoll32(op, text); })
         .Case<CertMaskPoll32Op>([&](auto op) { emitMaskPoll32(op, text); })
-        .Case<CertSleepOp>([&](auto op) { emitSleep(op, text); })
         .Case<CertSaveTimestampsOp>(
             [&](auto op) { emitSaveTimestamps(op, text); })
         .Case<CertSaveRegisterOp>(
