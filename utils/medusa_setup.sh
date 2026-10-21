@@ -1,96 +1,153 @@
-#!/bin/bash
-##===- utils/medusa_setup.sh - Setup mlir-aie env ----------*- Script -*-===##
-# 
-# This script sets up the environment to compile IRON designs in the medusa
-# environment.
-#
-# The script will optionally download and set up mlir-aie
-# 
-# source medusa_setup.sh [--force-install] <mlir-aie install dir> 
-#
-# Copyright (C) 2025, Advanced Micro Devices, Inc.
+#!/usr/bin/env bash
+# Copyright (C) 2025-2026, Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #
-##===----------------------------------------------------------------------===##
+# Generate medusa_env.sh in the current directory, then source that file.
+# Usage: source utils/medusa_setup.sh [--force-install] [<mlir-aie install dir>]
+# An explicit install directory takes precedence over --force-install.
+# Overrides: MEDUSA_WHEEL_DIR, VITIS, MEDUSA_SIM_ROOT, CERVINO_ROOT, ME_ROOT,
+# MEDUSA_SYSTEMC_LIB_DIR, MEDUSA_BOOST_LIB_DIR, and the license variables.
+# Existing installations are reused unless --force-install is requested.
 
-# Exit on error
-set -e
+# Keep temporary variables and shell options out of the caller's environment.
+_medusa_setup_main() (
+  local force_install=0 install_dir location wheel candidate
+  local wheel_dir=${MEDUSA_WHEEL_DIR:-/group/xrlabs/jefff/aie4/latest-wheels}
+  local sim_root=${MEDUSA_SIM_ROOT:-} systemc_dir=${MEDUSA_SYSTEMC_LIB_DIR:-}
 
-FORCE_INSTALL=0
-if [ "$1" == "--force-install" ]; then
-  FORCE_INSTALL=1
-  shift
-fi
-
-# get this file's location
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-
-# install dir
-if [ "$#" -ge 1 ]; then
-    export MLIR_AIE_INSTALL_DIR=`realpath $1`
-    FORCE_INSTALL=0
-else
-    export MLIR_AIE_INSTALL_DIR="$(pip show mlir_aie 2>/dev/null | grep ^Location: | awk '{print $2}')/mlir_aie"
-fi
-
-
-# If force install or an install dir isn't passed
-if [[ $FORCE_INSTALL -eq 1 || ( "$#" -lt 1 && -z "$(pip show mlir_aie | grep ^Location:)" ) ]]; then
-  
-  # install mlir-aie wheel
-  echo "Installing mlir_aie wheel..."
-  if ! python3 -m pip install -I mlir_aie -f /group/xrlabs/jefff/aie4/latest-wheels; then
-    echo "ERROR: Failed to install mlir_aie wheel" >&2
-    exit 1
+  if [[ ${1:-} == --force-install ]]; then
+    force_install=1
+    shift
   fi
-  export MLIR_AIE_INSTALL_DIR="$(pip show mlir_aie | grep ^Location: | awk '{print $2}')/mlir_aie"
-
-  # these are needed for mesimulator
-  echo "Installing mesimulator dependencies (toml, bitstring)..."
-  if ! python3 -m pip install toml bitstring cffi; then
-    echo "ERROR: Failed to install mesimulator dependencies" >&2
-    exit 1
+  if [[ $# -gt 1 || ${1:-} == --* ]]; then
+    echo 'Usage: source utils/medusa_setup.sh [--force-install] [<mlir-aie install dir>]' >&2
+    return 1
   fi
+
+  if [[ $# -eq 1 ]]; then
+    install_dir=$(realpath -- "$1") || return 1
+  else
+    location=$(python -m pip show mlir_aie 2>/dev/null | awk '/^Location:/ {print substr($0, 11)}')
+    if [[ $force_install -eq 1 || -z $location ]]; then
+      if [[ ! -d $wheel_dir ]]; then
+        echo "ERROR: Wheel directory does not exist: $wheel_dir" >&2
+        return 1
+      fi
+      # Choose a compatible wheel from the internal share explicitly. Let pip
+      # resolve its dependencies normally, without searching indexes for AIE.
+      wheel=$(python - "$wheel_dir" <<'PY'
+from pathlib import Path
+import sys
+from pip._vendor.packaging.tags import sys_tags
+from pip._vendor.packaging.utils import parse_wheel_filename
+
+compatible = set(sys_tags())
+wheels = []
+for path in Path(sys.argv[1]).glob('mlir_aie-*.whl'):
+    _, version, _, tags = parse_wheel_filename(path.name)
+    if compatible.intersection(tags):
+        wheels.append((version, path))
+if not wheels:
+    sys.exit('ERROR: No compatible MLIR-AIE wheel found in ' + sys.argv[1])
+print(max(wheels, key=lambda item: item[0])[1])
+PY
+      ) || return 1
+      echo "Installing MLIR-AIE wheel: $wheel"
+      local -a install_options=()
+      if [[ $force_install -eq 1 ]]; then
+        install_options+=(--force-reinstall)
+      fi
+      python -m pip install "${install_options[@]}" "$wheel" || return 1
+      location=$(python -m pip show mlir_aie 2>/dev/null | awk '/^Location:/ {print substr($0, 11)}')
+    fi
+    if [[ -z $location ]]; then
+      echo 'ERROR: Cannot locate mlir_aie in the active Python environment.' >&2
+      return 1
+    fi
+    install_dir="$location/mlir_aie"
+  fi
+
+  for candidate in bin python lib; do
+    if [[ ! -d $install_dir/$candidate ]]; then
+      echo "ERROR: Invalid MLIR-AIE installation: missing $install_dir/$candidate" >&2
+      return 1
+    fi
+  done
+  python -m pip install toml bitstring cffi || return 1
+
+  # Prefer a simulator installation with the Boost version used by current CI.
+  if [[ -z $sim_root ]]; then
+    for candidate in /group/xrlabs/jefff/pacifica-sim /proj/rdi/staff/jefff/aie4/pacifica-sim; do
+      if [[ -d $candidate/cervino/aie4 && -d $candidate/cervino/ext/Boost_1_89_0/boost_1_89_0/rdi/lib ]]; then
+        sim_root=$candidate
+        break
+      fi
+    done
+    sim_root=${sim_root:-/group/xrlabs/jefff/pacifica-sim}
+  fi
+  if [[ -z $systemc_dir ]]; then
+    for candidate in /wrk/hmca/shared/ext/systemc-2.3.3_gcc10_std20/lib64 /proj/rdi/staff/jefff/aie4/wrk/hmca/shared/ext/systemc-2.3.3_gcc10_std20/lib64; do
+      if [[ -d $candidate ]]; then
+        systemc_dir=$candidate
+        break
+      fi
+    done
+  fi
+
+  # Quote paths as shell code, and defer environment expansion until sourcing.
+  # Write atomically so a failed setup preserves any previous environment file.
+  local env_tmp
+  env_tmp=$(mktemp ./medusa_env.sh.XXXXXX) || return 1
+  trap 'rm -f -- "$env_tmp"' EXIT
+  {
+    printf '# Generated by utils/medusa_setup.sh; source this file to activate.\n'
+    printf 'export MLIR_AIE_INSTALL_DIR=%q\n' "$install_dir"
+    printf 'if [[ -z ${VITIS:-} ]]; then export VITIS=%q; fi\n' /proj/primebuilds/2026.2_PRIME_0601_1/installs/lin64/HEAD/Vitis
+    printf 'if [[ -z ${MEDUSA_SIM_ROOT:-} ]]; then export MEDUSA_SIM_ROOT=%q; fi\n' "$sim_root"
+    printf 'if [[ -z ${MEDUSA_SYSTEMC_LIB_DIR:-} ]]; then export MEDUSA_SYSTEMC_LIB_DIR=%q; fi\n' "$systemc_dir"
+    cat <<'ENV'
+export MLIR_AIE_DIR="$MLIR_AIE_INSTALL_DIR"
+export PYTHONPATH="$MLIR_AIE_INSTALL_DIR/python${PYTHONPATH:+:$PYTHONPATH}"
+export LD_LIBRARY_PATH="$MLIR_AIE_INSTALL_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+export CERVINO_ROOT="${CERVINO_ROOT:-$MEDUSA_SIM_ROOT/cervino}"
+export ME_ROOT="${ME_ROOT:-$CERVINO_ROOT/aie4}"
+export me_DIR="${me_DIR:-$ME_ROOT/core_model/sipp/lib}"
+export MEDUSA_BOOST_LIB_DIR="${MEDUSA_BOOST_LIB_DIR:-$CERVINO_ROOT/ext/Boost_1_89_0/boost_1_89_0/rdi/lib}"
+# Simulator libraries are optional for hardware execution. Add existing paths.
+for _medusa_lib in "$MEDUSA_SYSTEMC_LIB_DIR" "$MEDUSA_BOOST_LIB_DIR"; do
+  if [[ -d $_medusa_lib ]]; then
+    export LD_LIBRARY_PATH="$_medusa_lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  fi
+done
+for _medusa_python in "$ME_ROOT/python" "$ME_ROOT/applications"; do
+  if [[ -d $_medusa_python ]]; then
+    export PYTHONPATH="$PYTHONPATH:$_medusa_python"
+  fi
+done
+unset _medusa_lib _medusa_python
+
+if [[ ! -d $VITIS/aietools/bin || ! -d $VITIS/bin ]]; then
+  echo "ERROR: Invalid Vitis installation: $VITIS. Set VITIS and source this file again." >&2
+  return 1
 fi
+export PATH="$MLIR_AIE_INSTALL_DIR/bin:$VITIS/aietools/bin:$VITIS/bin${PATH:+:$PATH}"
+export XILINXD_LICENSE_FILE="${XILINXD_LICENSE_FILE:-/proj/xbuilds/licenses/:2100@aiengine4-eng}"
+export LM_LICENSE_FILE="${LM_LICENSE_FILE:-1757@xsjlicsrvip:2100@aiengine-eng}"
 
-# Write environment variables to medusa_env.sh
-cat > medusa_env.sh <<EOF
-# auto-generated by utils/medusa_setup.sh
+printf 'MLIR_AIE_DIR     : %s\nVITIS            : %s\nPATH             : %s\nLD_LIBRARY_PATH  : %s\nPYTHONPATH       : %s\n' \
+  "$MLIR_AIE_DIR" "$VITIS" "$PATH" "$LD_LIBRARY_PATH" "$PYTHONPATH"
+ENV
+  } > "$env_tmp" || return 1
+  bash -n "$env_tmp" || return 1
+  mv -- "$env_tmp" medusa_env.sh || return 1
+  echo 'Generated medusa_env.sh. Activate with: source medusa_env.sh'
+)
 
-# setup environment for mlir-aie
-export MLIR_AIE_DIR=${MLIR_AIE_INSTALL_DIR}
-export PATH=${MLIR_AIE_INSTALL_DIR}/bin:\$PATH 
-export PYTHONPATH=${MLIR_AIE_INSTALL_DIR}/python:\$PYTHONPATH
-export LD_LIBRARY_PATH=${MLIR_AIE_INSTALL_DIR}/lib:${MLIR_AIE_INSTALL_DIR}/lib/runtime_lib/x86_64/xaiengine/lib:\$LD_LIBRARY_PATH
-
-# setup environment for simulator
-if [[ $(hostname) == xco* ]]; then
-  export MEDUSA_SIM_ROOT=/proj/rdi/staff/jefff/aie4/pacifica-sim
+# An explicit conditional also lets us clean up under a caller's errexit setting.
+if _medusa_setup_main "$@"; then
+  unset -f _medusa_setup_main
 else
-  export MEDUSA_SIM_ROOT=/group/xrlabs/jefff/pacifica-sim
+  unset -f _medusa_setup_main
+  return 1 2>/dev/null || exit 1
 fi
-export CERVINO_ROOT=\$MEDUSA_SIM_ROOT/cervino
-export ME_ROOT=\$MEDUSA_SIM_ROOT/cervino/aie4
-export me_DIR=\$ME_ROOT/core_model/sipp/lib
-if [[ $(hostname) == xco* ]]; then
-  export LD_LIBRARY_PATH=/proj/rdi/staff/jefff/aie4/wrk/hmca/shared/ext/systemc-2.3.3_gcc10_std20/lib64:\$LD_LIBRARY_PATH
-else
-  export LD_LIBRARY_PATH=/wrk/hmca/shared/ext/systemc-2.3.3_gcc10_std20/lib64:\$LD_LIBRARY_PATH
-fi
-export LD_LIBRARY_PATH=\$CERVINO_ROOT/ext/Boost_1_89_0/boost_1_89_0/rdi/lib:\$LD_LIBRARY_PATH
-export PYTHONPATH=\$PYTHONPATH:\$ME_ROOT/python:\$ME_ROOT/applications
-
-# setup environment for vitis
-export VITIS=/proj/primebuilds/9999.0_PRIME_0819_1/installs/lin64/HEAD/Vitis
-export PATH=\$PATH:\${VITIS}/aietools/bin:\${VITIS}/bin
-export XILINXD_LICENSE_FILE=/proj/xbuilds/licenses/:2100@aiengine4-eng
-export LM_LICENSE_FILE=1757@xsjlicsrvip:2100@aiengine-eng
-
-echo "PATH              : ${PATH}"
-echo "LD_LIBRARY_PATH   : ${LD_LIBRARY_PATH}"
-echo "PYTHONPATH        : ${PYTHONPATH}"
-echo "VITIS             : ${VITIS}"
-EOF
-
-echo "Generated medusa_env.sh. To setup environment run:"
-echo "source medusa_env.sh"
