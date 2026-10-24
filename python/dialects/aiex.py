@@ -532,6 +532,7 @@ def shim_dma_single_bd_task(
         # layout in d0..d3, letting the consuming objectfifo chunk it). A pure
         # (zero-stride) repeat is fine and lowers to a queue repeat_count; for a
         # genuinely advancing iteration, use the raw dma_configure_task path.
+        # Other targets keep upstream's strided repeat.
         outer_stride = strides[0] if strides else 0
         if sizes:
             # On AIE4 a 5-dim pattern's sizes[1] is the D3 addressing dimension,
@@ -540,7 +541,11 @@ def shim_dma_single_bd_task(
             if all(isinstance(v, (int, np.integer)) for v in outer):
                 runs = int(np.prod([int(v) for v in outer]))
                 if runs > 1:
-                    if outer_stride != 0 and len(outer) == 1:
+                    if (
+                        outer_stride != 0
+                        and len(outer) == 1
+                        and _is_aie4_target()
+                    ):
                         raise ValueError(
                             "shim_dma_single_bd_task: a strided outermost (iteration) "
                             "dimension (sizes[0] > 1 with a nonzero stride) is not supported "

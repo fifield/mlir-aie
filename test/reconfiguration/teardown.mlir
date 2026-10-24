@@ -280,8 +280,9 @@ module {
 // CHECK-DAG:  %[[ZERO:.*]] = arith.constant 0 : i32
 // CHECK-DAG:  %[[S2MM0:.*]] = arith.constant 2219520 : i32
 // CHECK-DAG:  %[[RESET:.*]] = arith.constant 2 : i32
-// CHECK:      aiex.npu.maskwrite32(%[[CORE]], %[[ON]], %[[ON]])
-// CHECK-NEXT: aiex.npu.maskwrite32(%[[CORE]], %[[ZERO]], %[[ON]])
+// The configuration does not enable a core without an elf_file, so only the
+// teardown's disable shows.
+// CHECK:      aiex.npu.maskwrite32(%[[CORE]], %[[ZERO]], %[[ON]])
 // CHECK-NEXT: aiex.npu.maskwrite32(%[[S2MM0]], %[[RESET]], %[[RESET]])
 // CHECK-NEXT: aiex.npu.write32(%[[S2MM0]], %[[ZERO]])
 // CHECK-NEXT: {{^    }}}

@@ -5607,7 +5607,8 @@ void populateAIEVecToLLVMConversionPatterns(
 }
 
 // Configure legalization rules shared by AIE2 and AIE2p
-static void configureAIEVecToLLVMLegalizations(LLVMConversionTarget &target) {
+static void configureAIEVecToLLVMLegalizations(LLVMConversionTarget &target,
+                                               bool isAIE4) {
   // Vector f32 divf is illegal (needs unrolling to scalar divf)
   // Scalar f32 divf is legal (handled by downstream passes)
   target.addDynamicallyLegalOp<arith::DivFOp>([](arith::DivFOp divOp) {
@@ -5619,6 +5620,12 @@ static void configureAIEVecToLLVMLegalizations(LLVMConversionTarget &target) {
     // Scalar divf is legal
     return true;
   });
+
+  // AIE4 has no one-lane bitcast patterns (see
+  // populateAIEVecToLLVMConversionPatterns), so leaves them to
+  // convert-vector-to-llvm.
+  if (isAIE4)
+    return;
 
   // One-element vectors built from a scalar are illegal (lowered to bitcast)
   target.addDynamicallyLegalOp<vector::BroadcastOp>(
@@ -5710,7 +5717,7 @@ struct ConvertAIEVecToLLVMPass
                            ub::UBDialect>();
 
     // Configure legalizations for AIE2/AIE2p
-    configureAIEVecToLLVMLegalizations(target);
+    configureAIEVecToLLVMLegalizations(target, targetInfo.isAIE4());
     // f32 rsqrt has only the approximate INVSQRT lowering on AIE4, which the
     // pattern refuses without afn. Marking it illegal turns that refusal into
     // an error here rather than a G_FSQRT failure in Peano.

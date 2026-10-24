@@ -46,7 +46,10 @@ module {
 // CHECK: aie.objectfifo.dma_endpoint @dst1({{.*}}) fills @p1 {channelIndex = 1 : i32}
 // CHECK: aie.objectfifo.dma_endpoint @dst2({{.*}}) fills @p2 {channelIndex = 4 : i32}
 // CHECK: aie.objectfifo.dma_endpoint @dst3({{.*}}) fills @p3 {channelIndex = 5 : i32}
-// CHECK: aie.objectfifo.dma_endpoint @out4({{.*}}) drains @p0 {channelIndex = 5 : i32}
+// Drains skip MM2S 4, which reaches only North0; the order among the rest is
+// the allocator's.
+// CHECK-NOT: drains @p{{[0-9]}} {channelIndex = 4 : i32}
+// CHECK: aie.objectfifo.dma_endpoint @out4({{.*}}) drains @p0
 // ROUTE: aie.connect<South : 0, DMA : 0>
 // ROUTE: aie.connect<South : 1, DMA : 1>
 // ROUTE: aie.connect<South : 2, DMA : 4>
