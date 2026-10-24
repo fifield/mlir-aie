@@ -1416,8 +1416,8 @@ llvm::Error Pathfinder::cutOverflow() const {
   auto onDevice = [&](TileID t) { return t.col < columns && t.row < rows; };
   std::map<std::tuple<bool, int, bool>, size_t> channels;
   for (const auto &[ends, sb] : graph) {
-    const auto &[a, b] = ends;
-    auto xbar = graph.find({a, a});
+    const auto &[a, b, _] = ends;
+    auto xbar = graph.find(crossbarKey(a));
     if (a == b || !onDevice(a) || !onDevice(b) || xbar == graph.end())
       continue;
     bool rows = a.col == b.col;

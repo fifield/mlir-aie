@@ -61,6 +61,17 @@ static std::optional<NdDmaPattern> constantPattern(NpuDmaMemcpyNdOp op) {
   return pattern;
 }
 
+// True when `op` has no padding and a constant offset, length, sizes and
+// strides.
+static bool allConstant(AIE::DMABDOp op) {
+  if (op.getPadDimensions().has_value() ||
+      (op.getOffset() && !op.getConstantOffset()) ||
+      (op.getLen() && !op.getConstantLen()) || op.getMixedSizes().empty())
+    return false;
+  return getConstantIntValues(op.getMixedSizes()).has_value() &&
+         getConstantIntValues(op.getMixedStrides()).has_value();
+}
+
 // MemTiles and AIE4 shim NOC tiles have a D3 addressing dimension besides
 // the iteration one (see AIEDMATasksToNPU), so a descriptor there may hold
 // five entries, [iteration, d3, d2, d1, d0].

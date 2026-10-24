@@ -1100,7 +1100,7 @@ LogicalResult xilinx::AIE::AIERTControl::resetDmaChannels(DeviceOp &targetOp) {
       if (failed(resetChannel(dmaOp, dmaOp.getChannelDir(),
                               dmaOp.getChannelIndex())))
         return failure();
-    for (Block *block : getOrderedChainOfBlocks(&region))
+    for (auto &[block, channel, dir] : getOrderedChainOfBlocks(&region))
       for (auto startOp : block->getOps<DMAStartOp>())
         if (failed(resetChannel(startOp, startOp.getChannelDir(),
                                 startOp.getChannelIndex())))
