@@ -18,7 +18,8 @@
 
 #define DTYPE int32_t
 
-constexpr size_t DATA_COUNT = 2048;
+// Must match N in passthrough_dmas_placed.py; the shim BDs move N elements.
+constexpr size_t DATA_COUNT = 4096;
 constexpr size_t BUF_SIZE = DATA_COUNT * sizeof(DTYPE);
 
 int main(int argc, const char *argv[]) {
