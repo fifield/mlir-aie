@@ -40,12 +40,13 @@ with mlir_mod_ctx() as ctx:
 
     print(ctx.module)
 
-# Strided outermost dimension (size 5, stride 48): rejected with a clear error.
+# Strided outermost dimension (size 5, stride 48): rejected on AIE4 with a clear
+# error.
 # CHECK: REJECTED: {{.*}}strided outermost
 try:
     with mlir_mod_ctx() as ctx2:
 
-        @device(AIEDevice.npu1)
+        @device(AIEDevice.npu3)
         def dev2():
             S = tile(0, 0)
             M = tile(0, 2)
