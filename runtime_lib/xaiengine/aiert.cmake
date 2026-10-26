@@ -1,8 +1,8 @@
 # Copyright (C) 2023-2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-# third_party/aie-rt tracks upstream Xilinx/aie-rt directly (no personal
-# fork). Functionality mlir-aie needs that isn't upstream yet is vendored as
+# third_party/aie-rt tracks the internal AIE4 fork (see .gitmodules).
+# Additional functionality mlir-aie needs is vendored as
 # patch files under third_party/patches/aie-rt and applied here, once, at
 # configure time. See third_party/patches/aie-rt/README.md.
 function(apply_aie_rt_vendor_patches AIE_RT_ROOT PATCH_DIR)

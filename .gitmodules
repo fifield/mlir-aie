@@ -11,7 +11,7 @@
 [submodule "runtime_lib/xaiengine/aie-rt"]
 	path = third_party/aie-rt
 	url = https://gitenterprise.xilinx.com/jefff/aie-rt.git
-	branch = phoenix_v2023.2
+	branch = aie4-dev
 [submodule "third_party/bootgen"]
 	path = third_party/bootgen
 	url = https://github.com/Xilinx/bootgen.git

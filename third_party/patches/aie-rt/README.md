@@ -3,11 +3,15 @@ SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception -->
 
 # Vendored aie-rt patches
 
-`third_party/aie-rt` is pinned to a commit on upstream
-[Xilinx/aie-rt](https://github.com/Xilinx/aie-rt) `release/main_aig`. The
-patches in this directory carry functionality mlir-aie depends on that isn't
-upstream yet, applied automatically at CMake configure time (see
-`runtime_lib/xaiengine/aiert.cmake`). Each patch has an upstream PR, and
+`third_party/aie-rt` is pinned to the internal AIE4 fork
+[jefff/aie-rt](https://gitenterprise.xilinx.com/jefff/aie-rt), based on
+`aie4-dev` with compatible fixes merged from internal
+[ai-engine/aie-rt](https://gitenterprise.xilinx.com/ai-engine/aie-rt)
+`main_aig` at `73e6472b`. This preserves the fork's AIE4Z support and
+AIE4 DMA bounds-check fixes. The patches in this directory carry additional
+functionality mlir-aie depends on, applied automatically at CMake configure
+time (see
+`runtime_lib/xaiengine/aiert.cmake`). Each patch has a public upstream PR, and
 [#3851](https://github.com/Xilinx/mlir-aie/issues/3851) tracks what is needed
 to drop them.
 
@@ -65,8 +69,10 @@ to drop them.
 
 Note: `0003` and `0005` are maintained against this branch's aie-rt pin, where
 the `_XAie_Append*` serializers take `(Cmd, TxnPtr)` rather than upstream's
-`(DevInst, Cmd, TxnPtr)` and write `OpHdr.Col`/`Row` as 0; regenerate them if
-the submodule is bumped. `0003` is generated with two lines of context
+`(DevInst, Cmd, TxnPtr)` and write `OpHdr.Col`/`Row` as 0; re-check them if
+the submodule is bumped. All five patches apply unchanged to the merged
+`a696248f` pin, and a second configure skips them successfully. `0003` is
+generated with two lines of context
 (`git diff -U2`) so its leading context does not overlap the
 `_XAie_AppendMaskPollBusy32` body that `0005` rewrites; otherwise the
 reverse-apply idempotency check in `aiert.cmake` fails on re-configure.
