@@ -36,7 +36,10 @@ jobs:
     name: XRT NPU3 Tests
     runs-on: ryzen-ai-npu3
     env:
-      VITIS: /proj/primebuilds/2026.2_PRIME_0601_1/installs/lin64/HEAD/Vitis
+      # Standalone aietools copy (aie_ml, aie2p, aie2ps, aie4, aie4a) taken from
+      # /proj/aiebuilds/ryzen-ai/ryzen-ai-TA/main/ryzenai_2.0.0_2026_10_13_18759.
+      # Its root is an aietools directory, so bin/ holds xchesscc and v++.
+      VITIS: /proj/rdi/staff/jefff/aietools-aie4-20261013
       LM_LICENSE_FILE: 1757@172.19.220.188:2100@172.19.6.231
       XDG_CACHE_HOME: /scratch/github/actions-runner/_work/_temp/xdg-cache
       PIP_CACHE_DIR: /scratch/github/actions-runner/_work/_temp/pip-cache
@@ -89,7 +92,7 @@ jobs:
           source aie-venv/bin/activate
           source /opt/xilinx/xrt/setup.sh
 
-          export PATH=$PATH:${VITIS}/aietools/bin:${VITIS}/bin
+          export PATH=$PATH:${VITIS}/bin
           export PEANO_INSTALL_DIR="$(pip show llvm-aie | grep ^Location: | awk '{print $2}')/lnx64.o/tools/peano/"
           sed -i 's/\t\tVITIS_DSPLIB_INCLUDE_DIR/\t\t#VITIS_DSPLIB_INCLUDE_DIR/g' cmake/modulesXilinx/FindVitis.cmake
 
@@ -112,6 +115,7 @@ jobs:
             -DCMAKE_SHARED_LINKER_FLAGS_INIT="-fuse-ld=lld" \
             -DXRT_ROOT=/opt/xilinx/xrt \
             -DAIE_ENABLE_PYTHON_PASSES=OFF \
+            -DAIE_VITIS_COMPONENTS="AIE2;AIE2P;AIE4" \
             -DAIE_ENABLE_XRT_PYTHON_BINDINGS=ON \
             -DAIE_INCLUDE_INTEGRATION_TESTS=OFF
 
@@ -135,7 +139,7 @@ jobs:
         run: |
           source aie-venv/bin/activate
           source /opt/xilinx/xrt/setup.sh
-          export PATH=$PATH:${VITIS}/aietools/bin:${VITIS}/bin
+          export PATH=$PATH:${VITIS}/bin
           export PEANO_INSTALL_DIR="$(pip show llvm-aie | grep ^Location: | awk '{print $2}')/lnx64.o/tools/peano/"
 
           pushd build
