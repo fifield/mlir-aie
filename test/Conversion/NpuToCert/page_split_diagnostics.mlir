@@ -191,3 +191,33 @@ aie.device(npu2) {
     aiex.cert.uc_dma_write_des_sync(@c1)
   }
 }
+
+// -----
+
+// Patches accumulate across pushes, including through a second chain that
+// shares the payload, so @tA's first patch must share a page with its last
+// push. That span covers the whole page, which is over the 8192-byte limit.
+aie.device(xcve3858) {
+  memref.global "private" constant @tA : memref<980xi32> = dense<0>
+  memref.global "private" constant @tB : memref<1000xi32> = dense<0>
+  aiex.cert.uc_dma_chain @chainTA {
+    aiex.cert.uc_dma_bd @tA, 0, 980, false
+  }
+  aiex.cert.uc_dma_chain @chainTB {
+    aiex.cert.uc_dma_bd @tB, 0, 1000, false
+  }
+  aiex.cert.uc_dma_chain @chainTA2 {
+    aiex.cert.uc_dma_bd @tA, 4096, 980, false
+  }
+  // expected-error@+1 {{cannot be split without separating a cert.apply_offset_57 from a uC-DMA push of the payload it patches across pages; reduce the page's contents or regroup its apply_offset_57 ops and their pushes}}
+  aiex.cert.page {
+    aiex.cert.job(1) {
+      aiex.cert.apply_offset_57(@tA, 1, 0)
+      aiex.cert.uc_dma_write_des_sync(@chainTA)
+      aiex.cert.write32(0x1000, 1)
+      aiex.cert.uc_dma_write_des_sync(@chainTB)
+      aiex.cert.apply_offset_57(@tA, 1, 2)
+      aiex.cert.uc_dma_write_des_sync(@chainTA2)
+    }
+  }
+}
