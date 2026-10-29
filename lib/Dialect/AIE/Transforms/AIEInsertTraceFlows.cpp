@@ -956,8 +956,7 @@ struct AIEInsertTraceFlowsPass
         uint32_t localBdId =
             chanDesc.bdId - targetModel.getBdPoolStartId(shimCol, 0, bdPool);
         auto tokenValue = targetModel.encodeFieldValue(*tokenField, 1);
-        auto bdIdValue =
-            targetModel.encodeFieldValue(*bdIdField, localBdId);
+        auto bdIdValue = targetModel.encodeFieldValue(*bdIdField, localBdId);
         if (!tokenValue)
           llvm::report_fatal_error("Enable_Token_Issue does not fit in the "
                                    "field of " +

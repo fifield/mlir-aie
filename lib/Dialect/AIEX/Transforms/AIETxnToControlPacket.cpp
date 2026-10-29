@@ -148,10 +148,11 @@ struct AIELegalizeControlPacketPass
     uint32_t maxPayloadSize = AIEX::getCtrlPktMaxPayloadWords(targetModel);
 
     ConversionTarget target(getContext());
-    target.addDynamicallyLegalOp<AIEX::NpuControlPacketOp>([maxPayloadSize](Operation *op) {
-      auto packetOp = cast<AIEX::NpuControlPacketOp>(op);
-      return !packetOp.getData() || fitsInLine(packetOp, maxPayloadSize);
-    });
+    target.addDynamicallyLegalOp<AIEX::NpuControlPacketOp>(
+        [maxPayloadSize](Operation *op) {
+          auto packetOp = cast<AIEX::NpuControlPacketOp>(op);
+          return !packetOp.getData() || fitsInLine(packetOp, maxPayloadSize);
+        });
 
     RewritePatternSet patterns(&getContext());
     patterns.add<ControlPacketSplitPattern>(&getContext(), maxPayloadSize);

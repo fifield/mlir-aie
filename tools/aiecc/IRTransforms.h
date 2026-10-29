@@ -1484,7 +1484,7 @@ inline std::unique_ptr<mlir::PassManager> getInputWithAddressesPipeline(
                       loadPdiToCtrlPkt, skipObjectFifoVerify, coverColumns,
                       adaptiveOverlay, checkQueueSpace);
 
-  mlir::OpPassManager &dpm2 = pm->nest<DeviceOp>();
+  mlir::OpPassManager &dpm2 = pm->nest<xilinx::AIE::DeviceOp>();
   if (assignAddresses) {
     dpm2.addPass(xilinx::AIE::createAIEAssignBufferAddressesPass());
   }

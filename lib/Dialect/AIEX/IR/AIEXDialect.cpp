@@ -363,13 +363,12 @@ mlir::LogicalResult AIEX::verifyStridesWraps(
   // iteration fields 0 and carry the count on the queue push, so the repeat
   // limit applies.
   bool pureRepeat = inputStrides[4] == 0;
-  int64_t maxCount = pureRepeat
-                         ? targetModel.getMaxRepeatCount() + 1
-                         : static_cast<int64_t>(maxWrap[4]) + 1;
+  int64_t maxCount = pureRepeat ? targetModel.getMaxRepeatCount() + 1
+                                : static_cast<int64_t>(maxWrap[4]) + 1;
   if (inputSizes[4] > maxCount)
-    return emitError()
-           << (pureRepeat ? "repeat count " : "iteration count ")
-           << inputSizes[4] << " exceeds the [1:" << maxCount << "] range.";
+    return emitError() << (pureRepeat ? "repeat count " : "iteration count ")
+                       << inputSizes[4] << " exceeds the [1:" << maxCount
+                       << "] range.";
   for (int i = 0; i < 5; ++i) {
     if (!maxStep[i])
       continue;
@@ -937,22 +936,20 @@ AIEX::NpuDmaMemcpyNdOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
   auto allocOp = symbolTable.lookupSymbolIn<AIE::ShimDMAAllocationOp>(
       dev, getMetadata().getRootReference());
   if (allocOp) {
-  if (auto tile =
-          dyn_cast<AIE::TileOp>(allocOp.getTile().getDefiningOp())) {
-    int col = tile.getCol(), row = tile.getRow();
-    auto direction = allocOp.getChannelDir();
-    int64_t channel = allocOp.getChannelIndex();
-    if (failed(AIE::verifyDMAChannel(getOperation(), targetModel, col, row,
-                                     direction, channel)))
-      return failure();
-    if (getId() > std::numeric_limits<uint32_t>::max() ||
-        !targetModel.isBdChannelAccessible(col, row, getId(), channel,
-                                           direction))
-      return emitOpError("BD ID ")
-             << getId() << " is not accessible from channel ("
-             << stringifyDMAChannelDir(direction) << ", " << channel
-             << ").";
-  }
+    if (auto tile = dyn_cast<AIE::TileOp>(allocOp.getTile().getDefiningOp())) {
+      int col = tile.getCol(), row = tile.getRow();
+      auto direction = allocOp.getChannelDir();
+      int64_t channel = allocOp.getChannelIndex();
+      if (failed(AIE::verifyDMAChannel(getOperation(), targetModel, col, row,
+                                       direction, channel)))
+        return failure();
+      if (getId() > std::numeric_limits<uint32_t>::max() ||
+          !targetModel.isBdChannelAccessible(col, row, getId(), channel,
+                                             direction))
+        return emitOpError("BD ID ")
+               << getId() << " is not accessible from channel ("
+               << stringifyDMAChannelDir(direction) << ", " << channel << ").";
+    }
   }
   if (isDynamic)
     return verifyDynamicSizesStrides(targetModel, buffer, allocOp);
@@ -1003,8 +1000,8 @@ AIEX::NpuDmaMemcpyNdOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
       targetModel, col, row, inputSizes, inputStrides);
   // An oversized non-contiguous pattern that aie-decompose-large-dma-bd can
   // split into hardware-legal sub-transfers is also allowed to verify: the
-  // pass rewrites it before BD lowering. Truly undecomposable patterns (e.g.
-  // oversized strides) still fail below. isDecomposableNdDmaPattern
+  // pass rewrites it before BD lowering. Undecomposable patterns still fail
+  // below. isDecomposableNdDmaPattern
   // suppresses its own diagnostics, so no stray error is emitted for the
   // accepted case.
   llvm::SmallVector<int64_t, 5> inputOffsets =
@@ -2264,9 +2261,9 @@ LogicalResult AIEX::DMAStartBdChainOp::verify() {
   }
   for (unsigned i = 0, n = expectedArgTypes.size(); i < n; i++) {
     if (actualArgTypes[i] != expectedArgTypes[i]) {
-      return emitOpError("Argument ") << (i + 1) << " types mismatch: "
-                                      << "expected " << expectedArgTypes[i]
-                                      << " but got " << actualArgTypes[i];
+      return emitOpError("Argument ")
+             << (i + 1) << " types mismatch: " << "expected "
+             << expectedArgTypes[i] << " but got " << actualArgTypes[i];
     }
   }
   return success();
@@ -2536,7 +2533,7 @@ AIEX::BlockFloatType::getBlockFormat(StringRef blockType) {
       blockFormatsMap = {
           {"v8bfp16ebs8", {8, 8, 8, 0}},
           {"v16bfp16ebs16", {16, 8, 8, 0}},
-  };
+      };
 
   auto it = blockFormatsMap.find(blockType);
   if (it != blockFormatsMap.end()) {

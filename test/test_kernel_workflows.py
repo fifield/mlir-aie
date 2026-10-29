@@ -142,6 +142,10 @@ def test_lockfile_regeneration_finds_python_with_tomllib(available):
         assert result.stdout == available
 
 
+@pytest.mark.skipif(
+    not (WORKFLOWS / "mlirDistro.yml").exists(),
+    reason="this fork does not carry mlirDistro.yml",
+)
 @pytest.mark.parametrize("download_status", [0, 22])
 def test_llvm_archive_download_handles_http_errors(download_status):
     run = next(

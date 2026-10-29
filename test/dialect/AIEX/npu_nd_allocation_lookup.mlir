@@ -26,7 +26,7 @@ module {
 module {
   aie.device(npu1) {
     aie.runtime_sequence(%arg0: memref<4096xi32>) {
-      aiex.npu.dma_memcpy_nd(%arg0[0, 0, 0, 0][2, 1, 1, 2][1572864, 0, 0, 1]) {id = 0 : i64, metadata = @missing} : memref<4096xi32>
+      aiex.npu.dma_memcpy_nd(%arg0[0, 0, 0, 0, 0][1, 2, 2, 3, 4][0, 32, 12, 4, 1]) {id = 0 : i64, metadata = @missing} : memref<4096xi32>
     }
   }
 }
@@ -38,19 +38,20 @@ module {
   aie.device(npu1) {
     aie.runtime_sequence @not_alloc() {}
     aie.runtime_sequence @copy(%arg0: memref<4096xi32>) {
-      aiex.npu.dma_memcpy_nd(%arg0[0, 0, 0, 0][2, 1, 1, 2][1572864, 0, 0, 1]) {id = 0 : i64, metadata = @not_alloc} : memref<4096xi32>
+      aiex.npu.dma_memcpy_nd(%arg0[0, 0, 0, 0, 0][1, 2, 2, 3, 4][0, 32, 12, 4, 1]) {id = 0 : i64, metadata = @not_alloc} : memref<4096xi32>
     }
   }
 }
 
 // -----
 
-// The same oversized stride must not be deferred once the allocation exists.
+// Unsupported D3 addressing must not be deferred once the allocation exists.
+// Oversized strides are unsuitable here because Medusa can decompose them.
 module {
   aie.device(npu1) {
     aie.runtime_sequence(%arg0: memref<4096xi32>) {
-      // expected-error @+1 {{Stride 3 is 1572864 (encoded as 1572863), which exceeds the [1:1048576] range.}}
-      aiex.npu.dma_memcpy_nd(%arg0[0, 0, 0, 0][2, 1, 1, 2][1572864, 0, 0, 1]) {id = 0 : i64, metadata = @dma} : memref<4096xi32>
+      // expected-error @+1 {{D3 addressing is not supported on AIE2}}
+      aiex.npu.dma_memcpy_nd(%arg0[0, 0, 0, 0, 0][1, 2, 2, 3, 4][0, 32, 12, 4, 1]) {id = 0 : i64, metadata = @dma} : memref<4096xi32>
     }
     %tile = aie.tile(0, 0)
     aie.shim_dma_allocation @dma(%tile, MM2S, 0)
@@ -129,13 +130,14 @@ module {
 
 // -----
 
-// Static AIE1 transfers reject ShimPL tiles, which have no ShimDMA.
+// ShimPL tiles have no ShimDMA, so the allocation itself is rejected, before
+// the static memcpy verifier runs.
 module {
   aie.device(xcvc1902) {
     %tile = aie.tile(0, 0)
+    // expected-error @+1 {{unsupported DMA channel (MM2S, 0) on tile (0, 0).}}
     aie.shim_dma_allocation @dma(%tile, MM2S, 0)
     aie.runtime_sequence(%arg0: memref<64xi32>) {
-      // expected-error @+1 {{Unsupported tile type at (0, 0) Must be ShimNOC, Mem or Core.}}
       aiex.npu.dma_memcpy_nd(%arg0[0, 0, 0, 0][1, 1, 1, 64][0, 0, 0, 1]) {id = 0 : i64, metadata = @dma} : memref<64xi32>
     }
   }
@@ -143,13 +145,13 @@ module {
 
 // -----
 
-// Runtime AIE1 transfers also require a ShimNOC allocation.
+// Shim PL allocations are rejected before the dynamic memcpy verifier runs.
 module {
   aie.device(xcvc1902) {
     %tile = aie.tile(0, 0)
+    // expected-error @+1 {{unsupported DMA channel (MM2S, 0) on tile (0, 0).}}
     aie.shim_dma_allocation @dma(%tile, MM2S, 0)
     aie.runtime_sequence(%arg0: memref<64xi32>, %n: i64) {
-      // expected-error @+1 {{runtime sizes/strides are only supported for shim NOC tile DMAs.}}
       aiex.npu.dma_memcpy_nd(%arg0[0, 0, 0, 0][1, 1, %n, 16][0, 0, 16, 1]) {id = 0 : i64, metadata = @dma} : memref<64xi32>
     }
   }
