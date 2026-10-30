@@ -1427,7 +1427,7 @@ static void addChainDataCost(StringRef sym_name, AIE::DeviceOp deviceOp,
 }
 
 // Instruction sizes are the authoritative ISA_OPSIZE_* values from
-// third_party/aiebu/specification/aie2ps/isa_stubs.h -- the same table the
+// AIEBU's specification/aie2ps/isa_stubs.h -- the same table the
 // assembler encodes against -- so the running total here matches the bytes
 // emitJob actually produces. Keep the two in sync when adding a cert op:
 // an op the emitter can emit but this function ignores is counted as free,

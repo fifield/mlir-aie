@@ -53,14 +53,6 @@ MLIR_AIE_DIR="$WORK/mlir-aie"
 cd "$MLIR_AIE_DIR"
 AIE_PROJECT_COMMIT=$(git rev-parse --short=8 HEAD)
 
-# Patch aiebu: skip Debug build, skip tests, inject -lstdc++fs
-# (GCC 8 needs -lstdc++fs for std::filesystem, must come after objects)
-AIEBU_BUILD_SH="$MLIR_AIE_DIR/third_party/aiebu/build/build.sh"
-sed -i 's/^compile Debug/#compile Debug/' "$AIEBU_BUILD_SH"
-sed -i 's/^run_test="yes"/run_test="no"/' "$AIEBU_BUILD_SH"
-sed -i 's|cmake -B $BUILDDIR/$config $cmakeflags $BUILDDIR/..|cmake -B $BUILDDIR/$config $cmakeflags -DCMAKE_CXX_STANDARD_LIBRARIES=-lstdc++fs $BUILDDIR/..|' "$AIEBU_BUILD_SH"
-echo "Patched aiebu build.sh for GCC 8 compatibility"
-
 # Get LLVM version info from clone-llvm.sh
 WHEEL_VERSION=$("$MLIR_AIE_DIR/utils/clone-llvm.sh" --get-wheel-version)
 source <(grep -E '^(LLVM_PROJECT_COMMIT|DATETIME)=' "$MLIR_AIE_DIR/utils/clone-llvm.sh")
