@@ -266,7 +266,6 @@ std::optional<std::pair<TileID, Port>> getLinkedInput(TileID tile, Port output);
 /// namespaced UnitAttr; old IR used an unqualified presence marker.
 bool isControlPacketOverlay(mlir::Operation *op);
 
-
 #define GENERATE_TO_STRING(TYPE_WITH_INSERTION_OP)                             \
   friend std::string to_string(const TYPE_WITH_INSERTION_OP &s) {              \
     std::ostringstream ss;                                                     \

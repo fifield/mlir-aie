@@ -44,6 +44,15 @@ def AIE_Dialect : Dialect {
     name, so consumers key on the attribute, not the name.
 
   }];
+  let extraClassDeclaration = [{
+    /// Marks the runtime sequence that convert-aie-to-transaction generated to
+    /// hold a device's configuration. It is usually named `configure`, but a user
+    /// sequence may already own that name (the generated one is then
+    /// `configure0`), so consumers key on this attribute, not on the name.
+    static ::llvm::StringRef getGeneratedConfigureAttrName() {
+      return "aie.generated_configure";
+    }
+  }];
   let useDefaultTypePrinterParser = 1;
   let useDefaultAttributePrinterParser = 1;
   // Python wrappers in dialects/aie.py and AIEX lowerings emit arith.constant
