@@ -10,12 +10,15 @@
 
 // RUN: aie-opt --aie-npu-to-cert --cert-legalize-pages %s | FileCheck %s
 
-// Config (job 1, writes 0x1000=4096) is emitted before the user job (job 2,
-// writes 0x2000=8192), despite @user_seq preceding @configure in the input.
+// Config (job 1, which loads the configuration section writing 0x1000=4096)
+// is emitted before the user job (job 2, writes 0x2000=8192), despite
+// @user_seq preceding @configure in the input.
 // CHECK: aiex.cert.job(1)
-// CHECK: aiex.cert.write32(4096, 1)
+// CHECK-NEXT: aiex.cert.load_pdi({{[0-9]+}}, @main)
 // CHECK: aiex.cert.job(2)
 // CHECK: aiex.cert.write32(8192, 99)
+// CHECK: aiex.cert.section @main
+// CHECK: aiex.cert.write32(4096, 1)
 
 module {
   aie.device(npu2) @main {

@@ -7,7 +7,7 @@
 
 // The poll must remain between the DMA writes: merging their chains across
 // the poll would move a write past the queue-space check.
-// CHECK: aiex.cert.job(1)
+// CHECK: aiex.cert.job(2)
 // CHECK: aiex.cert.uc_dma_write_des_sync(@[[BEFORE:chain_[0-9]+]])
 // CHECK-NEXT: aiex.cert.maskpoll32(119328, 16777216, 0)
 // CHECK-NEXT: aiex.cert.uc_dma_write_des_sync(@[[AFTER:chain_[0-9]+]])
@@ -15,7 +15,7 @@
 // CHECK-NEXT: aiex.cert.maskpoll32(3147552, 65535, 321)
 // CHECK-NOT: aiex.npu.maskpoll
 
-// ASM: START_JOB 1
+// ASM: START_JOB 2
 // ASM: uC_DMA_WRITE_DES_SYNC
 // ASM-NEXT: MASK_POLL_32 0x0001d220, 0x01000000, 0x00000000
 // ASM-NEXT: uC_DMA_WRITE_DES_SYNC
@@ -28,7 +28,7 @@ aie.device(npu2) {
   %buffer = aie.buffer(%tile) {address = 1024 : i32, sym_name = "status"} : memref<256xi32>
   memref.global "private" constant @before : memref<1xi32> = dense<1>
   memref.global "private" constant @after : memref<1xi32> = dense<2>
-  aie.runtime_sequence @configure() {
+  aie.runtime_sequence @seq() {
     %address = arith.constant 0x1d220 : i32
     %zero = arith.constant 0 : i32
     %depth = arith.constant 0x1000000 : i32

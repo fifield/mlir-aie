@@ -4,15 +4,15 @@
 // An empty copy must not create a chain, descriptor, or DMA submission.
 // CHECK-LABEL: aie.device(npu3)
 // CHECK-NOT: aiex.cert.uc_dma
-// CHECK: aiex.cert.job(1)
+// CHECK: aiex.cert.job(2)
 // CHECK-NOT: aiex.cert.uc_dma
-// ASM: START_JOB 1
+// ASM: START_JOB 2
 // ASM-NOT: uC_DMA_WRITE_DES_SYNC
 // ASM: END_JOB
 // ASM-NOT: UC_DMA_BD
 aie.device(npu3) {
   memref.global "private" constant @empty : memref<0xi32> = dense<>
-  aie.runtime_sequence @configure() {
+  aie.runtime_sequence @seq() {
     %empty = memref.get_global @empty : memref<0xi32>
     aiex.npu.blockwrite(%empty) {address = 4096 : ui32} : memref<0xi32>
   }
@@ -28,11 +28,11 @@ aie.device(npu3) {
 // CHECK: aiex.cert.uc_dma_chain @chain_1 {
 // CHECK-NEXT: aiex.cert.uc_dma_bd @second, 8192, 2, false
 // CHECK-NOT: aiex.cert.uc_dma_chain
-// CHECK: aiex.cert.job(1) {
+// CHECK: aiex.cert.job(2) {
 // CHECK-NEXT: aiex.cert.uc_dma_write_des_sync(@chain_0)
 // CHECK-NEXT: aiex.cert.uc_dma_write_des_sync(@chain_1)
 // CHECK-NOT: aiex.cert.uc_dma
-// ASM: START_JOB 1
+// ASM: START_JOB 2
 // ASM-NEXT: uC_DMA_WRITE_DES_SYNC @chain_0
 // ASM-NEXT: uC_DMA_WRITE_DES_SYNC @chain_1
 // ASM-NEXT: END_JOB
@@ -43,7 +43,7 @@ aie.device(npu3) {
   memref.global "private" constant @empty : memref<0xi32> = dense<>
   memref.global "private" constant @first : memref<1xi32> = dense<7>
   memref.global "private" constant @second : memref<2xi32> = dense<[8, 9]>
-  aie.runtime_sequence @configure() {
+  aie.runtime_sequence @seq() {
     %empty = memref.get_global @empty : memref<0xi32>
     %first = memref.get_global @first : memref<1xi32>
     %second = memref.get_global @second : memref<2xi32>

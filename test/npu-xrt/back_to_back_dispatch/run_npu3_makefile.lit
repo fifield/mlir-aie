@@ -1,0 +1,16 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// REQUIRES: ryzen_ai_npu3, peano
+//
+// RUN: mkdir -p test_npu3
+// RUN: cd test_npu3
+// RUN: make -f %S/Makefile clean
+// RUN: make -f %S/Makefile all
+// RUN: %run_on_npu3% timeout 120 ./test.exe --elf back_to_back_dispatch.elf --mode seq --n 200 | FileCheck %s
+// RUN: %run_on_npu3% timeout 120 ./test.exe --elf back_to_back_dispatch.elf --mode runlist --n 200 | FileCheck %s
+// RUN: %run_on_npu3% timeout 120 ./test.exe --elf back_to_back_dispatch.elf --mode startall --n 200 | FileCheck %s
+// RUN: %run_on_npu3% timeout 120 ./test.exe --elf back_to_back_dispatch_outfirst.elf --mode seq --n 200 | FileCheck %s
+// RUN: %run_on_npu3% timeout 120 ./test.exe --elf back_to_back_dispatch_outfirst.elf --mode runlist --n 200 | FileCheck %s
+// CHECK: 200/200 runs exact
+// CHECK: PASS

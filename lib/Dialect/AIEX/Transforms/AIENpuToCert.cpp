@@ -999,6 +999,40 @@ struct SplitNpuBlockWriteOpPattern : OpRewritePattern<AIEX::NpuBlockWriteOp> {
   }
 };
 
+// Whether `entry`'s program loads a device other than itself: with
+// aiex.configure, aiex.npu.load_pdi or a hand-written cert.load_pdi.
+static bool loadsOtherDevice(AIE::DeviceOp entry) {
+  StringRef self = entry.getSymName();
+  return entry
+      .walk([&](Operation *op) {
+        std::optional<StringRef> loaded;
+        if (auto configure = dyn_cast<AIEX::ConfigureOp>(op))
+          loaded = configure.getSymbol();
+        else if (auto load = dyn_cast<AIEX::NpuLoadPdiOp>(op))
+          loaded = load.getDeviceRef();
+        else if (auto load = dyn_cast<AIEX::CertLoadPdiOp>(op))
+          loaded = load.getSymbol();
+        return loaded && *loaded != self ? WalkResult::interrupt()
+                                         : WalkResult::advance();
+      })
+      .wasInterrupted();
+}
+
+// Whether `entry`'s program runs on a microcontroller other than uC 0.
+static bool usesOtherUcs(AIE::DeviceOp entry) {
+  return entry
+      .walk([](Operation *op) {
+        if (auto group = dyn_cast<AIEX::CertAttachToGroupOp>(op))
+          if (group.getGroupId() != 0)
+            return WalkResult::interrupt();
+        if (auto page = dyn_cast<AIEX::CertPageOp>(op))
+          if (page.getPlacement().value_or(0) != 0)
+            return WalkResult::interrupt();
+        return WalkResult::advance();
+      })
+      .wasInterrupted();
+}
+
 struct AIENpuToCertPass
     : xilinx::AIEX::impl::AIENpuToCertBase<AIENpuToCertPass> {
   using Base = xilinx::AIEX::impl::AIENpuToCertBase<AIENpuToCertPass>;
@@ -1032,6 +1066,9 @@ struct AIENpuToCertPass
         break;
       }
     }
+
+    if (mainDevice && failed(loadEntryConfiguration(mainDevice)))
+      return signalPassFailure();
 
     if (mainDevice) {
       // Absorption below clones each referenced device's cert ops under the
@@ -1075,6 +1112,80 @@ struct AIENpuToCertPass
     for (auto dev : devicesToRemove) {
       dev.erase();
     }
+  }
+
+  // Deliver the entry device's configuration the way every other device's is
+  // delivered: as a cert.section that a LOAD_PDI names. Its generated
+  // configuration sequence, which would otherwise become job 1 and run on
+  // every dispatch, becomes that section, and the sequence keeps only the load:
+  // job 1 is then just the LOAD_PDI, which the firmware skips when the entry
+  // is still loaded. An explicit load of the entry at the head of the program
+  // (IRON's implicit load) is that same load and is dropped.
+  //
+  // A program that loads another device keeps the configuration as job 1: the
+  // loads would alternate, and none would be skipped. So does a program on
+  // more than one microcontroller: a LOAD_PDI on uC 0 alone would leave the
+  // others out of step at the firmware's post-load barrier.
+  LogicalResult loadEntryConfiguration(AIE::DeviceOp entry) {
+    AIE::RuntimeSequenceOp configure = findGeneratedConfigure(entry);
+    if (!configure || configure.getBody().empty())
+      return success();
+    Block &config = configure.getBody().front();
+    if (llvm::all_of(config, [](Operation &op) { return isa<AIE::EndOp>(op); }))
+      return success();
+    if (loadsOtherDevice(entry) || usesOtherUcs(entry))
+      return success();
+    StringRef self = entry.getSymName();
+    if (entry.lookupSymbol(self))
+      return entry.emitError("a symbol inside the device is named @")
+             << self << ", the name of its configuration section";
+
+    // The section, from the configuration (see processDevice).
+    OpBuilder builder(entry.getContext());
+    Location loc = configure.getLoc();
+    builder.setInsertionPoint(entry.getBody()->getTerminator());
+    auto section =
+        AIEX::CertSectionOp::create(builder, loc, builder.getStringAttr(self));
+    section.getBody().push_back(new Block);
+    builder.setInsertionPointToStart(&section.getBody().front());
+    auto page = AIEX::CertPageOp::create(builder, loc);
+    page.getBody().push_back(new Block);
+    builder.setInsertionPointToStart(&page.getBody().front());
+    uint32_t maxJobId = 0;
+    entry.walk([&](AIEX::CertJobOp job) {
+      maxJobId = std::max(maxJobId, job.getJobId());
+    });
+    auto job = AIEX::CertJobOp::create(builder, loc, maxJobId + 1);
+    IRMapping mapper;
+    configure.getRegion().cloneInto(&job.getBody(), mapper);
+    AIEX::CertJobOp::ensureTerminator(job.getBody(), builder, loc);
+    AIEX::CertPageOp::ensureTerminator(page.getBody(), builder, loc);
+    AIEX::CertSectionOp::ensureTerminator(section.getBody(), builder, loc);
+
+    // An explicit load of the entry heading the program is the same load.
+    for (auto seq : entry.getOps<AIE::RuntimeSequenceOp>()) {
+      if (seq == configure || seq.getBody().empty())
+        continue;
+      Block &body = seq.getBody().front();
+      if (!body.empty())
+        if (auto load = dyn_cast<AIEX::NpuLoadPdiOp>(body.front()))
+          if (load.getDeviceRef() == self)
+            load.erase();
+      break;
+    }
+
+    // The configuration job now only loads the section. Erase users before
+    // the values they use.
+    for (Operation &op :
+         llvm::make_early_inc_range(llvm::reverse(config.getOperations())))
+      if (!isa<AIE::EndOp>(op))
+        op.erase();
+    builder.setInsertionPointToStart(&config);
+    AIEX::NpuLoadPdiOp::create(
+        builder, loc, TypeRange{}, ValueRange{},
+        {builder.getNamedAttr(
+            "device_ref", FlatSymbolRefAttr::get(builder.getContext(), self))});
+    return success();
   }
 
   // Hoist every non-main device's memref.global into the main device, keeping

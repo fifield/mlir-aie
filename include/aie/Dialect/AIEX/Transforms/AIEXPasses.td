@@ -213,6 +213,15 @@ def AIENpuToCert : Pass<"aie-npu-to-cert", "mlir::ModuleOp"> {
 
     Referenced devices are absorbed into cert.section operations and removed
     from the output, keeping only the main device.
+
+    The main device's own configuration (its generated `configure` sequence)
+    is delivered the same way: as a cert.section of the device's name, loaded
+    by a LOAD_PDI in the configuration job (job 1, `{cert.configure}`), which
+    the firmware skips while the device is still loaded. An
+    `aiex.npu.load_pdi` of the main device heading its first runtime sequence
+    is that load and is not repeated. A program that loads another device, or
+    that runs on more than one microcontroller, keeps the configuration
+    itself as job 1.
   }];
 
   let options = [Option<"deviceName", "device-name", "std::string",
