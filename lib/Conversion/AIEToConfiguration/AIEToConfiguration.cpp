@@ -920,6 +920,43 @@ LogicalResult xilinx::AIE::inlineWriteConfigs(ModuleOp module) {
   return success();
 }
 
+// Whether `device`'s program configures another device: an aiex.configure,
+// an aiex.npu.load_pdi or cert.load_pdi of another device, or an
+// aiex.npu.write_config of another device.
+static bool configuresOtherDevices(AIE::DeviceOp device) {
+  StringRef self = device.getSymName();
+  return device
+      .walk([&](Operation *op) {
+        std::optional<StringRef> other;
+        if (auto configure = dyn_cast<AIEX::ConfigureOp>(op))
+          other = configure.getSymbol();
+        else if (auto load = dyn_cast<AIEX::NpuLoadPdiOp>(op))
+          other = load.getDeviceRef();
+        else if (auto load = dyn_cast<AIEX::CertLoadPdiOp>(op))
+          other = load.getSymbol();
+        else if (auto write = dyn_cast<AIEX::NpuWriteConfigOp>(op))
+          other = write.getDeviceRef();
+        return other && *other != self ? WalkResult::interrupt()
+                                       : WalkResult::advance();
+      })
+      .wasInterrupted();
+}
+
+// Whether `device` configures nothing beyond its stream switch routing: its
+// body holds only tiles, routing, shim DMA allocations (names the runtime
+// sequences use), runtime sequences, data globals and AIEX ops (cert code),
+// none of which configures anything else. Any other op, such as a core,
+// buffer, lock or DMA, counts as configuration of its own.
+static bool configuresOnlyRouting(AIE::DeviceOp device) {
+  return llvm::all_of(
+      device.getBody()->without_terminator(), [](Operation &op) {
+        return isa<AIE::TileOp, AIE::SwitchboxOp, AIE::ShimMuxOp, AIE::FlowOp,
+                   AIE::PacketFlowOp, AIE::WireOp, AIE::ShimDMAAllocationOp,
+                   AIE::RuntimeSequenceOp, memref::GlobalOp>(op) ||
+               isa_and_nonnull<AIEX::AIEXDialect>(op.getDialect());
+      });
+}
+
 static LogicalResult
 convertAIEToConfiguration(AIE::DeviceOp device, StringRef clElfDir,
                           AIE::AIEToConfigurationOutputType outputType) {
@@ -952,6 +989,16 @@ convertAIEToConfiguration(AIE::DeviceOp device, StringRef clElfDir,
   } else {
     builder.setInsertionPoint(configureOps.front());
   }
+
+  // An AIE4 device whose program configures other devices (a dispatcher) and
+  // that configures nothing beyond its own routing gets no configuration: the
+  // devices it configures set up their own routes, after a reset of the
+  // partition that clears any other. Its configuration would otherwise be a
+  // section of its own, whose load alternates with theirs so that none of
+  // them is ever skipped.
+  if (isa<AIE4TargetModel>(device.getTargetModel()) &&
+      configuresOtherDevices(device) && configuresOnlyRouting(device))
+    return success();
 
   // convert the parsed ops to MLIR
   AIEX::BlockwriteData blockwriteData(device, "config_blockwrite_data_");

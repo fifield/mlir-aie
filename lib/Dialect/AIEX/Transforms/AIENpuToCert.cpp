@@ -1122,10 +1122,14 @@ struct AIENpuToCertPass
   // is still loaded. An explicit load of the entry at the head of the program
   // (IRON's implicit load) is that same load and is dropped.
   //
-  // A program that loads another device keeps the configuration as job 1: the
-  // loads would alternate, and none would be skipped. So does a program on
-  // more than one microcontroller: a LOAD_PDI on uC 0 alone would leave the
-  // others out of step at the firmware's post-load barrier.
+  // On AIE4 a program that loads other devices loads the entry too, as on
+  // aie2p: the loads alternate on a repeated dispatch, so none is skipped and
+  // each reloads. A pure dispatcher has no configuration of its own (see
+  // generateAndInsertConfigOps), so it gets no section and its first load is
+  // the program head. Elsewhere such a program keeps its configuration as
+  // job 1. A program on more than one microcontroller keeps its configuration
+  // as job 1: a LOAD_PDI on uC 0 alone would leave the others out of step at
+  // the firmware's post-load barrier.
   LogicalResult loadEntryConfiguration(AIE::DeviceOp entry) {
     AIE::RuntimeSequenceOp configure = findGeneratedConfigure(entry);
     if (!configure || configure.getBody().empty())
@@ -1133,7 +1137,8 @@ struct AIENpuToCertPass
     Block &config = configure.getBody().front();
     if (llvm::all_of(config, [](Operation &op) { return isa<AIE::EndOp>(op); }))
       return success();
-    if (loadsOtherDevice(entry) || usesOtherUcs(entry))
+    bool aie4 = entry.getTargetModel().getTargetArch() == AIE::AIEArch::AIE4;
+    if (usesOtherUcs(entry) || (!aie4 && loadsOtherDevice(entry)))
       return success();
     StringRef self = entry.getSymName();
     if (entry.lookupSymbol(self))

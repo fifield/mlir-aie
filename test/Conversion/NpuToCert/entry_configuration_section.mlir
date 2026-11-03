@@ -65,14 +65,16 @@ module {
 
 // -----
 
-// A program that loads another device keeps its configuration as job 1:
-// alternating loads of the entry and @cfg would never be skipped.
+// A program that loads another device loads the entry's configuration too,
+// as on aie2p: on a repeated dispatch the two loads alternate and both reload.
 
 // CHECK-LABEL: aie.device(npu3)
 // CHECK: aiex.cert.job(1) {
-// CHECK-NEXT: aiex.cert.write32(4096, 286331153)
+// CHECK-NEXT: aiex.cert.load_pdi({{[0-9]+}}, @main)
 // CHECK-NEXT: } {cert.configure}
-// CHECK-NOT: aiex.cert.section @main
+// CHECK: aiex.cert.load_pdi({{[0-9]+}}, @cfg)
+// CHECK: aiex.cert.section @main
+// CHECK: aiex.cert.write32(4096, 286331153)
 module {
   aie.device(npu3) @cfg {
     aie.runtime_sequence @configure() attributes {aie.generated_configure} {
