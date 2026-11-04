@@ -19,7 +19,7 @@ aie.device(xcve3858) {
     }
   }
   aiex.cert.page {
-    // expected-error@+1 {{job 1 must be split around its aiex.cert.load_pdi, but local register r1 is written before it and read after it}}
+    // expected-error@+1 {{job 1 mixes cert.load_pdi with other operations and must be broken into separate jobs, but register r1 is written before it and read after it}}
     aiex.cert.job(1) {
       aiex.cert.uc_dma_write_des(1, @chain)
       aiex.cert.load_pdi(1, @cfg)

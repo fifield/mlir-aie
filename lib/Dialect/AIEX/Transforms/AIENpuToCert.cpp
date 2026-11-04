@@ -2158,10 +2158,12 @@ struct SplitCertPageOpPattern : OpRewritePattern<AIEX::CertPageOp> {
     // earlier job has several ops, or a page of small jobs whose sizes merely
     // sum over the limit, where the cut belongs on a job boundary. Fall back to
     // the exhaustive search, which considers every position in the page and
-    // keeps the legal one closest to split_target, before giving up.
+    // keeps the legal one closest to split_target, before giving up. Spans are
+    // not applied here: a page whose cuts are all blocked by a span has split
+    // points, and the span check below reports which constraint blocks them.
     if (!found_split_point)
       found_split_point = findLegalSplitPoint(op, cert_page_size / 2, flatIndex,
-                                              spans, split_job, split_iter);
+                                              {}, split_job, split_iter);
 
     // Over the split trigger but with nowhere to cut. Every cut has to leave at
     // least one op on each side, so a page whose bulk sits in a single one-op

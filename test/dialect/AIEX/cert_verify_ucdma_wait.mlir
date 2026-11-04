@@ -37,7 +37,7 @@ aie.device(xcve3858) {
   }
   aiex.cert.page {
     aiex.cert.job(1) {
-      // expected-error@+1 {{cert.wait_uc_dma waits on r3, which no earlier cert.uc_dma_write_des in this job writes}}
+      // expected-error@+1 {{cert.wait_uc_dma waits on $r3, which has no reaching cert.uc_dma_write_des in this job}}
       aiex.cert.wait_uc_dma(3)
       aiex.cert.uc_dma_write_des(3, @chain)
     }
@@ -57,7 +57,7 @@ aie.device(xcve3858) {
       aiex.cert.uc_dma_write_des(3, @chain)
     }
     aiex.cert.job(2) {
-      // expected-error@+1 {{cert.wait_uc_dma waits on r3, which no earlier cert.uc_dma_write_des in this job writes}}
+      // expected-error@+1 {{cert.wait_uc_dma waits on $r3, which has no reaching cert.uc_dma_write_des in this job}}
       aiex.cert.wait_uc_dma(3)
     }
   }
@@ -74,7 +74,7 @@ aie.device(xcve3858) {
   aiex.cert.page {
     aiex.cert.job(1) {
       aiex.cert.uc_dma_write_des(3, @chain)
-      // expected-error@+1 {{cert.wait_uc_dma waits on r4, which no earlier cert.uc_dma_write_des in this job writes}}
+      // expected-error@+1 {{cert.wait_uc_dma waits on $r4, which has no reaching cert.uc_dma_write_des in this job}}
       aiex.cert.wait_uc_dma(4)
     }
   }
@@ -91,7 +91,7 @@ aie.device(xcve3858) {
   aiex.cert.page {
     aiex.cert.job(1) {
       aiex.cert.uc_dma_write_des(8, @chain)
-      // expected-error@+1 {{cert.wait_uc_dma handle r8 is a shared register}}
+      // expected-error@+1 {{cert.wait_uc_dma wait handle $r8 is a global register}}
       aiex.cert.wait_uc_dma(8)
     }
   }

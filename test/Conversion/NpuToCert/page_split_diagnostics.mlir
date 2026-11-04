@@ -210,7 +210,7 @@ aie.device(xcve3858) {
   aiex.cert.uc_dma_chain @chainTA2 {
     aiex.cert.uc_dma_bd @tA, 4096, 980, false
   }
-  // expected-error@+1 {{cannot be split without separating a cert.apply_offset_57 from a uC-DMA push of the payload it patches across pages; reduce the page's contents or regroup its apply_offset_57 ops and their pushes}}
+  // expected-error@+1 {{cannot be split without separating a cert.apply_offset_57 from the uC-DMA push that consumes the payload it patches across pages; reduce the page's contents or regroup its apply_offset_57 ops and their pushes}}
   aiex.cert.page {
     aiex.cert.job(1) {
       aiex.cert.apply_offset_57(@tA, 1, 0)
@@ -242,7 +242,7 @@ aie.device(xcve3858) {
     aiex.cert.uc_dma_bd @oC, 0, 1000, true
     aiex.cert.uc_dma_bd @oA, 4096, 1000, false
   }
-  // expected-error@+1 {{cannot be split without separating a cert.apply_offset_57 from a uC-DMA push of the payload it patches across pages}}
+  // expected-error@+1 {{cannot be split without separating a cert.apply_offset_57 from the uC-DMA push that consumes the payload it patches across pages}}
   aiex.cert.page {
     aiex.cert.job(1) {
       aiex.cert.apply_offset_57(@oA, 1, 0)
@@ -272,7 +272,7 @@ aie.device(xcve3858) {
   aiex.cert.uc_dma_chain @chainRB {
     aiex.cert.uc_dma_bd @rB, 0, 1200, false
   }
-  // expected-error@+1 {{cannot be split: job 1 uses local registers r0..r7, which do not survive a split}}
+  // expected-error@+1 {{cannot be split: job 1 uses job-private local registers r0..r7, whose values do not survive a page split}}
   aiex.cert.page {
     aiex.cert.job(1) {
       aiex.cert.uc_dma_write_des(1, @chainRA)
