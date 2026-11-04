@@ -6,13 +6,13 @@
 // RUN: FileCheck %s --check-prefix=LLVM --input-file=%t.prj/opted_main_core_0_2.ll
 // RUN: llvm-objdump -d %t.out/elfs_main_core_0_2/elfs_main_core_0_2.elf | FileCheck %s
 
-// The sentinel loop stays i64; the bounded vector loop becomes i32.
+// The sentinel loop loses its counter; the bounded vector loop becomes i32.
 // LLVM-LABEL: define void @core_0_2()
-// LLVM:       phi i64
+// LLVM-NOT:   phi i64
 // LLVM:       phi i32
 // LLVM:       add <16 x i32>
 // LLVM:       icmp {{.*}} i32
-// LLVM:       icmp eq i64
+// LLVM-NOT:   icmp {{.*}} i64
 
 // CHECK-LABEL: <main>:
 // CHECK:       movxm{{[[:space:]]+}}ls, #0x[[LS:[0-9a-f]+]]

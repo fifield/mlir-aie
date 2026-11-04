@@ -4,12 +4,12 @@
 // RUN: aie-opt %s -aie-assign-tile-controller-ids -aie-generate-column-control-overlay="route-shim-to-tile-ctrl=true" | FileCheck %s
 
 // CHECK-LABEL: aie.device(npu3) {
-// CHECK: %[[SHIM:.*]] = aie.tile(0, 0) {controller_id = #aie.packet_info<pkt_type = 0, pkt_id = 15>}
-// CHECK: %[[MEM:.*]] = aie.tile(0, 1) {controller_id = #aie.packet_info<pkt_type = 0, pkt_id = 26>}
-// CHECK: %[[CORE2:.*]] = aie.tile(0, 2) {controller_id = #aie.packet_info<pkt_type = 0, pkt_id = 27>}
-// CHECK: %[[CORE3:.*]] = aie.tile(0, 3) {controller_id = #aie.packet_info<pkt_type = 0, pkt_id = 29>}
-// CHECK: %[[CORE4:.*]] = aie.tile(0, 4) {controller_id = #aie.packet_info<pkt_type = 0, pkt_id = 30>}
-// CHECK: %[[CORE5:.*]] = aie.tile(0, 5) {controller_id = #aie.packet_info<pkt_type = 0, pkt_id = 31>}
+// CHECK: %[[SHIM:.*]] = aie.tile(0, 0) {controller_id = #aie.packet_info<pkt_id = 15>}
+// CHECK: %[[MEM:.*]] = aie.tile(0, 1) {controller_id = #aie.packet_info<pkt_id = 26>}
+// CHECK: %[[CORE2:.*]] = aie.tile(0, 2) {controller_id = #aie.packet_info<pkt_id = 27>}
+// CHECK: %[[CORE3:.*]] = aie.tile(0, 3) {controller_id = #aie.packet_info<pkt_id = 29>}
+// CHECK: %[[CORE4:.*]] = aie.tile(0, 4) {controller_id = #aie.packet_info<pkt_id = 30>}
+// CHECK: %[[CORE5:.*]] = aie.tile(0, 5) {controller_id = #aie.packet_info<pkt_id = 31>}
 // CHECK: aie.packet_flow(26) {
 // CHECK:   aie.packet_source<%[[SHIM]], DMAControl : 0>
 // CHECK:   aie.packet_dest<%[[MEM]], TileControl : 0>

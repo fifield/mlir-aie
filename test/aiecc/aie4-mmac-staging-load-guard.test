@@ -43,7 +43,7 @@
 // GUARD: aiecc: main_core_0_2: {{.*}}/[[CORE]].o {{renamed to|recompiled as}} {{.*}}/objects_main_core_0_2.o
 // FP8-GUARD: exec: {{.*}}/llc {{.*}}peano-opted_[[CORE:canonical_[0-9A-F_]+]].ll -O2 --march=aie4 --mcpu=aie4b -disable-machine-cse -aie4postlegalizergenericcombiner-disable-rule=combine_indexed_to_autoinc -aie4postlegalizercustomcombiner-disable-rule=combine_staging_upd_load,combine_indexed_to_autoinc --function-sections
 // FP8-GUARD: aiecc: main_core_0_2: {{.*}}/[[CORE]].o {{renamed to|recompiled as}} {{.*}}/objects_main_core_0_2.o
-// IR: %[[B1:[0-9]+]] = load <128 x i8>, ptr getelementptr {{.*}} @in0_cons_buff_0, i20 4608)
+// IR: %[[B1:[0-9]+]] = load <128 x i8>, ptr getelementptr {{.*}} @in0__cons__buf0, i20 4608)
 // IR: call void @llvm.aie4.staging.to.matrix.{{(I4.)?}}I32768()
 // IR: call void @llvm.aie4.insert.staging.int.I1024(<128 x i8> %[[B1]], i32 0, i32 {{[13]}})
 // ORDER: ORDER OK: 3 tiles, 96 inserts, 12 MMACs, no accumulator spills

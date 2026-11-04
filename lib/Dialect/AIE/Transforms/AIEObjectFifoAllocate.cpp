@@ -1058,7 +1058,8 @@ struct AIEObjectFifoAllocatePass
         for (int free = 0; free < limit; ++free) {
           if (!channels.isChannelFree(tile, dir, free))
             continue;
-          roomy = bdRoom(tile, *col, *row, free, demand) >= dma.getNumBDs();
+          roomy =
+              bdRoom(tile, *col, *row, free, dir, demand) >= dma.getNumBDs();
           break;
         }
       }

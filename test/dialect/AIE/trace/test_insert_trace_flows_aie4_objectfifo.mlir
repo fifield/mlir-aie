@@ -18,7 +18,7 @@ module {
     %shim = aie.tile(0, 0)
     %core = aie.tile(0, 2)
     aie.objectfifo @out0(%core, {%shim}, 2 : i32) : !aie.objectfifo<memref<16xi32>>
-    aie.objectfifo @out1(%core, {%shim}, 2 : i32) {cons_dma_channels = array<i32: 1>} : !aie.objectfifo<memref<16xi32>>
+    aie.objectfifo @out1(%core, {%shim}, 2 : i32) {cons_ports = [#aie.end_port<DMA : 1>]} : !aie.objectfifo<memref<16xi32>>
     aie.trace @trace(%core) {
       aie.trace.packet id = 1 type = core
       aie.trace.event <"INSTR_EVENT_0">

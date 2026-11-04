@@ -7,7 +7,7 @@
 
 // CHECK-LABEL: aie.device(npu3) {
 // CHECK: %[[SHIM:.*]] = aie.tile(0, 0)
-// CHECK: %[[CORE:.*]] = aie.tile(0, 3) {controller_id = #aie.packet_info<pkt_type = 0, pkt_id = 29>}
+// CHECK: %[[CORE:.*]] = aie.tile(0, 3) {controller_id = #aie.packet_info<pkt_id = 29>}
 // CHECK: aie.runtime_sequence(%[[ARG0:.*]]: memref<?xi32>) {
 // CHECK:   aiex.npu.dma_memcpy_nd(%[[ARG0]][0, 0, 0, 0][1, 1, 1, 6][0, 0, 0, 1]) {id = 0 : i64, issue_token = true, metadata = @ctrlpkt_col0_ctrl_mm2s_chan1} : memref<?xi32>
 // CHECK:   %[[ROW:.*]] = arith.constant 0 : i32

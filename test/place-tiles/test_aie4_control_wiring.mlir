@@ -20,7 +20,7 @@
 // CHECK-LABEL: @single_shim
 module @single_shim {
   aie.device(npu3) {
-    // CHECK: %[[SHIM:.*]] = aie.tile(0, 0) {controller_id = #aie.packet_info<pkt_type = 0, pkt_id = 0>}
+    // CHECK: %[[SHIM:.*]] = aie.tile(0, 0) {controller_id = #aie.packet_info<pkt_id = 0>}
     %s = aie.logical_tile<ShimNOCTile>(?, ?)
     %m = aie.logical_tile<MemTile>(?, ?)
     aie.objectfifo @in(%s, {%m}, 2 : i32) : !aie.objectfifo<memref<16xi32>>
@@ -42,8 +42,8 @@ module @single_shim {
 // CHECK-LABEL: @two_columns
 module @two_columns {
   aie.device(npu3) {
-    // CHECK-DAG: %[[SHIM0:.*]] = aie.tile(0, 0) {controller_id = #aie.packet_info<pkt_type = 0, pkt_id = 0>}
-    // CHECK-DAG: %[[SHIM1:.*]] = aie.tile(1, 0) {controller_id = #aie.packet_info<pkt_type = 0, pkt_id = 1>}
+    // CHECK-DAG: %[[SHIM0:.*]] = aie.tile(0, 0) {controller_id = #aie.packet_info<pkt_id = 0>}
+    // CHECK-DAG: %[[SHIM1:.*]] = aie.tile(1, 0) {controller_id = #aie.packet_info<pkt_id = 1>}
     %s0 = aie.logical_tile<ShimNOCTile>(0, 0)
     %m0 = aie.logical_tile<MemTile>(0, 1)
     %s1 = aie.logical_tile<ShimNOCTile>(1, 0)
@@ -72,8 +72,8 @@ module @two_columns {
 // CHECK-LABEL: @already_wired
 module @already_wired {
   aie.device(npu3) {
-    // CHECK: aie.tile(0, 0) {controller_id = #aie.packet_info<pkt_type = 0, pkt_id = 1>}
-    %shim = aie.tile(0, 0) {controller_id = #aie.packet_info<pkt_type = 0, pkt_id = 1>}
+    // CHECK: aie.tile(0, 0) {controller_id = #aie.packet_info<pkt_id = 1>}
+    %shim = aie.tile(0, 0) {controller_id = #aie.packet_info<pkt_id = 1>}
     %mem = aie.tile(0, 1)
     aie.objectfifo @in(%shim, {%mem}, 2 : i32) : !aie.objectfifo<memref<16xi32>>
     aie.objectfifo @out(%mem, {%shim}, 2 : i32) : !aie.objectfifo<memref<16xi32>>
@@ -100,8 +100,8 @@ module @already_wired {
 // CHECK-LABEL: @controller_id_but_no_tct_route
 module @controller_id_but_no_tct_route {
   aie.device(npu3) {
-    // CHECK: %[[SHIM:.*]] = aie.tile(0, 0) {controller_id = #aie.packet_info<pkt_type = 0, pkt_id = 7>}
-    %shim = aie.tile(0, 0) {controller_id = #aie.packet_info<pkt_type = 0, pkt_id = 7>}
+    // CHECK: %[[SHIM:.*]] = aie.tile(0, 0) {controller_id = #aie.packet_info<pkt_id = 7>}
+    %shim = aie.tile(0, 0) {controller_id = #aie.packet_info<pkt_id = 7>}
     %mem = aie.tile(0, 1)
     aie.objectfifo @in(%shim, {%mem}, 2 : i32) : !aie.objectfifo<memref<16xi32>>
     aie.objectfifo @out(%mem, {%shim}, 2 : i32) : !aie.objectfifo<memref<16xi32>>

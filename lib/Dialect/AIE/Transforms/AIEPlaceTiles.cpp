@@ -133,8 +133,9 @@ static void emitAIE4ControlWiring(DeviceOp device) {
   // control packets by those ids, so they must not be renumbered here).
   llvm::SmallSet<int, 8> usedIds;
   for (auto &[col, tile] : shimByCol)
-    if (auto info = tile->getAttrOfType<PacketInfoAttr>("controller_id"))
-      usedIds.insert(static_cast<int>(info.getPktId()));
+    if (auto info = tile->getAttrOfType<PacketInfoAttr>("controller_id");
+        info && info.isAssigned())
+      usedIds.insert(info.assignedId());
   int nextId = 0;
   auto allocPktId = [&]() {
     while (usedIds.count(nextId))
@@ -147,8 +148,9 @@ static void emitAIE4ControlWiring(DeviceOp device) {
   SmallVector<int> shimPktIds;
   for (auto &[col, tile] : shimByCol) {
     int pktId;
-    if (auto info = tile->getAttrOfType<PacketInfoAttr>("controller_id"))
-      pktId = static_cast<int>(info.getPktId());
+    if (auto info = tile->getAttrOfType<PacketInfoAttr>("controller_id");
+        info && info.isAssigned())
+      pktId = info.assignedId();
     else {
       pktId = allocPktId();
       tile->setAttr("controller_id",

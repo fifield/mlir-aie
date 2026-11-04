@@ -55,7 +55,7 @@ endfunction()
 
 # Peano needs the runtime helper payload for every architecture.
 # Chess wrapper generation remains gated on xchesscc_wrapper and AIETools.
-foreach(_aie_arch AIE AIE2 AIE2P)
+foreach(_aie_arch AIE AIE2 AIE2P AIE4)
   if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/${_aie_arch}/CMakeLists.txt)
     add_subdirectory(${_aie_arch})
   endif()

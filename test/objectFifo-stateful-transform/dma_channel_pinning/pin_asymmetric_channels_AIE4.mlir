@@ -26,7 +26,7 @@ module @pin_s2mm_channel1 {
     %t02 = aie.tile(0, 2)
     %t12 = aie.tile(1, 2)
 
-    aie.objectfifo @of (%t02, {%t12}, 2 : i32) {prod_dma_channel = 0 : i32, cons_dma_channels = array<i32: 1>} : !aie.objectfifo<memref<16xi32>>
+    aie.objectfifo @of (%t02, {%t12}, 2 : i32) {prod_port = #aie.end_port<DMA : 0>, cons_ports = [#aie.end_port<DMA : 1>]} : !aie.objectfifo<memref<16xi32>>
   }
 }
 
@@ -40,6 +40,6 @@ module @pin_mm2s_channel0 {
     %t02 = aie.tile(0, 2)
     %t12 = aie.tile(1, 2)
 
-    aie.objectfifo @of (%t02, {%t12}, 2 : i32) {prod_dma_channel = 0 : i32, cons_dma_channels = array<i32: 0>} : !aie.objectfifo<memref<16xi32>>
+    aie.objectfifo @of (%t02, {%t12}, 2 : i32) {prod_port = #aie.end_port<DMA : 0>, cons_ports = [#aie.end_port<DMA : 0>]} : !aie.objectfifo<memref<16xi32>>
   }
 }

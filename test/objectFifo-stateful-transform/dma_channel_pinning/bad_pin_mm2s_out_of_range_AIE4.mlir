@@ -27,6 +27,6 @@ module @bad_pin_mm2s_out_of_range_AIE4 {
     %t02 = aie.tile(0, 2)
     %t12 = aie.tile(1, 2)
 
-    aie.objectfifo @of (%t02, {%t12}, 2 : i32) {prod_dma_channel = 1 : i32, cons_dma_channels = array<i32: 0>} : !aie.objectfifo<memref<16xi32>>
+    aie.objectfifo @of (%t02, {%t12}, 2 : i32) {prod_port = #aie.end_port<DMA : 1>, cons_ports = [#aie.end_port<DMA : 0>]} : !aie.objectfifo<memref<16xi32>>
   }
 }

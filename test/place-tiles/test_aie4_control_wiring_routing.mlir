@@ -25,7 +25,7 @@
 
 // Column 1's shim: Control32:0/1 carry controller_id 1, fan in to one
 // westbound master port.
-// CHECK:      %[[SHIM1:.*]] = aie.tile(1, 0) {controller_id = #aie.packet_info<pkt_type = 0, pkt_id = 1>}
+// CHECK:      %[[SHIM1:.*]] = aie.tile(1, 0) {controller_id = #aie.packet_info<pkt_id = 1>}
 // CHECK:      aie.switchbox(%[[SHIM1]]) {
 // CHECK-NEXT:   %[[A1:.*]] = aie.amsel<0> (0)
 // CHECK-NEXT:   aie.masterset(West32 : 0, %[[A1]])
@@ -39,7 +39,7 @@
 
 // Column 0's shim: the id-1 stream from the east joins its own two id-0
 // Control32 ports, all three fan in to Controller32:0 on one amsel.
-// CHECK:      %[[SHIM0:.*]] = aie.tile(0, 0) {controller_id = #aie.packet_info<pkt_type = 0, pkt_id = 0>}
+// CHECK:      %[[SHIM0:.*]] = aie.tile(0, 0) {controller_id = #aie.packet_info<pkt_id = 0>}
 // CHECK:      aie.switchbox(%[[SHIM0]]) {
 // CHECK-NEXT:   %[[A0:.*]] = aie.amsel<0> (0)
 // CHECK-NEXT:   aie.masterset(Controller32 : 0, %[[A0]])
