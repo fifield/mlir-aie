@@ -254,6 +254,46 @@ def AIECertPages : Pass<"cert-legalize-pages", "AIE::DeviceOp"> {
   ];
 }
 
+def AIECertAssignPdiIds : Pass<"aie-cert-assign-pdi-ids", "AIE::DeviceOp"> {
+  let summary = "Derive cert.load_pdi ids from the content of their sections";
+  let description = [{
+    Replaces the `pdi_id` of every `cert.load_pdi` (including ones nested in
+    sections) with a 32-bit id hashed from the content of the section it
+    loads. The CERT firmware skips a `LOAD_PDI` whose id equals the one it
+    loaded last on that uC, across every ELF on a hardware context, so ids
+    must identify the configuration, not its position in a module.
+
+    The hash (xxh3-128, domain "mlir-aie.cert.pdi.v3") walks the section body
+    in IR order: op names, regions, blocks and attributes, job ids included.
+    Labels and helper symbol names are not hashed: references are resolved to
+    their definitions (uC-DMA chains, `memref.global` data, nested sections),
+    and nested loads' `pdi_id`s are skipped. Sections with equal content thus
+    share an id, which is correct since they configure the array identically.
+
+    The digest is folded to 32 bits, rehashing the reserved 0 and 0xFFFFFFFF.
+    Two different sections loaded on the same uC that fold to one id are an
+    error; the uC of a load is that of its `cert.attach_to_group` (or
+    `cert.page` placement), and a nested load inherits its section's uCs.
+    Section labels must be unique. Collisions across compilations cannot be
+    checked here (about 2^-32 per pair).
+
+    Run after `cert-legalize-pages`, once section contents are final.
+  }];
+
+  let options = [Option<"testIdBits", "test-id-bits", "unsigned",
+                        /*default=*/"32",
+                        "Testing only: truncate ids to this many bits (>= 2) "
+                        "to force collisions",
+                        "::llvm::cl::Hidden">];
+
+  let constructor = "xilinx::AIEX::createAIECertAssignPdiIdsPass()";
+  let dependentDialects = [
+    "mlir::memref::MemRefDialect",
+    "xilinx::AIE::AIEDialect",
+    "xilinx::AIEX::AIEXDialect",
+  ];
+}
+
 def AIECertVerify : Pass<"aie-cert-verify", "AIE::DeviceOp"> {
   let summary = "Verify CERT ordering/placement legality invariants";
   let description = [{
@@ -723,6 +763,10 @@ def AIEExpandLoadPdi : Pass<"aie-expand-load-pdi", "mlir::ModuleOp"> {
     A sequence whose first and last reset (or overlay load) name the same PDI
     gets one more of the other, so the next dispatch's first load is not skipped
     as cached. Under teardown no sequence needs this.
+
+    The AIE4 firmware does not reset the array on a load, so an AIE4
+    device's `load_pdi` becomes its `write_config` alone, with no empty device
+    load, no alternation and no trailing load.
   }];
 
   let constructor = "xilinx::AIEX::createAIEExpandLoadPdiPass()";

@@ -88,6 +88,11 @@ static AIE::RuntimeSequenceOp findGeneratedConfigure(AIE::DeviceOp device) {
 // within `parentDevice`. If a load_pdi for that symbol already exists, its id
 // is reused so repeated loads of the same PDI share an id; otherwise a fresh id
 // (1-based, one past the current maximum) is assigned.
+//
+// These ids are provisional and only unique within this module. The CERT
+// firmware's skip-if-same-id cache spans ELFs, so the AIE4 cert pipeline
+// replaces them with ids derived from each section's content
+// in aie-cert-assign-pdi-ids once page legalization has fixed the contents.
 static uint32_t getOrAssignPdiId(AIE::DeviceOp parentDevice,
                                  StringRef deviceSymName) {
   uint32_t pdiId = 1;
@@ -1137,7 +1142,7 @@ struct AIENpuToCertPass
     Block &config = configure.getBody().front();
     if (llvm::all_of(config, [](Operation &op) { return isa<AIE::EndOp>(op); }))
       return success();
-    bool aie4 = entry.getTargetModel().getTargetArch() == AIE::AIEArch::AIE4;
+    bool aie4 = isa<AIE::AIE4TargetModel>(entry.getTargetModel());
     if (usesOtherUcs(entry) || (!aie4 && loadsOtherDevice(entry)))
       return success();
     StringRef self = entry.getSymName();

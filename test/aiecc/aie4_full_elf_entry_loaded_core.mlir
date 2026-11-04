@@ -20,6 +20,50 @@
 // RUN: diff aie4_full_elf_entry_loaded_core_prj/top/cfga.asm aie4_full_elf_entry_loaded_core_prj/main/cfga.asm
 // RUN: FileCheck %s --check-prefix=JSON --input-file=aie4_full_elf_entry_loaded_core_prj/top/full_elf_config.json
 
+// The CERT firmware skips a LOAD_PDI whose id matches the last one it loaded,
+// across every ELF on a hardware context, so the id is derived from the
+// section's content: the two compilations name their
+// entry differently but load the same @cfga configuration, and so the same id.
+// RUN: grep LOAD_PDI aie4_full_elf_entry_loaded_core_prj/top/full_elf_cert.mlir.asm > aie4_full_elf_entry_loaded_core_prj/top.load_pdi
+// RUN: grep LOAD_PDI aie4_full_elf_entry_loaded_core_prj/main/full_elf_cert.mlir.asm > aie4_full_elf_entry_loaded_core_prj/main.load_pdi
+// RUN: FileCheck %s --check-prefix=PDI --input-file=aie4_full_elf_entry_loaded_core_prj/top.load_pdi
+// RUN: diff aie4_full_elf_entry_loaded_core_prj/top.load_pdi aie4_full_elf_entry_loaded_core_prj/main.load_pdi
+
+// A configuration that differs (here, in one lock's initial value) gets a
+// different id even under the same device names; otherwise loading one ELF's
+// @cfg after the other's would be skipped. These designs have no cores.
+// RUN: sed -n 's|^// NOCORE: ||p' %s | sed 's/LOCKINIT/1/' > aie4_full_elf_entry_loaded_core_prj/nocore1.mlir
+// RUN: sed -n 's|^// NOCORE: ||p' %s | sed 's/LOCKINIT/2/' > aie4_full_elf_entry_loaded_core_prj/nocore2.mlir
+// RUN: %aiecc --get-full-elf --dump-intermediates --tmpdir=aie4_full_elf_entry_loaded_core_prj/nocore1 --output-dir=aie4_full_elf_entry_loaded_core_prj/nocore1 aie4_full_elf_entry_loaded_core_prj/nocore1.mlir
+// RUN: %aiecc --get-full-elf --dump-intermediates --tmpdir=aie4_full_elf_entry_loaded_core_prj/nocore2 --output-dir=aie4_full_elf_entry_loaded_core_prj/nocore2 aie4_full_elf_entry_loaded_core_prj/nocore2.mlir
+// RUN: grep LOAD_PDI aie4_full_elf_entry_loaded_core_prj/nocore1/full_elf_cert.mlir.asm > aie4_full_elf_entry_loaded_core_prj/nocore1.load_pdi
+// RUN: grep LOAD_PDI aie4_full_elf_entry_loaded_core_prj/nocore2/full_elf_cert.mlir.asm > aie4_full_elf_entry_loaded_core_prj/nocore2.load_pdi
+// RUN: FileCheck %s --check-prefix=NOCORE-PDI --input-file=aie4_full_elf_entry_loaded_core_prj/nocore1.load_pdi
+// RUN: FileCheck %s --check-prefix=NOCORE-PDI --input-file=aie4_full_elf_entry_loaded_core_prj/nocore2.load_pdi
+// RUN: not diff aie4_full_elf_entry_loaded_core_prj/nocore1.load_pdi aie4_full_elf_entry_loaded_core_prj/nocore2.load_pdi
+
+// PDI: LOAD_PDI {{ *}}{{[0-9]+}}, @cfga
+// NOCORE-PDI: LOAD_PDI {{ *}}{{[0-9]+}}, @cfg
+
+// NOCORE: module {
+// NOCORE:   aie.device(npu3) @main {
+// NOCORE:     aie.runtime_sequence @entry(%x: memref<16xi32>) {
+// NOCORE:       aiex.configure @cfg {
+// NOCORE:         aiex.run @s(%x) : (memref<16xi32>)
+// NOCORE:       }
+// NOCORE:     }
+// NOCORE:   }
+// NOCORE:   aie.device(npu3) @cfg {
+// NOCORE:     %tile = aie.tile(0, 2)
+// NOCORE:     %lock = aie.lock(%tile, 0) {init = LOCKINIT : i32}
+// NOCORE:     aie.runtime_sequence @s(%p: memref<16xi32>) {
+// NOCORE:       %addr = arith.constant 393224 : i32
+// NOCORE:       %value = arith.constant 3333 : i32
+// NOCORE:       aiex.npu.write32(%addr, %value) : i32, i32
+// NOCORE:     }
+// NOCORE:   }
+// NOCORE: }
+
 // ELF-NOT: elfs_a_core_0_2.elf
 // ELF: elf_file = "{{.*}}elfs_cfga_core_0_2.elf"
 // ELF-NOT: elfs_a_core_0_2.elf

@@ -379,11 +379,12 @@ inline llvm::json::Value makeAie4PatchInfoJson(int xrtId,
 // Full-ELF config.json fed to `aiebu-asm -t aie4_config`. AIE4's control code
 // is a single "cert" assembly shared by the whole module (produced by the
 // cert pipeline — convert-aie-to-transaction, aie-npu-to-cert,
-// cert-legalize-pages — then `--aie-cert-to-asm`), not a per-runtime-sequence
-// transaction binary. That assembly is the program of one entry device
-// (`entryDevice`, the device aie-npu-to-cert emitted): every other device was
-// absorbed into it as cert sections reachable only through its load-pdi
-// references, so only `entryDevice` gets a kernel. Its instances are the
+// cert-legalize-pages, aie-cert-assign-pdi-ids, aie-cert-verify — then
+// `--aie-cert-to-asm`), not a per-runtime-sequence transaction binary. That
+// assembly is the program of one entry device (`entryDevice`, the device
+// aie-npu-to-cert emitted): every other device was absorbed into it as cert
+// sections reachable only through its load-pdi references, so only
+// `entryDevice` gets a kernel. Its instances are the
 // runtime sequences that became jobs -- all of them, or only `sequenceFilter`
 // when non-empty -- and all point at `certAsmPath`. There is no PDIs section
 // (aie-npu-to-cert already folded the load-pdi references into the code).

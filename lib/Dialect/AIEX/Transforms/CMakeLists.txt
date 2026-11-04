@@ -17,6 +17,7 @@ add_mlir_dialect_library(AIEXTransforms
   AIEDecomposeLargeDmaBd.cpp
   AIENpuToCert.cpp
   AIECertVerify.cpp
+  AIECertAssignPdiIds.cpp
   AIEMaterializeBDChains.cpp
   AIEMaterializeRuntimeSequences.cpp
   AIEAssignRuntimeSequenceBDIDs.cpp

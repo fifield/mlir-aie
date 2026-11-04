@@ -2661,15 +2661,16 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
   // Combined ELF: all PDIs + NPU insts bundled
   // + control packet data, if any.
   // AIE4 "cert" control code: convert-aie-to-transaction + aie-npu-to-cert +
-  // cert-legalize-pages over the *whole* module, then `--aie-cert-to-asm` to
-  // text. The result is the program of one entry device -- --device-name, or
-  // "main" by default -- with every other device folded into it through its
-  // load-pdi references. Each of the entry device's runtime sequences becomes
-  // a job of that program; --sequence-name keeps only the named one. The
-  // entry device's full-elf instances share this single assembly file (see
-  // makeAie4ConfigJson). Non-AIE4 modules never reach the (expensive,
-  // AIE4-specific) pipeline: the value is empty and unused, since
-  // fullElfConfig only reads it under moduleHasAie4Device.
+  // cert-legalize-pages + aie-cert-assign-pdi-ids + aie-cert-verify over the
+  // *whole* module, then `--aie-cert-to-asm` to text. The result is the
+  // program of one entry device -- --device-name, or "main" by default -- with
+  // every other device folded into it through its load-pdi references. Each of
+  // the entry device's runtime sequences becomes a job of that program;
+  // --sequence-name keeps only the named one. The entry device's full-elf
+  // instances share this single assembly file (see makeAie4ConfigJson).
+  // Non-AIE4 modules never reach the (expensive, AIE4-specific) pipeline: the
+  // value is empty and unused, since fullElfConfig only reads it under
+  // moduleHasAie4Device.
   std::string aie4EntryDevice = devFilter.empty() ? "main" : devFilter;
   auto &certAsm = npuLowered.map<std::string>(
       "full_elf_cert.mlir.asm",

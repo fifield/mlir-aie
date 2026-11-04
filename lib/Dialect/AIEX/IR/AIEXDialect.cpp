@@ -2726,6 +2726,13 @@ static Operation *precedingReset(Operation *op) {
   });
 }
 
+// The AIE4 firmware does not reset the array on a load, so an AIE4
+// write_config follows no reset load: there is nothing for it to check.
+static bool inAie4Device(Operation *op) {
+  auto device = op->getParentOfType<AIE::DeviceOp>();
+  return device && isa<AIE::AIE4TargetModel>(device.getTargetModel());
+}
+
 static bool loadsSamePdi(AIEX::NpuLoadPdiOp a, AIEX::NpuLoadPdiOp b) {
   return a.getDeviceRefAttr() == b.getDeviceRefAttr() &&
          a.getId() == b.getId() && a.getSize() == b.getSize() &&
@@ -2733,6 +2740,8 @@ static bool loadsSamePdi(AIEX::NpuLoadPdiOp a, AIEX::NpuLoadPdiOp b) {
 }
 
 LogicalResult AIEX::NpuWriteConfigOp::verify() {
+  if (inAie4Device(*this))
+    return success();
   Operation *found = precedingReset(*this);
   if (!found)
     return emitOpError("must follow the load_pdi that resets the array");
@@ -2779,6 +2788,8 @@ AIEX::NpuWriteConfigOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
   if (!isa_and_present<AIE::DeviceOp>(
           symbolTable.lookupSymbolIn(scope, getDeviceRefAttr())))
     return emitOpError() << getDeviceRefAttr() << " is not a device";
+  if (inAie4Device(*this))
+    return success();
   auto reset = dyn_cast_or_null<AIEX::NpuLoadPdiOp>(precedingReset(*this));
   FlatSymbolRefAttr resetRef = reset ? reset.getDeviceRefAttr() : nullptr;
   auto empty = resetRef ? dyn_cast_or_null<AIE::DeviceOp>(

@@ -1403,6 +1403,11 @@ def AIE_NpuLoadPdiOp
     runtime by the driver or host program.
 
     If a symbol reference is provided, the compiler driver (aiecc) will match it to a device symbol name and assign the PDI ID field based on it.
+    This applies to the AIE2 (NPU instruction stream) flow only. On AIE4, `id` is not used:
+    `aie-npu-to-cert` lowers the load to a `cert.load_pdi` whose id
+    `aie-cert-assign-pdi-ids` derives from the content of the loaded configuration section.
+    The content includes the section's job ids, so the same device compiled into a
+    different program can get a different id.
 
     ### Watch Out!
 

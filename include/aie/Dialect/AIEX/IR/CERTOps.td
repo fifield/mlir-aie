@@ -537,6 +537,9 @@ def AIE_CertSectionOp
     The section contains one or more jobs and can be loaded/executed by referencing
     its symbol.
 
+    `aie-cert-assign-pdi-ids` derives the PDI id of a loaded section from its
+    contents, not from its name.
+
     Example:
     ```
       cert.section @pdi0 {
@@ -561,10 +564,18 @@ def AIE_CertLoadPdiOp : AIEX_Op<"cert.load_pdi", [HasParent<"CertJobOp">]> {
   let summary = "Load PDI (Platform Device Image)";
   let description = [{
     This operation loads a PDI (Platform Device Image), which is a piece of control code.
-    It can be loaded by other control code at any time. The `pdi_id` is an ELF-wide unique
-    identifier that specifies a unique PDI. Consecutive loading of the same PDI results in
-    subsequent loads being skipped by the microcontroller. The `symbol` operand refers to
+    It can be loaded by other control code at any time. The `symbol` operand refers to
     a cert.section containing the PDI jobs.
+
+    The `pdi_id` identifies the PDI. The microcontroller skips a load whose `pdi_id`
+    equals the id of the PDI it loaded last on that uC, and that cache is shared by every
+    ELF dispatched on a hardware context, so equal ids must mean the same PDI across
+    compilations, not just within one ELF. `aie-npu-to-cert` assigns provisional
+    per-module ids (1, 2, ...); in the AIE4 pipeline `aie-cert-assign-pdi-ids` then
+    replaces them with ids derived from the section contents.
+    See that pass for the hash contract and collision limits. It avoids 0 and
+    0xFFFFFFFF: the firmware starts with 0xFFFFFFFF as "nothing loaded" and
+    restores 0 from a zeroed preemption context.
 
     This opcode should take one whole job which in turn should take one whole page.
 

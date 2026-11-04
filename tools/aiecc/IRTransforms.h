@@ -169,7 +169,10 @@ inline std::string coreKey(xilinx::AIE::CoreOp coreOp) {
 //===----------------------------------------------------------------------===//
 
 // Stamp `aiecc.pdi_id` 1-based on every DeviceOp. Call once on the
-// pre-split module so the attribute propagates through clones.
+// pre-split module so the attribute propagates through clones. These ids feed
+// the AIE2 NPU instruction stream only: aie-npu-to-cert ignores the load_pdi
+// `id`, and the AIE4 cert pipeline derives ids from each section's source
+// device and content (aie-cert-assign-pdi-ids, see getAie4CertPipeline).
 inline void assignDevicePdiIds(mlir::ModuleOp module) {
   mlir::Builder b(module.getContext());
   int nextId = 1;
@@ -2178,7 +2181,8 @@ getTransactionPipeline(mlir::MLIRContext *ctx, llvm::StringRef elfDir,
 // AIE4 "cert" pipeline: transaction generation, followed by lowering the
 // transaction into the AIE4 firmware's cert representation. Mirrors
 // `builtin.module(aie.device(convert-aie-to-transaction{elf-dir=<elfDir>}),
-// aie-npu-to-cert, aie.device(cert-legalize-pages, aie-cert-verify))`.
+// aie-npu-to-cert, aie.device(cert-legalize-pages, aie-cert-assign-pdi-ids,
+// aie-cert-verify))`.
 // `aie-npu-to-cert` runs
 // module-wide (it emits `entryDevice` and absorbs every other device's
 // load-pdi references into that device's cert sections), so this pipeline is
@@ -2200,6 +2204,14 @@ getAie4CertPipeline(mlir::MLIRContext *ctx, llvm::StringRef elfDir,
   pm->addPass(xilinx::AIEX::createAIENpuToCertPass(certOptions));
   auto &certDpm = pm->nest<xilinx::AIE::DeviceOp>();
   certDpm.addPass(xilinx::AIEX::createAIECertPagesPass());
+  // aie-cert-assign-pdi-ids replaces aie-npu-to-cert's per-module PDI ids with
+  // ids hashed from each cert.section's content. The
+  // firmware skips a LOAD_PDI whose id matches the last one it loaded, across
+  // ELFs sharing a hardware context, so ids must identify the configuration,
+  // not its position in this module. It runs after cert-legalize-pages, which
+  // is the last pass to change section contents (page formation, splitting,
+  // uC-DMA chain merging).
+  certDpm.addPass(xilinx::AIEX::createAIECertAssignPdiIdsPass());
   // aie-cert-verify runs last, after page legalization and placement lowering,
   // where final pages and uC (group) assignments are known. It turns CERT
   // firmware constraints (barrier co-location, one wait_tcts per actor, remote

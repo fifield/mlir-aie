@@ -37,6 +37,10 @@ std::unique_ptr<mlir::OperationPass<mlir::ModuleOp>>
 createAIENpuToCertPass(const AIENpuToCertOptions &options);
 std::unique_ptr<mlir::OperationPass<AIE::DeviceOp>> createAIECertPagesPass();
 std::unique_ptr<mlir::OperationPass<AIE::DeviceOp>> createAIECertVerifyPass();
+std::unique_ptr<mlir::OperationPass<AIE::DeviceOp>>
+createAIECertAssignPdiIdsPass();
+std::unique_ptr<mlir::OperationPass<AIE::DeviceOp>>
+createAIECertAssignPdiIdsPass(const AIECertAssignPdiIdsOptions &options);
 std::unique_ptr<mlir::OperationPass<mlir::ModuleOp>> createAIEXToStandardPass();
 std::unique_ptr<mlir::OperationPass<mlir::ModuleOp>>
 createAIESCFToControlFlowPass();

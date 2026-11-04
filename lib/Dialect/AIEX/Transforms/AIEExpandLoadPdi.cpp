@@ -14,6 +14,9 @@
 //    b. an `aiex.npu.write_config @device`, whose register writes the NPU
 //       translation emits (or, with inline-config, those writes as ops).
 //    c. with teardown, an `aiex.npu.write_teardown @device` where it ends.
+//    The AIE4 firmware does not reset the array on a load, so an empty
+//    device load would reset nothing. On AIE4, each write_config is
+//    expanded on its own.
 // 2. With ctrl-pkt=true: replaces each `load_pdi @device` with
 //    a. a `load_pdi @ctrl_pkt_overlay`, which configures the NPU to stream
 //       further configuration as control packets, and
@@ -269,6 +272,17 @@ static LogicalResult transformLoadPdi(
   return success();
 }
 
+// Whether `load` writes an AIE4 device's configuration in line. Loading an
+// empty device ahead of it would reset nothing: the AIE4 firmware does not
+// reset on a load.
+static bool isAie4Write32(ModuleOp module, NpuLoadPdiOp load,
+                          AIEX::ExpandMode mode) {
+  if (mode != AIEX::ExpandMode::write32)
+    return false;
+  auto dev = module.lookupSymbol<AIE::DeviceOp>(load.getDeviceRefAttr());
+  return dev && isa<AIE::AIE4TargetModel>(dev.getTargetModel());
+}
+
 // The checks that need no expansion, so the pass fails before it changes the
 // IR.
 static LogicalResult
@@ -357,7 +371,8 @@ struct AIEExpandLoadPdiPass
       SequenceLoads &loads = sequences[seq];
       AIEX::ExpandMode mode = expandMode(loadPdiOp);
       loads.last = {mode, {}};
-      if (mode == AIEX::ExpandMode::none)
+      if (mode == AIEX::ExpandMode::none ||
+          isAie4Write32(module, loadPdiOp, mode))
         continue;
       auto dev =
           module.lookupSymbol<AIE::DeviceOp>(loadPdiOp.getDeviceRefAttr());
@@ -398,7 +413,8 @@ struct AIEExpandLoadPdiPass
         auto device = seq->getParentOfType<AIE::DeviceOp>();
         auto *it = initEntries.find(device);
         if (it != initEntries.end() &&
-            (loads.last.first == AIEX::ExpandMode::none ||
+            (isa<AIE::AIE4TargetModel>(device.getTargetModel()) ||
+             loads.last.first == AIEX::ExpandMode::none ||
              loads.last != it->second))
           initEntries.erase(it);
       }
@@ -432,7 +448,8 @@ struct AIEExpandLoadPdiPass
       ArrayState next = {mode, dev && mode == AIEX::ExpandMode::ctrlpkt
                                    ? dev.getOverlayAttr()
                                    : FlatSymbolRefAttr{}};
-      bool keepPreload = !clTeardown || state != next;
+      bool keepPreload = (!clTeardown || state != next) &&
+                         !isAie4Write32(module, loadPdiOp, mode);
       state = next;
       AIEX::BlockwriteData *config = nullptr, *teardown = nullptr;
       if (clTeardown && expandMode(loadPdiOp) == AIEX::ExpandMode::ctrlpkt) {
