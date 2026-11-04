@@ -1200,20 +1200,35 @@ struct AIENpuToCertPass
 
   // Hoist every non-main device's memref.global into the main device, keeping
   // the symbol names unique and the references inside the source device
-  // pointing at the new names.
+  // pointing at the new names. Device names are reserved too: processDevice
+  // names each absorbed device's section after it, and skips names that
+  // already resolve, so a global must not take one -- including the main
+  // device's own globals.
   void migrateGlobalsIntoMainDevice(AIE::DeviceOp mainDevice,
                                     ArrayRef<AIE::DeviceOp> devices) {
-    Block *mainBody = mainDevice.getBody();
-    if (!mainBody)
-      return;
-    MLIRContext *ctx = mainDevice.getContext();
+    auto isDeviceName = [&](StringRef candidate) {
+      return llvm::any_of(devices, [&](AIE::DeviceOp device) {
+        return device.getSymName() == candidate;
+      });
+    };
+
+    for (auto global : llvm::to_vector(mainDevice.getOps<memref::GlobalOp>())) {
+      StringRef oldName = global.getSymName();
+      if (!isDeviceName(oldName))
+        continue;
+      std::string newName;
+      unsigned counter = 0;
+      do
+        newName = oldName.str() + "_" + std::to_string(counter++);
+      while (nameTaken(mainDevice, newName) || isDeviceName(newName));
+      renamePayloadUses(mainDevice, oldName, newName);
+      global.setSymName(newName);
+    }
 
     for (auto dev : devices) {
       if (dev == mainDevice)
         continue;
-      llvm::SmallVector<memref::GlobalOp, 8> globals(
-          dev.getOps<memref::GlobalOp>());
-      for (auto global : globals) {
+      for (auto global : llvm::to_vector(dev.getOps<memref::GlobalOp>())) {
         StringRef oldName = global.getSymName();
         // The replacement has to be free in BOTH devices, not just in the
         // destination. Checking only the main device lets a name collide with
@@ -1225,28 +1240,54 @@ struct AIENpuToCertPass
         std::string newName = oldName.str();
         unsigned counter = 0;
         auto taken = [&](StringRef candidate) {
-          if (mainDevice.lookupSymbol(candidate))
-            return true;
-          return candidate != oldName && dev.lookupSymbol(candidate);
+          return nameTaken(mainDevice, candidate) || isDeviceName(candidate) ||
+                 (candidate != oldName && nameTaken(dev, candidate));
         };
         while (taken(newName))
           newName = oldName.str() + "_" + std::to_string(counter++);
-
+        // Rewrite the uses while they are still inside the source device;
+        // once it is absorbed the clones carry whatever name is set here.
         if (newName != oldName) {
-          // Rewrite the uses while they are still inside the source device;
-          // once it is absorbed the clones carry whatever name is set here.
-          if (failed(SymbolTable::replaceAllSymbolUses(
-                  global, StringAttr::get(ctx, newName), dev))) {
-            dev.emitError("could not rename global \"")
-                << oldName << "\" while absorbing it into the main device";
-            signalPassFailure();
-            return;
-          }
+          renamePayloadUses(dev, oldName, newName);
           global.setSymName(newName);
         }
-        global->moveBefore(mainBody, mainBody->begin());
+        global->moveBefore(mainDevice.getBody(), mainDevice.getBody()->begin());
       }
     }
+  }
+
+  // The device verifier rejects duplicate sym_names among all body ops,
+  // including SSA ops such as aie.buffer that the symbol table does not index.
+  static bool nameTaken(AIE::DeviceOp dev, StringRef name) {
+    return llvm::any_of(dev.getBody()->getOperations(), [&](Operation &op) {
+      auto symName =
+          op.getAttrOfType<StringAttr>(SymbolTable::getSymbolAttrName());
+      return symName && symName.getValue() == name;
+    });
+  }
+
+  // Rewrite only references that name a payload global. A generic symbol-use
+  // rewrite would also rename same-named device references, such as
+  // load_pdi's device_ref, which resolve against the module. Nested symbol
+  // tables resolve their own names, so their uses are left alone.
+  static void renamePayloadUses(AIE::DeviceOp dev, StringRef oldName,
+                                StringRef newName) {
+    auto newRef = FlatSymbolRefAttr::get(dev.getContext(), newName);
+    dev.walk<WalkOrder::PreOrder>([&](Operation *op) {
+      if (op != dev && op->hasTrait<OpTrait::SymbolTable>())
+        return WalkResult::skip();
+      if (auto get = dyn_cast<memref::GetGlobalOp>(op)) {
+        if (get.getName() == oldName)
+          get.setNameAttr(newRef);
+      } else if (auto bd = dyn_cast<AIEX::CertUcDmaBdOp>(op)) {
+        if (bd.getRemoteAddress() == oldName)
+          bd.setRemoteAddressAttr(newRef);
+      } else if (auto patch = dyn_cast<AIEX::CertApplyOffset57Op>(op)) {
+        if (patch.getSymbol() == oldName)
+          patch.setSymbolAttr(newRef);
+      }
+      return WalkResult::advance();
+    });
   }
 
   void processDevice(AIE::DeviceOp currentDevice) {

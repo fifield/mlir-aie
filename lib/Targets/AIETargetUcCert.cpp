@@ -14,7 +14,6 @@
 #include "mlir/Tools/mlir-translate/MlirTranslateMain.h"
 
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/CommandLine.h"
@@ -307,19 +306,23 @@ LogicalResult emitPage(CertPageOp pageOp, std::string &text,
 // .endl label
 //
 // The section content is emitted to a separate file
-void emitUcDmaChain(CertUcDmaChainOp op, std::string &chains, std::string &data,
-                    llvm::StringSet<> &emittedGlobals);
+LogicalResult emitUcDmaChain(CertUcDmaChainOp op, std::string &chains,
+                             std::string &data,
+                             llvm::StringSet<> &emittedGlobals);
+LogicalResult emitGlobalData(Operation *op, StringRef dataSymbol,
+                             std::string &data,
+                             llvm::StringSet<> &emittedGlobals);
 
-// `ownedChains` are the uC-DMA chains this section is the sole referrer of.
-// They are emitted into the section's own file rather than the main assembly:
-// the section body is pulled in with `.include`, and an assembler resolves a
-// label only within the file that defines it, so a chain named from a
-// section's text but defined in the main assembly fails with "Label not
-// found". The same applies transitively to the blockwrite data a chain's BDs
-// address, which emitUcDmaChain appends to the data string handed to it.
+StringRef referencedChain(Operation *op) {
+  if (auto write = dyn_cast<CertUcDmaWriteDesSyncOp>(op))
+    return write.getSymbol();
+  if (auto write = dyn_cast<CertUcDmaWriteDesOp>(op))
+    return write.getSymbol();
+  return {};
+}
+
 LogicalResult emitSection(CertSectionOp sectionOp, std::string &text,
-                          llvm::StringRef outputPath,
-                          ArrayRef<CertUcDmaChainOp> ownedChains = {}) {
+                          llvm::StringRef outputPath) {
   LogicalResult result = success();
   std::string sectionName = sectionOp.getSymName().str();
   std::string sectionFileName = sectionName + ".asm";
@@ -328,9 +331,34 @@ LogicalResult emitSection(CertSectionOp sectionOp, std::string &text,
   std::string sectionText;
   std::string sectionData;
   std::string sectionChains;
-  llvm::StringSet<> sectionGlobals;
-  for (auto chain : ownedChains)
-    emitUcDmaChain(chain, sectionChains, sectionData, sectionGlobals);
+  llvm::StringSet<> emittedChains;
+  llvm::StringSet<> emittedGlobals;
+  auto device = sectionOp->getParentOfType<DeviceOp>();
+  // AIEBU resolves labels within the including file's scope. Each section
+  // needs its own chain and payload copies, even when another section shares
+  // them.
+  sectionOp.walk([&](Operation *op) {
+    if (auto patch = dyn_cast<CertApplyOffset57Op>(op)) {
+      if (failed(emitGlobalData(op, patch.getSymbol(), sectionData,
+                                emittedGlobals)))
+        result = failure();
+      return;
+    }
+    StringRef name = referencedChain(op);
+    if (name.empty() || !emittedChains.insert(name).second)
+      return;
+    auto chain =
+        dyn_cast_if_present<CertUcDmaChainOp>(device.lookupSymbol(name));
+    if (!chain) {
+      op->emitError("uC DMA chain symbol not found: ") << name;
+      result = failure();
+    } else if (failed(emitUcDmaChain(chain, sectionChains, sectionData,
+                                     emittedGlobals))) {
+      result = failure();
+    }
+  });
+  if (failed(result))
+    return result;
 
   // Process pages within the section
   for (auto page : sectionOp.getBody().getOps<CertPageOp>()) {
@@ -374,13 +402,7 @@ LogicalResult emitSection(CertSectionOp sectionOp, std::string &text,
 
   // Emit EOF before data section
   sectionFile << "EOF\n\n";
-
-  // Chains first, then the data their BDs address -- same order as the main
-  // assembly, and both after EOF so they are in this file's data region.
-  if (!sectionChains.empty()) {
-    sectionFile << ";\n;data (chains)\n;\n";
-    sectionFile << sectionChains;
-  }
+  sectionFile << sectionChains;
 
   // Emit data section
   if (!sectionData.empty()) {
@@ -432,30 +454,27 @@ LogicalResult emitAttachToGroupOp(CertAttachToGroupOp groupOp,
   return result;
 }
 
-void emitUcDmaBdData(CertUcDmaBdOp op, std::string &data,
-                     llvm::StringSet<> &emittedGlobals) {
-  // lookup data from operation
-  auto dataSymbol = op.getRemoteAddress();
+LogicalResult emitGlobalData(Operation *op, StringRef dataSymbol,
+                             std::string &data,
+                             llvm::StringSet<> &emittedGlobals) {
   if (emittedGlobals.contains(dataSymbol))
-    return;
+    return success();
 
   auto global = dyn_cast_if_present<memref::GlobalOp>(
       op->getParentOfType<AIE::DeviceOp>().lookupSymbol(dataSymbol));
   if (!global) {
-    op.emitError("Global symbol not found");
-    return;
+    return op->emitError("Global symbol not found");
   }
 
   auto initVal = global.getInitialValue();
   if (!initVal) {
-    op.emitError("Global symbol has no initial value");
-    return;
+    return op->emitError("Global symbol has no initial value");
   }
 
   auto initData = dyn_cast<DenseIntElementsAttr>(*initVal);
   if (!initData) {
-    op.emitError("Global symbol initial value is not a dense int array");
-    return;
+    return op->emitError(
+        "Global symbol initial value is not a dense int array");
   }
 
   // data0:
@@ -468,11 +487,13 @@ void emitUcDmaBdData(CertUcDmaBdOp op, std::string &data,
     ss << llvm::format("  .long           0x%08x\n", d.getZExtValue());
   data += ss.str();
   emittedGlobals.insert(dataSymbol);
+  return success();
 }
 
 // UC_DMA_BD       0, 0x001A05C0, @data, 8, 0, 1
-void emitUcDmaBd(CertUcDmaBdOp op, std::string &chains, std::string &data,
-                 llvm::StringSet<> &emittedGlobals) {
+LogicalResult emitUcDmaBd(CertUcDmaBdOp op, std::string &chains,
+                          std::string &data,
+                          llvm::StringSet<> &emittedGlobals) {
   std::string s;
   llvm::raw_string_ostream ss(s);
   ss << "  UC_DMA_BD       0, ";
@@ -482,20 +503,23 @@ void emitUcDmaBd(CertUcDmaBdOp op, std::string &chains, std::string &data,
   ss << "0, ";
   ss << (op.getNextBd() ? "1\n" : "0\n");
   chains += ss.str();
-  emitUcDmaBdData(op, data, emittedGlobals);
+  return emitGlobalData(op, op.getRemoteAddress(), data, emittedGlobals);
 }
 
 // .align           16
 // name_of_chain:
 //   UC_DMA_BD       0, 0x001A05C0, @data0, 8, 0, 1
-void emitUcDmaChain(CertUcDmaChainOp op, std::string &chains, std::string &data,
-                    llvm::StringSet<> &emittedGlobals) {
+LogicalResult emitUcDmaChain(CertUcDmaChainOp op, std::string &chains,
+                             std::string &data,
+                             llvm::StringSet<> &emittedGlobals) {
   chains += "  .align 16\n";
   chains += op.getName().str() + ":\n";
   for (auto &o : op.getBody().front()) {
-    llvm::TypeSwitch<Operation *>(&o).Case<CertUcDmaBdOp>(
-        [&](auto op) { emitUcDmaBd(op, chains, data, emittedGlobals); });
+    if (auto bd = dyn_cast<CertUcDmaBdOp>(&o))
+      if (failed(emitUcDmaBd(bd, chains, data, emittedGlobals)))
+        return failure();
   }
+  return success();
 }
 
 } // namespace
@@ -541,75 +565,43 @@ LogicalResult xilinx::AIE::AIETranslateToUcDma(ModuleOp module,
     return block;
   };
 
-  // A section's body is emitted into its own file and pulled back in with
-  // `.include`. An assembler resolves a label only inside the file that
-  // defines it, so any uC-DMA chain a section names has to be emitted into
-  // that same file -- otherwise assembly fails with "Label not found".
-  //
-  // Every section gets its own copy of every chain it names, along with the
-  // blockwrite data those BDs address. Copying rather than moving is what
-  // makes a *shared* chain work: two sections that name the same chain each
-  // need it resolvable in their own file, and the label is file-scoped, so a
-  // copy per file is not a duplicate definition. The chain and its data are
-  // read-only configuration, so duplicating them is safe.
-  //
-  // The main assembly keeps its copy only when the device's own executable
-  // ops also name the chain; otherwise the definition would be dead there.
-  llvm::StringMap<CertUcDmaChainOp> chainByName;
-  for (Operation &op : *deviceOp.getBody())
-    if (auto chain = dyn_cast<CertUcDmaChainOp>(&op))
-      chainByName[chain.getName()] = chain;
-
-  // A chain is named by BOTH the synchronous and the asynchronous write-des
-  // ops. Counting only the synchronous one would let an async reference from
-  // the main stream go unseen, and the chain would be moved out from under it.
-  auto chainNameOf = [](Operation *op) -> StringRef {
-    if (auto sync = dyn_cast<CertUcDmaWriteDesSyncOp>(op))
-      return sync.getSymbol();
-    if (auto async = dyn_cast<CertUcDmaWriteDesOp>(op))
-      return async.getSymbol();
-    return {};
-  };
-
-  // Definitions remain at device scope in IR, but AIEBU labels are local to
-  // each output group. Record every group that needs a copy of each chain.
-  std::map<std::string, std::set<uint32_t>> deviceChainUsers;
-  for (Operation &op : *deviceOp.getBody()) {
-    if (isa<CertSectionOp>(&op))
-      continue;
-    op.walk([&](Operation *inner) {
-      StringRef name = chainNameOf(inner);
-      if (name.empty() || inner->getParentOfType<CertSectionOp>())
-        return;
-      auto group = inner->getParentOfType<CertAttachToGroupOp>();
-      deviceChainUsers[name.str()].insert(group ? group.getGroupId() : 0);
-    });
-  }
-
-  llvm::StringSet<> chainsCoveredBySections;
-  auto chainsOwnedBy = [&](CertSectionOp section) {
-    llvm::SmallVector<CertUcDmaChainOp, 4> owned;
-    llvm::StringSet<> seen;
-    section.walk([&](Operation *inner) {
-      StringRef name = chainNameOf(inner);
-      if (name.empty() || !seen.insert(name).second)
-        return;
-      auto it = chainByName.find(name);
-      if (it == chainByName.end())
-        return;
-      owned.push_back(it->second);
-      if (deviceChainUsers.find(name.str()) == deviceChainUsers.end())
-        chainsCoveredBySections.insert(name);
-    });
-    return owned;
-  };
+  // AIEBU resolves labels within each controller's block. Record every group
+  // that needs a device-level chain; sections emit their own copies.
+  llvm::StringSet<> sectionReferences;
+  std::map<std::string, std::set<uint32_t>> chainUsers;
+  deviceOp.walk([&](Operation *op) {
+    StringRef name = referencedChain(op);
+    auto patch = dyn_cast<CertApplyOffset57Op>(op);
+    if (name.empty() && !patch)
+      return;
+    if (op->getParentOfType<CertSectionOp>()) {
+      if (!name.empty())
+        sectionReferences.insert(name);
+      return;
+    }
+    auto group = op->getParentOfType<CertAttachToGroupOp>();
+    uint32_t groupId = group ? group.getGroupId() : 0;
+    if (patch) {
+      size_t block = blockFor(groupId);
+      if (failed(emitGlobalData(op, patch.getSymbol(), data[block],
+                                emittedGlobals[groupId])))
+        result = failure();
+      return;
+    }
+    if (!deviceOp.lookupSymbol<CertUcDmaChainOp>(name)) {
+      op->emitError("uC DMA chain symbol not found: ") << name;
+      result = failure();
+      return;
+    }
+    chainUsers[name.str()].insert(groupId);
+  });
 
   // Sections are hoisted ahead of the executable stream: they are labeled
   // `.include` blocks, not pages, and the code below them may reference them
   // (e.g. `LOAD_PDI 1, @config_device`), so their labels must already be
   // defined. `emitAttachToGroupOp` hoists a group's sections the same way.
   for (auto section : deviceOp.getBody()->getOps<CertSectionOp>()) {
-    if (failed(emitSection(section, text[0], outputPath, chainsOwnedBy(section))))
+    if (failed(emitSection(section, text[0], outputPath)))
       result = failure();
   }
 
@@ -628,18 +620,17 @@ LogicalResult xilinx::AIE::AIETranslateToUcDma(ModuleOp module,
               emitAttachToGroupOp(grp, text[block], data[block], outputPath)))
         result = failure();
     } else if (auto chain = dyn_cast<CertUcDmaChainOp>(&op)) {
-      // Chains used only in sections already live in those sections' files.
-      if (chainsCoveredBySections.contains(chain.getName()))
+      std::set<uint32_t> users = {0};
+      auto it = chainUsers.find(chain.getName().str());
+      if (it != chainUsers.end())
+        users = it->second;
+      else if (sectionReferences.contains(chain.getName()))
         continue;
-      auto users = deviceChainUsers.find(chain.getName().str());
-      if (users == deviceChainUsers.end()) {
-        emitUcDmaChain(chain, chains[0], data[0], emittedGlobals[0]);
-        continue;
-      }
-      for (uint32_t groupId : users->second) {
+      for (uint32_t groupId : users) {
         size_t block = blockFor(groupId);
-        emitUcDmaChain(chain, chains[block], data[block],
-                       emittedGlobals[groupId]);
+        if (failed(emitUcDmaChain(chain, chains[block], data[block],
+                                  emittedGlobals[groupId])))
+          result = failure();
       }
     }
   }
@@ -664,35 +655,23 @@ LogicalResult xilinx::AIE::AIETranslateToUcDma(ModuleOp module,
   return success();
 }
 
-// A `cert.section` is written to its own <section>.asm and included from the
-// main assembly by BARE FILENAME, which an assembler resolves relative to the
-// file holding the include. The two therefore have to be siblings. The
-// three-argument AIETranslateToUcDma takes the main assembly's path and puts
-// the sections beside it -- that is what aiecc passes -- but mlir-translate
-// hands a registered translation nothing except a raw_ostream, so the path is
-// not reachable from this entry point.
-//
-// Expose it as an option instead. Empty (the default) keeps the historical
-// behaviour of writing sections to the process's current directory, so no
-// existing invocation changes.
-static llvm::cl::opt<std::string> certSectionDir(
-    "cert-section-dir",
-    llvm::cl::desc("Directory to write aiex.cert.section .asm files into "
-                   "(default: the current directory)"),
-    llvm::cl::init(""));
+// The registered translation receives a stream, so its output filename is
+// unavailable. An explicit directory lets callers keep section files beside it.
+static llvm::cl::opt<std::string>
+    certSectionDir("cert-section-dir",
+                   llvm::cl::desc("Directory for aiex.cert.section .asm files "
+                                  "(default: current directory)"),
+                   llvm::cl::init(""));
 
 LogicalResult xilinx::AIE::AIETranslateToUcDma(ModuleOp module,
                                                raw_ostream &output) {
   std::string assembly;
 
-  // emitSection takes a FILE path and uses its parent directory, so give the
-  // requested directory a placeholder filename.
-  llvm::SmallString<128> pathStorage;
+  llvm::SmallString<128> outputPath;
   if (!certSectionDir.empty()) {
-    pathStorage = llvm::StringRef(certSectionDir);
-    llvm::sys::path::append(pathStorage, "main.asm");
+    outputPath = StringRef(certSectionDir);
+    llvm::sys::path::append(outputPath, "main.asm");
   }
-  llvm::StringRef outputPath = pathStorage;
 
   auto r = AIETranslateToUcDma(module, assembly, outputPath);
   if (failed(r))
