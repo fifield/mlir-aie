@@ -77,7 +77,6 @@ def certRegions():
 # CHECK: aiex.cert.write32_d(3, 7) {address_is_reg, value_is_reg}
 # CHECK: aiex.cert.read32(3, 4096)
 # CHECK: aiex.cert.read32_d(3, 4)
-# CHECK: aiex.cert.poll32(4096, 42)
 # CHECK: aiex.cert.maskpoll32(4096, 255, 16)
 # CHECK: aiex.cert.nop
 @construct_and_print_module
@@ -96,7 +95,6 @@ def certScalarOps():
                 cert_write32_d(3, 7, address_is_reg=True, value_is_reg=True)
                 cert_read32(3, 0x1000)
                 cert_read32_d(3, 4)
-                cert_poll32(0x1000, 42)
                 cert_maskpoll32(0x1000, 0xFF, 0x10)
                 cert_nop()
 

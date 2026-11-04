@@ -1594,8 +1594,6 @@ static void updateCostForOp(Operation &o, AIE::DeviceOp deviceOp,
     text_cost += 4; // ISA_OPSIZE_READ_32_D
   } else if (isa<AIEX::CertWrite32DOp>(o)) {
     text_cost += 12; // ISA_OPSIZE_WRITE_32_D
-  } else if (isa<AIEX::CertPoll32Op>(o)) {
-    text_cost += 12; // ISA_OPSIZE_POLL_32
   } else if (isa<AIEX::CertMaskPoll32Op>(o)) {
     text_cost += 16; // ISA_OPSIZE_MASK_POLL_32
   } else if (isa<AIEX::CertSaveTimestampsOp>(o)) {

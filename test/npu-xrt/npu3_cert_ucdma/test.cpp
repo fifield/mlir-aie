@@ -134,7 +134,7 @@ int main(int argc, const char *argv[]) {
   if (run.wait2(std::chrono::seconds(10)) == std::cv_status::timeout) {
     std::cout << "FAIL: run did not complete within 10s. The cert job never "
                  "released the gate lock -- a uC-DMA transfer never landed "
-                 "(cert.poll32 spinning) or an opcode wedged the "
+                 "(cert.maskpoll32 spinning) or an opcode wedged the "
                  "microcontroller."
               << std::endl;
     return 1;

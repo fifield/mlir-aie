@@ -33,7 +33,6 @@ module {
       aiex.cert.write32_d(3, 5) {address_is_reg}
       aiex.cert.write32_d(68157440, 4) {value_is_reg}
       aiex.cert.write32_d(3, 4) {address_is_reg, value_is_reg}
-      aiex.cert.poll32(0x02100000, 1)
       aiex.cert.maskpoll32(0x02100000, 0xf, 1)
       aiex.cert.save_timestamps(7)
       aiex.cert.save_register(0x02100000, 9)

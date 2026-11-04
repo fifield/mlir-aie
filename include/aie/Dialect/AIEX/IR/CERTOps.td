@@ -245,6 +245,8 @@ def AIE_CertMaskPoll32Op
     Lowers to the CERT ISA `MASK_POLL_32` instruction (opcode 0x14),
     with constant 32-bit operands in address, mask, value order.
     No timeout operand is encoded; polling behavior is controlled by firmware.
+    To wait for an exact 32-bit value, use mask 0xFFFFFFFF; this replaces the
+    deprecated POLL_32, which AIEBU already assembles that way.
 
     Example:
     ```
@@ -491,25 +493,6 @@ def AIE_CertSaveRegisterOp
   }];
 }
 
-def AIE_CertPoll32Op: AIEX_Op<"cert.poll32", [HasParent<"CertJobOp">]> {
-  let summary = "Poll a constant address until it equals a value";
-  let description = [{
-    This poll is a busy poll: it blocks the current job (other jobs continue to
-    execute) until the value read at `address` equals `value`.
-
-    Example:
-    ```
-      cert.poll32(0x02100000, 1)
-    ```
-  }];
-  let arguments = (
-    ins UI32Attr:$address,
-        UI32Attr:$value
-  );
-  let assemblyFormat = [{
-    `(` $address `,` $value `)` attr-dict
-  }];
-}
 
 def AIE_CertNopOp : AIEX_Op<"cert.nop", []> {
   let summary = "No operation (NOP)";

@@ -193,16 +193,6 @@ void emitWrite32D(CertWrite32DOp op, std::string &text) {
   text += ss.str();
 }
 
-// POLL_32                0x02100000, 0x00000001
-void emitPoll32(CertPoll32Op op, std::string &text) {
-  std::string s;
-  llvm::raw_string_ostream ss(s);
-  ss << mn("POLL_32");
-  ss << llvm::format("0x%08x, ", op.getAddress());
-  ss << llvm::format("0x%08x\n", op.getValue());
-  text += ss.str();
-}
-
 // MASK_POLL_32           0x02100000, 0x0000000f, 0x00000001
 void emitMaskPoll32(CertMaskPoll32Op op, std::string &text) {
   std::string s;
@@ -261,7 +251,6 @@ LogicalResult emitJob(CertJobOp jobOp, std::string &text, std::string &data) {
         .Case<CertRead32Op>([&](auto op) { emitRead32(op, text); })
         .Case<CertRead32DOp>([&](auto op) { emitRead32D(op, text); })
         .Case<CertWrite32DOp>([&](auto op) { emitWrite32D(op, text); })
-        .Case<CertPoll32Op>([&](auto op) { emitPoll32(op, text); })
         .Case<CertMaskPoll32Op>([&](auto op) { emitMaskPoll32(op, text); })
         .Case<CertSaveTimestampsOp>(
             [&](auto op) { emitSaveTimestamps(op, text); })

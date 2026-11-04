@@ -123,13 +123,13 @@ module {
       aiex.cert.write32(0x600400, 0x11112222)
       // The uC read path must see that write at the same base-less address.
       // A wrong address decode never matches and the run times out.
-      aiex.cert.poll32(0x600400, 0x11112222)
+      aiex.cert.maskpoll32(0x600400, 0xFFFFFFFF, 0x11112222)
       // Same word, upper half only, through the masked poll.
       aiex.cert.maskpoll32(0x600400, 0xFFFF0000, 0x11110000)
 
       // --- obuf[1]: second immediate, so a stuck/echoed value is visible ----
       aiex.cert.write32(0x600404, 0x33334444)
-      aiex.cert.poll32(0x600404, 0x33334444)
+      aiex.cert.maskpoll32(0x600404, 0xFFFFFFFF, 0x33334444)
 
       // --- obuf[8..11]: pointer table for the register-held addresses -------
       aiex.cert.write32(0x600420, 0x600404)
@@ -175,7 +175,7 @@ module {
       // it straight back (same round-trip as obuf[0], but against tile control
       // space instead of data memory)...
       aiex.cert.write32(0x6AE010, 5)
-      aiex.cert.poll32(0x6AE010, 5)
+      aiex.cert.maskpoll32(0x6AE010, 0xFFFFFFFF, 5)
       // ...then overwrite it with WRITE_32_D through a register-held address
       // and READ_32 the result out to obuf[7]. 21 != 5, so a WRITE_32_D that
       // silently did nothing here leaves 5 in obuf[7] and fails loudly rather

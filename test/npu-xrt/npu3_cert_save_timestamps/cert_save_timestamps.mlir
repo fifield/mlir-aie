@@ -231,7 +231,7 @@ module {
 
       // --- liveness marker: distinguishes "job never ran" from "no records" --
       aiex.cert.write32(0x600400, 0xA5A5A5A5)
-      aiex.cert.poll32(0x600400, 0xA5A5A5A5)
+      aiex.cert.maskpoll32(0x600400, 0xFFFFFFFF, 0xA5A5A5A5)
 
       // --- release the gate so the MM2S BD streams obuf to the host ---------
       aiex.cert.write32(0x6AE000, 1)

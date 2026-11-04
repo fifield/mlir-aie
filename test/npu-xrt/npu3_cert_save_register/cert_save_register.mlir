@@ -84,28 +84,28 @@ module {
       // the write never landed the job hangs here instead of quietly saving a
       // zero, which would be indistinguishable from a broken SAVE_REGISTER.
       aiex.cert.write32(0x600400, 0x11112222)
-      aiex.cert.poll32(0x600400, 0x11112222)
+      aiex.cert.maskpoll32(0x600400, 0xFFFFFFFF, 0x11112222)
       aiex.cert.save_register(0x600400, 201)
 
       // --- record 202: a different word, a different value ------------------
       // A SAVE_REGISTER that ignored its address operand and always read
       // 0x600400 would produce 0x11112222 here.
       aiex.cert.write32(0x600404, 0x33334444)
-      aiex.cert.poll32(0x600404, 0x33334444)
+      aiex.cert.maskpoll32(0x600404, 0xFFFFFFFF, 0x33334444)
       aiex.cert.save_register(0x600404, 202)
 
       // --- record 203: 0x600400 again, after overwriting it -----------------
       // Same address as record 201, different contents. This is the assertion
       // that SAVE_REGISTER reads memory at execution time.
       aiex.cert.write32(0x600400, 0x55556666)
-      aiex.cert.poll32(0x600400, 0x55556666)
+      aiex.cert.maskpoll32(0x600400, 0xFFFFFFFF, 0x55556666)
       aiex.cert.save_register(0x600400, 203)
 
       // --- record 204: tile CONTROL space, not data memory -------------------
       // Lock 1's value register. 21 is not a value the lock can reach on its
       // own from init 0 before the DMA runs, so a stale/zero read is visible.
       aiex.cert.write32(0x6AE010, 21)
-      aiex.cert.poll32(0x6AE010, 21)
+      aiex.cert.maskpoll32(0x6AE010, 0xFFFFFFFF, 21)
       aiex.cert.save_register(0x6AE010, 204)
 
       // --- release the gate so the MM2S BD streams obuf to the host ---------

@@ -59,10 +59,10 @@
 // WHY THE ECHOES ARE READ *IMMEDIATELY* AFTER THE WAIT
 //
 // The three cert.read32 + cert.write32_d {value_is_reg} echoes sample the last
-// word of each destination range with no intervening cert.poll32. That
+// word of each destination range with no intervening cert.maskpoll32. That
 // ordering is the only thing that could make a no-op cert.wait_uc_dma
 // observable: if the wait did not actually block, the read would race the
-// in-flight transfer and see poison. The cert.poll32s that follow are a
+// in-flight transfer and see poison. The cert.maskpoll32s that follow are a
 // separate liveness net -- they make a genuinely stuck transfer time out
 // cleanly instead of returning a confusing partial buffer.
 //
@@ -176,8 +176,8 @@ module {
       // First word of each async destination. If a transfer is genuinely
       // stuck these never match and the host's bounded wait reports a clean
       // timeout rather than a half-written buffer.
-      aiex.cert.poll32(0x600500, 0xA5A5A501)
-      aiex.cert.poll32(0x600900, 0x11110001)
+      aiex.cert.maskpoll32(0x600500, 0xFFFFFFFF, 0xA5A5A501)
+      aiex.cert.maskpoll32(0x600900, 0xFFFFFFFF, 0x11110001)
 
       // --- sync: single blocking op ----------------------------------------
       // uc_dma_write_des_sync enqueues and waits in one instruction, so the
@@ -186,7 +186,7 @@ module {
       aiex.cert.uc_dma_write_des_sync(@chain_sync)
       aiex.cert.read32(3, 0x600A3C)
       aiex.cert.write32_d(0x600408, 3) {value_is_reg}
-      aiex.cert.poll32(0x600A00, 0x22220001)
+      aiex.cert.maskpoll32(0x600A00, 0xFFFFFFFF, 0x22220001)
 
       // --- release the gate so the MM2S BD streams obuf to the host --------
       // Plain WRITE_32 on purpose: the gate must never depend on an op under

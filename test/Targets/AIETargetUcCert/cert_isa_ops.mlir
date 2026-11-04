@@ -16,7 +16,6 @@
 // CHECK:   WAIT_UC_DMA            $r2
 // CHECK:   READ_32                $r1, 0x02100000
 // CHECK:   READ_32_D              $r0, $r1
-// CHECK:   POLL_32                0x02100000, 0x00000001
 // CHECK:   MASK_POLL_32           0x02100000, 0x0000000f, 0x00000001
 // CHECK:   SAVE_TIMESTAMPS        7
 // CHECK:   SAVE_REGISTER          0x02100000, 9
@@ -37,7 +36,6 @@ module {
       aiex.cert.wait_uc_dma(2)
       aiex.cert.read32(1, 0x02100000)
       aiex.cert.read32_d(0, 1)
-      aiex.cert.poll32(0x02100000, 1)
       aiex.cert.maskpoll32(0x02100000, 0xf, 1)
       aiex.cert.save_timestamps(7)
       aiex.cert.save_register(0x02100000, 9)
