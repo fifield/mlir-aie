@@ -102,12 +102,13 @@ struct AIECertPerSiteSectionsPass
 
     OpBuilder builder(device.getContext());
     for (auto &[templ, templSites] : sitesOf) {
-      // The template's job ids depend on the rest of the program: page
-      // splitting renumbers jobs device-wide. Number them 1..n in order, so
-      // the same configuration gets the same content, and so the same id,
-      // in any program. Ids stay unique within the section's pages.
-      uint32_t nextJobId = 1;
-      templ.walk([&](CertJobOp job) { job.setJobId(nextJobId++); });
+      // Canonical page-local IDs keep the section hash independent of the
+      // surrounding program while preserving distinct firmware job slots.
+      templ.walk([&](CertPageOp page) {
+        uint32_t nextJobId = 1;
+        for (auto job : page.getBody().front().getOps<CertJobOp>())
+          job.setJobId(nextJobId++);
+      });
 
       // aiebu folds labels to lower case, so the labels are lower case.
       std::string base = llvm::StringRef(templ.getSymName()).lower();

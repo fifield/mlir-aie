@@ -9,7 +9,7 @@
 
 // Every cert.load_pdi site gets its own copy of the section it loads,
 // labelled <lower-case name>__site<n>, in program order. The copies are
-// cloned from the template after its job ids are renumbered 1..n. The
+// cloned from the template after its job ids are renumbered 1..n per page. The
 // template is erased.
 
 // CHECK-LABEL: aie.device(npu3)

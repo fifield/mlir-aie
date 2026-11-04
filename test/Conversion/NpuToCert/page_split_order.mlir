@@ -30,6 +30,9 @@
 // CHECK: aiex.cert.page
 // CHECK: aiex.cert.job(2)
 // CHECK: aiex.cert.wait_tcts(0, 6, 1)
+// CHECK: aiex.cert.page
+// CHECK-NEXT: aiex.cert.job(1)
+// CHECK: aiex.cert.job(63)
 
 module {
   aie.device(npu2) {
@@ -51,6 +54,11 @@ module {
         aiex.cert.uc_dma_write_des_sync(@c2)
         aiex.cert.wait_tcts(0, 6, 1)
       }
+    }
+    // Splitting another page must not shift these IDs into colliding slots.
+    aiex.cert.page {
+      aiex.cert.job(1) {}
+      aiex.cert.job(63) {}
     }
   }
 }

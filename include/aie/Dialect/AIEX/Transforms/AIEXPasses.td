@@ -265,7 +265,7 @@ def AIECertPerSiteSections
     case), and retargets the load. All copies of a section are cloned from
     one template, after `cert-legalize-pages`, so they are byte-identical and
     `aie-cert-assign-pdi-ids` gives them one id: a repeated load is still
-    skipped. The template's job ids are first renumbered 1..n in order, so its
+    skipped. The template's job ids are first renumbered 1..n per page, so its
     content (and so its id) does not depend on the rest of the program. The
     template is erased unless something else (a `cert.preempt`) still
     names it.

@@ -18,7 +18,7 @@
 
 // SEC: START_JOB 1
 // SEC: .eop
-// SEC: START_JOB 2
+// SEC: START_JOB 1
 // SEC: .eop
 
 module {

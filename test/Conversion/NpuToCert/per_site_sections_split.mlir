@@ -21,7 +21,7 @@
 // CHECK-NEXT: aiex.cert.write32(8192, 1)
 // CHECK-NEXT: aiex.cert.uc_dma_write_des_sync(@[[C0:chain_[0-9]+]])
 // CHECK: aiex.cert.page {
-// CHECK-NEXT: aiex.cert.job(2) {
+// CHECK-NEXT: aiex.cert.job(1) {
 // CHECK-NEXT: aiex.cert.uc_dma_write_des_sync(@[[C1:chain_[0-9]+]])
 // CHECK: aiex.cert.section @cfg__site1 {
 // CHECK-NEXT: aiex.cert.page {
@@ -29,7 +29,7 @@
 // CHECK-NEXT: aiex.cert.write32(8192, 1)
 // CHECK-NEXT: aiex.cert.uc_dma_write_des_sync(@[[C0]])
 // CHECK: aiex.cert.page {
-// CHECK-NEXT: aiex.cert.job(2) {
+// CHECK-NEXT: aiex.cert.job(1) {
 // CHECK-NEXT: aiex.cert.uc_dma_write_des_sync(@[[C1]])
 
 module {

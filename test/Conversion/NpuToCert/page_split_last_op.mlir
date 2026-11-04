@@ -111,7 +111,7 @@ aie.device(npu2) {
       aiex.cert.uc_dma_write_des_sync(@mj_small)
       aiex.cert.uc_dma_write_des_sync(@mj_fat)
     }
-    aiex.cert.job(2) {
+    aiex.cert.job(66) {
       aiex.cert.maskwrite32(6959104, 0, 1)
       aiex.cert.maskwrite32(6999568, 2, 2)
     }
