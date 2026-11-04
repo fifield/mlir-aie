@@ -17,7 +17,7 @@
 // RUN: %aiecc --get-full-elf --dump-intermediates --device-name=top --tmpdir=aie4_full_elf_entry_loaded_core_prj/top --output-dir=aie4_full_elf_entry_loaded_core_prj/top aie4_full_elf_entry_loaded_core_prj/top.mlir
 // RUN: %aiecc --get-full-elf --dump-intermediates --tmpdir=aie4_full_elf_entry_loaded_core_prj/main --output-dir=aie4_full_elf_entry_loaded_core_prj/main aie4_full_elf_entry_loaded_core_prj/main.mlir
 // RUN: FileCheck %s --check-prefix=ELF --input-file=aie4_full_elf_entry_loaded_core_prj/top/physical_with_elfs.mlir
-// RUN: diff aie4_full_elf_entry_loaded_core_prj/top/cfga.asm aie4_full_elf_entry_loaded_core_prj/main/cfga.asm
+// RUN: diff aie4_full_elf_entry_loaded_core_prj/top/cfga__site0.asm aie4_full_elf_entry_loaded_core_prj/main/cfga__site0.asm
 // RUN: FileCheck %s --check-prefix=JSON --input-file=aie4_full_elf_entry_loaded_core_prj/top/full_elf_config.json
 
 // The CERT firmware skips a LOAD_PDI whose id matches the last one it loaded,

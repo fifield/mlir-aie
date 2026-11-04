@@ -2204,6 +2204,10 @@ getAie4CertPipeline(mlir::MLIRContext *ctx, llvm::StringRef elfDir,
   pm->addPass(xilinx::AIEX::createAIENpuToCertPass(certOptions));
   auto &certDpm = pm->nest<xilinx::AIE::DeviceOp>();
   certDpm.addPass(xilinx::AIEX::createAIECertPagesPass());
+  // aiebu rejects two LOAD_PDIs of one label in a column: give each load site
+  // a copy of its section, cloned from the legalized template so all copies
+  // hash to one id below.
+  certDpm.addPass(xilinx::AIEX::createAIECertPerSiteSectionsPass());
   // aie-cert-assign-pdi-ids replaces aie-npu-to-cert's per-module PDI ids with
   // ids hashed from each cert.section's content. The
   // firmware skips a LOAD_PDI whose id matches the last one it loaded, across

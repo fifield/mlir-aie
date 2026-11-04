@@ -10,7 +10,7 @@
 
 // RUN: rm -rf aie4_user_configure_sequence_prj && mkdir -p aie4_user_configure_sequence_prj
 // RUN: %aiecc --get-full-elf --dump-intermediates --tmpdir=aie4_user_configure_sequence_prj --output-dir=aie4_user_configure_sequence_prj %s
-// RUN: FileCheck %s --check-prefix=SEC --input-file=aie4_user_configure_sequence_prj/cfg.asm
+// RUN: FileCheck %s --check-prefix=SEC --input-file=aie4_user_configure_sequence_prj/cfg__site0.asm
 // RUN: FileCheck %s --check-prefix=ENTRY --input-file=aie4_user_configure_sequence_prj/full_elf_cert.mlir.asm
 
 // SEC-NOT: 0x5ec0de01

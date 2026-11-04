@@ -254,6 +254,38 @@ def AIECertPages : Pass<"cert-legalize-pages", "AIE::DeviceOp"> {
   ];
 }
 
+def AIECertPerSiteSections
+    : Pass<"aie-cert-per-site-sections", "AIE::DeviceOp"> {
+  let summary = "Give every cert.load_pdi site a copy of its section";
+  let description = [{
+    aiebu rejects two `LOAD_PDI`s of one label in a column, and two section
+    files of one name. This pass gives each `cert.load_pdi` site (in program
+    order; section bodies are not entered) its own copy of the section it
+    loads, labelled `<lower-case name>__site<n>` (aiebu folds labels to lower
+    case), and retargets the load. All copies of a section are cloned from
+    one template, after `cert-legalize-pages`, so they are byte-identical and
+    `aie-cert-assign-pdi-ids` gives them one id: a repeated load is still
+    skipped. The template's job ids are first renumbered 1..n in order, so its
+    content (and so its id) does not depend on the rest of the program. The
+    template is erased unless something else (a `cert.preempt`) still
+    names it.
+
+    Run it after `cert-legalize-pages` and before `aie-cert-assign-pdi-ids`.
+    A section that loads another section, and a program on more than one uC
+    (unless `multi-uc`), are errors. The multi-uC check looks for
+    `cert.attach_to_group` ops with a non-zero id, so it relies on
+    `cert-legalize-pages` having lowered `cert.page` placements to groups.
+  }];
+  let constructor = "xilinx::AIEX::createAIECertPerSiteSectionsPass()";
+  let dependentDialects = ["xilinx::AIE::AIEDialect",
+                           "xilinx::AIEX::AIEXDialect",
+  ];
+  let options = [Option<"multiUc", "multi-uc", "bool", /*default=*/"false",
+                        "Experiment only: allow programs on more than one "
+                        "microcontroller.",
+                        "::llvm::cl::Hidden">];
+}
+
 def AIECertAssignPdiIds : Pass<"aie-cert-assign-pdi-ids", "AIE::DeviceOp"> {
   let summary = "Derive cert.load_pdi ids from the content of their sections";
   let description = [{
