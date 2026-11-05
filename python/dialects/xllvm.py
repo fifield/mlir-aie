@@ -28,9 +28,9 @@ _TM_OPS = {
 # [start, end), and the offset Peano's default TM aperture adds to them.
 # AIE2/AIE2P: registers lie between the 64 KiB data memory and 0x80000, where
 # the aperture starts (regdb; core-visible R + 0x80000 is a 20-bit address).
-# AIE4: AIE4 Arch Spec Table 5-8 allows processor-bus addresses
-# 0x48000-0x5CFFF (core module, memory module, stream switch); the -0x58000
-# offset maps these to tile registers 0xA0000-0xB4FFF.
+# AIE4: processor-bus addresses 0x48000-0x5CFFF cover the core module,
+# memory module, and stream switch. Adding -0x58000 to tile-register offsets
+# 0xA0000-0xB4FFF produces this processor-bus window.
 _TM_WINDOWS = {
     "aie2": (0x10000, 0x80000, 0x80000),
     "aie2p": (0x10000, 0x80000, 0x80000),
