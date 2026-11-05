@@ -9,8 +9,8 @@
 # out = in + K over 1024 x i32, streamed
 #   shim -> memtile -> core -> memtile -> shim
 # through depth-2 objectFifos. The memtile objectFifo BD chains loop forever,
-# which is what makes back-to-back dispatch of this design interesting
-# (issue #423); the dataflow itself is the placed vector_scalar_add.
+# so repeated dispatches must preserve the configuration of live memtile
+# channels; the dataflow itself is the placed vector_scalar_add.
 #
 #   python back_to_back_dispatch_placed.py [--name main] [--k 1] [--output-first]
 #

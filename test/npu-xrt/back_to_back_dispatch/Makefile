@@ -64,7 +64,7 @@ run-expand: back_to_back_dispatch_expand.elf test.exe
 
 # Expected to FAIL until the configuration resets the array before
 # configuring it: every dispatch reloads the other ELF's configuration over
-# live memtile channels (issue #423). Bounded to 8 runs; run it last and
+# live memtile channels. Bounded to 8 runs; run it last and
 # check the device afterwards (see README.md).
 run-alternate: back_to_back_dispatch.elf back_to_back_dispatch_b.elf test.exe
 	./test.exe --elf back_to_back_dispatch.elf --alt-elf back_to_back_dispatch_b.elf \

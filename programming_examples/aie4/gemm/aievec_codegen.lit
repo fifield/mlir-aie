@@ -5,7 +5,7 @@
 // commit / MMAC / pop / insert (and OUT=i8 vst.srs) counts, one crRnd /
 // crSat write, no lda.s8 or vector stack traffic, no post-incremented
 // staging index, and the zb/za timing check around each K-loop of core
-// (0,2). Config A is #358's lit size (OUT=i8); config C (OUT=i32) with
+// (0,2). Config A uses M=512, N=768, K=1024 (OUT=i8); config C (OUT=i32) with
 // trace events is the largest core. Config B (K = 128) has no K-loop (it is
 // inlined) and Peano spills accumulators there, so vector stack traffic is
 // allowed and its timing is covered by hardware only.

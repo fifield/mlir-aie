@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 // RUN: aie-opt --aie-create-pathfinder-flows --aie-find-flows %s | FileCheck %s
 //
-// Preserve the original Medusa #258 fixture's end-to-end packet destinations
-// across routing and lifting, independently of its chosen links and arbiters.
+// Preserve end-to-end packet destinations across routing and lifting,
+// independently of the chosen links and arbiters.
 // Same-ID sources may merge, but neither may acquire another destination.
 // CHECK-NOT: aie.packet_flow
 // CHECK: aie.packet_flow(2) {

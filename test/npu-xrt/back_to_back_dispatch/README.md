@@ -10,10 +10,10 @@
 A memtile objectFifo design (`out = in + 1` over 1024 x i32), dispatched many
 times with no gap between dispatches. Every run must return exactly its own
 output. This is a hardware regression test for delivering an AIE4 full ELF's
-configuration as a skippable `LOAD_PDI`, and for issue
-[#423](https://gitenterprise.xilinx.com/XRLabs/mlir-aie/issues/423).
+configuration as a skippable `LOAD_PDI` to prevent displaced output when
+dispatches reuse live memtile channels.
 
-## Issue #423
+## Reusing live memtile channels
 
 ObjectFifo memtile BD chains loop forever, so when a dispatch ends, memtile
 channels are still live. If the firmware does not reset the array between
@@ -67,8 +67,8 @@ N=200, and the output-first design in `seq` and `runlist` mode.
 ## Known failing comparisons
 
 `make extra` builds two comparisons that reconfigure live memtile channels
-without resetting them first. They exhibit the displaced-data symptoms of
-#423 and are excluded from `make run` and lit:
+without resetting them first. They exhibit the displaced-data symptoms
+described above and are excluded from `make run` and lit:
 
 ```bash
 make run-expand       # ./test.exe --elf back_to_back_dispatch_expand.elf --mode seq --n 8

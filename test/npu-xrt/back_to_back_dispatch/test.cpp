@@ -38,7 +38,7 @@ constexpr int COUNT = 1024;
 constexpr size_t BYTES = COUNT * sizeof(int32_t);
 constexpr int32_t POISON = (int32_t)0xdeadbeef;
 // Alternating ELFs reloads the configuration over live memtile channels on
-// every dispatch, which is the #423 failure until the configuration resets
+// every dispatch, displacing output data unless the configuration resets
 // the array first; keep it short.
 constexpr int MAX_RUNS_ALTERNATE = 8;
 

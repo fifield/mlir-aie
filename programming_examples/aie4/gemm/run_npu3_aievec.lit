@@ -11,7 +11,7 @@
 // RUN: cd test_aievec
 // RUN: make -f %S/Makefile test.exe
 //
-// A: #358's lit size; NG=1 (odd): parity flips per strip; CT=4 lock guards;
+// A: M=512, N=768, K=1024; NG=1 (odd): parity flips per strip; CT=4 lock guards;
 //    dynamic zero_if (KT=16).
 // RUN: make -f %S/Makefile all KERNEL=aievec M=512 N=768 K=1024 OUT=i8 CT=4 ITERS=1
 // RUN: %run_on_npu3% timeout 300 make -f %S/Makefile run KERNEL=aievec M=512 N=768 K=1024 OUT=i8 CT=4 ITERS=1 | FileCheck %s
