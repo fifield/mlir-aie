@@ -7,4 +7,3 @@
 
 add_aie_runtime_libs(AIE4)
 add_subdirectory(mesim)
-add_subdirectory(cassandra)
