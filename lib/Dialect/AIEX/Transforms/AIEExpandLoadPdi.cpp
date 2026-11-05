@@ -298,6 +298,24 @@ verifyExpansion(ModuleOp module, ArrayRef<NpuLoadPdiOp> loadPdiOps,
         return existing->emitOpError()
                << "is named '" << initEntrySequenceName
                << "', which aie-expand-load-pdi reserves under init-entry";
+  // On restore, LOAD_LAST_PDI replays only the last loaded section (an empty
+  // device or the overlay), not the configuration written in line after it.
+  for (NpuLoadPdiOp loadPdiOp : loadPdiOps) {
+    if (expandMode(loadPdiOp) == AIEX::ExpandMode::none)
+      continue;
+    auto device = loadPdiOp->getParentOfType<AIE::DeviceOp>();
+    AIEX::CertPreemptOp preempt;
+    if (device)
+      device.walk([&](AIEX::CertPreemptOp op) {
+        preempt = op;
+        return WalkResult::interrupt();
+      });
+    if (preempt)
+      return preempt.emitError(
+          "cert.preempt cannot be combined with configuration written in "
+          "line (--expand-load-pdis / --load-pdi-to-ctrl-pkt): restore "
+          "replays only the last loaded section");
+  }
   if (!teardown)
     return success();
   for (NpuLoadPdiOp loadPdiOp : loadPdiOps) {

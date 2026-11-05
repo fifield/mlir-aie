@@ -336,6 +336,26 @@ def AIECertVerify : Pass<"aie-cert-verify", "AIE::DeviceOp"> {
     The uC (microcontroller / CERT group) of a cert op is the `group_id` of
     its nearest enclosing `cert.attach_to_group`, or 0 if the op is at device
     level (not inside any `cert.attach_to_group`).
+
+    Preemption rules. Restore brings memtile data back, then `LOAD_LAST_PDI`
+    replays the whole section the uC loaded last:
+    - every `cert.preempt` needs an earlier `cert.load_pdi` on its uC in
+      program order, since without one the replayed page index is unset or
+      stale (rule 3). A configure job is not a load;
+    - in a device with a `cert.preempt`, no section a `cert.load_pdi` names
+      may write memtile data memory, which the replay would write over the
+      restored data (rule 1). A `cert.write32_d` with `address_is_reg` in
+      such a section is an error too: its address is only known at run time.
+    A `cert.preempt` with configuration written in line (rule 5) is
+    rejected by `aie-expand-load-pdi`.
+
+    Not checked: `LOAD_CORES` metadata. The firmware records it even for a
+    skipped load and never clears it on `LOAD_PDI`, so a command that used
+    `LOAD_CORES`/`LOAD_CORES_CP` earlier on the same hardware context can
+    leave a core replay target that is wrong for a later command whose
+    configuration is a LOAD_PDI section. mlir-aie emits no `LOAD_CORES`, so
+    the hazard is across commands and cannot be seen here: preemptible AIE4
+    full ELFs must not share a hardware context with `LOAD_CORES` commands.
   }];
 
   let constructor = "xilinx::AIEX::createAIECertVerifyPass()";

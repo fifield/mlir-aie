@@ -12,7 +12,9 @@
 #include "mlir/Pass/Pass.h"
 
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 
 #include <algorithm>
@@ -336,10 +338,156 @@ static LogicalResult checkUcDmaWaitHandles(AIE::DeviceOp device) {
   return result;
 }
 
+// Preemption rule 3: on restore, LOAD_LAST_PDI replays the page index the
+// last LOAD_PDI on the uC recorded. cert never validates or clears that index,
+// so a cert.preempt with no earlier load on its uC would replay page 0 of the
+// command, or a stale page of another ELF. A configure job is not a load.
+// Program order per uC: device-level control code is uC 0, each
+// cert.attach_to_group(k) is uC k; section bodies run where they are loaded
+// and are not part of it.
+static LogicalResult checkPreemptAfterLoad(AIE::DeviceOp device) {
+  std::set<int> loaded;
+  LogicalResult result = success();
+  device->walk<WalkOrder::PreOrder>([&](Operation *op) -> WalkResult {
+    if (isa<AIEX::CertSectionOp>(op))
+      return WalkResult::skip();
+    if (isa<AIEX::CertLoadPdiOp>(op))
+      loaded.insert(getUcGroupId(op));
+    if (auto preempt = dyn_cast<AIEX::CertPreemptOp>(op)) {
+      int uc = getUcGroupId(op);
+      if (!loaded.count(uc)) {
+        preempt.emitError()
+            << "cert.preempt needs an earlier cert.load_pdi on uC " << uc
+            << ": on restore LOAD_LAST_PDI replays the page index of the last "
+               "load, which is unset or stale without one";
+        result = failure();
+      }
+    }
+    return WalkResult::advance();
+  });
+  return result;
+}
+
+// The tile-relative offset of a memtile's data memory: AIE4 puts it after a
+// 1 MiB register space (aie-rt XAIE4GBL_MEM_TILE_MODULE_DATAMEMORY), AIE2
+// at the start of the tile. On AIE4 a memtile spans five 1 MiB address rows:
+// registers, then the 3 MiB data window (memtile (0, 1): 0x200000 up to the
+// last word at 0x4F_FFFC), then a 1 MiB hole. Writes into the hole are
+// invalid anyway and are not reported here.
+static uint32_t memTileDataOffset(const AIE::AIETargetModel &tm) {
+  return isa<AIE::AIE4TargetModel>(tm) ? 0x00100000 : 0;
+}
+
+// Preemption rule 1: restore brings memtile data back from DDR and then
+// replays the whole last-loaded section. A section that writes memtile data
+// memory (a buffer initializer) would overwrite the restored data. Checks
+// every section a cert.load_pdi names, in a device with a cert.preempt:
+// cert.write32/maskwrite32, cert.write32_d, and the BDs of the uC-DMA chains
+// it writes. A cert.write32_d with address_is_reg takes its address from a
+// register at run time (cert dpu_control.c resolves it), so it cannot be
+// shown to stay out of memtile data memory and is rejected too.
+static LogicalResult checkNoMemtileDataInLoadedSections(AIE::DeviceOp device) {
+  if (!device.walk([](AIEX::CertPreemptOp) { return WalkResult::interrupt(); })
+           .wasInterrupted())
+    return success();
+  const AIE::AIETargetModel &tm = device.getTargetModel();
+  uint32_t dataOffset = memTileDataOffset(tm);
+  uint32_t dataSize = tm.getMemTileSize();
+  // The offset into memtile data memory `[addr, addr + bytes)` writes, if it
+  // overlaps it.
+  auto memtileDataOffset = [&](uint64_t addr,
+                               uint64_t bytes) -> std::optional<uint64_t> {
+    if (addr > UINT32_MAX || dataSize == 0)
+      return std::nullopt;
+    int col = static_cast<int>(addr >> tm.getColumnShift());
+    int row = static_cast<int>(tm.getRowFromAddress(addr));
+    if (col >= tm.columns() || row >= tm.rows() || !tm.isMemTile(col, row))
+      return std::nullopt;
+    uint64_t off = addr - tm.getTileAddress(col, row);
+    if (off + bytes <= dataOffset || off >= uint64_t(dataOffset) + dataSize)
+      return std::nullopt;
+    return off;
+  };
+
+  llvm::SmallPtrSet<Operation *, 4> loadedSections;
+  device.walk([&](AIEX::CertLoadPdiOp load) {
+    if (Operation *section =
+            SymbolTable::lookupSymbolIn(device, load.getSymbolAttr()))
+      loadedSections.insert(section);
+  });
+
+  LogicalResult result = success();
+  auto report = [&](AIEX::CertSectionOp section, Operation *op, uint64_t addr) {
+    op->emitError() << "section @" << section.getSymName()
+                    << " writes memtile data memory at 0x"
+                    << llvm::utohexstr(addr)
+                    << "; a design with cert.preempt restores memtile data "
+                       "before replaying this section, which would overwrite "
+                       "it";
+    result = failure();
+  };
+  auto reportRegisterAddress = [&](AIEX::CertSectionOp section,
+                                   AIEX::CertWrite32DOp writeD) {
+    writeD.emitError() << "section @" << section.getSymName()
+                       << " has a cert.write32_d whose address is in register "
+                          "$r"
+                       << writeD.getAddress()
+                       << ", which may be in memtile data memory; a design "
+                          "with cert.preempt restores memtile data before "
+                          "replaying this section, which would overwrite it";
+    result = failure();
+  };
+  for (Operation *sectionOp : loadedSections) {
+    auto section = cast<AIEX::CertSectionOp>(sectionOp);
+    // A register address is known only at run time, so it may be anywhere.
+    section.walk([&](AIEX::CertWrite32DOp writeD) {
+      if (writeD.getAddressIsReg())
+        reportRegisterAddress(section, writeD);
+    });
+    section.walk([&](Operation *op) {
+      std::optional<uint64_t> addr;
+      if (auto write = dyn_cast<AIEX::CertWrite32Op>(op))
+        addr = write.getAddress();
+      else if (auto mask = dyn_cast<AIEX::CertMaskWrite32Op>(op))
+        addr = mask.getAddress();
+      else if (auto writeD = dyn_cast<AIEX::CertWrite32DOp>(op)) {
+        if (!writeD.getAddressIsReg())
+          addr = writeD.getAddress();
+      }
+      if (addr && memtileDataOffset(*addr, 4)) {
+        report(section, op, *addr);
+        return;
+      }
+      FlatSymbolRefAttr chainRef;
+      if (auto des = dyn_cast<AIEX::CertUcDmaWriteDesOp>(op))
+        chainRef = des.getSymbolAttr();
+      else if (auto sync = dyn_cast<AIEX::CertUcDmaWriteDesSyncOp>(op))
+        chainRef = sync.getSymbolAttr();
+      if (!chainRef)
+        return;
+      auto chain = dyn_cast_or_null<AIEX::CertUcDmaChainOp>(
+          SymbolTable::lookupSymbolIn(device, chainRef));
+      if (!chain)
+        return;
+      chain.walk([&](AIEX::CertUcDmaBdOp bd) {
+        uint64_t local = static_cast<uint32_t>(bd.getLocalAddress());
+        uint64_t bytes = 4 * static_cast<uint64_t>(bd.getLength());
+        if (memtileDataOffset(local, bytes))
+          report(section, op, local);
+      });
+    });
+  }
+  return result;
+}
+
 struct AIECertVerifyPass
     : xilinx::AIEX::impl::AIECertVerifyBase<AIECertVerifyPass> {
   void runOnOperation() override {
     AIE::DeviceOp device = getOperation();
+    if (failed(checkPreemptAfterLoad(device)))
+      signalPassFailure();
+    if (failed(checkNoMemtileDataInLoadedSections(device)))
+      signalPassFailure();
     if (failed(checkJobSlots(device)))
       signalPassFailure();
     if (failed(checkGroupIds(device)))
