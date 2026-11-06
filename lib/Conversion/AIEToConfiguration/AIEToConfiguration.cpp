@@ -116,6 +116,7 @@ std::optional<int> xilinx::AIE::parseTransactionBinary(
     case static_cast<uint8_t>(XAie_TxnOpcode::XAIE_IO_WRITE):
     case static_cast<uint8_t>(XAie_TxnOpcode::XAIE_IO_BLOCKWRITE):
     case static_cast<uint8_t>(XAie_TxnOpcode::XAIE_IO_MASKWRITE):
+    case static_cast<uint8_t>(XAie_TxnOpcode::XAIE_IO_MASKPOLL):
     case 0x6: // XAie_TxnOpcode::XAIE_IO_PREEMPT
     case 0x8: // XAie_TxnOpcode::XAIE_IO_LOAD_PDI
     case static_cast<uint8_t>(XAie_TxnOpcode::XAIE_IO_CUSTOM_OP_TCT):
@@ -184,7 +185,28 @@ std::optional<int> xilinx::AIE::parseTransactionBinary(
         uint32_t value = read32(i + 16);
         uint32_t mask = read32(i + 20);
         uint32_t opSize = read32(i + 24);
-        if (!requireBytes(i, opSize))
+        if (opSize < 28 || !requireBytes(i, opSize))
+          return std::nullopt;
+        uint64_t addr = (static_cast<uint64_t>(addrHi) << 32) | addrLo;
+        op.cmd.RegOff = addr;
+        op.cmd.Value = value;
+        op.cmd.Mask = mask;
+        op.cmd.Size = opSize;
+        i += opSize;
+        break;
+      }
+      case XAie_TxnOpcode::XAIE_IO_MASKPOLL: {
+        // Same word layout as MASKWRITE (aie-rt's XAie_MaskPoll32Hdr matches
+        // XAie_MaskWrite32Hdr); the poll timeout is not serialized.
+        LLVM_DEBUG(llvm::dbgs() << "opcode: MASKPOLL (0x04)\n");
+        if (!requireBytes(i, 28))
+          return std::nullopt;
+        uint32_t addrLo = read32(i + 8);
+        uint32_t addrHi = read32(i + 12);
+        uint32_t value = read32(i + 16);
+        uint32_t mask = read32(i + 20);
+        uint32_t opSize = read32(i + 24);
+        if (opSize < 28 || !requireBytes(i, opSize))
           return std::nullopt;
         uint64_t addr = (static_cast<uint64_t>(addrHi) << 32) | addrLo;
         op.cmd.RegOff = addr;
@@ -319,6 +341,20 @@ std::optional<int> xilinx::AIE::parseTransactionBinary(
         i += 16;
         break;
       }
+      case XAie_TxnOpcode::XAIE_IO_MASKPOLL: {
+        LLVM_DEBUG(llvm::dbgs() << "opcode: MASKPOLL (0x04)\n");
+        if (!requireBytes(i, 16))
+          return std::nullopt;
+        uint32_t addr = read32(i + 4);
+        uint32_t value = read32(i + 8);
+        uint32_t mask = read32(i + 12);
+        op.cmd.RegOff = addr;
+        op.cmd.Value = value;
+        op.cmd.Mask = mask;
+        op.cmd.Size = 0;
+        i += 16;
+        break;
+      }
       case XAie_TxnOpcode::XAIE_IO_CUSTOM_OP_TCT: {
         uint32_t opSize = read32(i + 4);
         if (opSize < 16 || !requireBytes(i, opSize))
@@ -416,9 +452,10 @@ static LogicalResult generateTransactions(AIERTControl &ctl,
 }
 
 // Translate vector of TransactionBinaryOperation to a sequence of transaction
-// ops (npu.write32, npu.maskwrite32, npu.blockwrite). Each emitted op gets the
-// per-op `sourceLoc` from AIERT's instruction-range bracketing if available;
-// otherwise it falls back to `fallbackLoc` (typically the device location).
+// ops (npu.write32, npu.maskwrite32, npu.maskpoll, npu.blockwrite). Each
+// emitted op gets the per-op `sourceLoc` from AIERT's instruction-range
+// bracketing if available; otherwise it falls back to `fallbackLoc` (typically
+// the device location).
 static LogicalResult
 emitTransactionOps(OpBuilder &builder, Location fallbackLoc,
                    std::vector<TransactionBinaryOperation> &operations,
@@ -460,6 +497,13 @@ emitTransactionOps(OpBuilder &builder, Location fallbackLoc,
       Value mask = constant(loc, op.cmd.Mask);
       AIEX::NpuMaskWrite32Op::create(builder, loc, address, value, mask,
                                      nullptr, nullptr, nullptr);
+    } else if (op.cmd.Opcode == XAie_TxnOpcode::XAIE_IO_MASKPOLL) {
+      Value address = constant(loc, op.cmd.RegOff);
+      Value value = constant(loc, op.cmd.Value);
+      Value mask = constant(loc, op.cmd.Mask);
+      AIEX::NpuMaskPollOp::create(builder, loc, address, value, mask,
+                                  /*buffer=*/nullptr, /*column=*/nullptr,
+                                  /*row=*/nullptr);
     } else if (op.cmd.Opcode == XAie_TxnOpcode::XAIE_IO_CUSTOM_OP_TCT) {
       if (!op.sync) {
         llvm::errs() << "Missing sync payload while emitting transaction\n";
@@ -610,6 +654,10 @@ static LogicalResult emitControlPacketOps(
           /*opcode*/ builder.getI32IntegerAttr(0),
           /*stream_id*/ builder.getI32IntegerAttr(0),
           DenseI32ArrayAttr::get(ctx, ArrayRef<int32_t>(value)));
+    } else if (op.cmd.Opcode == XAie_TxnOpcode::XAIE_IO_MASKPOLL) {
+      llvm::errs()
+          << "control-packet configuration cannot express a mask poll\n";
+      return failure();
     } else {
       llvm::errs() << "Unhandled txn opcode: " << op.cmd.Opcode << "\n";
       return failure();
@@ -792,6 +840,11 @@ LogicalResult xilinx::AIE::generateAndInsertConfigOps(
   if (failed(ctl.setIOBackend(aieSim, xaieDebug)))
     return failure();
 
+  // A declared lock without an initializer starts at zero on AIE4, as after
+  // the reset its configuration sections start with, rather than at the count
+  // an earlier configuration or dispatch left.
+  ctl.zeroUninitializedLocks = isa<AIE4TargetModel>(targetModel);
+
   // start collecting transations
   ctl.startTransaction();
 
@@ -824,15 +877,34 @@ LogicalResult xilinx::AIE::generateAndInsertTeardownOps(
                                    skipCtrlPktOverlay ? device : DeviceOp{});
 }
 
+LogicalResult xilinx::AIE::generateAndInsertPartitionResetOps(
+    OpBuilder &builder, xilinx::AIE::DeviceOp device,
+    AIEX::BlockwriteData &blockwriteData,
+    AIE::AIEToConfigurationOutputType outputType) {
+  const AIETargetModel &targetModel =
+      (const AIETargetModel &)device.getTargetModel();
+  if (!targetModel.hasProperty(AIETargetModel::IsNPU))
+    return failure();
+
+  AIERTControl ctl(targetModel);
+  if (failed(ctl.setIOBackend(/*aieSim=*/false, /*xaieDebug=*/false)))
+    return failure();
+  ctl.startTransaction();
+  if (failed(ctl.addColumnQuiesce(device)))
+    return failure();
+  return insertRecordedTransaction(ctl, builder, outputType, blockwriteData);
+}
+
 LogicalResult
 xilinx::AIE::insertConfigOps(ArrayRef<std::pair<Operation *, DeviceOp>> sites,
                              AIE::AIEToConfigurationOutputType outputType) {
   bool ctrlPkt = outputType == AIE::AIEToConfigurationOutputType::ControlPacket;
-  // Indexed by whether the site is a teardown.
-  std::array<llvm::DenseMap<DeviceOp, AIEX::BlockwriteData>, 2> blockwriteData;
+  // Indexed by what the site writes: a configuration, a teardown or a reset.
+  enum Kind { Config, Teardown, Reset };
+  std::array<llvm::DenseMap<DeviceOp, AIEX::BlockwriteData>, 3> blockwriteData;
   std::array<llvm::DenseMap<std::pair<Operation *, Operation *>,
                             std::unique_ptr<Block>>,
-             2>
+             3>
       configs;
   struct ConstantPool {
     Operation *last = nullptr;
@@ -843,25 +915,37 @@ xilinx::AIE::insertConfigOps(ArrayRef<std::pair<Operation *, DeviceOp>> sites,
     auto device = at->getParentOfType<DeviceOp>();
     if (!device)
       return at->emitError("expected to be nested under an aie.device op");
-    bool teardown = isa<AIEX::NpuWriteTeardownOp>(at);
-    std::unique_ptr<Block> &config = configs[teardown][{configured, device}];
+    Kind kind = isa<AIEX::NpuWriteTeardownOp>(at) ? Teardown
+                : isa<AIEX::NpuWriteResetOp>(at)  ? Reset
+                                                  : Config;
+    std::unique_ptr<Block> &config = configs[kind][{configured, device}];
     if (!config) {
+      static constexpr const char *prefixes[] = {"loadpdi_", "teardown_",
+                                                 "reset_"};
       AIEX::BlockwriteData &payloads =
-          blockwriteData[teardown]
-              .try_emplace(device, device, teardown ? "teardown_" : "loadpdi_")
+          blockwriteData[kind]
+              .try_emplace(device, device, prefixes[kind])
               .first->second;
       auto generated = std::make_unique<Block>();
       OpBuilder configBuilder(at->getContext());
       configBuilder.setInsertionPointToEnd(generated.get());
-      if (teardown ? failed(generateAndInsertTeardownOps(
-                         configBuilder, configured, payloads, outputType))
-                   : failed(generateAndInsertConfigOps(
-                         configBuilder, configured, payloads,
-                         /*clElfDir=*/"", outputType,
-                         /*skipCtrlPktOverlay=*/ctrlPkt)))
-        return at->emitError(teardown ? "Failed to generate teardown operations"
-                                      : "Failed to generate configuration "
-                                        "operations");
+      LogicalResult result =
+          kind == Teardown
+              ? generateAndInsertTeardownOps(configBuilder, configured,
+                                             payloads, outputType)
+          : kind == Reset
+              ? generateAndInsertPartitionResetOps(configBuilder, configured,
+                                                   payloads, outputType)
+              : generateAndInsertConfigOps(configBuilder, configured, payloads,
+                                           /*clElfDir=*/"", outputType,
+                                           /*skipCtrlPktOverlay=*/ctrlPkt);
+      if (failed(result))
+        return at->emitError(kind == Teardown ? "Failed to generate teardown "
+                                                "operations"
+                             : kind == Reset  ? "Failed to generate reset "
+                                                "operations"
+                                              : "Failed to generate "
+                                                "configuration operations");
       config = std::move(generated);
     }
     auto seq = at->getParentOfType<RuntimeSequenceOp>();
@@ -897,6 +981,11 @@ xilinx::AIE::insertConfigOps(ArrayRef<std::pair<Operation *, DeviceOp>> sites,
 LogicalResult xilinx::AIE::inlineWriteConfigs(ModuleOp module) {
   SmallVector<std::pair<Operation *, DeviceOp>> sites;
   WalkResult walk = module.walk([&](Operation *write) {
+    // A reset writes the partition of the device that holds the sequence.
+    if (isa<AIEX::NpuWriteResetOp>(write)) {
+      sites.emplace_back(write, write->getParentOfType<DeviceOp>());
+      return WalkResult::advance();
+    }
     FlatSymbolRefAttr ref;
     if (auto config = dyn_cast<AIEX::NpuWriteConfigOp>(write))
       ref = config.getDeviceRefAttr();
@@ -957,6 +1046,11 @@ static bool configuresOnlyRouting(AIE::DeviceOp device) {
       });
 }
 
+bool xilinx::AIE::isPureDispatcher(DeviceOp device) {
+  return isa<AIE4TargetModel>(device.getTargetModel()) &&
+         configuresOtherDevices(device) && configuresOnlyRouting(device);
+}
+
 static LogicalResult
 convertAIEToConfiguration(AIE::DeviceOp device, StringRef clElfDir,
                           AIE::AIEToConfigurationOutputType outputType) {
@@ -996,8 +1090,7 @@ convertAIEToConfiguration(AIE::DeviceOp device, StringRef clElfDir,
   // partition that clears any other. Its configuration would otherwise be a
   // section of its own, whose load alternates with theirs so that none of
   // them is ever skipped.
-  if (isa<AIE4TargetModel>(device.getTargetModel()) &&
-      configuresOtherDevices(device) && configuresOnlyRouting(device))
+  if (isPureDispatcher(device))
     return success();
 
   // convert the parsed ops to MLIR

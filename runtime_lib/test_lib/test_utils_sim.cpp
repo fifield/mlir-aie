@@ -242,6 +242,17 @@ void test_utils::wait_for_cycles(uint64_t col, uint64_t row, uint32_t cycles) {
   }
 }
 
+// Poll an array register until (value & mask) matches, as XAIE_IO_MASKPOLL
+// does on hardware. Bounded so a value that never arrives fails loudly.
+static void maskPoll(uint64_t addr, uint32_t value, uint32_t mask) {
+  for (int attempt = 0; attempt < 1000000; attempt++)
+    if ((mlir_aie_sim_read32(addr) & mask) == value)
+      return;
+  printf("transaction mask poll timed out at 0x%llx\n",
+         static_cast<unsigned long long>(addr));
+  assert(0 && "transaction mask poll timed out");
+}
+
 // Unpack transaction binary and write it to the aie array simulation
 void test_utils::write_transaction_binary(unsigned char *data,
                                           uint64_t nbytes) {
@@ -294,6 +305,16 @@ void test_utils::write_transaction_binary(unsigned char *data,
         uint32_t w = (r & ~mask) | (value & mask);
         mlir_aie_sim_write32(addr, w);
         i += size;
+      } else if (opc == 0x04) {
+        uint32_t addr0, addr1;
+        std::memcpy(&addr0, &data[i + 8], 4);
+        std::memcpy(&addr1, &data[i + 12], 4);
+        std::memcpy(&value, &data[i + 16], 4);
+        std::memcpy(&mask, &data[i + 20], 4);
+        std::memcpy(&size, &data[i + 24], 4);
+        addr = static_cast<uint64_t>(addr1) << 32 | addr0;
+        maskPoll(addr, value, mask);
+        i += size;
       } else {
         assert(0 && "unhandled transaction binary opcode");
       }
@@ -321,6 +342,12 @@ void test_utils::write_transaction_binary(unsigned char *data,
         uint32_t r = mlir_aie_sim_read32(addr);
         uint32_t w = (r & ~mask) | (value & mask);
         mlir_aie_sim_write32(addr, w);
+        i += 16;
+      } else if (opc == 0x04) {
+        std::memcpy(&addr, &data[i + 4], 4);
+        std::memcpy(&value, &data[i + 8], 4);
+        std::memcpy(&mask, &data[i + 12], 4);
+        maskPoll(addr, value, mask);
         i += 16;
       } else {
         assert(0 && "unhandled transaction binary opcode");

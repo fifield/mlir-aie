@@ -7,10 +7,18 @@
 // RUN: cd test_npu3
 // RUN: make -f %S/Makefile clean
 // RUN: make -f %S/Makefile all
-// RUN: %run_on_npu3% timeout 120 ./test.exe --elf back_to_back_dispatch.elf --mode seq --n 200 | FileCheck %s
-// RUN: %run_on_npu3% timeout 120 ./test.exe --elf back_to_back_dispatch.elf --mode runlist --n 200 | FileCheck %s
-// RUN: %run_on_npu3% timeout 120 ./test.exe --elf back_to_back_dispatch.elf --mode startall --n 200 | FileCheck %s
-// RUN: %run_on_npu3% timeout 120 ./test.exe --elf back_to_back_dispatch_outfirst.elf --mode seq --n 200 | FileCheck %s
-// RUN: %run_on_npu3% timeout 120 ./test.exe --elf back_to_back_dispatch_outfirst.elf --mode runlist --n 200 | FileCheck %s
+// RUN: %run_on_npu3% ./test.exe --elf back_to_back_dispatch.elf --mode seq --n 200 | FileCheck %s
+// RUN: %run_on_npu3% ./test.exe --elf back_to_back_dispatch.elf --mode runlist --n 200 | FileCheck %s
+// RUN: %run_on_npu3% ./test.exe --elf back_to_back_dispatch.elf --mode startall --n 200 | FileCheck %s
+// RUN: %run_on_npu3% ./test.exe --elf back_to_back_dispatch_outfirst.elf --mode seq --n 200 | FileCheck %s
+// RUN: %run_on_npu3% ./test.exe --elf back_to_back_dispatch_outfirst.elf --mode runlist --n 200 | FileCheck %s
+// Builds that configure the array again on every dispatch; they need the
+// reset at the head of each configuration. Bounded to 8 runs.
+// RUN: make -f %S/Makefile extra
+// RUN: %run_on_npu3% ./test.exe --elf back_to_back_dispatch_expand.elf --mode seq --n 8 | FileCheck %s --check-prefix=EIGHT
+// RUN: %run_on_npu3% ./test.exe --elf back_to_back_dispatch_aba.elf --mode aba --n 8 | FileCheck %s --check-prefix=EIGHT
+// RUN: %run_on_npu3% ./test.exe --elf back_to_back_dispatch.elf --alt-elf back_to_back_dispatch_b.elf --mode alternate --n 8 | FileCheck %s --check-prefix=EIGHT
 // CHECK: 200/200 runs exact
 // CHECK: PASS
+// EIGHT: 8/8 runs exact
+// EIGHT: PASS

@@ -107,6 +107,17 @@ struct AIERTControl {
                                             int destChannel);
   mlir::LogicalResult resetPerfCounters(int col, int row);
 
+  // Zero declared non-shim locks without an initializer on tiles without a
+  // core, instead of leaving the count an earlier configuration or dispatch
+  // left. Set by generateAndInsertConfigOps for AIE4.
+  bool zeroUninitializedLocks = false;
+  // Emit the partition-wide reset (AIE4 only) that every AIE4 configuration
+  // section starts with: hold every core in reset, pulse every core-tile and
+  // memtile DMA channel reset, clear the memtile MM2S constant pad values,
+  // return the shim data channels to their default modes, and leave every
+  // core disabled.
+  mlir::LogicalResult addColumnQuiesce(DeviceOp &targetOp);
+
 private:
   const AIETargetModel &targetModel;
   struct AIERtImpl;

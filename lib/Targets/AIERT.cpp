@@ -759,11 +759,21 @@ LogicalResult xilinx::AIE::AIERTControl::initLocks(DeviceOp &targetOp) {
 
   // Set locks with explicit initializers
   targetOp.walkOutsideRuntimeSequences<LockOp>([&](LockOp lockOp) {
+    TileOp tileOp = lockOp.getTileOp();
     if (lockOp.getLockID() && lockOp.getInit()) {
       TxnLocBracket bracket(*this, lockOp.getLoc());
-      auto tileLoc = XAie_TileLoc(lockOp.getTileOp().colIndex(),
-                                  lockOp.getTileOp().rowIndex());
+      auto tileLoc = XAie_TileLoc(tileOp.colIndex(), tileOp.rowIndex());
       auto locInit = XAie_LockInit(*lockOp.getLockID(), *lockOp.getInit());
+      TRY_XAIE_API_FATAL_ERROR(XAie_LockSetValue, &aiert->devInst, tileLoc,
+                               locInit);
+    } else if (zeroUninitializedLocks && lockOp.getLockID() &&
+               !tileOp.isShimTile() && !tileOp.getCoreOp()) {
+      // A declared lock without an initializer starts at zero rather than at
+      // the count the previous dispatch left. Tiles with a core already zeroed
+      // all their locks above.
+      TxnLocBracket bracket(*this, lockOp.getLoc());
+      auto tileLoc = XAie_TileLoc(tileOp.colIndex(), tileOp.rowIndex());
+      auto locInit = XAie_LockInit(*lockOp.getLockID(), 0);
       TRY_XAIE_API_FATAL_ERROR(XAie_LockSetValue, &aiert->devInst, tileLoc,
                                locInit);
     } else
@@ -1308,6 +1318,212 @@ LogicalResult xilinx::AIE::AIERTControl::addCoreElf(uint32_t col, uint32_t row,
                               XAie_TileLoc(col, row),
                               XAie_DmaChReset::DMA_CHANNEL_UNRESET);
 
+  return success();
+}
+
+// Upper bound for each core reset readback. aie-rt does not serialize it:
+// aiex.npu.maskpoll and cert MASK_POLL_32 carry no timeout.
+static constexpr uint32_t kQuiescePollTimeoutUs = 1000;
+
+// Partition-wide quiesce at the head of an AIE4 configuration. Every tile in
+// the partition is visited, not only those the device declares: a previous
+// design may have left cores running or DMA channels armed on tiles this one
+// does not use. Each phase completes over all tiles before the next starts.
+LogicalResult xilinx::AIE::AIERTControl::addColumnQuiesce(DeviceOp &targetOp) {
+  if (!isa<AIE4TargetModel>(targetModel))
+    return targetOp.emitOpError(
+        "the partition reset is only written as registers on AIE4; elsewhere "
+        "aie-expand-load-pdi lowers aiex.npu.write_reset to the load of an "
+        "empty device");
+  TxnLocBracket bracket(*this, targetOp.getLoc());
+
+  int numCols = targetModel.columns();
+  int numRows = targetModel.rows();
+  // Register offsets are tile-relative and identical in every column, so
+  // resolve them once on column 0's first tile of each kind.
+  auto firstRow = [&](auto isKind) -> std::optional<TileID> {
+    for (int row = 0; row < numRows; row++)
+      if (isKind(0, row))
+        return TileID{0, row};
+    return std::nullopt;
+  };
+  std::optional<TileID> coreTile = firstRow(
+      [&](int col, int row) { return targetModel.isCoreTile(col, row); });
+  std::optional<TileID> memTile = firstRow(
+      [&](int col, int row) { return targetModel.isMemTile(col, row); });
+  // Only NOC shims have DMA channels; PL shims have none to quiesce.
+  std::optional<TileID> shimTile = firstRow(
+      [&](int col, int row) { return targetModel.isShimNOCTile(col, row); });
+  if (!coreTile || !memTile || !shimTile)
+    return targetOp.emitOpError(
+        "configure-time DMA reset needs core, memory and shim tiles");
+
+  const RegisterInfo *coreCtl =
+      targetModel.lookupRegister("Core_Control", *coreTile, /*isMem=*/false);
+  if (!coreCtl)
+    return targetOp.emitOpError(
+        "register database has no Core_Control for core tiles");
+  const BitFieldInfo *coreReset = coreCtl->getField("Reset");
+  const BitFieldInfo *coreEnable = coreCtl->getField("Enable");
+  if (!coreReset || !coreEnable)
+    return targetOp.emitOpError(
+        "Core_Control has no Reset or Enable field in the register database");
+  std::optional<uint32_t> coreResetMask = targetModel.getFieldMask(*coreReset);
+  std::optional<uint32_t> coreEnableMask =
+      targetModel.getFieldMask(*coreEnable);
+  if (!coreResetMask || !coreEnableMask)
+    return targetOp.emitOpError(
+        "Core_Control Reset or Enable field does not fit in 32 bits");
+  // Reset asserted, enable clear; the readback checks both.
+  auto coreAssert = targetModel.encodeFieldValue(*coreReset, 1);
+  if (!coreAssert)
+    return targetOp.emitOpError(
+        "Core_Control Reset value does not fit in the register field");
+  uint32_t corePollMask = *coreResetMask | *coreEnableMask;
+
+  // The number of data channels in each direction of `tile`'s kind, counted
+  // from the register database's DMA_{S2MM,MM2S}_<n>_Ctrl registers. aie-rt
+  // numbers the shim's control-packet and trace channels after the data
+  // channels, so only these may be reset.
+  struct DmaChannels {
+    int s2mm = 0, mm2s = 0;
+  };
+  auto countDmaChannels = [&](TileID tile, StringRef kind,
+                              DmaChannels &channels) -> LogicalResult {
+    for (auto [prefix, count] :
+         {std::pair<StringRef, int *>{"DMA_S2MM_", &channels.s2mm},
+          std::pair<StringRef, int *>{"DMA_MM2S_", &channels.mm2s}}) {
+      while (targetModel.lookupRegister(
+          (Twine(prefix) + Twine(*count) + "_Ctrl").str(), tile,
+          /*isMem=*/true))
+        ++*count;
+      if (*count == 0)
+        return targetOp.emitOpError() << "register database has no " << prefix
+                                      << "0_Ctrl for " << kind << " tiles";
+    }
+    return success();
+  };
+  // The memtile MM2S channels' DMA_MM2S_<n>_Constant_Pad_Value registers.
+  // Starting a BD queue entry only writes the pad value when it is non-zero,
+  // so a previous design's pad would otherwise leak into this one. Probed by
+  // name like the Ctrl registers and checked against the MM2S Ctrl count.
+  SmallVector<uint32_t> memPadValue;
+  for (int n = 0;; n++) {
+    std::string name =
+        (Twine("DMA_MM2S_") + Twine(n) + "_Constant_Pad_Value").str();
+    const RegisterInfo *reg =
+        targetModel.lookupRegister(name, *memTile, /*isMem=*/true);
+    if (!reg)
+      break;
+    memPadValue.push_back(reg->offset);
+  }
+  if (memPadValue.empty())
+    return targetOp.emitOpError(
+        "register database has no DMA_MM2S_0_Constant_Pad_Value for memory "
+        "tiles");
+  auto memMm2sCtrl = [&](size_t n) {
+    return targetModel.lookupRegister(
+        (Twine("DMA_MM2S_") + Twine(n) + "_Ctrl").str(), *memTile,
+        /*isMem=*/true);
+  };
+  if (!memMm2sCtrl(memPadValue.size() - 1) || memMm2sCtrl(memPadValue.size()))
+    return targetOp.emitOpError(
+        "register database has a different number of memory tile MM2S "
+        "channels and constant pad value registers");
+  DmaChannels coreChannels, memChannels, shimChannels;
+  if (failed(countDmaChannels(*coreTile, "core", coreChannels)) ||
+      failed(countDmaChannels(*memTile, "memory", memChannels)) ||
+      failed(countDmaChannels(*shimTile, "shim", shimChannels)))
+    return failure();
+
+  // Tiles, column-major with rows ascending.
+  SmallVector<XAie_LocType> coreTiles, memTiles, shimTiles;
+  // The core and memory tiles, with their data channel counts.
+  SmallVector<std::pair<XAie_LocType, DmaChannels>> dmaTiles;
+  for (int col = 0; col < numCols; col++) {
+    for (int row = 0; row < numRows; row++) {
+      XAie_LocType tile = XAie_TileLoc(col, row);
+      if (targetModel.isCoreTile(col, row)) {
+        coreTiles.push_back(tile);
+        dmaTiles.push_back({tile, coreChannels});
+      } else if (targetModel.isMemTile(col, row)) {
+        memTiles.push_back(tile);
+        dmaTiles.push_back({tile, memChannels});
+      } else if (targetModel.isShimNOCTile(col, row)) {
+        // Only NoC shim tiles: the register layout of a PL shim tile may
+        // differ, and a write to an undefined offset is a slave error.
+        shimTiles.push_back(tile);
+      }
+    }
+  }
+  auto forEachChannel = [&](DmaChannels channels, auto fn) -> LogicalResult {
+    for (auto [dir, count] : {std::pair{DMA_S2MM, channels.s2mm},
+                              std::pair{DMA_MM2S, channels.mm2s}})
+      for (int ch = 0; ch < count; ch++)
+        if (failed(fn(static_cast<u8>(ch), dir)))
+          return failure();
+    return success();
+  };
+  // Writing a channel's default descriptor clears its Reset field and returns
+  // every other field of its control register, such as out-of-order mode, to
+  // its reset value (as AIERTControl::resetDmaChannels does for a teardown).
+  auto writeDefaultChannel = [&](XAie_LocType tile, u8 ch,
+                                 XAie_DmaDirection dir) -> LogicalResult {
+    XAie_DmaChannelDesc defaults;
+    TRY_XAIE_API_EMIT_ERROR(targetOp, XAie_DmaChannelDescInit, &aiert->devInst,
+                            &defaults, tile);
+    TRY_XAIE_API_EMIT_ERROR(targetOp, XAie_DmaWriteChannel, &aiert->devInst,
+                            &defaults, tile, ch, dir);
+    return success();
+  };
+
+  // Q0: hold every core in reset with its enable clear.
+  for (XAie_LocType tile : coreTiles) {
+    TRY_XAIE_API_EMIT_ERROR(targetOp, XAie_CoreReset, &aiert->devInst, tile);
+    TRY_XAIE_API_EMIT_ERROR(targetOp, XAie_CoreDisable, &aiert->devInst, tile);
+  }
+  // QB: read each Core_Control back, so the core resets have reached the
+  // array before any channel is reset.
+  for (XAie_LocType tile : coreTiles)
+    TRY_XAIE_API_EMIT_ERROR(targetOp, XAie_MaskPoll, &aiert->devInst,
+                            targetModel.getTileAddress(tile.Col, tile.Row) +
+                                coreCtl->offset,
+                            corePollMask, *coreAssert, kQuiescePollTimeoutUs);
+  // Q1: assert the reset of every core-tile and memtile data channel, and
+  // only then (Q2) release them, writing each channel's default mode.
+  for (auto [tile, channels] : dmaTiles)
+    if (failed(forEachChannel(
+            channels, [&](u8 ch, XAie_DmaDirection dir) -> LogicalResult {
+              TRY_XAIE_API_EMIT_ERROR(targetOp, XAie_DmaChannelReset,
+                                      &aiert->devInst, tile, ch, dir,
+                                      DMA_CHANNEL_RESET);
+              return success();
+            })))
+      return failure();
+  for (auto [tile, channels] : dmaTiles)
+    if (failed(forEachChannel(
+            channels, [&](u8 ch, XAie_DmaDirection dir) -> LogicalResult {
+              return writeDefaultChannel(tile, ch, dir);
+            })))
+      return failure();
+  // Q2p: clear every memtile MM2S channel's constant pad value, which the
+  // channel descriptor does not cover.
+  for (XAie_LocType tile : memTiles)
+    for (uint32_t offset : memPadValue)
+      TRY_XAIE_API_EMIT_ERROR(
+          targetOp, XAie_Write32, &aiert->devInst,
+          targetModel.getTileAddress(tile.Col, tile.Row) + offset, 0);
+  // Q2s: shim channels have no Reset field; return their modes to default.
+  for (XAie_LocType tile : shimTiles)
+    if (failed(forEachChannel(
+            shimChannels, [&](u8 ch, XAie_DmaDirection dir) -> LogicalResult {
+              return writeDefaultChannel(tile, ch, dir);
+            })))
+      return failure();
+  // Q3: release the cores' reset and leave them disabled; the configuration
+  // that follows enables the cores it loads.
+  for (XAie_LocType tile : coreTiles)
+    TRY_XAIE_API_EMIT_ERROR(targetOp, XAie_CoreUnreset, &aiert->devInst, tile);
   return success();
 }
 

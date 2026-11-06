@@ -71,9 +71,10 @@ mlir::LogicalResult AIETranslateShimSolution(mlir::ModuleOp module,
 mlir::LogicalResult AIETranslateGraphXPE(mlir::ModuleOp module,
                                          llvm::raw_ostream &, llvm::StringRef);
 // The TXN encoding of each device an aiex.npu.write_config or write_teardown
-// names. Shared by the translations of one module's sequences, folded or not,
-// it encodes each written device once: a configuration's writes patch no DDR
-// address. Safe to share across threads.
+// names, and of each partition an aiex.npu.write_reset resets. Shared by the
+// translations of one module's sequences, folded or not, it encodes each
+// written device once: a configuration's writes patch no DDR address. Safe to
+// share across threads.
 class NpuConfigCache {
 public:
   struct Config {
@@ -83,16 +84,19 @@ public:
     std::vector<TxnLocEntry> locmap;
   };
 
-  // `device`'s configuration, or with `teardown` its teardown, encoded by
-  // `encode` the first time it is asked for; nullptr if that failed.
+  // What an encoding writes for its device.
+  enum Kind { Configuration, Teardown, Reset };
+
+  // `device`'s configuration, teardown or partition reset (`kind`), encoded
+  // by `encode` the first time it is asked for; nullptr if that failed.
   const Config *
-  getOrEncode(mlir::Operation *device, bool teardown,
+  getOrEncode(mlir::Operation *device, Kind kind,
               llvm::function_ref<mlir::LogicalResult(Config &)> encode);
 
 private:
   std::mutex mutex;
-  // Indexed by whether the encoding is a teardown.
-  std::array<llvm::DenseMap<mlir::Operation *, std::unique_ptr<Config>>, 2>
+  // Indexed by Kind.
+  std::array<llvm::DenseMap<mlir::Operation *, std::unique_ptr<Config>>, 3>
       configs;
 };
 

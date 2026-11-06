@@ -9,14 +9,17 @@
 
 // The AIE4 firmware does not reset the array on a load, so an empty
 // device load ahead of the configuration would reset nothing. Each AIE4 load
-// becomes its write_config alone: no @empty_N device, no alternation, and no
-// trailing load at the end of the sequence.
+// becomes an aiex.npu.write_reset and its write_config: no @empty_N device,
+// no alternation, and no trailing load at the end of the sequence.
 
 // CHECK-NOT: @empty_
 // CHECK-LABEL: aie.device(npu3_1col) {
 // CHECK: aie.runtime_sequence @seq
+// CHECK-NEXT: aiex.npu.write_reset
 // CHECK-NEXT: aiex.npu.write_config @a
+// CHECK-NEXT: aiex.npu.write_reset
 // CHECK-NEXT: aiex.npu.write_config @b
+// CHECK-NEXT: aiex.npu.write_reset
 // CHECK-NEXT: aiex.npu.write_config @a
 // CHECK-NOT: load_pdi
 // CHECK-NOT: @empty_

@@ -11,6 +11,9 @@
 //   --mode alternate seq, alternating between --elf and --alt-elf on one
 //                    hw_context (every dispatch loads the other ELF's
 //                    configuration); at most 8 runs
+//   --mode aba       seq over the --aba build (kernel main:seq): each run
+//                    configures A, B, then A again, and writes in + 1,
+//                    in + 2 and in + 1 to three outputs; at most 8 runs
 //
 // It also reports the time per dispatch: in seq mode the median of runs
 // 1..N-1 (run 0 loads the configuration), otherwise the total over N.
@@ -37,10 +40,10 @@
 constexpr int COUNT = 1024;
 constexpr size_t BYTES = COUNT * sizeof(int32_t);
 constexpr int32_t POISON = (int32_t)0xdeadbeef;
-// Alternating ELFs reloads the configuration over live memtile channels on
-// every dispatch, displacing output data unless the configuration resets
-// the array first; keep it short.
-constexpr int MAX_RUNS_ALTERNATE = 8;
+// Alternating ELFs, and A -> B -> A in one ELF, reload a configuration on
+// every dispatch; without the reset at the head of the configuration that
+// fails (data displaced, then a hang), so keep them short.
+constexpr int MAX_RUNS_RELOADING = 8;
 
 using Clock = std::chrono::steady_clock;
 
@@ -48,7 +51,8 @@ static int32_t input_value(int run, int i) { return ((run + 1) << 16) | i; }
 
 // Returns true if the run's output is exact; otherwise prints the first
 // mismatch and what the output looks like.
-static bool check_run(int run, int k, const int32_t *out) {
+static bool check_run(int run, int k, const int32_t *out,
+                      const std::string &label = "") {
   int first = -1, bad = 0;
   for (int i = 0; i < COUNT; i++)
     if (out[i] != input_value(run, i) + k) {
@@ -58,7 +62,7 @@ static bool check_run(int run, int k, const int32_t *out) {
     }
   if (!bad)
     return true;
-  std::cout << "run " << run << ": FAIL " << bad << "/" << COUNT
+  std::cout << "run " << run << label << ": FAIL " << bad << "/" << COUNT
             << " elements wrong, first at index " << first << " (got 0x"
             << std::hex << out[first] << ", expected 0x"
             << input_value(run, first) + k << std::dec << ")";
@@ -130,25 +134,28 @@ int main(int argc, char **argv) {
     else {
       std::cerr << "usage: " << argv[0]
                 << " [--elf f] [--kernel name] [--k K]"
-                   " [--mode seq|runlist|startall|alternate] [--n N]"
+                   " [--mode seq|runlist|startall|alternate|aba] [--n N]"
                    " [--timeout-ms T] [--alt-elf f] [--alt-kernel name]"
                    " [--alt-k K]\n";
       return 2;
     }
   }
   if (mode != "seq" && mode != "runlist" && mode != "startall" &&
-      mode != "alternate") {
+      mode != "alternate" && mode != "aba") {
     std::cerr << "unknown mode " << mode << "\n";
     return 2;
   }
   bool alternate = mode == "alternate";
+  bool aba = mode == "aba";
+  if (aba && kernel_name == "main:sequence")
+    kernel_name = "main:seq";
   if (alternate && alt_elf.empty()) {
     std::cerr << "--mode alternate needs --alt-elf\n";
     return 2;
   }
-  if (alternate && n > MAX_RUNS_ALTERNATE) {
-    std::cerr << "refusing --n " << n << " in alternate mode (at most "
-              << MAX_RUNS_ALTERNATE << ")\n";
+  if ((alternate || aba) && n > MAX_RUNS_RELOADING) {
+    std::cerr << "refusing --n " << n << " in " << mode << " mode (at most "
+              << MAX_RUNS_RELOADING << ")\n";
     return 2;
   }
   std::chrono::milliseconds timeout(timeout_ms);
@@ -167,32 +174,39 @@ int main(int argc, char **argv) {
   }
   auto design_of = [&](int r) { return alternate ? r % 2 : 0; };
 
-  // Distinct input per run; output prefilled with a poison value.
-  std::vector<xrt::bo> bo_in, bo_out;
+  // Distinct input per run; outputs prefilled with a poison value. In aba
+  // mode each run has three outputs (A, B, A again) with these K.
+  const std::vector<int> aba_ks{1, 2, 1};
+  int num_out = aba ? (int)aba_ks.size() : 1;
+  std::vector<xrt::bo> bo_in;
+  std::vector<std::vector<xrt::bo>> bo_out(num_out);
   for (int r = 0; r < n; r++) {
     bo_in.emplace_back(xrt::ext::bo{device, BYTES});
-    bo_out.emplace_back(xrt::ext::bo{device, BYTES});
     auto *in = bo_in[r].map<int32_t *>();
-    auto *out = bo_out[r].map<int32_t *>();
-    for (int i = 0; i < COUNT; i++) {
+    for (int i = 0; i < COUNT; i++)
       in[i] = input_value(r, i);
-      out[i] = POISON;
-    }
     bo_in[r].sync(XCL_BO_SYNC_BO_TO_DEVICE);
-    bo_out[r].sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    for (auto &outs : bo_out) {
+      outs.emplace_back(xrt::ext::bo{device, BYTES});
+      auto *out = outs[r].map<int32_t *>();
+      for (int i = 0; i < COUNT; i++)
+        out[i] = POISON;
+      outs[r].sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    }
   }
 
   auto make_run = [&](int r) {
     xrt::run run(kernels[design_of(r)]);
     run.set_arg(0, bo_in[r]);
-    run.set_arg(1, bo_out[r]);
+    for (int o = 0; o < num_out; o++)
+      run.set_arg(1 + o, bo_out[o][r]);
     return run;
   };
 
   std::vector<double> run_us;
   double total_us = 0;
   try {
-    if (mode == "seq" || alternate) {
+    if (mode == "seq" || alternate || aba) {
       for (int r = 0; r < n; r++) {
         auto run = make_run(r);
         auto t0 = Clock::now();
@@ -242,8 +256,16 @@ int main(int argc, char **argv) {
 
   int bad_runs = 0;
   for (int r = 0; r < n; r++) {
-    bo_out[r].sync(XCL_BO_SYNC_BO_FROM_DEVICE);
-    if (!check_run(r, ks[design_of(r)], bo_out[r].map<int32_t *>()))
+    bool ok = true;
+    for (int o = 0; o < num_out; o++) {
+      bo_out[o][r].sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+      int kk = aba ? aba_ks[o] : ks[design_of(r)];
+      static const char *aba_labels[] = {" (A)", " (B)", " (A again)"};
+      std::string label = aba ? aba_labels[o] : "";
+      if (!check_run(r, kk, bo_out[o][r].map<int32_t *>(), label))
+        ok = false;
+    }
+    if (!ok)
       bad_runs++;
   }
   if (!run_us.empty()) {

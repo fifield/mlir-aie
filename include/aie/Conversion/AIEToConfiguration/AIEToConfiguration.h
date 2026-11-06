@@ -55,13 +55,14 @@ mlir::LogicalResult generateAndInsertConfigOps(
 // and a sequence's constants and payload globals are made once, at its head:
 // a device reloaded hundreds of times would otherwise repeat each per reload.
 // Control-packet output skips what is marked is_ctrl_pkt_overlay. A site that
-// is an aiex.npu.write_teardown gets the device's teardown ops instead.
+// is an aiex.npu.write_teardown gets the device's teardown ops instead, and an
+// aiex.npu.write_reset the reset of the device's partition.
 mlir::LogicalResult insertConfigOps(
     llvm::ArrayRef<std::pair<mlir::Operation *, xilinx::AIE::DeviceOp>> sites,
     AIEToConfigurationOutputType outputType);
 
-// Inlines each aiex.npu.write_config and write_teardown in `module`. The arith
-// and memref dialects must be loaded.
+// Inlines each aiex.npu.write_config, write_teardown and write_reset in
+// `module`. The arith and memref dialects must be loaded.
 mlir::LogicalResult inlineWriteConfigs(mlir::ModuleOp module);
 
 // Insert the ops of `device`'s teardown (see aiex.npu.write_teardown).
@@ -72,6 +73,20 @@ generateAndInsertTeardownOps(mlir::OpBuilder &builder,
                              AIEToConfigurationOutputType outputType =
                                  AIEToConfigurationOutputType::Transaction,
                              bool skipCtrlPktOverlay = false);
+
+// Whether `device` is an AIE4 pure dispatcher: its program configures other
+// devices, and it configures nothing beyond its own routing. It gets no
+// configuration, so no reset and no section: the devices it configures set up
+// their own routes after the reset their configuration starts with.
+bool isPureDispatcher(xilinx::AIE::DeviceOp device);
+
+// Insert the AIE4 reset of `device`'s partition (see aiex.npu.write_reset),
+// which every AIE4 configuration section starts with.
+mlir::LogicalResult generateAndInsertPartitionResetOps(
+    mlir::OpBuilder &builder, xilinx::AIE::DeviceOp device,
+    xilinx::AIEX::BlockwriteData &blockwriteData,
+    AIEToConfigurationOutputType outputType =
+        AIEToConfigurationOutputType::Transaction);
 
 // --------------------------------------------------------------------------
 // Device reset

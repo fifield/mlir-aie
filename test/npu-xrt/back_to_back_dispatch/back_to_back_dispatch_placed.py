@@ -13,9 +13,17 @@
 # channels; the dataflow itself is the placed vector_scalar_add.
 #
 #   python back_to_back_dispatch_placed.py [--name main] [--k 1] [--output-first]
+#   python back_to_back_dispatch_placed.py --aba
 #
 # --name names the device (the kernel is "<name>:sequence"), --k sets K, and
 # --output-first makes the core acquire its output buffer before its input.
+#
+# --aba instead emits two configurations of the same tiles, locks and routes,
+# @cfga (K = 1) and @cfgb (K = 2), and an entry device @main whose sequence
+# @seq(in, out_a, out_b, out_a2) runs A, then B, then A again on one input:
+#   aiex.configure @cfga { aiex.run @sequence(in, out_a) }
+#   aiex.configure @cfgb { aiex.run @sequence(in, out_b) }
+#   aiex.configure @cfga { aiex.run @sequence(in, out_a2) }
 import argparse
 import sys
 
@@ -92,13 +100,43 @@ def back_to_back_dispatch(name, k, output_first):
             dma_await_task(in_task, out_task)
 
 
+# The entry device of --aba: a pure dispatcher (no resources of its own) whose
+# only loads are those of @cfga and @cfgb.
+ABA_ENTRY = """  aie.device(npu3) @main {{
+    aie.runtime_sequence @seq(%in: {ty}, %oa: {ty}, %ob: {ty}, %oa2: {ty}) {{
+      aiex.configure @cfga {{
+        aiex.run @sequence(%in, %oa) : ({ty}, {ty})
+      }}
+      aiex.configure @cfgb {{
+        aiex.run @sequence(%in, %ob) : ({ty}, {ty})
+      }}
+      aiex.configure @cfga {{
+        aiex.run @sequence(%in, %oa2) : ({ty}, {ty})
+      }}
+    }}
+  }}
+"""
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--name", default="main")
 parser.add_argument("--k", type=int, default=1)
 parser.add_argument("--output-first", action="store_true")
+parser.add_argument("--aba", action="store_true")
 args = parser.parse_args()
 
 with mlir_mod_ctx() as ctx:
-    back_to_back_dispatch(args.name, args.k, args.output_first)
+    if args.aba:
+        back_to_back_dispatch("cfga", 1, args.output_first)
+        back_to_back_dispatch("cfgb", 2, args.output_first)
+    else:
+        back_to_back_dispatch(args.name, args.k, args.output_first)
     assert ctx.module.operation.verify(), "module verification failed"
-    print(ctx.module)
+    text = str(ctx.module)
+
+if args.aba:
+    # aiex.run names the configurations' sequence.
+    assert text.count("aie.runtime_sequence(") == 2, text
+    text = text.replace("aie.runtime_sequence(", "aie.runtime_sequence @sequence(")
+    last = text.rstrip().rfind("}")
+    text = text[:last] + ABA_ENTRY.format(ty="memref<%dxi32>" % PROBLEM_SIZE) + "}\n"
+print(text)

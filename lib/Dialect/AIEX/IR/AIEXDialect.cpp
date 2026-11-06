@@ -2701,7 +2701,7 @@ LogicalResult AIEX::NpuLoadPdiOp::canonicalize(AIEX::NpuLoadPdiOp op,
 
 static bool writesConfig(Operation *op) {
   return isa<AIEX::NpuLoadPdiOp, AIEX::NpuWriteConfigOp,
-             AIEX::NpuWriteTeardownOp>(op);
+             AIEX::NpuWriteTeardownOp, AIEX::NpuWriteResetOp>(op);
 }
 
 // Visits the load_pdi, write_config and write_teardown ops before `op` in its
@@ -2722,20 +2722,24 @@ static Operation *findConfigOpBefore(Operation *op,
   return visit(op) ? op : nullptr;
 }
 
-// The load_pdi that resets the array for `op`, or the write_teardown that
-// leaves it so, or null.
-static Operation *precedingReset(Operation *op) {
-  return findConfigOpBefore(op, [&](Operation *prev) {
-    return prev != op &&
-           isa<AIEX::NpuLoadPdiOp, AIEX::NpuWriteTeardownOp>(prev);
-  });
-}
-
-// The AIE4 firmware does not reset the array on a load, so an AIE4
-// write_config follows no reset load: there is nothing for it to check.
+// The AIE4 firmware does not reset the array on a load: an AIE4 write_config
+// follows a write_reset instead.
 static bool inAie4Device(Operation *op) {
   auto device = op->getParentOfType<AIE::DeviceOp>();
   return device && isa<AIE::AIE4TargetModel>(device.getTargetModel());
+}
+
+// The write_reset or (except on AIE4) load_pdi that resets the array for `op`,
+// or the write_teardown that leaves it so, or null.
+static Operation *precedingReset(Operation *op) {
+  bool aie4 = inAie4Device(op);
+  return findConfigOpBefore(op, [&](Operation *prev) {
+    if (prev == op)
+      return false;
+    if (isa<AIEX::NpuWriteTeardownOp, AIEX::NpuWriteResetOp>(prev))
+      return true;
+    return !aie4 && isa<AIEX::NpuLoadPdiOp>(prev);
+  });
 }
 
 static bool loadsSamePdi(AIEX::NpuLoadPdiOp a, AIEX::NpuLoadPdiOp b) {
@@ -2745,11 +2749,11 @@ static bool loadsSamePdi(AIEX::NpuLoadPdiOp a, AIEX::NpuLoadPdiOp b) {
 }
 
 LogicalResult AIEX::NpuWriteConfigOp::verify() {
-  if (inAie4Device(*this))
-    return success();
   Operation *found = precedingReset(*this);
   if (!found)
-    return emitOpError("must follow the load_pdi that resets the array");
+    return emitOpError(inAie4Device(*this)
+                           ? "must follow the write_reset that resets the array"
+                           : "must follow the load_pdi that resets the array");
   auto reset = dyn_cast<AIEX::NpuLoadPdiOp>(found);
   if (!reset)
     return success();

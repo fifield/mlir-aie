@@ -1445,6 +1445,9 @@ def AIE_NpuWriteConfigOp
     adds. A `write_teardown` may stand in for the reset, and a skipped reset is
     fine if every configuration since that PDI was loaded is torn down.
 
+    An `aiex.npu.write_reset` may stand in for that load; on AIE4, whose
+    firmware does not reset the array on a load, it must.
+
     Example:
     ```
       aiex.npu.load_pdi {device_ref = @empty_0}
@@ -1454,6 +1457,28 @@ def AIE_NpuWriteConfigOp
   let arguments = (ins FlatSymbolRefAttr:$device_ref);
   let assemblyFormat = [{ $device_ref attr-dict }];
   let hasVerifier = 1;
+}
+
+def AIE_NpuWriteResetOp
+    : AIEX_Op<"npu.write_reset", [HasParent<"AIE::RuntimeSequenceOp">]> {
+  let summary = "Reset the array before the configuration written after it";
+  let description = [{
+    Resets the array, as the `aiex.npu.write_config` that follows it needs.
+    `aie-expand-load-pdi` places one before each configuration it writes in
+    line, where upstream places the `load_pdi` of an empty device. On AIE4,
+    whose firmware does not reset the array on a load, it stays and is written
+    as the partition reset every AIE4 configuration section starts with (cores
+    held in reset, stream switches cleared, DMA channels reset). Elsewhere the
+    pass lowers it to that empty-device `load_pdi`, alternating between two
+    empty devices so the firmware never skips it.
+
+    Example:
+    ```
+      aiex.npu.write_reset
+      aiex.npu.write_config @dev
+    ```
+  }];
+  let assemblyFormat = [{ attr-dict }];
 }
 
 def AIE_NpuWriteTeardownOp

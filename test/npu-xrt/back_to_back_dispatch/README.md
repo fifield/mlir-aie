@@ -28,6 +28,14 @@ and the sequence only pushes the shim tasks of its run. This relies on the
 design ending each dispatch in its post-configuration state (cores that loop
 forever, balanced DMA chains).
 
+Whenever a configuration does run (the first dispatch, or a load of another
+configuration), it starts with a reset of the whole partition: every core is
+held in reset, every core-tile and memtile DMA channel is reset, the memtile
+pad values and shim data channels return to their defaults, and then the
+configuration is written. In a section it is at the top of the section; under
+`--expand-load-pdis` an `aiex.npu.write_reset` writes it in line, before the
+configuration.
+
 ## What the test checks
 
 `back_to_back_dispatch_placed.py` is the placed `vector_scalar_add` dataflow:
@@ -50,6 +58,7 @@ the others, otherwise the total divided by `N`.
 | `runlist` | one `xrt::runlist` holding all N runs |
 | `startall` | start all N runs, then wait for each |
 | `alternate` | `seq`, alternating between `--elf` and `--alt-elf` on one hardware context (at most 8 runs) |
+| `aba` | `seq` over `back_to_back_dispatch_aba.elf` (kernel `main:seq`): each run configures A (`in + 1`), B (`in + 2`), then A again, on the same tiles and locks, into three outputs (at most 8 runs) |
 
 ## Build and run
 
@@ -62,22 +71,24 @@ make run              # seq, runlist and startall, N=200 each, then output-first
 ```
 
 The lit test `run_npu3_makefile.lit` runs `seq`, `runlist` and `startall` with
-N=200, and the output-first design in `seq` and `runlist` mode.
+N=200, the output-first design in `seq` and `runlist` mode, and the four
+reloading cases below with N=8.
 
-## Known failing comparisons
+## Reloading cases
 
-`make extra` builds two comparisons that reconfigure live memtile channels
-without resetting them first. They exhibit the displaced-data symptoms
-described above and are excluded from `make run` and lit:
+`make extra` builds three more ELFs that reconfigure live memtile channels.
+The configure-time reset makes these normal regression cases;
+`make run-extra` runs each with N=8:
 
 ```bash
 make run-expand       # ./test.exe --elf back_to_back_dispatch_expand.elf --mode seq --n 8
+make run-aba          # ./test.exe --elf back_to_back_dispatch_aba.elf --mode aba --n 8
 make run-alternate    # ./test.exe --elf back_to_back_dispatch.elf \
                       #   --alt-elf back_to_back_dispatch_b.elf --mode alternate --n 8
 ```
 
-**Run these last, once, and bounded.** The targets are pinned to 8
-runs. Check the device with a known-good ELF afterwards.
+**Keep these runs bounded.** Disabling the reset displaces output data and can
+leave the device needing a reboot.
 
 ## Notes
 

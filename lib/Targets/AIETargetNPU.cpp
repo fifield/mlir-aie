@@ -309,9 +309,10 @@ struct TxnEncoder {
         foldDDRAddrOffset(foldDDRAddrOffset) {}
 
   void encode(Operation &o);
-  LogicalResult encodeConfig(DeviceOp configured, bool teardown,
+  LogicalResult encodeConfig(DeviceOp configured, NpuConfigCache::Kind kind,
                              NpuConfigCache::Config &config);
-  void appendConfig(Operation *op, FlatSymbolRefAttr deviceRef, bool teardown);
+  void appendConfig(Operation *op, FlatSymbolRefAttr deviceRef,
+                    NpuConfigCache::Kind kind);
 
   DeviceOp device;
   const AIETargetModel &tm;
@@ -333,10 +334,11 @@ struct TxnEncoder {
   LogicalResult result = success();
 };
 
-// Generates `configured`'s configuration ops, or with `teardown` its teardown
-// ops, as the expand-load-pdi pass would inline them, in a scratch device of
-// its own, and encodes them as a sequence's own ops are.
-LogicalResult TxnEncoder::encodeConfig(DeviceOp configured, bool teardown,
+// Generates `configured`'s configuration, teardown or partition reset ops
+// (`kind`), as the expand-load-pdi pass would inline them, in a scratch device
+// of its own, and encodes them as a sequence's own ops are.
+LogicalResult TxnEncoder::encodeConfig(DeviceOp configured,
+                                       NpuConfigCache::Kind kind,
                                        NpuConfigCache::Config &config) {
   MLIRContext *ctx = device.getContext();
   ctx->getOrLoadDialect<arith::ArithDialect>();
@@ -356,10 +358,15 @@ LogicalResult TxnEncoder::encodeConfig(DeviceOp configured, bool teardown,
   Block *body = new Block;
   seq.getBody().push_back(body);
   builder.setInsertionPointToStart(body);
-  BlockwriteData payloads(holder, teardown ? "teardown_" : "loadpdi_");
-  if (teardown
-          ? failed(generateAndInsertTeardownOps(builder, configured, payloads))
-          : failed(generateAndInsertConfigOps(builder, configured, payloads)))
+  static constexpr const char *prefixes[] = {"loadpdi_", "teardown_", "reset_"};
+  BlockwriteData payloads(holder, prefixes[kind]);
+  LogicalResult generated =
+      kind == NpuConfigCache::Teardown
+          ? generateAndInsertTeardownOps(builder, configured, payloads)
+      : kind == NpuConfigCache::Reset
+          ? generateAndInsertPartitionResetOps(builder, configured, payloads)
+          : generateAndInsertConfigOps(builder, configured, payloads);
+  if (failed(generated))
     return failure();
   // The locmap is kept whether or not this translation writes one: another
   // sharing the cache may.
@@ -371,21 +378,29 @@ LogicalResult TxnEncoder::encodeConfig(DeviceOp configured, bool teardown,
   return encoder.result;
 }
 
+// `deviceRef` names the configured device; a reset resets this sequence's.
 void TxnEncoder::appendConfig(Operation *op, FlatSymbolRefAttr deviceRef,
-                              bool teardown) {
-  auto configured = dyn_cast_or_null<DeviceOp>(
-      SymbolTable::lookupSymbolIn(device->getParentOp(), deviceRef));
+                              NpuConfigCache::Kind kind) {
+  DeviceOp configured =
+      kind == NpuConfigCache::Reset
+          ? device
+          : dyn_cast_or_null<DeviceOp>(
+                SymbolTable::lookupSymbolIn(device->getParentOp(), deviceRef));
   const NpuConfigCache::Config *config =
       configured
-          ? configs.getOrEncode(configured, teardown,
+          ? configs.getOrEncode(configured, kind,
                                 [&](NpuConfigCache::Config &c) {
-                                  return encodeConfig(configured, teardown, c);
+                                  return encodeConfig(configured, kind, c);
                                 })
           : nullptr;
   if (!config) {
-    op->emitOpError(teardown ? "cannot generate the teardown of "
-                             : "cannot generate the configuration of ")
-        << deviceRef;
+    if (kind == NpuConfigCache::Reset)
+      op->emitOpError("cannot generate the partition reset");
+    else
+      op->emitOpError(kind == NpuConfigCache::Teardown
+                          ? "cannot generate the teardown of "
+                          : "cannot generate the configuration of ")
+          << deviceRef;
     result = failure();
     return;
   }
@@ -513,10 +528,13 @@ void TxnEncoder::encode(Operation &o) {
                      op->getName().getStringRef(), std::nullopt, op, tm);
       })
       .Case<NpuWriteConfigOp>([&](auto op) {
-        appendConfig(op, op.getDeviceRefAttr(), /*teardown=*/false);
+        appendConfig(op, op.getDeviceRefAttr(), NpuConfigCache::Configuration);
       })
       .Case<NpuWriteTeardownOp>([&](auto op) {
-        appendConfig(op, op.getDeviceRefAttr(), /*teardown=*/true);
+        appendConfig(op, op.getDeviceRefAttr(), NpuConfigCache::Teardown);
+      })
+      .Case<NpuWriteResetOp>([&](auto op) {
+        appendConfig(op, /*deviceRef=*/nullptr, NpuConfigCache::Reset);
       })
       .Default([&](Operation *op) {
         // Pure values (constants, the operands above) need no encoding;
@@ -533,10 +551,10 @@ void TxnEncoder::encode(Operation &o) {
 } // namespace
 
 const NpuConfigCache::Config *xilinx::AIE::NpuConfigCache::getOrEncode(
-    Operation *device, bool teardown,
+    Operation *device, Kind kind,
     llvm::function_ref<LogicalResult(Config &)> encode) {
   std::lock_guard<std::mutex> lock(mutex);
-  auto [it, inserted] = configs[teardown].try_emplace(device);
+  auto [it, inserted] = configs[kind].try_emplace(device);
   if (inserted) {
     auto config = std::make_unique<Config>();
     if (succeeded(encode(*config)))

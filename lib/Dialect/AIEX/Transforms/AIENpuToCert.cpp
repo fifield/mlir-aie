@@ -7,6 +7,7 @@
 
 #include "aie/Conversion/AIEToConfiguration/AIEToConfiguration.h"
 #include "aie/Dialect/AIE/IR/AIEDialect.h"
+#include "aie/Dialect/AIEX/AIEUtils.h"
 #include "aie/Dialect/AIEX/IR/AIEXDialect.h"
 #include "aie/Dialect/AIEX/Transforms/AIEXPasses.h"
 
@@ -82,6 +83,27 @@ static AIE::RuntimeSequenceOp findGeneratedConfigure(AIE::DeviceOp device) {
     if (isGeneratedConfigure(seq))
       return seq;
   return nullptr;
+}
+
+// The AIE4 firmware does not reset the array on a load, as the aie2p firmware
+// does before a PDI it loads, so every AIE4 configuration starts with the
+// reset of the partition, an empty one included (as the aie2p firmware resets
+// the array when it loads an empty device). Only configuration
+// convert-aie-to-transaction generated gets it (hand-written cert code is left
+// as written), and not a pure dispatcher's, which stays empty and gets no
+// section.
+static LogicalResult prependPartitionReset(AIE::DeviceOp device) {
+  if (!isa<AIE::AIE4TargetModel>(device.getTargetModel()) ||
+      AIE::isPureDispatcher(device))
+    return success();
+  AIE::RuntimeSequenceOp seq = findGeneratedConfigure(device);
+  if (!seq)
+    return success();
+  if (seq.getBody().empty())
+    seq.getBody().emplaceBlock();
+  OpBuilder builder = OpBuilder::atBlockBegin(&seq.getBody().front());
+  AIEX::BlockwriteData payloads(device, "reset_");
+  return AIE::generateAndInsertPartitionResetOps(builder, device, payloads);
 }
 
 // Returns the PDI id to use for a cert.load_pdi that references `deviceSymName`
@@ -1023,6 +1045,19 @@ static bool loadsOtherDevice(AIE::DeviceOp entry) {
       .wasInterrupted();
 }
 
+// Whether `entry`'s program writes another device's configuration in line
+// (aiex.npu.write_config, --expand-load-pdis). On AIE4 an aiex.npu.write_reset
+// precedes it.
+static bool writesOtherDeviceInLine(AIE::DeviceOp entry) {
+  return entry
+      .walk([&](AIEX::NpuWriteConfigOp write) {
+        return write.getDeviceRef() != entry.getSymName()
+                   ? WalkResult::interrupt()
+                   : WalkResult::advance();
+      })
+      .wasInterrupted();
+}
+
 // Whether `entry`'s program runs on a microcontroller other than uC 0.
 static bool usesOtherUcs(AIE::DeviceOp entry) {
   return entry
@@ -1047,6 +1082,30 @@ struct AIENpuToCertPass
 
   void runOnOperation() override {
     auto moduleOp = getOperation();
+    // Whether the entry's program configures other devices, by loading them or
+    // writing their configuration in line: known before inlineWriteConfigs
+    // turns the latter into plain writes.
+    bool entryConfiguresOthers = false;
+    // Configuration written in line, reset included, is written by uC 0 while
+    // the other uCs run: nothing orders them, unlike at a load site.
+    if (auto entry = moduleOp.lookupSymbol<AIE::DeviceOp>(deviceName)) {
+      bool writesInLine = writesOtherDeviceInLine(entry);
+      entryConfiguresOthers = writesInLine || loadsOtherDevice(entry);
+      if (writesInLine && usesOtherUcs(entry) &&
+          isa<AIE::AIE4TargetModel>(entry.getTargetModel())) {
+        entry.emitError("configuration written in line (--expand-load-pdis) "
+                        "is not supported in a program on more than one "
+                        "microcontroller: uC 0 would reset and configure "
+                        "columns the other uCs may be using");
+        return signalPassFailure();
+      }
+    }
+    // Before inlineWriteConfigs, which hides whether a device is a pure
+    // dispatcher, and before the name fallback tags hand-written
+    // configuration too.
+    for (auto dev : moduleOp.getOps<AIE::DeviceOp>())
+      if (failed(prependPartitionReset(dev)))
+        return signalPassFailure();
     if (failed(AIE::inlineWriteConfigs(moduleOp)))
       return signalPassFailure();
 
@@ -1072,7 +1131,8 @@ struct AIENpuToCertPass
       }
     }
 
-    if (mainDevice && failed(loadEntryConfiguration(mainDevice)))
+    if (mainDevice &&
+        failed(loadEntryConfiguration(mainDevice, entryConfiguresOthers)))
       return signalPassFailure();
 
     if (mainDevice) {
@@ -1127,15 +1187,17 @@ struct AIENpuToCertPass
   // is still loaded. An explicit load of the entry at the head of the program
   // (IRON's implicit load) is that same load and is dropped.
   //
-  // On AIE4 a program that loads other devices loads the entry too, as on
-  // aie2p: the loads alternate on a repeated dispatch, so none is skipped and
-  // each reloads. A pure dispatcher has no configuration of its own (see
-  // generateAndInsertConfigOps), so it gets no section and its first load is
-  // the program head. Elsewhere such a program keeps its configuration as
-  // job 1. A program on more than one microcontroller keeps its configuration
-  // as job 1: a LOAD_PDI on uC 0 alone would leave the others out of step at
-  // the firmware's post-load barrier.
-  LogicalResult loadEntryConfiguration(AIE::DeviceOp entry) {
+  // A pure dispatcher, whose program only configures other devices, has no
+  // configuration of its own (see generateAndInsertConfigOps): it gets no
+  // section, and its first load is the program head. On AIE4 an entry that
+  // does configure something of its own may not also configure other devices
+  // (`configuresOthers`): their configuration starts with a reset of the
+  // partition, which would undo the entry's. Elsewhere such a program keeps
+  // its configuration as job 1. A program on more than one microcontroller
+  // keeps its configuration as job 1: a LOAD_PDI on uC 0 alone would leave
+  // the others out of step at the firmware's post-load barrier.
+  LogicalResult loadEntryConfiguration(AIE::DeviceOp entry,
+                                       bool configuresOthers) {
     AIE::RuntimeSequenceOp configure = findGeneratedConfigure(entry);
     if (!configure || configure.getBody().empty())
       return success();
@@ -1143,7 +1205,13 @@ struct AIENpuToCertPass
     if (llvm::all_of(config, [](Operation &op) { return isa<AIE::EndOp>(op); }))
       return success();
     bool aie4 = isa<AIE::AIE4TargetModel>(entry.getTargetModel());
-    if (usesOtherUcs(entry) || (!aie4 && loadsOtherDevice(entry)))
+    if (configuresOthers && aie4)
+      return entry.emitError(
+          "the entry device configures resources of its own and also "
+          "configures other devices, whose configuration starts with a "
+          "reset of the partition that would undo the entry's; move the "
+          "entry's resources into a device it configures");
+    if (usesOtherUcs(entry) || (!aie4 && configuresOthers))
       return success();
     StringRef self = entry.getSymName();
     if (entry.lookupSymbol(self))

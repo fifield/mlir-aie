@@ -817,8 +817,9 @@ def AIEExpandLoadPdi : Pass<"aie-expand-load-pdi", "mlir::ModuleOp"> {
     as cached. Under teardown no sequence needs this.
 
     The AIE4 firmware does not reset the array on a load, so an AIE4
-    device's `load_pdi` becomes its `write_config` alone, with no empty device
-    load, no alternation and no trailing load.
+    device's `load_pdi` becomes an `aiex.npu.write_reset` and its
+    `write_config`, with no empty device load, no alternation and no trailing
+    load.
   }];
 
   let constructor = "xilinx::AIEX::createAIEExpandLoadPdiPass()";

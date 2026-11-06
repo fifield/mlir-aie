@@ -17,7 +17,8 @@
 // CHECK: LOAD_PDI [[A]], @a__site1
 
 // SEC: START_JOB 1
-// SEC-NEXT: WRITE_32 0x006ae000, 0x00000001
+// SEC-NEXT: WRITE_32 0x006a3000, 0x00000002
+// SEC: WRITE_32 0x006ae000, 0x00000001
 
 module {
   aie.device(npu3_1col) @main {

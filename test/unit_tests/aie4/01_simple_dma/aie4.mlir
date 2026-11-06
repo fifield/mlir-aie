@@ -19,14 +19,17 @@
 // TODO: verify the data being written then add it to the checks
 //
 // CHECK-LABEL: aie.runtime_sequence @configure()
+// On AIE4 lock 1, which has no initializer, starts at zero.
+// CHECK: %[[L1:.*]] = arith.constant 7004176 : i32
+// CHECK: %[[V0:.*]] = arith.constant 0 : i32
+// CHECK: aiex.npu.write32(%[[L1]], %[[V0]]) : i32, i32
 // CHECK: aiex.npu.blockwrite(%{{.*}}) {address = 6995968 : ui32} : memref<6xi32>
 // CHECK: aiex.npu.blockwrite(%{{.*}}) {address = 6996000 : ui32} : memref<6xi32>
 // CHECK: %[[A0:.*]] = arith.constant 6999556 : i32
-// CHECK: %[[V0:.*]] = arith.constant 0 : i32
 // CHECK: aiex.npu.write32(%[[A0]], %[[V0]]) : i32, i32
 // CHECK: aiex.npu.blockwrite(%{{.*}}) {address = 98304 : ui32} : memref<9xi32>
 // CHECK: aiex.npu.blockwrite(%{{.*}}) {address = 98352 : ui32} : memref<9xi32>
-// The zero value constant is shared by both writes.
+// The zero value constant is shared by all three writes.
 // CHECK: %[[A1:.*]] = arith.constant 99668 : i32
 // CHECK: aiex.npu.write32(%[[A1]], %[[V0]]) : i32, i32
 //

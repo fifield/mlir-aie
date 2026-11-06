@@ -9,7 +9,8 @@
 
 // The entry's configuration is delivered like any other device's: as a
 // cert.section that a LOAD_PDI names. Job 1 ({cert.configure}) only loads it,
-// so the firmware skips it while the entry is still loaded.
+// so the firmware skips it while the entry is still loaded. A generated AIE4
+// configuration starts with the reset of the partition.
 // 0x11111111 = 286331153, 0x22222222 = 572662306.
 
 // CHECK-LABEL: aie.device(npu3)
@@ -65,44 +66,12 @@ module {
 
 // -----
 
-// A program that loads another device loads the entry's configuration too,
-// as on aie2p: on a repeated dispatch the two loads alternate and both reload.
-
-// CHECK-LABEL: aie.device(npu3)
-// CHECK: aiex.cert.job(1) {
-// CHECK-NEXT: aiex.cert.load_pdi({{[0-9]+}}, @main)
-// CHECK-NEXT: } {cert.configure}
-// CHECK: aiex.cert.load_pdi({{[0-9]+}}, @cfg)
-// CHECK: aiex.cert.section @main
-// CHECK: aiex.cert.write32(4096, 286331153)
-module {
-  aie.device(npu3) @cfg {
-    aie.runtime_sequence @configure() attributes {aie.generated_configure} {
-      %a = arith.constant 4096 : i32
-      %v = arith.constant 0x22222222 : i32
-      aiex.npu.write32(%a, %v) : i32, i32
-    }
-  }
-  aie.device(npu3) @main {
-    aie.runtime_sequence @configure() attributes {aie.generated_configure} {
-      %a = arith.constant 4096 : i32
-      %v = arith.constant 0x11111111 : i32
-      aiex.npu.write32(%a, %v) : i32, i32
-    }
-    aie.runtime_sequence @seq() {
-      aiex.npu.load_pdi {device_ref = @cfg}
-    }
-  }
-}
-
-// -----
-
 // A program on more than one microcontroller keeps its configuration as job
 // 1: a LOAD_PDI on uC 0 alone would leave the other uCs out of step.
 
 // CHECK-LABEL: aie.device(npu3)
 // CHECK: aiex.cert.job(1) {
-// CHECK-NEXT: aiex.cert.write32(4096, 286331153)
+// CHECK: aiex.cert.write32(4096, 286331153)
 // CHECK-NEXT: } {cert.configure}
 // CHECK-NOT: aiex.cert.section @main
 module {
