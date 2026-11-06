@@ -3,12 +3,15 @@ SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception -->
 
 # Vendored aie-rt patches
 
-`third_party/aie-rt` is pinned to the internal AIE4 fork
-[jefff/aie-rt](https://gitenterprise.xilinx.com/jefff/aie-rt), based on
-`aie4-dev` with compatible fixes merged from internal
-[ai-engine/aie-rt](https://gitenterprise.xilinx.com/ai-engine/aie-rt)
-`main_aig` at `73e6472b`. This preserves the fork's AIE4Z support and
-AIE4 DMA bounds-check fixes. The patches in this directory carry additional
+`third_party/aie-rt` is pinned to `7e20c6a0` on
+[`jefff/aie-rt:aie4-main-aig`](https://gitenterprise.xilinx.com/jefff/aie-rt/tree/aie4-main-aig).
+This branch is based on
+[`AMD-AECG-AIENGINE/aie-rt:main_aig`](https://github.com/AMD-AECG-AIENGINE/aie-rt/tree/main_aig)
+at `73e6472b`, with the following changes from our previous fork reapplied:
+AIE4 D0-wrap validation, the memory API revert, CDO/simulator support,
+build and warning fixes, and the AIE4 stream-switch header-guard fix.
+
+The patches in this directory carry additional
 functionality mlir-aie depends on, applied automatically at CMake configure
 time (see
 `runtime_lib/xaiengine/aiert.cmake`). Each patch has a public upstream PR, and
@@ -70,8 +73,8 @@ to drop them.
 Note: `0003` and `0005` are maintained against this branch's aie-rt pin, where
 the `_XAie_Append*` serializers take `(Cmd, TxnPtr)` rather than upstream's
 `(DevInst, Cmd, TxnPtr)` and write `OpHdr.Col`/`Row` as 0; re-check them if
-the submodule is bumped. All five patches apply unchanged to the merged
-`a696248f` pin, and a second configure skips them successfully. `0003` is
+the submodule is bumped. All five patches apply unchanged to the
+`7e20c6a0` pin, and a second configure skips them successfully. `0003` is
 generated with two lines of context
 (`git diff -U2`) so its leading context does not overlap the
 `_XAie_AppendMaskPollBusy32` body that `0005` rewrites; otherwise the
