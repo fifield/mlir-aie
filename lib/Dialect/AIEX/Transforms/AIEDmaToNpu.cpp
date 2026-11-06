@@ -166,6 +166,19 @@ struct RtpToWrite32Pattern : OpConversionPattern<NpuWriteRTPOp> {
     }
     AIE::TileOp tile = buffer.getTileOp();
 
+    // A tile-relative address cannot reach an AIE4 mem tile's data memory,
+    // which starts 1 MiB into its address window; name the buffer instead.
+    const auto &tm = AIE::getTargetModel(op);
+    if (isa<AIE::AIE4TargetModel>(tm) &&
+        tm.isMemTile(tile.getCol(), tile.getRow())) {
+      NpuWrite32Op::create(
+          rewriter, op->getLoc(),
+          createConstantI32(rewriter, op->getLoc(), op.getIndex()),
+          adaptor.getValue(), op.getBufferAttr(), nullptr, nullptr);
+      rewriter.eraseOp(op);
+      return success();
+    }
+
     uint32_t idx = op.getIndex() * sizeof(uint32_t);
     uint32_t address = *bufferAddress + idx;
 

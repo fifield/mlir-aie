@@ -1436,7 +1436,12 @@ getAbsoluteAddress(T *op, uint32_t addressOffset,
     uint32_t row = buffer.getTileOp().getRow();
     address = static_cast<uint32_t>(*bufferAddress) +
               addressOffset * sizeof(uint32_t);
-    address = tm.getTileAddress(col, row) | (address & 0xfffff);
+    // An AIE4 mem tile's 4 MiB data memory starts 1 MiB into its five-row
+    // window, after its registers
+    if (isa<AIE::AIE4TargetModel>(tm) && tm.isMemTile(col, row))
+      address = tm.getTileAddress(col, row) + 0x100000 + address;
+    else
+      address = tm.getTileAddress(col, row) | (address & 0xfffff);
   } else { // otherwise, the given address is absolute
     address = addressOffset;
     std::optional<uint32_t> col = op->getColumn();
