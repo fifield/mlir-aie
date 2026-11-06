@@ -1303,7 +1303,7 @@ struct AIEDMATasksToNPUPass
     if (bd_op.getLengthStateTableIdxAttr() && lengthUnit)
       return emitUpdateBdLengthFromParameter(
           builder, bd_op, buffer_type, *lengthUnit, tm, tile.getCol(),
-          tile.getRow(), bd_id);
+          tile.getRow(), bd_id, channel, channelDir);
     return success();
   }
 

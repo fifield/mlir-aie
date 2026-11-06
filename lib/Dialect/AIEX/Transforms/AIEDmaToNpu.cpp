@@ -620,9 +620,9 @@ public:
     // verifier requires a length_unit with it.
     auto lengthUnit = op.getLengthUnit();
     if (op.getLengthStateTableIdxAttr() && lengthUnit) {
-      if (failed(emitUpdateBdLengthFromParameter(rewriter, op, bufferType,
-                                                 *lengthUnit, targetModel,
-                                                 tileCol, tileRow, op.getId())))
+      if (failed(emitUpdateBdLengthFromParameter(
+              rewriter, op, bufferType, *lengthUnit, targetModel, tileCol,
+              tileRow, op.getId(), infoOp.getChannelIndex(), channelDir)))
         return failure();
     }
 
