@@ -1,0 +1,14 @@
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// GEMM int8 x uint8 with the Peano C++ kernel (kernel_peano.cc, KERNEL_CC=peano). One
+// dtype per test: compiling several designs in one test exceeds CI's per-test
+// time limit.
+// REQUIRES: ryzen_ai_npu3, peano
+//
+// RUN: mkdir -p test_npu3_peano_i8u8
+// RUN: cd test_npu3_peano_i8u8
+// RUN: make -f %S/Makefile clean
+// RUN: make -f %S/Makefile all KERNEL_CC=peano DTYPE=i8u8 M=512 N=768
+// RUN: %run_on_npu3% make -f %S/Makefile run KERNEL_CC=peano DTYPE=i8u8 M=512 N=768 | FileCheck %s
+// CHECK: PASS

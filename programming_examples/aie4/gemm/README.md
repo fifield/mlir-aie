@@ -40,6 +40,8 @@ make run WBUF=1                 # one W strip buffer
 make run ABCAST=0 ASPLIT=1       # fetch A separately for each column
 make run C_REASM=0              # drain C through two joins per column
 make run KERNEL_CC=peano        # compile the kernel and cores with Peano (kernel_peano.cc)
+make run KERNEL_CC=peano DTYPE=i4   # Peano C++ kernel, any DTYPE
+make run KERNEL=aievec DTYPE=fp8    # flat AIEVec core (fp8 and bf16 give OUT=f32)
 ```
 
 Each configuration uses its own `build_*` directory. Kernel objects are cached
@@ -133,12 +135,31 @@ without it.
 
 ## Peano kernel (`KERNEL_CC=peano`)
 
-The Peano and AIEVec paths support `DTYPE=i8` only. Use
-`KERNEL=extern KERNEL_CC=chess` (the defaults) for fp8 and bf16.
+Every `DTYPE` has all three core implementations: chess C++ (`kernel.cc`, the default),
+Peano C++ (`kernel_peano.cc`, `KERNEL_CC=peano`) and flat AIEVec (`KERNEL=aievec`). Outputs
+differ: chess and Peano produce every `OUT` listed for the type, while AIEVec produces `i8`,
+`u8`, `i32` and `f32`, so fp8 and bf16 give `f32` only (no f32 narrowing op in AIEVec; the
+Makefile defaults to `OUT=f32` there).
 
-`kernel_peano.cc` implements the int8 path of `kernel.cc` with Peano builtins (same entry points,
-macros and semantics; verified bit-exact for ASPLIT=2, SHIFT=12, K=1024, CT=4 (i8) and CT=1
-(i32)). `install/peano` is a symlink to the venv llvm-aie, i.e. the same Peano build. `KERNEL_CC=peano` builds it with Peano `clang++` and lets Peano compile
+| `DTYPE` | chess C++ | Peano C++ | AIEVec |
+|---|---|---|---|
+| `i8`, `u8`, `i8u8`, `u8i8`, `i4` | all outputs | all outputs | `i8`/`u8`, `i32` |
+| `fp8`, `bf16` | all outputs | all outputs | `f32` |
+
+Throughput, 2048×3072, three columns (median of 30 launches; the machine was shared, so
+expect a few percent of noise):
+
+| Case | chess | Peano C++ | AIEVec |
+|---|---|---|---|
+| int4 → int8, K=2048, `ITERS=50` | 182 TOPS (best 193) | 137 TOPS | 164 TOPS |
+| fp8 → fp32, K=1024, `ITERS=20` | 32.6 TOPS | 32.3 TOPS | 32.1 TOPS |
+
+fp32 output is limited by DDR writes, so the three cores are indistinguishable there; the
+narrow-output cases show the core differences.
+
+`kernel_peano.cc` implements `kernel.cc` with Peano builtins (same entry points, macros and
+semantics, for every `DTYPE` and `OUT`; bit-exact for integer types, within the float
+tolerance otherwise). `install/peano` is a symlink to the venv llvm-aie, i.e. the same Peano build. `KERNEL_CC=peano` builds it with Peano `clang++` and lets Peano compile
 and link the cores; the build directories carry a `_peano` suffix so chess and Peano artifacts
 never mix. `TIMING=1` is a compile error there (Peano has no usable cycle counter); use
 `TRACE_SIZE`. `kernel_bench/` takes the same `KERNEL_CC` switch, but its Peano build reports 0
@@ -155,11 +176,22 @@ the extern build. Build directories carry an `_aievec` suffix.
   strip-end tile without prefetch. Each tile is a runtime K-loop over K-tiles 0..KT−2, then the
   peeled last K-tile and 64 stores. A K-loop iteration is a commit, 64 row MMACs with a dynamic
   `zero_if(kt == 0)`, and a W pop after every odd row; the accumulators start as `ub.poison`.
+  K here is the A row length in bytes (KT = bytes / 64), so int4 and bf16 share this structure.
+  The integer types differ only in the MMAC format and the X/Z signs (`u8`, `i8u8`, `u8i8`) or
+  the A row type (`i4`: `vector<128xi4>`).
+- **Float types.** `zero_if` is integer-only, so fp8 and bf16 peel K-tile 0 (an MMAC without
+  accumulator, which sets hardware `zero_acc`) and run the K-loop over K-tiles 1..KT−2: three
+  K-tile bodies per tile instead of two, and K = 128 bytes (two K-tiles) has no loop at all. fp32
+  accumulators are stored raw. Peano spills about a quarter of the accumulators around the last
+  K-tile (the Peano C++ kernel does not), so `check_aievec` allows vector stack traffic for them.
+  The cost is a few dozen vector stack operations per tile, small against the ~1100-cycle tile.
+  `aiecc` sizes floating-point core stacks from the compiled code, including the runtime
+  frame, so the allocation follows Peano's spill requirements across K sizes and compiler versions.
   The K-loop also carries one `ptr`-dialect pointer per A part, advanced one K-tile per
   iteration, so Peano walks the A rows with post-increment loads. OUT=i8 rounds to +inf and
   saturates through explicit-mode SRS, so the core writes `crRnd`/`crSat` once at entry. The
-  tile body exists twice per core whatever NG is (once when NG·CT = 1). At K = 128 the core stack
-  is raised to 4 KiB, because the accumulator spills there use the whole default 2 KiB.
+  tile body exists twice per core whatever NG is (once when NG·CT = 1). At K = 128 bytes the
+  integer core stack is raised to 4 KiB, because the accumulator spills use the default 2 KiB.
 - **Peano flags.** `AIEVEC_LLC_ARGS` (default `-aie-force-postpipeliner
   -aie-postpipeliner-maxii=80`) reaches llc through `aiecc --peano-llc-arg`. With it, Peano's
   post-pipeliner software-pipelines each K-loop at II = 64-65 bundles for 64 MMACs, issuing each
@@ -170,13 +202,15 @@ the extern build. Build directories carry an `_aievec` suffix.
   default maximum II of 64 is one bundle short of the 65 it needs, hence the flag. Pipelining adds a
   prologue/epilogue K-tile per K-loop, so `.text` is 2.6–6.4 KB of the 32 KB program memory.
   Non-default `AIEVEC_LLC_ARGS` build into their own directories.
-- **Restrictions.** `C_REASM=1` and K ≥ 128 are required; `TIMING=1` and `KERNEL_CC` are errors.
+- **Restrictions.** `C_REASM=1` and at least two K-tiles (128 bytes per A row) are required;
+  `TIMING=1` and `KERNEL_CC` are errors; `OUT` is `i8`, `u8`, `i32` or `f32`.
 - **Static gate.** `make check_aievec KERNEL=aievec ...` runs `check_aievec_core.py`:
   - `.text` ≤ 16 KB;
   - exact counts per core: 4 commits, 256 MMACs, 128 pops and 128 staging inserts (half of each
     when NG·CT = 1), plus one K-tile (1 commit, 64 MMACs, 32 pops and inserts) per
-    software-pipelined K-loop; for OUT=i8 also 128 `vst.srs` and one `crRnd` and one `crSat`
-    write;
+    software-pipelined K-loop; for OUT=i8 or u8 also 128 `vst.srs` and one `crRnd` and one
+    `crSat` write. fp8 and bf16 (`--float`) have 6 commits, 384 MMACs and 192 pops and inserts,
+    because of the peeled first K-tile;
   - no `lda.s8`, no vector stack traffic, no post-incremented staging index, and the expected
     number of K-loops;
   - `test/aiecc/aie4-mmac-schedule-checker.py` on the straight-line block around each K-loop
@@ -191,8 +225,8 @@ the extern build. Build directories carry an `_aievec` suffix.
   K = 128 timing is checked by hardware only.
 - **Tests.** `aievec_codegen.lit` checks code size, instruction counts and scheduling.
   `run_npu3_aievec.lit` describes and runs five npu3 configurations covering int8 and int32
-  output, odd and even C-buffer group counts, and parity across repeated launches, each under
-  `timeout 300`. Additional regressions are
+  output, odd and even C-buffer group counts, and parity across repeated launches.
+  llvm-lit handles the per-test timeout. Additional regressions are
   `test/Target/LLVMIR/aie4_flat_kloop_poison.py` (poison init and dynamic `zero_if` at 64 rows)
   and `test/aiecc/aie4-peano-llc-arg.test`.
 

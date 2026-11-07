@@ -36,6 +36,22 @@ expansion, lint and LLVM lowering run in the normal aiecc pipeline; this path
 needs no `--enable-aie4-vectorization` flag. aiecc also supplies the staging-load
 combine workaround when required by the IR.
 
+## Data types
+
+The core is generated for every `DTYPE` (`i8`, `u8`, `i8u8`, `u8i8`, `i4`, `fp8`, `bf16`),
+with outputs `i8`/`u8` (SRS), `i32` and, for the float types, `f32`. `K` below is the A row
+length in bytes, so `KT = K/64` for every type. `fmt`, `lhs_signed` and `rhs_signed` select the
+MMAC format and X/Z signs: `INT8` with (T,T), (F,F), (T,F), (F,T) for `i8`, `u8`, `i8u8`,
+`u8i8`; `INT4` for `i4` with a `vector<128xi4>` row; `FP8` and `BF16` for the float types with
+`vector<64xf8E4M3FN>` and `vector<32xbf16>` rows.
+
+`zero_if` is integer-only, so the float cores peel K-tile 0 (an MMAC without accumulator) and
+loop over K-tiles `1..KT-2`: three K-tile bodies per tile body, and no loop at `KT=2`. There is
+no f32 narrowing op in the dialect, so fp8 and bf16 produce `f32` only (`conv_f32_bf16`
+narrows with whatever rounding mode is ambient and nothing here sets it). Peano spills about a
+quarter of the float accumulators around the last K-tile; `check_aievec_core.py --allow-spills`
+accepts that for the float types and counts the rest exactly.
+
 ## Core structure
 
 Each core computes 64×64 output tiles. Let `KT = K/64`, `NT = N/(COLS*64)` and
@@ -169,7 +185,9 @@ strip-end tile acquires its own lock only when `CT=1`; otherwise the first tile
 of its group already acquired it.
 
 The original core-loop sketch makes the parity and lock guards explicit. It
-shows the normal 2 KiB stack; the implementation selects 4 KiB for `KT=2`.
+shows the normal 2 KiB integer stack; the implementation selects 4 KiB for
+integer `KT=2`. Floating-point stacks are sized by `aiecc` from the compiled
+core's spill requirements and runtime frame.
 
 ```python
 bufs, prod, cons = c_l1[c][r]
@@ -304,9 +322,8 @@ All configurations use `KERNEL=aievec COLS=3`.
 
 `aievec_codegen.lit` runs the static checks on A, B and C, with `TRACE_SIZE=8192`
 for C. `run_npu3_aievec.lit` runs A–E on npu3. The host verifies the first and
-last of 41 launches. Each hardware run has an outer `timeout 300`, since the
-host's internal timeout covers only the first launch; parity or stream-count
-errors can otherwise hang later launches.
+last of 41 launches. llvm-lit handles the per-test timeout, including hangs
+in later launches caused by parity or stream-count errors.
 
 Two compiler regressions cover the supporting behavior:
 

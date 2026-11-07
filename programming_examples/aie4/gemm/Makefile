@@ -10,11 +10,13 @@ N ?= 3072
 #   u8 (uint8 x uint8):                      OUT=u8 or i32
 #   fp8 (E4M3):                              OUT=fp8, bf16 or f32
 #   bf16:                                    OUT=bf16 or f32
+# KERNEL=aievec produces i8, u8, i32 or f32 only.
 DTYPE ?= i8
 # K is in elements. Keep A at <= 1024 bytes per row: bf16 is 2 bytes per
 # element and i4 half a byte.
 K ?= $(if $(filter bf16,$(DTYPE)),512,$(if $(filter i4,$(DTYPE)),2048,1024))
-OUT ?= $(if $(filter fp8,$(DTYPE)),fp8,$(if $(filter bf16,$(DTYPE)),bf16,$(if $(filter u8,$(DTYPE)),u8,i8)))
+# KERNEL=aievec has no f32 narrowing op, so its float types default to f32.
+OUT ?= $(if $(filter fp8,$(DTYPE)),$(if $(filter aievec,$(KERNEL)),f32,fp8),$(if $(filter bf16,$(DTYPE)),$(if $(filter aievec,$(KERNEL)),f32,bf16),$(if $(filter u8,$(DTYPE)),u8,i8)))
 SHIFT ?= 12
 ITERS ?= 1
 COLS ?= 3
@@ -57,10 +59,11 @@ ksuf := _aievec$(if $(filter-out $(AIEVEC_LLC_ARGS_DEFAULT),$(AIEVEC_LLC_ARGS))$
 else
 ksuf := $(if $(filter peano,$(KERNEL_CC)),_peano)
 endif
-# The Peano and AIEVec kernels currently implement int8 inputs only.
-ifneq ($(DTYPE),i8)
-ifneq ($(filter aievec,$(KERNEL))$(filter peano,$(KERNEL_CC)),)
-$(error DTYPE=$(DTYPE) requires KERNEL=extern KERNEL_CC=chess)
+ifeq ($(KERNEL),aievec)
+ifneq ($(filter fp8 bf16,$(DTYPE)),)
+ifneq ($(OUT),f32)
+$(error KERNEL=aievec produces OUT=f32 for DTYPE=$(DTYPE): no f32 narrowing op)
+endif
 endif
 endif
 # C path: 1 reassembles wide runs; 0 joins row pairs onto two shim channels.
@@ -139,7 +142,7 @@ $(cfg)/gemm.elf: $(cfg)/gemm.mlir $(kobj)
 		gemm.mlir -o gemm_in.mlir,cp gemm.mlir gemm_in.mlir)
 	cd $(cfg) && aiecc -v --tmpdir=project $(core_flags) --dump-intermediates \
 		--get-full-elf --full-elf-name=gemm.elf gemm_in.mlir \
-		> aiecc.log 2>&1 || (grep -i error aiecc.log | head -20; false)
+		> aiecc.log 2>&1 || (grep -i -m 20 'error:' aiecc.log || tail -20 aiecc.log; false)
 
 run: all
 	./test.exe $(cfg)/gemm.elf $(M) $(N) $(K) $(out_bits) $(SHIFT) $(ITERS) $(COLS) dtype=$(DTYPE) $(if $(filter 1,$(TIMING)),timing) $(if $(filter 1,$(trace_on)),trace=$(TRACE_SIZE))
@@ -150,11 +153,16 @@ run: all
 # (COLS*64) = 1), else two. K = 128 inlines the one-iteration K-loop: no
 # K-loop to check, and Peano spills accumulators (hardware covers timing).
 tile_copies := $(if $(filter $(N),$(shell expr $(COLS) \* 64)),1,2)
-kt2 := $(filter 128,$(K))
+# K is in elements; the DMA and core structure follow the A row length in bytes.
+kbytes := $(if $(filter bf16,$(DTYPE)),$(shell expr $(K) \* 2),$(if $(filter i4,$(DTYPE)),$(shell expr $(K) / 2),$(K)))
+kt := $(shell expr $(kbytes) / 64)
+# No K-loop survives at two K-tiles, nor at three for float types (the
+# one-iteration loop is inlined).
+kt2 := $(if $(filter 2,$(kt)),1,$(if $(and $(filter 3,$(kt)),$(filter fp8 bf16,$(DTYPE))),1))
 ifeq ($(KERNEL),aievec)
 check_aievec: $(cfg)/gemm.elf
-	python3 $(srcdir)/check_aievec_core.py $(cfg)/project --out $(OUT) --max-text 16384 --schedule \
-		--tile-copies $(tile_copies) --expect-kloops $(if $(kt2),0,$(tile_copies)) $(if $(kt2),--allow-spills) \
+	python3 $(srcdir)/check_aievec_core.py $(cfg)/project --out $(OUT) --max-text 16384 --schedule --kt $(kt) $(if $(filter fp8 bf16,$(DTYPE)),--float) \
+		--tile-copies $(tile_copies) --expect-kloops $(if $(kt2),0,$(tile_copies)) $(if $(or $(kt2),$(filter fp8 bf16,$(DTYPE))),--allow-spills) \
 		$(if $(strip $(AIEVEC_LLC_ARGS)),--allow-pipelined)
 else
 check_aievec:

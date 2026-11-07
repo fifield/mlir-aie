@@ -1,0 +1,13 @@
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// GEMM int4 with the flat AIEVec core (KERNEL=aievec).
+// One dtype per test, for CI's per-test time limit.
+// REQUIRES: ryzen_ai_npu3, peano
+//
+// RUN: mkdir -p test_npu3_aievec_i4
+// RUN: cd test_npu3_aievec_i4
+// RUN: make -f %S/Makefile test.exe
+// RUN: make -f %S/Makefile all KERNEL=aievec DTYPE=i4 M=512 N=768
+// RUN: %run_on_npu3% make -f %S/Makefile run KERNEL=aievec DTYPE=i4 M=512 N=768 | FileCheck %s
+// CHECK: PASS

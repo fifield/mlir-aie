@@ -219,7 +219,7 @@ def schedule_check(code, start, last, args):
         "--inserts-per-tile",
         ",".join(map(str, [head_ins] + mid + [ins_rest])),
         "--forbid-lda-s8",
-    ]
+    ] + (["--allow-acc-spills"] if args.allow_spills else [])
     with tempfile.NamedTemporaryFile("w", suffix=".dis", delete=False) as f:
         f.write("\n".join(lines) + "\n")
         cmd[2] = f.name
@@ -233,13 +233,26 @@ def schedule_check(code, start, last, args):
 def main():
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("project", help="aiecc --tmpdir directory")
-    p.add_argument("--out", choices=["i8", "i32"], required=True)
+    p.add_argument("--out", choices=["i8", "u8", "i32", "f32"], required=True)
+    p.add_argument(
+        "--float",
+        action="store_true",
+        help="fp8/bf16 core: zero_if is integer-only, so K-tile 0 is peeled "
+        "(three commits per tile body, one more K-tile of MMACs and pops "
+        "unless K has only two K-tiles)",
+    )
     p.add_argument("--max-text", type=int, default=16384)
     p.add_argument(
         "--tile-copies",
         type=int,
         default=2,
         help="tile bodies per core: 2 (output-tile loop + peeled), 1 if NG*CT == 1",
+    )
+    p.add_argument(
+        "--kt",
+        type=int,
+        help="K-tiles per output tile; sets the float K-tile structure "
+        "(default: three commits per tile body unless --expect-kloops 0)",
     )
     p.add_argument("--expect-commits", type=int)
     p.add_argument("--expect-mmacs", type=int)
@@ -265,19 +278,29 @@ def main():
         "--allow-spills",
         action="store_true",
         help="do not gate vector stack traffic (K == 128: Peano spills "
-        "accumulators when both K-tiles are straight-line code)",
+        "accumulators when both K-tiles are straight-line code; fp8/bf16: "
+        "Peano spills about a quarter of the accumulators around the last "
+        "K-tile)",
     )
     p.add_argument("--mmacs-per-ktile", type=int, default=64)
     p.add_argument("--pops-per-ktile", type=int, default=32)
     args = p.parse_args()
 
     copies = args.tile_copies
-    # Prime 32 pops; the prefetching copy pops 64 per tile body (its K-loop
-    # and its last K-tile), the peeled copy 32 (its K-loop only).
-    pops = 32 + (64 if copies == 2 else 0) + 32
+    # K-tiles issued ahead of the last one in each tile body: the K-loop, plus
+    # the peeled first K-tile for float types. With two K-tiles (no K-loop)
+    # both types have one lead K-tile. A float core at three K-tiles inlines
+    # its one-iteration K-loop but still has three commits.
+    if args.kt is not None:
+        lead = 2 if args.float and args.kt > 2 else 1
+    else:
+        lead = 2 if args.float and args.expect_kloops != 0 else 1
+    # Prime 32 pops; the prefetching copy pops one K-tile of W per lead tile
+    # and its last K-tile, the peeled copy only per lead tile.
+    pops = 32 + (32 * (lead + 1) if copies == 2 else 0) + 32 * lead
     expect = {
-        "commit": args.expect_commits or 2 * copies,
-        "mmac": args.expect_mmacs or 128 * copies,
+        "commit": args.expect_commits or (lead + 1) * copies,
+        "mmac": args.expect_mmacs or 64 * (lead + 1) * copies,
         "pop": args.expect_pops or pops,
         "insert": args.expect_inserts or pops,
         "lda.s8": 0,
@@ -287,7 +310,7 @@ def main():
     if args.allow_spills:
         del expect["vector [sp"]
     kloops_expected = copies if args.expect_kloops is None else args.expect_kloops
-    if args.out == "i8":
+    if args.out in ("i8", "u8"):
         expect.update(
             {"vst.srs": args.expect_srs or 64 * copies, "crrnd": 1, "crsat": 1}
         )
@@ -333,11 +356,13 @@ def main():
         if not kloops:
             print("; no K-loop", end="")
         # A software-pipelined K-loop issues the previous K-tile's last MMACs
-        # after its commit; its prologue and epilogue add one K-tile copy.
+        # no later than its commit; its prologue and epilogue add one K-tile
+        # copy. An unpipelined loop's first MMAC always follows the commit
+        # (it reads the committed matrix), so equal bundles also count.
         piped = sum(
             1
             for s, e in kloops
-            if first(code, s, e, "mmac") < first(code, s, e, "commit")
+            if first(code, s, e, "mmac") <= first(code, s, e, "commit")
         )
         if piped:
             print(f"; {piped} pipelined", end="")

@@ -31,3 +31,25 @@
 // CHECK: CHECK_AIEVEC OK: 12 cores
 // KT2: core_0_2: {{.*}} vst.srs 128 crrnd 1 crsat 1 (vector [sp {{[0-9]+}}, allowed); ZOLs 1; no K-loop
 // KT2: CHECK_AIEVEC OK: 12 cores
+//
+// Other types share the int8 structure (the A row is always 64 bytes per
+// K-tile): int4 and the unsigned and mixed-sign int8 types have the int8 counts.
+// RUN: make -f %S/Makefile check_aievec KERNEL=aievec DTYPE=i4 M=512 N=768 CT=4 ITERS=1 | FileCheck %s --check-prefix=I4
+// I4: core_0_2: {{.*}} commit 6 mmac 384 pop 192 insert 192 {{.*}} vst.srs 128 crrnd 1 crsat 1; {{.*}}; 2 pipelined
+// I4: CHECK_AIEVEC OK: 12 cores
+// RUN: make -f %S/Makefile check_aievec KERNEL=aievec DTYPE=u8i8 M=512 N=768 CT=4 ITERS=1 | FileCheck %s --check-prefix=U8I8
+// U8I8: core_0_2: {{.*}} commit 6 mmac 384 pop 192 insert 192 {{.*}} vst.srs 128 crrnd 1 crsat 1; {{.*}}; 2 pipelined
+// U8I8: CHECK_AIEVEC OK: 12 cores
+//
+// fp8 and bf16 peel K-tile 0 (zero_if is integer-only): three K-tile bodies per
+// tile body, so 6 commits (+2 pipelined), 384 (+128) MMACs and 192 (+64) pops.
+// Peano spills some accumulators around the last K-tile; the gate allows it.
+// RUN: make -f %S/Makefile check_aievec KERNEL=aievec DTYPE=fp8 M=512 N=768 CT=1 ITERS=1 | FileCheck %s --check-prefix=FP8
+// FP8: core_0_2: {{.*}} commit 8 mmac 512 pop 256 insert 256 {{.*}}; 2 pipelined
+// FP8: core_0_2 K-loop {{.*}}: ORDER OK: 6 tiles, 192 inserts, 320 MMACs, accumulator spills allowed (loop body checked twice)
+// FP8: core_0_2 K-loop {{.*}}: ORDER OK: 6 tiles, 128 inserts, 320 MMACs, accumulator spills allowed (loop body checked twice)
+// FP8: CHECK_AIEVEC OK: 12 cores
+// Two K-tiles: no K-loop for float types either.
+// RUN: make -f %S/Makefile check_aievec KERNEL=aievec DTYPE=bf16 M=512 N=576 K=64 CT=1 ITERS=2 | FileCheck %s --check-prefix=BF16KT2
+// BF16KT2: core_0_2: {{.*}} commit 4 mmac 256 pop 128 insert 128 {{.*}}; no K-loop
+// BF16KT2: CHECK_AIEVEC OK: 12 cores

@@ -1,0 +1,17 @@
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Validate int4 K in elements before packing it into bytes, for both kernels.
+// RUN: not python3 %S/gemm_placed.py -M 256 -N 192 -K 257 --dtype i4 --ct 1 --kernel aievec 2>&1 | FileCheck %s --check-prefix=BAD-K
+// RUN: not python3 %S/gemm_placed.py -M 256 -N 192 -K 257 --dtype i4 --ct 1 --kernel extern 2>&1 | FileCheck %s --check-prefix=BAD-K
+// RUN: not python3 %S/gemm_placed.py -M 256 -N 192 -K 128 --dtype i4 --ct 1 --kernel aievec 2>&1 | FileCheck %s --check-prefix=BAD-K
+// BAD-K: K must be a multiple of 128 (one 64-byte K-tile of i4), with >= 2 K-tiles
+// RUN: python3 %S/gemm_placed.py -M 256 -N 192 -K 256 --dtype i4 --ct 1 --kernel aievec > %t.i4.mlir
+
+// Float AIEVec defaults must match explicit f32 output.
+// RUN: python3 %S/gemm_placed.py -M 256 -N 192 -K 128 --dtype fp8 --ct 1 --kernel aievec > %t.fp8.default.mlir
+// RUN: python3 %S/gemm_placed.py -M 256 -N 192 -K 128 --dtype fp8 --ct 1 --kernel aievec --out f32 > %t.fp8.f32.mlir
+// RUN: cmp %t.fp8.default.mlir %t.fp8.f32.mlir
+// RUN: python3 %S/gemm_placed.py -M 256 -N 192 -K 64 --dtype bf16 --ct 1 --kernel aievec > %t.bf16.default.mlir
+// RUN: python3 %S/gemm_placed.py -M 256 -N 192 -K 64 --dtype bf16 --ct 1 --kernel aievec --out f32 > %t.bf16.f32.mlir
+// RUN: cmp %t.bf16.default.mlir %t.bf16.f32.mlir

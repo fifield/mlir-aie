@@ -30,6 +30,9 @@ DTYPES = {
     "fp8": (1, ("fp8", "bf16", "f32")),
     "bf16": (2, ("bf16", "f32")),
 }
+# Outputs the flat AIEVec core can produce: SRS narrows int32 accumulators;
+# float accumulators are stored raw.
+AIEVEC_OUTS = ("i8", "u8", "i32", "f32")
 OUT_BYTES = {"i8": 1, "u8": 1, "fp8": 1, "bf16": 2, "i32": 4, "f32": 4}
 
 N_COLS = 3  # active columns, overridden by --cols
@@ -63,17 +66,22 @@ def build(
     # Element size of A and W. K is in elements; Kb is the row length in
     # bytes, which sets all DMA geometry (a K-tile is always 64 bytes).
     esize, outs = DTYPES[dtype]
-    Kb = int(K * esize)
+    k_tile_elements = int(TILE / esize)
     assert out in outs, f"--dtype {dtype} outputs {', '.join(outs)}"
-    assert Kb % TILE == 0 and Kb >= 2 * TILE, (
-        f"K must be a multiple of {int(TILE / esize)} (one 64-byte K-tile of "
+    # Validate elements before converting to bytes, especially for packed int4.
+    assert K % k_tile_elements == 0 and K >= 2 * k_tile_elements, (
+        f"K must be a multiple of {k_tile_elements} (one 64-byte K-tile of "
         f"{dtype}), with >= 2 K-tiles"
     )
+    Kb = K * TILE // k_tile_elements
     assert M % (N_ROWS * TILE) == 0, "M must be a multiple of 256"
     assert N % (N_COLS * TILE) == 0, "N must be a multiple of 192"
     MB = M // (N_ROWS * TILE)  # M-blocks
     assert kernel in ("extern", "aievec")
-    assert kernel != "aievec" or dtype == "i8", "--kernel aievec requires --dtype i8"
+    assert kernel != "aievec" or out in AIEVEC_OUTS, (
+        "--kernel aievec outputs i8, u8, i32 or f32 (no f32 narrowing op for "
+        "bf16 or fp8 output)"
+    )
     # aievec: a C objectfifo acquire inside the group loop would make
     # objectfifo lowering unroll the loop and copy the tile body.
     assert kernel == "extern" or c_reasm, "--kernel aievec requires --c-reasm 1"
@@ -453,11 +461,12 @@ def build(
                         cores[c][r],
                         a_core[c][r],
                         c_l1[c][r],
-                        K=K,
+                        K=Kb,
                         NG=NG,
                         ct=ct,
                         a_split=a_split,
-                        out_i8=out == "i8",
+                        dtype=dtype,
+                        out=out,
                         shift=shift,
                         trace=bool(trace_size),
                     )
@@ -642,7 +651,9 @@ def build(
                 inputs = next_inputs
 
 
-def aievec_core(core_tile, a_fifos, c_l1, *, K, NG, ct, a_split, out_i8, shift, trace):
+def aievec_core(
+    core_tile, a_fifos, c_l1, *, K, NG, ct, a_split, dtype, out, shift, trace
+):
     """Emit core (c, r)'s body in flat AIEVec (KERNEL=aievec).
 
     Same schedule as kernel.cc: prime 32 W pops per strip, then each 64x64
@@ -652,12 +663,19 @@ def aievec_core(core_tile, a_fifos, c_l1, *, K, NG, ct, a_split, out_i8, shift, 
     next output tile unless it ends the strip. The tile body is emitted
     twice: in the runtime output-tile loop and as the peeled strip end. The
     C buffer parity is computed at run time from the M-block count.
+
+    K is the A row length in bytes, so KT = K / 64 for every dtype. Integer
+    types use zero_if(kt == 0). zero_if is integer-only, so fp8 and bf16 peel
+    K-tile 0 (an MMAC without accumulator) and loop over K-tiles 1..KT-2.
     """
     from aie.dialects import arith as arith_d, scf as scf_d, ub as ub_d
     from aie.dialects import vector as vector_d
     from aie.dialects.aie import event as aie_event
     from aie.helpers.dialects.scf import if_, yield_
     from aie.helpers.dialects.aievec_aie4 import (
+        BF16,
+        FP8,
+        INT4,
         INT8,
         POS_INF,
         SAT,
@@ -668,6 +686,9 @@ def aievec_core(core_tile, a_fifos, c_l1, *, K, NG, ct, a_split, out_i8, shift, 
     )
     from aie.ir import (
         Attribute,
+        BF16Type,
+        F32Type,
+        Float8E4M3FNType,
         IndexType,
         InsertionPoint,
         IntegerAttr,
@@ -681,11 +702,27 @@ def aievec_core(core_tile, a_fifos, c_l1, *, K, NG, ct, a_split, out_i8, shift, 
     KT = K // TILE
     # KT == 1 would make the peeled K-tile accumulate onto the poison init.
     assert KT >= 2, "--kernel aievec needs K >= 128"
-    out_bytes = 1 if out_i8 else 4
+    out_bytes = OUT_BYTES[out]
     i32 = IntegerType.get_signless(32)
-    V64I8 = VectorType.get([64], IntegerType.get_signless(8))
     V16I32 = VectorType.get([16], i32)
     V64I32 = VectorType.get([64], i32)
+    V64F32 = VectorType.get([64], F32Type.get())
+    # MMAC format, X / Z signedness and the A row type (one 64-byte K-tile row).
+    fmt, lhs_signed, rhs_signed = {
+        "i8": (INT8, True, True),
+        "u8": (INT8, False, False),
+        "i8u8": (INT8, True, False),
+        "u8i8": (INT8, False, True),
+        "i4": (INT4, True, True),
+        "fp8": (FP8, None, None),
+        "bf16": (BF16, None, None),
+    }[dtype]
+    is_float = dtype in ("fp8", "bf16")
+    a_row_ty = {
+        "i4": VectorType.get([128], IntegerType.get_signless(4)),
+        "fp8": VectorType.get([64], Float8E4M3FNType.get()),
+        "bf16": VectorType.get([32], BF16Type.get()),
+    }.get(dtype, VectorType.get([64], IntegerType.get_signless(8)))
     KT_WORDS = (TILE // a_split) * TILE // 4  # one K-tile of one A part
     C_ROW_WORDS = ct * TILE * out_bytes // 4  # C buffer row stride
     C_TILE_WORDS = TILE * out_bytes // 4  # C tile j step
@@ -743,59 +780,86 @@ def aievec_core(core_tile, a_fifos, c_l1, *, K, NG, ct, a_split, out_i8, shift, 
         q = ptr_add(ptrs[part], rr * 64) if rr else ptrs[part]
         m = Operation.create("ptr.from_ptr", results=[gty], operands=[q, md]).result
         w = vector_d.load(V16I32, m, [idx(0)], alignment=64)
-        return vector_d.bitcast(V64I8, w)
+        return vector_d.bitcast(a_row_ty, w)
+
+    def pop(slot):
+        stage_stream(fmt, W_STREAM_PORT, slot, rhs_signed=rhs_signed)
 
     def ktile(ptrs, meta, accs, *, zero_if, prefetch):
-        commit(INT8, rhs_signed=True)
-        out = []
+        commit(fmt, rhs_signed=rhs_signed)
+        res = []
         for r in range(TILE):
-            out.append(
+            res.append(
                 mmac_active(
-                    INT8,
+                    fmt,
                     a_row(ptrs, meta, r),
                     accs[r],
                     zero_if=zero_if,
-                    lhs_signed=True,
-                    rhs_signed=True,
+                    lhs_signed=lhs_signed,
+                    rhs_signed=rhs_signed,
                 )
             )
             if prefetch and r & 1:
-                stage_stream(INT8, W_STREAM_PORT, r // 2, rhs_signed=True)
-        return out
+                pop(r // 2)
+        return res
 
     def emit_tile(a_lo, a_hi, c_buf, j_words, *, prefetch_last):
         if trace:
             aie_event(0)
         parts = [to_ptr(a_lo)] + ([] if a_split == 1 else [to_ptr(a_hi)])
         meta = [(gty, md) for _, gty, md in parts]
-        # zero_if(kt == 0) ignores the accumulator, so the init is never read.
-        init = [ub_d.poison(V64I32)] * TILE + [p for p, _, _ in parts]
-        for kt, args, res in range_(0, KT - 1, iter_args=init, insert_yield=False):
-            accs, ptrs = list(args[:TILE]), list(args[TILE:])
-            yield_(
-                ktile(
-                    ptrs,
-                    meta,
-                    accs,
-                    zero_if=arith_d.cmpi(arith_d.CmpIPredicate.eq, kt, idx(0)),
-                    prefetch=True,
+
+        def loop_body(first, accs0, ptrs0, zero_at_first):
+            """K-tiles first..KT-2 as a runtime loop carrying accs and ptrs."""
+            init = list(accs0) + list(ptrs0)
+            for kt, args, res in range_(
+                first, KT - 1, iter_args=init, insert_yield=False
+            ):
+                accs, ptrs = list(args[:TILE]), list(args[TILE:])
+                yield_(
+                    ktile(
+                        ptrs,
+                        meta,
+                        accs,
+                        zero_if=(
+                            arith_d.cmpi(arith_d.CmpIPredicate.eq, kt, idx(0))
+                            if zero_at_first
+                            else None
+                        ),
+                        prefetch=True,
+                    )
+                    + [ptr_add(p, KT_WORDS * 4) for p in ptrs]
                 )
-                + [ptr_add(p, KT_WORDS * 4) for p in ptrs]
+            return list(res[:TILE]), list(res[TILE:])
+
+        if is_float:
+            # K-tile 0 has no accumulator input (hardware zero_acc).
+            ptrs = [p for p, _, _ in parts]
+            accs = ktile(ptrs, meta, [None] * TILE, zero_if=None, prefetch=True)
+            ptrs = [ptr_add(p, KT_WORDS * 4) for p in ptrs]
+            if KT > 2:
+                accs, ptrs = loop_body(1, accs, ptrs, False)
+        else:
+            # zero_if(kt == 0) ignores the accumulator, so the init is never read.
+            accs, ptrs = loop_body(
+                0, [ub_d.poison(V64I32)] * TILE, [p for p, _, _ in parts], True
             )
-        last = ktile(
-            list(res[TILE:]),
-            meta,
-            list(res[:TILE]),
-            zero_if=None,
-            prefetch=prefetch_last,
-        )
+        last = ktile(ptrs, meta, accs, zero_if=None, prefetch=prefetch_last)
         for r in range(TILE):
             off = arith_d.addi(j_words, idx(r * C_ROW_WORDS))
-            if out_i8:
+            if out in ("i8", "u8"):
                 y = srs(
-                    last[r], shift=shift, signed=True, rounding=POS_INF, saturation=SAT
+                    last[r],
+                    shift=shift,
+                    signed=out == "i8",
+                    rounding=POS_INF,
+                    saturation=SAT,
                 )
                 vector_d.store(vector_d.bitcast(V16I32, y), c_buf, [off], alignment=64)
+            elif out == "f32":
+                vector_d.store(
+                    vector_d.bitcast(V64I32, last[r]), c_buf, [off], alignment=64
+                )
             else:
                 vector_d.store(last[r], c_buf, [off], alignment=64)
         if trace:
@@ -831,9 +895,10 @@ def aievec_core(core_tile, a_fifos, c_l1, *, K, NG, ct, a_split, out_i8, shift, 
     def eq(v, n):
         return arith_d.cmpi(arith_d.CmpIPredicate.eq, v, idx(n))
 
-    # With KT == 2 both K-tiles are straight-line code and Peano spills
-    # accumulators: the spill slots fill the default 2 KiB stack exactly.
-    stack = 0x1000 if KT == 2 else 0x800
+    # Float accumulator spills vary with KT and the Peano version. Let aiecc
+    # size their stack from the compiled core, including the runtime frame.
+    # Integer KT == 2 spills fill the default 2 KiB, so reserve 4 KiB there.
+    stack = None if is_float else 0x1000 if KT == 2 else 0x800
 
     # Lock values are plain constants (use_lock's wrapper), so objectfifo
     # lowering never peels these loops.
@@ -843,7 +908,7 @@ def aievec_core(core_tile, a_fifos, c_l1, *, K, NG, ct, a_split, out_i8, shift, 
             a = [f.acquire(ObjectFifoPort.Consume, 1) for f in a_fifos]
             a_lo, a_hi = a[0], a[-1]  # same buffer when a_split == 1
             for i in range(32):  # prime the strip's first K-tile
-                stage_stream(INT8, W_STREAM_PORT, i, rhs_signed=True)
+                pop(i)
             # Buffer of group g in M-block m: (m*NG + g) & 1.
             base = arith_d.andi(arith_d.index_cast(i32, m), c32(1)) if NG % 2 else None
             n_loop = NG * ct - 1  # every tile but the strip's last
@@ -943,12 +1008,14 @@ if __name__ == "__main__":
     )
     args = p.parse_args()
     if args.kernel == "aievec":
-        if args.dtype != "i8":
-            p.error("--kernel aievec requires --dtype i8")
         # A C acquire in the group loop would be unrolled with the tile body.
         assert args.c_reasm, "--kernel aievec requires --c-reasm 1"
     if args.out is None:
-        args.out = DTYPES[args.dtype][1][0]
+        args.out = (
+            "f32"
+            if args.kernel == "aievec" and args.dtype in ("fp8", "bf16")
+            else DTYPES[args.dtype][1][0]
+        )
     if args.out not in DTYPES[args.dtype][1]:
         p.error(f"--dtype {args.dtype} outputs {', '.join(DTYPES[args.dtype][1])}")
     N_COLS = args.cols

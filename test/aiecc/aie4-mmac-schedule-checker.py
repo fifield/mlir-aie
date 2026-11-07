@@ -360,6 +360,11 @@ def main():
         help="reject scalar lda.s8 loads",
     )
     p.add_argument(
+        "--allow-acc-spills",
+        action="store_true",
+        help="do not reject accumulator spills or fills through the stack",
+    )
+    p.add_argument(
         "--mmacs-per-tile",
         required=True,
         help="comma-separated MMAC count for each staged tile, in order",
@@ -394,7 +399,7 @@ def main():
                 commits.append(cycle)
             elif MMAC_RE.match(s):
                 mmacs.append(cycle + MMAC_READ)
-            if ACC_STACK_RE.match(s):
+            if ACC_STACK_RE.match(s) and not args.allow_acc_spills:
                 errors.append(f"accumulator spill/fill at cycle {cycle}: {s}")
 
     per_tile = [int(x) for x in args.mmacs_per_tile.split(",")]
@@ -492,7 +497,9 @@ def main():
         )
     print(
         f"ORDER OK: {tiles} tiles, {len(inserts)} inserts, {len(mmacs)} MMACs"
-        f"{pop_count}, no accumulator spills{shape}"
+        f"{pop_count}, "
+        f"{'accumulator spills allowed' if args.allow_acc_spills else 'no accumulator spills'}"
+        f"{shape}"
     )
 
 

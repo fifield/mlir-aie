@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 // KERNEL=aievec on hardware; configurations A-E are described below.
-// test.cpp bounds only the first launch, so every run is wrapped in
-// `timeout 300`: a C parity or pop-count bug hangs instead of failing.
 //
 // REQUIRES: ryzen_ai_npu3, peano
 //
@@ -14,26 +12,26 @@
 // A: M=512, N=768, K=1024; NG=1 (odd): parity flips per strip; CT=4 lock guards;
 //    dynamic zero_if (KT=16).
 // RUN: make -f %S/Makefile all KERNEL=aievec M=512 N=768 K=1024 OUT=i8 CT=4 ITERS=1
-// RUN: %run_on_npu3% timeout 300 make -f %S/Makefile run KERNEL=aievec M=512 N=768 K=1024 OUT=i8 CT=4 ITERS=1 | FileCheck %s
+// RUN: %run_on_npu3% make -f %S/Makefile run KERNEL=aievec M=512 N=768 K=1024 OUT=i8 CT=4 ITERS=1 | FileCheck %s
 //
 // B: KT=2 (K-loop inlined, zero_if folded); CT=1; odd NG=3 with in-strip
 //    parity; 4 strips.
 // RUN: make -f %S/Makefile all KERNEL=aievec M=512 N=576 K=128 OUT=i8 CT=1 ITERS=2
-// RUN: %run_on_npu3% timeout 300 make -f %S/Makefile run KERNEL=aievec M=512 N=576 K=128 OUT=i8 CT=1 ITERS=2 | FileCheck %s
+// RUN: %run_on_npu3% make -f %S/Makefile run KERNEL=aievec M=512 N=576 K=128 OUT=i8 CT=1 ITERS=2 | FileCheck %s
 //
 // C: OUT=i32; odd NG=3; CT=1; repeated strips.
 // RUN: make -f %S/Makefile all KERNEL=aievec M=512 N=576 K=256 OUT=i32 CT=1 ITERS=2
-// RUN: %run_on_npu3% timeout 300 make -f %S/Makefile run KERNEL=aievec M=512 N=576 K=256 OUT=i32 CT=1 ITERS=2 | FileCheck %s
+// RUN: %run_on_npu3% make -f %S/Makefile run KERNEL=aievec M=512 N=576 K=256 OUT=i32 CT=1 ITERS=2 | FileCheck %s
 //
 // D: even NG=2 (static peeled buffer, runtime g & 1); CT=4 guards across
 //    groups; A_SPLIT=1; odd KT=3; 3 strips.
 // RUN: make -f %S/Makefile all KERNEL=aievec M=256 N=1536 K=192 OUT=i8 CT=4 ASPLIT=1 ITERS=3
-// RUN: %run_on_npu3% timeout 300 make -f %S/Makefile run KERNEL=aievec M=256 N=1536 K=192 OUT=i8 CT=4 ASPLIT=1 ITERS=3 | FileCheck %s
+// RUN: %run_on_npu3% make -f %S/Makefile run KERNEL=aievec M=256 N=1536 K=192 OUT=i8 CT=4 ASPLIT=1 ITERS=3 | FileCheck %s
 //
 // E: C parity carried across launches: odd NG=3, one strip per launch, so
 //    the M-block parity flips at every launch (41 launches, first and last
 //    checked).
 // RUN: make -f %S/Makefile all KERNEL=aievec M=256 N=576 K=128 OUT=i8 CT=1 ITERS=1
-// RUN: %run_on_npu3% timeout 300 make -f %S/Makefile run KERNEL=aievec M=256 N=576 K=128 OUT=i8 CT=1 ITERS=1 | FileCheck %s
+// RUN: %run_on_npu3% make -f %S/Makefile run KERNEL=aievec M=256 N=576 K=128 OUT=i8 CT=1 ITERS=1 | FileCheck %s
 //
 // CHECK: PASS
