@@ -1144,6 +1144,28 @@ def AIE_DMABDOp : AIE_Op<"dma_bd", [AttrSizedOperandSegments]> {
     All strides are expressed in multiples of the element width (just like `len` and `offset`)
     **with the caveat that the inner-most dimension's stride must be 1**.
 
+    #### Dimensions of a DMA task BD
+
+    Inside a runtime-sequence DMA task (`aiex.dma_configure_task`), the number
+    of `sizes`/`strides` entries selects the hardware dimensions they fill:
+
+    | entries | meaning                          | tiles                       |
+    |---------|----------------------------------|-----------------------------|
+    | 1-3     | `[d2, d1, d0]` (lowest dims)     | all                         |
+    | 4       | `[iteration, d2, d1, d0]`        | all                         |
+    | 5       | `[iteration, d3, d2, d1, d0]`    | MemTile, AIE4 shim NOC tile |
+
+    A four-entry list is `[iteration, d2, d1, d0]` even on a tile with a D3
+    dimension. To address D3, write five entries with a leading unit iteration,
+    or give four entries and the `iteration` attribute (see below). `len` covers
+    the addressing dimensions, not the iteration. For example, writing an
+    NCHW-ordered `[y 720][c 3][i 2][x 1280]` frame from an AIE4 shim:
+
+    ```
+    aie.dma_bd(%out : memref<11059200xi32> offset = 0 len = 5529600
+               sizes = [1, 720, 3, 2, 1280] strides = [0, 5120, 3686400, 2560, 1])
+    ```
+
     ## DMA constant padding on AIE-ML Devices
 
     AIE-ML devices can apply constant padding at the buffer descriptor level, described with pairs of padding

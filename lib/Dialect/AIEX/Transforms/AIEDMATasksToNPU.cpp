@@ -62,6 +62,25 @@ static bool tileHasD3AddressDim(const AIE::AIETargetModel &tm, int col,
          (isa<AIE::AIE4TargetModel>(tm) && tm.isShimNOCTile(col, row));
 }
 
+// A four-entry pattern is [iteration, d2, d1, d0] even on a tile with D3, so
+// one written as four addressing dims puts its outermost dim in the iteration
+// slot. Spell out the five-entry form that reaches D3.
+static void attachFiveEntryD3Note(InFlightDiagnostic &diag,
+                                  ArrayRef<AIE::BDDimLayoutAttr> dims) {
+  std::string sizes, strides;
+  llvm::raw_string_ostream sizesOs(sizes), stridesOs(strides);
+  for (AIE::BDDimLayoutAttr dim : dims) {
+    sizesOs << ", " << dim.getSize();
+    stridesOs << ", " << dim.getStride();
+  }
+  diag.attachNote() << "the outermost entry of a four-entry sizes/strides "
+                       "list is the iteration dimension, not D3; to address "
+                       "D3 on this tile, write five entries [iteration, d3, "
+                       "d2, d1, d0] (here sizes = [1"
+                    << sizes << "] strides = [0" << strides
+                    << "]) or set the `iteration` attribute";
+}
+
 struct DMAStartTaskOpPattern : OpRewritePattern<DMAStartTaskOp> {
   DMAStartTaskOpPattern(MLIRContext *context,
                         llvm::DenseMap<Operation *, bool> &onlyPushedOnce)
@@ -608,7 +627,9 @@ struct AIEDMATasksToNPUPass
   // The dynamic (runtime-valued) lowering of one BD on an AIE4 shim tile.
   // Five-entry layouts are [iteration, d3, d2, d1, d0]; the legacy four-entry
   // convention is [iteration, d2, d1, d0], and smaller task patterns describe
-  // the lowest addressing dimensions.
+  // the lowest addressing dimensions. An iteration attribute takes the
+  // iteration slot, so with it four entries are [d3, d2, d1, d0], as on the
+  // static path.
   LogicalResult rewriteSingleBDDynamicAIE4(OpBuilder &builder,
                                            AIE::DMABDOp bd_op,
                                            AIE::TileOp &tile, int channel,
@@ -631,13 +652,14 @@ struct AIEDMATasksToNPUPass
                                 "dimensions may be provided.");
     OpFoldResult one = builder.getI64IntegerAttr(1);
     OpFoldResult zeroOfr = builder.getI64IntegerAttr(0);
-    size_t rank = sizes.size() == 5 ? 5 : 4;
+    std::optional<AIE::BDIterationAttr> iter = bd_op.getIteration();
+    size_t rank = sizes.size() == 5 || (iter && sizes.size() == 4) ? 5 : 4;
     SmallVector<OpFoldResult> sizesN(rank, one), stridesN(rank, zeroOfr);
     for (size_t i = 0; i < sizes.size(); i++) {
       sizesN[rank - sizes.size() + i] = sizes[i];
       stridesN[rank - strides.size() + i] = strides[i];
     }
-    if (std::optional<AIE::BDIterationAttr> iter = bd_op.getIteration()) {
+    if (iter) {
       sizesN.front() = builder.getI64IntegerAttr(iter->getSize());
       stridesN.front() = builder.getI64IntegerAttr(iter->getStride());
     }
@@ -700,8 +722,10 @@ struct AIEDMATasksToNPUPass
 
     if (!sizes.empty()) {
       // The addressing extent must equal the length. The leading entry is
-      // iteration only for the four/five-entry forms.
-      size_t addressRank = sizes.size() >= 4 ? sizes.size() - 1 : sizes.size();
+      // iteration only for the four/five-entry forms without an iteration
+      // attribute.
+      size_t addressRank =
+          sizes.size() >= 4 && !iter ? sizes.size() - 1 : sizes.size();
       Value extent = cst64(1);
       for (size_t i = sizes.size() - addressRank; i < sizes.size(); ++i) {
         Value size = getAsI64(builder, loc, sizes[i]);
@@ -1104,6 +1128,14 @@ struct AIEDMATasksToNPUPass
       // A BD's iteration attribute takes the iteration slot, leaving all of
       // its dims as data dims.
       bool useD3AddressDim = dims->size() == 5 || (iter && dims->size() == 4);
+      // On an AIE4 tile with D3, a four-entry pattern written as four
+      // addressing dims lands its outermost dim in the iteration slot. Point
+      // diagnostics about that slot at the five-entry form, unless a zero
+      // stride makes the outermost dim a plain repeat.
+      bool fourEntryOnD3Tile =
+          isa<AIE::AIE4TargetModel>(tm) && !iter && dims->size() == 4 &&
+          (*dims)[0].getStride() != 0 &&
+          tileHasD3AddressDim(tm, tile.getCol(), tile.getRow());
       if (useD3AddressDim &&
           !tileHasD3AddressDim(tm, tile.getCol(), tile.getRow()))
         return bd_op->emitOpError(
@@ -1164,10 +1196,16 @@ struct AIEDMATasksToNPUPass
       getHardwareStridesWraps(tm, bd_op, buffer_type, input_sizes,
                               input_strides, sizes, strides);
 
-      if (failed(verifyStridesWraps(
-              bd_op, [&] { return bd_op->emitOpError(); }, buffer_type,
-              tile.getCol(), tile.getRow(), input_sizes, input_strides, sizes,
-              strides, treatAsLinear))) {
+      auto emitStrideWrapError = [&] {
+        InFlightDiagnostic err = bd_op->emitOpError();
+        if (fourEntryOnD3Tile && (*dims)[0].getSize() > 1)
+          attachFiveEntryD3Note(err, *dims);
+        return err;
+      };
+      if (failed(verifyStridesWraps(bd_op, emitStrideWrapError, buffer_type,
+                                    tile.getCol(), tile.getRow(), input_sizes,
+                                    input_strides, sizes, strides,
+                                    treatAsLinear))) {
         return failure();
       }
 
@@ -1236,7 +1274,14 @@ struct AIEDMATasksToNPUPass
             << "Addressing dimensions of data layout transformation would "
                "result in transfer of "
             << (len_dims_addr_granularity * addr_granularity / 8) << " bytes. ";
-        if (!useD3AddressDim)
+        // A length covering all four entries means they were meant as
+        // D3..D0.
+        uint64_t fourDimLen = bd_op.getBufferElementTypeWidthInBytes();
+        for (AIE::BDDimLayoutAttr dim : *dims)
+          fourDimLen *= dim.getSize();
+        if (fourEntryOnD3Tile && fourDimLen == len)
+          attachFiveEntryD3Note(err, *dims);
+        else if (!useD3AddressDim)
           err.attachNote() << "Do not include the highest dimension size in "
                               "transfer length, as this is the BD repeat "
                               "count.";
@@ -1444,17 +1489,34 @@ struct AIEDMATasksToNPUPass
     // One push onto the task queue runs one iteration of a BD's iteration
     // dimension; only a push's repeat_count runs the rest. Warn once the
     // BDs are known to lower, so an invalid one gets only its error.
-    SmallVector<std::pair<Location, int64_t>> unrepeatedIterations;
+    // A four-entry pattern on an AIE4 tile with D3 also gets the five-entry
+    // form, in case its outermost entry was meant as D3.
+    struct UnrepeatedIteration {
+      Location loc;
+      int64_t iterations;
+      SmallVector<AIE::BDDimLayoutAttr> fourEntryDims;
+    };
+    SmallVector<UnrepeatedIteration> unrepeatedIterations;
     if (onlyPushedOnce.lookup(op)) {
+      const AIE::AIETargetModel &tm = AIE::getTargetModel(op);
       for (auto bd_op : body.getOps<AIE::DMABDOp>()) {
         SmallVector<OpFoldResult> sizes = bd_op.getMixedSizes();
         std::optional<int64_t> iterations;
-        if (std::optional<AIE::BDIterationAttr> iter = bd_op.getIteration())
+        SmallVector<AIE::BDDimLayoutAttr> fourEntryDims;
+        if (std::optional<AIE::BDIterationAttr> iter = bd_op.getIteration()) {
           iterations = iter->getSize();
-        else if (sizes.size() == 4)
+        } else if (sizes.size() == 4) {
           iterations = getConstantIntValue(sizes.front());
+          std::optional<SmallVector<AIE::BDDimLayoutAttr>> dims =
+              bd_op.getConstantDimensions();
+          if (isa<AIE::AIE4TargetModel>(tm) &&
+              tileHasD3AddressDim(tm, tile.getCol(), tile.getRow()) && dims &&
+              dims->size() == 4 && (*dims)[0].getStride() != 0)
+            fourEntryDims = *dims;
+        }
         if (iterations && *iterations > 1)
-          unrepeatedIterations.emplace_back(bd_op.getLoc(), *iterations);
+          unrepeatedIterations.push_back(
+              {bd_op.getLoc(), *iterations, fourEntryDims});
       }
     }
 
@@ -1469,12 +1531,16 @@ struct AIEDMATasksToNPUPass
       }
     }
 
-    for (auto [loc, iterations] : unrepeatedIterations)
-      mlir::emitWarning(loc)
-          << "iteration dimension of size " << iterations
+    for (const UnrepeatedIteration &u : unrepeatedIterations) {
+      InFlightDiagnostic warning =
+          mlir::emitWarning(u.loc)
+          << "iteration dimension of size " << u.iterations
           << " is pushed with repeat_count 0, so only its first iteration "
              "runs; set repeat_count = "
-          << iterations - 1;
+          << u.iterations - 1;
+      if (!u.fourEntryDims.empty())
+        attachFiveEntryD3Note(warning, u.fourEntryDims);
+    }
 
     op.erase();
 
