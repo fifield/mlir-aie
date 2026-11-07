@@ -5309,6 +5309,14 @@ LogicalResult DMABDOp::verify() {
       return emitOpError(
           "For >32b width datatypes, inner-most dim stride must be 1");
 
+    // AIE4 BDs have no D0 step size: the innermost dimension is always
+    // linear. aie-rt drops a D0 stride with only a warning, so the access
+    // would silently differ from the one declared. The runtime BD paths
+    // (aiex.npu.dma_memcpy_nd, dma tasks) reject it the same way.
+    if (isa<AIE4TargetModel>(targetModel) && dims->back().getSize() > 1 &&
+        dims->back().getStride() != 1)
+      return emitOpError("AIE4 D0 stride is fixed by hardware and must be 1.");
+
     // The hardware stepsize/wrap registers are denominated in 32-bit words.
     // lib/Targets/AIERT.cpp's static/CDO lowering converts element-
     // granularity strides/sizes to words by scaling by
