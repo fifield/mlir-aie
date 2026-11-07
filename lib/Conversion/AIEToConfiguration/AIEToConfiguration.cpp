@@ -880,7 +880,7 @@ LogicalResult xilinx::AIE::generateAndInsertTeardownOps(
 LogicalResult xilinx::AIE::generateAndInsertPartitionResetOps(
     OpBuilder &builder, xilinx::AIE::DeviceOp device,
     AIEX::BlockwriteData &blockwriteData,
-    AIE::AIEToConfigurationOutputType outputType) {
+    AIE::AIEToConfigurationOutputType outputType, Operation *incoming) {
   const AIETargetModel &targetModel =
       (const AIETargetModel &)device.getTargetModel();
   if (!targetModel.hasProperty(AIETargetModel::IsNPU))
@@ -890,7 +890,8 @@ LogicalResult xilinx::AIE::generateAndInsertPartitionResetOps(
   if (failed(ctl.setIOBackend(/*aieSim=*/false, /*xaieDebug=*/false)))
     return failure();
   ctl.startTransaction();
-  if (failed(ctl.addColumnQuiesce(device)))
+  if (failed(
+          ctl.addColumnQuiesce(device, dyn_cast_or_null<DeviceOp>(incoming))))
     return failure();
   return insertRecordedTransaction(ctl, builder, outputType, blockwriteData);
 }

@@ -11,6 +11,7 @@
 
 #include "mlir/IR/MLIRContext.h"
 
+#include <algorithm>
 #include <cassert>
 #include <iostream>
 #include <stdexcept>
@@ -596,6 +597,127 @@ void test_aie4_target_register_lookup() {
   std::cout << "  ✓ Memory/core names and addresses resolve consistently\n";
 }
 
+void test_aie4_stream_switch_registers() {
+  std::cout << "Test: AIE4 Stream Switch Register Enumeration\n";
+  const auto &model = getTargetModel(AIEDevice::npu3);
+  struct Expected {
+    TileID tile;
+    const char *kind;
+    size_t registers;
+    size_t runs;
+    uint32_t first;
+    uint32_t last;
+    // Offsets inside the switch's register range that must not be cleared:
+    // holes in the address map and excluded registers.
+    std::vector<uint32_t> excluded;
+    // Offsets the database must not define at all (address map holes).
+    std::vector<uint32_t> holes;
+  };
+  for (const Expected &expected : {
+           Expected{{0, 2},
+                    "core",
+                    192,
+                    22,
+                    0xB4000,
+                    0xB4B9C,
+                    {0xB4010, 0xB4020, 0xB414C, 0xB4F00, 0xB4F04},
+                    {0xB4010, 0xB4020, 0xB414C}},
+           Expected{{0, 1},
+                    "memory tile",
+                    198,
+                    41,
+                    0x20000,
+                    0x6024C,
+                    {0x20010, 0x20250, 0x20254, 0x20260},
+                    {0x20010}},
+           Expected{{0, 0},
+                    "shim",
+                    171,
+                    29,
+                    0x8000,
+                    0x4823C,
+                    {0x8008, 0x8250, 0x8254, 0x8260},
+                    {0x8008}},
+       }) {
+    auto regs = model.getStreamSwitchRegisters(expected.tile);
+    std::string kind = expected.kind;
+    if (regs.size() != expected.registers)
+      throw std::runtime_error(
+          "Wrong number of " + kind +
+          " stream switch registers: " + std::to_string(regs.size()));
+    if (regs.front()->offset != expected.first ||
+        regs.back()->offset != expected.last)
+      throw std::runtime_error("Wrong " + kind + " stream switch range");
+    size_t runs = 0;
+    for (size_t i = 0; i < regs.size(); i++) {
+      const RegisterInfo *reg = regs[i];
+      llvm::StringRef name = reg->name;
+      if (!name.starts_with("Stream_Switch_") || reg->type != "rw" ||
+          reg->width != 32 || std::stoul(reg->reset, nullptr, 0) != 0 ||
+          name.contains("Parity") || name.contains("Event_Port_Selection"))
+        throw std::runtime_error("Unexpected " + kind +
+                                 " stream switch register " + reg->name);
+      if (i > 0 && reg->offset <= regs[i - 1]->offset)
+        throw std::runtime_error(kind + " registers are not sorted by offset");
+      // A run of consecutive registers never spans an offset that the
+      // register database does not define.
+      if (i == 0 || reg->offset != regs[i - 1]->offset + 4)
+        ++runs;
+      else if (model.lookupRegisterByAddress(
+                   model.getTileAddress(expected.tile.col, expected.tile.row) +
+                   reg->offset) != reg)
+        throw std::runtime_error("Address lookup disagrees for " + reg->name);
+    }
+    if (runs != expected.runs)
+      throw std::runtime_error("Wrong number of " + kind +
+                               " stream switch runs: " + std::to_string(runs));
+    for (uint32_t offset : expected.excluded)
+      for (const RegisterInfo *reg : regs)
+        if (reg->offset == offset)
+          throw std::runtime_error("Excluded " + kind + " register " +
+                                   reg->name + " is cleared");
+    // The full module is larger and sorted the same way.
+    auto all = model.getTileRegisters(expected.tile);
+    for (uint32_t hole : expected.holes) {
+      for (const RegisterInfo *reg : all)
+        if (reg->offset == hole)
+          throw std::runtime_error("The " + kind + " register database " +
+                                   "defines hole offset " + reg->name);
+      if (model.lookupRegisterByAddress(
+              model.getTileAddress(expected.tile.col, expected.tile.row) +
+              hole))
+        throw std::runtime_error("The " + kind +
+                                 " address lookup defines a hole offset");
+    }
+    if (all.size() <= regs.size() ||
+        !std::is_sorted(all.begin(), all.end(),
+                        [](const RegisterInfo *a, const RegisterInfo *b) {
+                          return a->offset < b->offset;
+                        }))
+      throw std::runtime_error("Bad " + kind + " module enumeration");
+  }
+  // Every core tile and every column enumerate the same registers.
+  if (model.getStreamSwitchRegisters({2, 5}) !=
+          model.getStreamSwitchRegisters({0, 2}) ||
+      model.getStreamSwitchRegisters({1, 0}) !=
+          model.getStreamSwitchRegisters({0, 0}))
+    throw std::runtime_error("Stream switch registers differ between tiles");
+  for (const char *name :
+       {"Stream_Switch_Parity_Status", "Stream_Switch_Parity_Injection_0",
+        "Stream_Switch_Event_Port_Selection_0",
+        "Tile_Control_Packet_Handler_Status",
+        "Event_Group_Stream_Switch_Enable"}) {
+    const RegisterInfo *reg = model.lookupRegister(name, {0, 2});
+    if (!reg)
+      throw std::runtime_error(std::string("Missing core register ") + name);
+    for (const RegisterInfo *ss : model.getStreamSwitchRegisters({0, 2}))
+      if (ss == reg)
+        throw std::runtime_error(std::string("Excluded register cleared: ") +
+                                 name);
+  }
+  std::cout << "  ✓ 192/198/171 core/memtile/shim registers in 22/41/29 runs\n";
+}
+
 int main() {
   try {
     std::cout << "==============================================\n";
@@ -623,6 +745,7 @@ int main() {
     test_aie4_cross_module();
     test_aie4_wrong_module();
     test_aie4_nonexistent_register();
+    test_aie4_stream_switch_registers();
 
     std::cout << "\n==============================================\n";
     std::cout << "All tests passed! ✓\n";

@@ -112,11 +112,14 @@ struct AIERTControl {
   // left. Set by generateAndInsertConfigOps for AIE4.
   bool zeroUninitializedLocks = false;
   // Emit the partition-wide reset (AIE4 only) that every AIE4 configuration
-  // section starts with: hold every core in reset, pulse every core-tile and
-  // memtile DMA channel reset, clear the memtile MM2S constant pad values,
-  // return the shim data channels to their default modes, and leave every
-  // core disabled.
-  mlir::LogicalResult addColumnQuiesce(DeviceOp &targetOp);
+  // section starts with: hold every core in reset, clear every stream switch,
+  // pulse every core-tile and memtile DMA channel reset, clear the memtile
+  // MM2S constant pad values, return the shim data channels to their default
+  // modes, and leave every core disabled. With `incoming`, the device whose
+  // configuration follows, packet slots are cleared only on its packet-mode
+  // tiles; without it, everywhere.
+  mlir::LogicalResult addColumnQuiesce(DeviceOp &targetOp,
+                                       DeviceOp incoming = {});
 
 private:
   const AIETargetModel &targetModel;

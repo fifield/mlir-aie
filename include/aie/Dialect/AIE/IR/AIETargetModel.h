@@ -814,6 +814,22 @@ public:
   const RegisterInfo *lookupRegister(llvm::StringRef name, TileID tile,
                                      bool isMem = false) const;
 
+  /// Every register of the module that holds `tile`'s registers (shim, memory
+  /// tile, or the compute tile's core or memory module per `isMem`), sorted by
+  /// tile-relative offset. Unlike lookupRegister, AIE4 compute-tile memory
+  /// lookups do not fall back to the core module. Empty if the target has no
+  /// register database.
+  std::vector<const RegisterInfo *> getTileRegisters(TileID tile,
+                                                     bool isMem = false) const;
+
+  /// The registers that configure `tile`'s stream switches, sorted by offset:
+  /// every read-write `Stream_Switch_*` register (port configuration, packet
+  /// slots, deterministic merge; on AIE4 both the data switch and the 32-bit
+  /// switch), excluding parity injection and status and event port selection.
+  /// Used by the AIE4 configure-step switch clear. Empty if the target has no
+  /// register database.
+  std::vector<const RegisterInfo *> getStreamSwitchRegisters(TileID tile) const;
+
   /// Resolve an absolute device address using this target's register database
   /// and physical-to-logical tile mapping. Return nullptr if not found.
   const RegisterInfo *lookupRegisterByAddress(uint64_t address) const;

@@ -77,6 +77,11 @@ public:
   const RegisterInfo *lookupRegisterByOffset(uint32_t offset,
                                              llvm::StringRef module) const;
 
+  /// Every register of `module` (a JSON module key, case-insensitive), sorted
+  /// by tile-relative offset. Empty if the module is unknown.
+  std::vector<const RegisterInfo *>
+  getRegistersInModule(llvm::StringRef module) const;
+
   /// Lookup event by name and module
   std::optional<uint32_t> lookupEvent(llvm::StringRef name,
                                       llvm::StringRef module) const;

@@ -81,12 +81,15 @@ generateAndInsertTeardownOps(mlir::OpBuilder &builder,
 bool isPureDispatcher(xilinx::AIE::DeviceOp device);
 
 // Insert the AIE4 reset of `device`'s partition (see aiex.npu.write_reset),
-// which every AIE4 configuration section starts with.
+// which every AIE4 configuration section starts with. `incoming`, if known, is
+// the device configured right after; the reset then clears packet slots only
+// where that configuration uses them (see AIERTControl::addColumnQuiesce).
 mlir::LogicalResult generateAndInsertPartitionResetOps(
     mlir::OpBuilder &builder, xilinx::AIE::DeviceOp device,
     xilinx::AIEX::BlockwriteData &blockwriteData,
     AIEToConfigurationOutputType outputType =
-        AIEToConfigurationOutputType::Transaction);
+        AIEToConfigurationOutputType::Transaction,
+    mlir::Operation *incoming = nullptr);
 
 // --------------------------------------------------------------------------
 // Device reset

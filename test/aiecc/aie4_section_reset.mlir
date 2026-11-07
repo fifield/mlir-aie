@@ -7,10 +7,10 @@
 
 // AIE4 configuration delivered as LOAD_PDI sections: every section starts
 // with the reset of the whole partition (all three columns of npu3), and only
-// then writes its device's configuration. The runtime-sequence jobs never reset anything. For A, B, A,
-// both copies of @a and the copy of @b each carry the reset, so the A -> B
-// and B -> A transitions (cert does not skip them: the ids differ) start
-// from a quiesced array.
+// then writes its device's configuration. The runtime-sequence jobs never
+// reset anything. For A, B, A, both copies of @a and the copy of @b each carry
+// the reset, so the A -> B and B -> A transitions (cert does not skip them:
+// the ids differ) start from a quiesced array.
 //
 // Under --expand-load-pdis each configuration is written in line instead,
 // after an aiex.npu.write_reset that writes the same reset; nothing is loaded.
@@ -51,8 +51,12 @@
 // QB: poll every Core_Control back.
 // SEC-NEXT: MASK_POLL_32 {{ *}}0x006a3000, 0x00000003, 0x00000002
 // SEC: MASK_POLL_32 {{ *}}0x049a3000, 0x00000003, 0x00000002
+// S: zero every stream switch register of the partition with uC-DMA chains,
+// which page legalization splits over several jobs of the section.
+// SEC-NEXT: uC_DMA_WRITE_DES_SYNC {{ *}}@chain_{{[0-9]+}}
+// SEC-NOT: {{WRITE_32|POLL_32}}
 // Q1: assert the memtile and core-tile DMA channel resets.
-// SEC-NEXT: MASK_WRITE_32 {{ *}}0x00109e00, 0x00000002, 0x00000002
+// SEC: MASK_WRITE_32 {{ *}}0x00109e00, 0x00000002, 0x00000002
 // SEC: MASK_WRITE_32 {{ *}}0x049ace10, 0x00000002, 0x00000002
 // Q2: release them.
 // SEC-NEXT: WRITE_32 {{ *}}0x00109e00, 0x00000000

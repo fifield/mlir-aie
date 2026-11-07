@@ -1,0 +1,51 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// Static check of the stale route this example depends on; no hardware.
+//
+// Both designs keep their hand-placed memtile routes: the stream enters on
+// South:0 and goes to DMA:0 in A, to DMA:2 in B.
+// RUN: aie-opt --aie-create-pathfinder-flows %S/design_a.mlir | FileCheck %s --check-prefix=ROUTE-A
+// RUN: aie-opt --aie-create-pathfinder-flows %S/design_b.mlir | FileCheck %s --check-prefix=ROUTE-B
+// ROUTE-A:      aie.switchbox(%mem_tile_0_1) {
+// ROUTE-A-NEXT:   aie.connect<South : 0, DMA : 0>
+// ROUTE-A-NEXT:   aie.connect<DMA : 0, South : 0>
+// ROUTE-B:      aie.switchbox(%mem_tile_0_1) {
+// ROUTE-B-NEXT:   aie.connect<South : 0, DMA : 2>
+// ROUTE-B-NEXT:   aie.connect<DMA : 2, South : 0>
+//
+// Memtile (0, 1) Stream_Switch_Manager_Config_DMA_0 is 0x120000 (1179648) and
+// Manager_Config_DMA_2 is 0x120008 (1179656); 0x8000000e (-2147483634)
+// enables the port and selects subordinate South:0.
+//
+// A's configuration connects South:0 -> DMA:0.
+// RUN: aie-opt --aie-create-pathfinder-flows --aie-assign-buffer-addresses --aie-assign-lock-ids --aie-assign-bd-ids --convert-aie-to-transaction=device-name=stream_a --canonicalize %S/design_a.mlir | FileCheck %s --check-prefix=A
+// A: aiex.npu.write32(%c1179648_i32, %c-2147483634_i32)
+//
+// B's configuration alone never writes manager port DMA:0, so the South:0 ->
+// DMA:0 connection left by A would survive next to South:0 -> DMA:2, and the
+// stream would fork into an idle S2MM 0.
+// RUN: aie-opt --aie-create-pathfinder-flows --aie-assign-buffer-addresses --aie-assign-lock-ids --aie-assign-bd-ids --convert-aie-to-transaction=device-name=stream_b --canonicalize %S/design_b.mlir | FileCheck %s --check-prefix=CONFIG-B
+// CONFIG-B-NOT: address = 1179648 :
+// CONFIG-B-NOT: %c1179648_i32
+// CONFIG-B:     aiex.npu.write32(%c1179656_i32, %c-2147483634_i32)
+// CONFIG-B-NOT: address = 1179648 :
+// CONFIG-B-NOT: %c1179648_i32
+//
+// In its LOAD_PDI section, B's configuration follows the reset of the
+// partition, whose stream switch clear zeroes manager ports DMA:0 to DMA:3
+// (0x120000, 4 words) with a uC-DMA BD before B connects South:0 -> DMA:2.
+// RUN: rm -rf stale_route_static_prj && mkdir -p stale_route_static_prj
+// RUN: %aiecc --tmpdir=stale_route_static_prj/b --device-name=stream_b --get-full-elf --full-elf-name=stale_route_static_prj/b.elf %S/design_b.mlir
+// RUN: FileCheck %s --check-prefix=LDPDI --input-file=stale_route_static_prj/b/stream_b__site0.asm
+// RUN: FileCheck %s --check-prefix=LDPDI-MAIN --input-file=stale_route_static_prj/b/full_elf_cert.mlir.asm
+// LDPDI-MAIN:       LOAD_PDI {{ *}}{{[0-9]+}}, @stream_b__site0
+// LDPDI:            uC_DMA_WRITE_DES_SYNC {{ *}}@[[CHAIN:chain_[0-9]+]]
+// LDPDI:            WRITE_32 {{ *}}0x00120008, 0x8000000e
+// LDPDI:            [[CHAIN]]:
+// LDPDI:            UC_DMA_BD {{ *}}0, 0x00120000, @[[DATA:[A-Za-z0-9_]+]], 4, 0, 1
+// LDPDI:            [[DATA]]:
+// LDPDI-NEXT:       .long 0x00000000
+// LDPDI-NEXT:       .long 0x00000000
+// LDPDI-NEXT:       .long 0x00000000
+// LDPDI-NEXT:       .long 0x00000000

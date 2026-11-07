@@ -1,0 +1,14 @@
+// (c) Copyright 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// REQUIRES: ryzen_ai_npu3, peano
+//
+// RUN: mkdir -p stream_reuse_elfs_npu3
+// RUN: cd stream_reuse_elfs_npu3
+// RUN: make -f %S/Makefile clean
+// RUN: make -f %S/Makefile all
+// RUN: %run_on_npu3% ./test.exe --mode seq --n 32 | FileCheck %s
+// RUN: %run_on_npu3% ./test.exe --mode runlist --n 32 | FileCheck %s
+// RUN: %run_on_npu3% ./test.exe --mode startall --n 32 | FileCheck %s
+// CHECK: 32/32 runs exact (A,B alternating)
+// CHECK: PASS

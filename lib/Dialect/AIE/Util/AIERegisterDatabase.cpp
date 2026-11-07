@@ -317,6 +317,21 @@ RegisterDatabase::lookupRegisterByOffset(uint32_t offset,
   return offIt->second;
 }
 
+std::vector<const RegisterInfo *>
+RegisterDatabase::getRegistersInModule(StringRef module) const {
+  std::vector<const RegisterInfo *> regs;
+  auto modIt = registersByOffset_.find(module.lower());
+  if (modIt == registersByOffset_.end())
+    return regs;
+  regs.reserve(modIt->second.size());
+  for (const auto &entry : modIt->second)
+    regs.push_back(entry.second);
+  llvm::sort(regs, [](const RegisterInfo *a, const RegisterInfo *b) {
+    return a->offset < b->offset;
+  });
+  return regs;
+}
+
 std::optional<uint32_t> RegisterDatabase::lookupEvent(StringRef name,
                                                       StringRef module) const {
   std::string key = module.str() + "::" + name.str();

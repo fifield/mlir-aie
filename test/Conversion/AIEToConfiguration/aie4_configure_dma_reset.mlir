@@ -18,7 +18,7 @@
 // RUN: cat aie4_configure_dma_reset_prj/v1_c1.inl.asm aie4_configure_dma_reset_prj/v1_c2.inl.asm aie4_configure_dma_reset_prj/v1_c3.inl.asm | FileCheck %s
 
 // An AIE4 configuration section starts by resetting the whole partition
-// (Q0-Q3) before anything the device itself configures.
+// (Q0, QB, S, Q1-Q3) before anything the device itself configures.
 
 // npu3_1col: one column, shim row 0, memtile row 1, core rows 2-5. Every
 // core and DMA channel in the column is reset, declared or not. Core (0,2)
@@ -40,6 +40,9 @@
 // CHECK-NEXT: MASK_POLL_32 0x007a3000, 0x00000003, 0x00000002
 // CHECK-NEXT: MASK_POLL_32 0x008a3000, 0x00000003, 0x00000002
 // CHECK-NEXT: MASK_POLL_32 0x009a3000, 0x00000003, 0x00000002
+// S: clear every stream switch in the partition with one uC-DMA chain (see
+// aie4_configure_switch_clear.mlir).
+// CHECK-NEXT: uC_DMA_WRITE_DES_SYNC @chain_{{[0-9]+}}
 // Q1: assert the reset of every memtile and core-tile channel, all S2MM then
 // all MM2S per tile, unused channels included.
 // CHECK-NEXT: {{^ *}}MASK_WRITE_32 0x00109e00, 0x00000002, 0x00000002
@@ -227,7 +230,11 @@ module {
 // CHECK-NEXT: MASK_WRITE_32 0x029a3000, 0x00000001, 0x00000000
 // CHECK-NEXT: MASK_POLL_32 0x006a3000, 0x00000003, 0x00000002
 // CHECK:      MASK_POLL_32 0x029a3000, 0x00000003, 0x00000002
-// CHECK-NEXT: {{^ *}}MASK_WRITE_32 0x00109e00, 0x00000002, 0x00000002
+// S's chain of both columns' switch clears does not fit one cert page, so
+// page legalization splits it, and job 1 with it, over several jobs.
+// CHECK-NEXT: uC_DMA_WRITE_DES_SYNC @chain_{{[0-9]+}}
+// CHECK-NOT: {{WRITE_32|POLL_32}}
+// CHECK: {{^ *}}MASK_WRITE_32 0x00109e00, 0x00000002, 0x00000002
 // CHECK:      {{^ *}}MASK_WRITE_32 0x009ace10, 0x00000002, 0x00000002
 // CHECK-NEXT: {{^ *}}MASK_WRITE_32 0x02109e00, 0x00000002, 0x00000002
 // CHECK:      {{^ *}}MASK_WRITE_32 0x02149e80, 0x00000002, 0x00000002

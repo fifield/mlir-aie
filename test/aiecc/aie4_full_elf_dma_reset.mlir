@@ -25,8 +25,13 @@
 // CHECK: MASK_POLL_32 {{ *}}0x006a3000, 0x00000003, 0x00000002
 // CHECK-NOT: 0x00110000,
 // CHECK: MASK_POLL_32 {{ *}}0x049a3000, 0x00000003, 0x00000002
+// S: clear every stream switch of the three columns. Its uC-DMA chains do not
+// fit one cert page, so page legalization splits the configure job over
+// several jobs (only chains and job boundaries come before Q1).
+// CHECK-NEXT: uC_DMA_WRITE_DES_SYNC {{ *}}@chain_{{[0-9]+}}
+// CHECK-NOT: {{WRITE_32|POLL_32}}
 // Q1: assert memtile DMA_S2MM_0_Ctrl's Reset, then the other columns'.
-// CHECK-NEXT: {{^ *}}MASK_WRITE_32 {{ *}}0x00109e00, 0x00000002, 0x00000002
+// CHECK: {{^ *}}MASK_WRITE_32 {{ *}}0x00109e00, 0x00000002, 0x00000002
 // CHECK-NOT: 0x00110000,
 // CHECK: {{^ *}}MASK_WRITE_32 {{ *}}0x04109e00, 0x00000002, 0x00000002
 // CHECK-NOT: 0x00110000,

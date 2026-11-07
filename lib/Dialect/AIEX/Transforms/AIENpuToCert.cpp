@@ -103,7 +103,10 @@ static LogicalResult prependPartitionReset(AIE::DeviceOp device) {
     seq.getBody().emplaceBlock();
   OpBuilder builder = OpBuilder::atBlockBegin(&seq.getBody().front());
   AIEX::BlockwriteData payloads(device, "reset_");
-  return AIE::generateAndInsertPartitionResetOps(builder, device, payloads);
+  // The reset is the top of `device`'s own configuration, which follows it.
+  return AIE::generateAndInsertPartitionResetOps(
+      builder, device, payloads, AIE::AIEToConfigurationOutputType::Transaction,
+      /*incoming=*/device);
 }
 
 // Returns the PDI id to use for a cert.load_pdi that references `deviceSymName`
@@ -1951,19 +1954,24 @@ static bool cutSeparatesSpan(ArrayRef<IndivisibleSpan> spans, int p,
 // What is never legal is a cut ahead of everything on the page: it leaves the
 // earlier page empty, so the "split" makes no progress and the greedy driver
 // repeats it forever. Among the legal candidates pick the one whose
-// earlier-page cost is closest to `split_target`. Returns false if no legal
+// earlier-page cost is closest to `split_target`, or, with `fill`, the one that
+// fills the earlier page most without exceeding it (if every cut leaves it
+// over the target, the smallest such one). Returns false if no legal
 // split point exists (the caller then leaves the page intact).
 static bool findLegalSplitPoint(AIEX::CertPageOp page, uint32_t split_target,
                                 const std::map<Operation *, int> &flatIndex,
                                 ArrayRef<IndivisibleSpan> spans,
                                 AIEX::CertJobOp &split_job,
-                                Block::iterator &split_iter) {
+                                Block::iterator &split_iter,
+                                bool fill = false) {
   AIE::DeviceOp deviceOp = page->getParentOfType<AIE::DeviceOp>();
   uint32_t text_cost = 32; // page header, mirrors estimateCost
   uint32_t data_cost = 0;
   ChainDataCostState seen; // mirrors estimateCost
   bool found = false;
   uint32_t best_delta = 0;
+  bool best_fits = false;
+  uint32_t best_cost = 0;
   // Whether some job already visited holds a real op, i.e. whether cutting at
   // the current job's first op would leave content on the earlier page.
   bool sawOpInEarlierJob = false;
@@ -1992,9 +2000,18 @@ static bool findLegalSplitPoint(AIEX::CertPageOp page, uint32_t split_target,
           uint32_t cost = text_cost + data_cost;
           uint32_t delta =
               cost > split_target ? cost - split_target : split_target - cost;
-          if (!found || delta < best_delta) {
+          // With `fill`, a fitting cut beats any over-target one; among fitting
+          // cuts the fullest earlier page wins, among over-target ones the
+          // smallest.
+          bool fits = cost <= split_target;
+          bool better = fill ? (fits && (!best_fits || cost > best_cost)) ||
+                                   (!fits && !best_fits && cost < best_cost)
+                             : delta < best_delta;
+          if (!found || better) {
             found = true;
             best_delta = delta;
+            best_fits = fits;
+            best_cost = cost;
             split_job = job;
             split_iter = current;
           }
@@ -2204,7 +2221,13 @@ struct SplitCertPageOpPattern : OpRewritePattern<AIEX::CertPageOp> {
     AIEX::CertJobOp split_job;
     Block::iterator split_iter;
     bool found_split_point = false;
-    uint32_t cost = estimateCost(op, cert_page_size / 2, split_job, split_iter,
+    // On AIE4 a page over the limit is cut where the earlier page is as full
+    // as fits under cert_page_size, so it becomes as few pages as possible.
+    // Elsewhere it is cut about in half.
+    bool fill = isa<AIE::AIE4TargetModel>(
+        op->getParentOfType<AIE::DeviceOp>().getTargetModel());
+    uint32_t split_target = fill ? cert_page_size : cert_page_size / 2;
+    uint32_t cost = estimateCost(op, split_target, split_job, split_iter,
                                  found_split_point);
     LLVM_DEBUG(llvm::outs()
                << "Estimate cost for page: " << " is " << cost << "\n");
@@ -2226,12 +2249,13 @@ struct SplitCertPageOpPattern : OpRewritePattern<AIEX::CertPageOp> {
     // earlier job has several ops, or a page of small jobs whose sizes merely
     // sum over the limit, where the cut belongs on a job boundary. Fall back to
     // the exhaustive search, which considers every position in the page and
-    // keeps the legal one closest to split_target, before giving up. Spans are
-    // not applied here: a page whose cuts are all blocked by a span has split
-    // points, and the span check below reports which constraint blocks them.
-    if (!found_split_point)
-      found_split_point = findLegalSplitPoint(op, cert_page_size / 2, flatIndex,
-                                              {}, split_job, split_iter);
+    // keeps the legal one closest to split_target, before giving up. Filling
+    // a page always uses the exhaustive search. Spans are not applied here: a
+    // page whose cuts are all blocked by a span has split points, and the span
+    // check below reports which constraint blocks them.
+    if (fill || !found_split_point)
+      found_split_point = findLegalSplitPoint(op, split_target, flatIndex, {},
+                                              split_job, split_iter, fill);
 
     // Over the split trigger but with nowhere to cut. Every cut has to leave at
     // least one op on each side, so a page whose bulk sits in a single one-op
@@ -2277,8 +2301,8 @@ struct SplitCertPageOpPattern : OpRewritePattern<AIEX::CertPageOp> {
       int p = fi == flatIndex.end() ? 0 : fi->second;
       SpanKind kind = SpanKind::LocalBarrier;
       if (cutSeparatesSpan(spans, p, &kind)) {
-        if (!findLegalSplitPoint(op, cert_page_size / 2, flatIndex, spans,
-                                 split_job, split_iter)) {
+        if (!findLegalSplitPoint(op, split_target, flatIndex, spans, split_job,
+                                 split_iter, fill)) {
           // Keep indivisible pages whole while they fit the hardware limit.
           // Set hadError on overflow so the pass fails, not just this rewrite.
           if (cost > cert_page_limit) {

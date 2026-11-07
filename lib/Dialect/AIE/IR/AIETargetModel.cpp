@@ -125,6 +125,29 @@ const RegisterInfo *AIETargetModel::lookupRegister(llvm::StringRef name,
   });
 }
 
+std::vector<const RegisterInfo *>
+AIETargetModel::getTileRegisters(TileID tile, bool isMem) const {
+  const auto *db = getRegisterDatabase();
+  if (!db)
+    return {};
+  if (isShimNOCorPLTile(tile.col, tile.row))
+    return db->getRegistersInModule("shim");
+  if (isMemTile(tile.col, tile.row))
+    return db->getRegistersInModule("memory_tile");
+  return db->getRegistersInModule(isMem ? "memory" : "core");
+}
+
+std::vector<const RegisterInfo *>
+AIETargetModel::getStreamSwitchRegisters(TileID tile) const {
+  std::vector<const RegisterInfo *> regs = getTileRegisters(tile);
+  llvm::erase_if(regs, [](const RegisterInfo *reg) {
+    StringRef name = reg->name;
+    return !name.starts_with("Stream_Switch_") || reg->type != "rw" ||
+           name.contains("Parity") || name.contains("Event_Port_Selection");
+  });
+  return regs;
+}
+
 const RegisterInfo *
 AIETargetModel::lookupRegisterByAddress(uint64_t address) const {
   const auto *db = getRegisterDatabase();

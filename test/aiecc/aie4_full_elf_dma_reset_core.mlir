@@ -8,7 +8,8 @@
 // REQUIRES: peano
 
 // With a compiled core, the configure-time reset of the partition still comes
-// first in the configure job: every phase (Q0-Q3) precedes the core ELF load,
+// first in the configure job: every phase (Q0-Q3, with the stream switch clear
+// S between QB and Q1) precedes the core ELF load,
 // which disables core (0,2), resets its DMA channels, writes its program
 // memory (0x680000) and finally enables it.
 
@@ -21,6 +22,12 @@
 // CHECK-NEXT: MASK_WRITE_32 {{ *}}0x006a3000, 0x00000001, 0x00000000
 // CHECK-NOT: uC_DMA_WRITE_DES_SYNC
 // CHECK: MASK_POLL_32 {{ *}}0x006a3000, 0x00000003, 0x00000002
+// S, split by page legalization over several jobs
+// (aie4_full_elf_dma_reset.mlir), then Q1.
+// CHECK: MASK_POLL_32 {{ *}}0x049a3000, 0x00000003, 0x00000002
+// CHECK-NEXT: uC_DMA_WRITE_DES_SYNC {{ *}}@chain_{{[0-9]+}}
+// CHECK-NOT: {{WRITE_32|POLL_32}}
+// CHECK: {{^ *}}MASK_WRITE_32 {{ *}}0x00109e00, 0x00000002, 0x00000002
 // CHECK-NOT: uC_DMA_WRITE_DES_SYNC
 // CHECK: {{^ *}}MASK_WRITE_32 {{ *}}0x006ace00, 0x00000002, 0x00000002
 // CHECK-NOT: uC_DMA_WRITE_DES_SYNC

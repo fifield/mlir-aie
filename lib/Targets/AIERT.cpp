@@ -1329,7 +1329,8 @@ static constexpr uint32_t kQuiescePollTimeoutUs = 1000;
 // the partition is visited, not only those the device declares: a previous
 // design may have left cores running or DMA channels armed on tiles this one
 // does not use. Each phase completes over all tiles before the next starts.
-LogicalResult xilinx::AIE::AIERTControl::addColumnQuiesce(DeviceOp &targetOp) {
+LogicalResult xilinx::AIE::AIERTControl::addColumnQuiesce(DeviceOp &targetOp,
+                                                          DeviceOp incoming) {
   if (!isa<AIE4TargetModel>(targetModel))
     return targetOp.emitOpError(
         "the partition reset is only written as registers on AIE4; elsewhere "
@@ -1430,6 +1431,67 @@ LogicalResult xilinx::AIE::AIERTControl::addColumnQuiesce(DeviceOp &targetOp) {
     return targetOp.emitOpError(
         "register database has a different number of memory tile MM2S "
         "channels and constant pad value registers");
+  // Phase S's registers: the stream switch registers of both the 512b data
+  // switch and the 32b switch (port configuration, packet slots,
+  // deterministic merge; see getStreamSwitchRegisters). All reset to 0, which
+  // disables every port, slot and arbiter, so writing 0 returns the switch to
+  // its fresh-context state. Grouped into runs of consecutive offsets; a run
+  // never covers an offset without a register (the address map has holes,
+  // and an access to one is a slave error).
+  struct SwitchRun {
+    uint32_t offset;
+    uint32_t words;
+  };
+  //
+  // A packet slot matters only on a subordinate port in packet mode, and S
+  // takes every port out of packet mode. With the incoming device known, the
+  // slots are cleared only on the tiles where its configuration puts ports in
+  // packet mode again (it has packet rules there, the control-packet overlay's
+  // included); elsewhere a stale slot stays inert.
+  auto collectSwitchRuns =
+      [&](TileID tile, StringRef kind, bool slots,
+          SmallVectorImpl<SwitchRun> &runs) -> LogicalResult {
+    for (const RegisterInfo *reg : targetModel.getStreamSwitchRegisters(tile)) {
+      StringRef name = reg->name;
+      if (!slots && name.contains("_Slot"))
+        continue;
+      uint64_t resetValue;
+      if (reg->width != 32 ||
+          StringRef(reg->reset).getAsInteger(0, resetValue) || resetValue != 0)
+        return targetOp.emitOpError()
+               << name << " of " << kind
+               << " tiles is not a 32-bit register that resets to 0 in the "
+                  "register database";
+      if (!runs.empty() &&
+          runs.back().offset + 4 * runs.back().words == reg->offset)
+        runs.back().words++;
+      else
+        runs.push_back({reg->offset, 1});
+    }
+    if (runs.empty())
+      return targetOp.emitOpError()
+             << "register database has no stream switch registers for " << kind
+             << " tiles";
+    return success();
+  };
+  // Indexed by whether the runs include the slots.
+  std::array<SmallVector<SwitchRun>, 2> coreSwitch, memSwitch, shimSwitch;
+  for (bool slots : {false, true})
+    if (failed(
+            collectSwitchRuns(*coreTile, "core", slots, coreSwitch[slots])) ||
+        failed(
+            collectSwitchRuns(*memTile, "memory", slots, memSwitch[slots])) ||
+        failed(collectSwitchRuns(*shimTile, "shim", slots, shimSwitch[slots])))
+      return failure();
+  std::set<std::pair<int, int>> packetTiles;
+  if (incoming)
+    for (auto switchbox : incoming.getOps<SwitchboxOp>())
+      if (!switchbox.getConnections().front().getOps<PacketRulesOp>().empty())
+        packetTiles.insert({switchbox.colIndex(), switchbox.rowIndex()});
+  auto clearsSlots = [&](int col, int row) {
+    return !incoming || packetTiles.count({col, row});
+  };
+
   DmaChannels coreChannels, memChannels, shimChannels;
   if (failed(countDmaChannels(*coreTile, "core", coreChannels)) ||
       failed(countDmaChannels(*memTile, "memory", memChannels)) ||
@@ -1440,19 +1502,24 @@ LogicalResult xilinx::AIE::AIERTControl::addColumnQuiesce(DeviceOp &targetOp) {
   SmallVector<XAie_LocType> coreTiles, memTiles, shimTiles;
   // The core and memory tiles, with their data channel counts.
   SmallVector<std::pair<XAie_LocType, DmaChannels>> dmaTiles;
+  // Every tile, with its stream switch register runs.
+  SmallVector<std::pair<XAie_LocType, ArrayRef<SwitchRun>>> switchTiles;
   for (int col = 0; col < numCols; col++) {
     for (int row = 0; row < numRows; row++) {
       XAie_LocType tile = XAie_TileLoc(col, row);
       if (targetModel.isCoreTile(col, row)) {
         coreTiles.push_back(tile);
         dmaTiles.push_back({tile, coreChannels});
+        switchTiles.push_back({tile, coreSwitch[clearsSlots(col, row)]});
       } else if (targetModel.isMemTile(col, row)) {
         memTiles.push_back(tile);
         dmaTiles.push_back({tile, memChannels});
+        switchTiles.push_back({tile, memSwitch[clearsSlots(col, row)]});
       } else if (targetModel.isShimNOCTile(col, row)) {
         // Only NoC shim tiles: the register layout of a PL shim tile may
         // differ, and a write to an undefined offset is a slave error.
         shimTiles.push_back(tile);
+        switchTiles.push_back({tile, shimSwitch[clearsSlots(col, row)]});
       }
     }
   }
@@ -1489,6 +1556,17 @@ LogicalResult xilinx::AIE::AIERTControl::addColumnQuiesce(DeviceOp &targetOp) {
                             targetModel.getTileAddress(tile.Col, tile.Row) +
                                 coreCtl->offset,
                             corePollMask, *coreAssert, kQuiescePollTimeoutUs);
+  // S: clear every stream switch in the partition, one block set per run of
+  // consecutive registers. The configuration reinstalls this device's routes
+  // (control-packet overlay included) in configureSwitches. Stream data left
+  // in switch FIFOs is not removed: the outgoing design must have drained its
+  // streams.
+  for (auto [tile, runs] : switchTiles)
+    for (const SwitchRun &run : runs)
+      TRY_XAIE_API_EMIT_ERROR(targetOp, XAie_BlockSet32, &aiert->devInst,
+                              targetModel.getTileAddress(tile.Col, tile.Row) +
+                                  run.offset,
+                              0, run.words);
   // Q1: assert the reset of every core-tile and memtile data channel, and
   // only then (Q2) release them, writing each channel's default mode.
   for (auto [tile, channels] : dmaTiles)
