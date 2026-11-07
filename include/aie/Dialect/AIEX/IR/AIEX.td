@@ -1409,6 +1409,13 @@ def AIE_NpuLoadPdiOp
     The content includes the section's job ids, so the same device compiled into a
     different program can get a different id.
 
+    On AIE4 full ELFs the entry device's own configuration is delivered the same way: job 1
+    of the program is a `LOAD_PDI` of a section holding it (see `aie-npu-to-cert`), and every
+    loaded section begins with a reset of the partition's cores, DMA channels and stream
+    switches. A repeated dispatch skips the load, so each dispatch must leave the array in its
+    post-configuration state (cores loop forever); `--expand-load-pdis` configures on every
+    dispatch instead. See `docs/AIE4ConfigurationDelivery.md`.
+
     ### Watch Out!
 
     The firmware optimizes out repeated `load_pdi` operations if they refer to the same PDI.
