@@ -130,6 +130,34 @@ Each example's hardware flow is exercised in CI on npu3 hardware via its
 `run_npu3_makefile.lit` (`REQUIRES: ryzen_ai_npu3, chess`), independent of
 the `aie4.mlir` simulator RUN lines above.
 
+### Peano
+
+The hardware flow can also compile the kernel and core with Peano instead of
+chess:
+
+```
+make KERNEL_CC=peano            # $PEANO_INSTALL_DIR/bin/clang++, aiecc --peano
+make run KERNEL_CC=peano
+```
+
+Run `make clean` when switching compilers; both write `project/kernel.o`.
+Most examples compile the same `kernel.cc` with both compilers. Three have a
+`kernel_peano.cc` with the same entry points, because of Peano gaps
+described in each file's header:
+
+* `matmul_int8_sparse`, `matmul_fp8_sparse` - Peano cannot select the
+  two-argument `load_staging(B, mask)`, so the sparsity rows are loaded by a
+  small file-scope assembly helper.
+* `matmul_mxint8` - Peano lacks `v128mxint8_unaligned` and does not tie the
+  operands of the plain MX fifo pops, so each vector uses a fill plus a
+  jump-mode pop.
+
+`matmul_mxfp8`, `matmul_mxfp6` and `matmul_mxfp4` reject `KERNEL_CC=peano`:
+Peano cannot select the MXFP8 MMAC yet.
+
+The Peano flow is exercised by each example's `run_npu3_peano.lit`
+(`REQUIRES: ryzen_ai_npu3, peano`).
+
 Design notes:
 
 - A single compute tile at (0, 2) in column 0. Inputs arrive on two shim MM2S

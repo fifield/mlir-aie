@@ -9,6 +9,19 @@
 ##===----------------------------------------------------------------------===##
 
 srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
+include ${srcdir}/../../makefile-common
+
+# Kernel compiler: chess (default, kernel.cc via xchesscc) or peano
+# (kernel.cc via Peano clang++; aiecc then compiles/links the core with Peano).
+KERNEL_CC ?= chess
+ifeq ($(filter $(KERNEL_CC),chess peano),)
+$(error KERNEL_CC must be chess or peano)
+endif
+# Peano cannot select the MXFP8 MMAC (llvm.aie4.MXFP8.528.ACC2048.mmac) yet,
+# and MXFP6/MXFP4 run through it; drop this guard once it does.
+ifeq ($(KERNEL_CC),peano)
+$(error KERNEL_CC=peano is not supported yet: Peano cannot select the MXFP8 MMAC)
+endif
 
 targetname := matmul_mxfp8
 
@@ -18,15 +31,23 @@ all: $(targetname).elf test.exe
 	clang -std=c++17 -lstdc++ -I/opt/xilinx/xrt/include -L/opt/xilinx/xrt/lib \
 		-luuid -lxrt_coreutil -lm $< -o $@
 
+ifeq ($(KERNEL_CC),peano)
+project/kernel.o: ${srcdir}/kernel.cc
+	mkdir -p project
+	cd project && $(PEANO_INSTALL_DIR)/bin/clang++ $(PEANOWRAP4_FLAGS) -c $(abspath $<) -o kernel.o
+core_flags := --peano $(PEANO_INSTALL_DIR)
+else
 project/kernel.o: ${srcdir}/kernel.cc
 	mkdir -p project
 	cd project && xchesscc_wrapper aie4 -I $(AIETOOLS_DIR)/include -c $(abspath $<) -o kernel.o
+core_flags := --xchesscc --xbridge
+endif
 
 $(targetname)_placed.mlir: ${srcdir}/$(targetname)_placed.py
 	python $< -d npu3 > $@
 
 $(targetname).elf: $(targetname)_placed.mlir project/kernel.o
-	aiecc -v --tmpdir=project --xchesscc --xbridge \
+	aiecc -v --tmpdir=project $(core_flags) \
 		--get-full-elf --full-elf-name=$@ $<
 
 run: test.exe $(targetname).elf
