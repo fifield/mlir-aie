@@ -1,0 +1,9 @@
+{
+  "path": "inputs/model/model.safetensors",
+  "repository": "convaiinnovations/laya",
+  "revision": "1c5edc17a7acd8701df6fc341c0d179f1c62c982",
+  "file": "model.safetensors",
+  "bytes": 842609210,
+  "sha256": "891102d372688fc2a094dac56a384bc537b87c63f21f9f3dac0be2b7cbc8d86c",
+  "scope": "Raw checkpoint from the Hugging Face hub. It is fetched by fetch_model.py, not kept in git. The small config and tokenizer files of the same revision are kept in inputs/model."
+}

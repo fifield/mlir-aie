@@ -1,0 +1,107 @@
+{
+  "exact/b1_l128": {
+    "elf_normalized_sha256": "24c4f385038006aae7cbfad5ec130058e3da0acfd323d76c0c2f9cf71a636765"
+  },
+  "exact/b1_l256": {
+    "elf_normalized_sha256": "59268cf29f0857c4b8385dc0dcff63c9778164a3b3df945ba49257cd09f40cfd"
+  },
+  "exact/b1_l512": {
+    "elf_normalized_sha256": "51a64231a4e22d005ba2fd7b86df9dfc0fedb18dad47a1de7a3ce40d848098dd"
+  },
+  "exact/b1_l64": {
+    "elf_normalized_sha256": "f588ec5591c0cb672af707924d250bf146a588b48fb9b19f4d9b3bc9b943870d"
+  },
+  "exact/b2_l128": {
+    "elf_normalized_sha256": "6a0421c8dd182cbb351dcfb313b1c0b36ec8f3dbe80159fb5a17f9442e689b9a"
+  },
+  "exact/b2_l256": {
+    "elf_normalized_sha256": "4a99ec34811510ec6de2d525a6daa5b7c9fc09a45ff4daf483f6013b2709726d"
+  },
+  "exact/b2_l512": {
+    "elf_normalized_sha256": "b4d1453bb442a6e23d7771d85cd559a0071d41f92a8583b21f88bb26c7c21575"
+  },
+  "exact/b2_l64": {
+    "elf_normalized_sha256": "2f51f278c7ff708ebd6f2ad3b2f235e9efbc5444d74d7899be83c3f0af040a52"
+  },
+  "exact/b4_l128": {
+    "elf_normalized_sha256": "60e3fde1023782b5c8337cd81b4e2f384cbd5e2190c4a289ffae2c29214d968d"
+  },
+  "exact/b4_l256": {
+    "elf_normalized_sha256": "3a6333dcfe9cd149be3b596937e98edb3b80afabf514d046c99a48973e84fed4"
+  },
+  "exact/b4_l512": {
+    "elf_normalized_sha256": "fd930de940b90234c986b42415bf84a1b20cac3f51febe1f91afd149c63b8f5f"
+  },
+  "exact/b4_l64": {
+    "elf_normalized_sha256": "d74397f4e3e9608e5449892ed931a6234d9faaaea38100f72057ce67bfaa50c5"
+  },
+  "exact/b8_l128": {
+    "elf_normalized_sha256": "daab24f408cf6db443f30f6e967ce13025a3c1c84a104b4f702bfc0d5dfd2271"
+  },
+  "exact/b8_l256": {
+    "elf_normalized_sha256": "e9fe74474550a2b3c850a9d79f28bfb4d73a86bdfaaee56b47723d54ef831dea"
+  },
+  "exact/b8_l512": {
+    "elf_normalized_sha256": "51f9531dc99a2dc47a0c3386ddbc2a14073137db2d9b208f551cda9739f4cc6d"
+  },
+  "exact/b8_l64": {
+    "elf_normalized_sha256": "489a34c7af3ad3f74dc13a270fdd07e17793f8bc90362774403ed14a36effb91"
+  },
+  "fast/b1_l128": {
+    "elf_normalized_sha256": "fac8002f01b1fe39865f624a314552b3f8a8e2459c61c01658ec5c70c04520a2"
+  },
+  "fast/b1_l256": {
+    "elf_normalized_sha256": "d2f05e12643fa1825d49588dbe96e28d0c4ecdb891ec4d0bc5d4c10bcee1dee2"
+  },
+  "fast/b1_l512": {
+    "elf_normalized_sha256": "edb46965403e98927d4f86c4516c16d833b96b3e27aa652b0663b71d5589dfce"
+  },
+  "fast/b1_l64": {
+    "elf_normalized_sha256": "2aa41b106ee7c36c90912c115ea53f41136a2c52a97c49ee2b5260e9fa83e84d"
+  },
+  "fast/b2_l128": {
+    "elf_normalized_sha256": "98bd67dcff2f86ff90fba381604db5eec81d2dfe65bd223cb6c2304a3093a38c"
+  },
+  "fast/b2_l256": {
+    "elf_normalized_sha256": "e6b3af21649b53792eff0d778e04fb34a64b91873378c705a1720b4b2cf19ffe"
+  },
+  "fast/b2_l512": {
+    "elf_normalized_sha256": "bb42cc2bf4cff2afbf4e2f2750355cf79a47bd557a2f5cd151981e53a41b1ca3"
+  },
+  "fast/b2_l64": {
+    "elf_normalized_sha256": "389b6ae65acb3285e75adaa54b6236f9e9fb8447dff2cd75af2dcc6babd6489d"
+  },
+  "fast/b4_l128": {
+    "elf_normalized_sha256": "69e6100699d67cf73018592297ab7a48b36ebb06ac9b8dc58680bc7921616cbb"
+  },
+  "fast/b4_l256": {
+    "elf_normalized_sha256": "9bd50668dc99d403a1e871ae38fc157f72990c248e10156dfe84cd84f299b7dd"
+  },
+  "fast/b4_l512": {
+    "elf_normalized_sha256": "d076e58f7ec390aecb62da27fbd891e0e6fc3cff26f8d7f880feeb51b568fadc"
+  },
+  "fast/b4_l64": {
+    "elf_normalized_sha256": "a05cbc4da23ea6d2d666029b386fcb6e90c1782b44ef3a89fcb0f4b0297acc7a"
+  },
+  "fast/b8_l128": {
+    "elf_normalized_sha256": "92170ee50aac0207b5239b887ce93e1d5433a4785519fb985522646ef5031c75"
+  },
+  "fast/b8_l256": {
+    "elf_normalized_sha256": "12abface4edf9dd4ce83a7d0c5595f0018cd12e05dce9fdc697a30c03f0bb35f"
+  },
+  "fast/b8_l512": {
+    "elf_normalized_sha256": "182affa246b06b8a9bd462c95259b14a9234d962255a4fef27c4a34b5bda46d1"
+  },
+  "fast/b8_l64": {
+    "elf_normalized_sha256": "f297cf63d6ecd5a7954bfc06ad9cf21681bdf7e6b0b8ff5bc8723e66a267b602"
+  },
+  "mixed/exact/b2_b1_l64": {
+    "elf_normalized_sha256": "5a4eee9e0ed5f25fc6a1b2beb55c2586cd2e956f517eca893f9d04d2cf6c275f"
+  },
+  "pair/exact/b1_l64": {
+    "elf_normalized_sha256": "29212732b87b43022fa66fdbaf255e42b07d78c825380ea081a5b10fe8d2def1"
+  },
+  "pair/fast/b1_l64": {
+    "elf_normalized_sha256": "d4098623174bf99cce5f9bbd4544d42490ea1914102f253be34de1ef13a955cc"
+  }
+}

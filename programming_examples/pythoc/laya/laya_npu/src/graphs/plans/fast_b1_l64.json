@@ -1,0 +1,11030 @@
+{
+  "batch": 1,
+  "length": 64,
+  "arenas": [
+    66895872,
+    66453504,
+    66977792,
+    63963136,
+    66977792,
+    63963136,
+    65798144,
+    61341696,
+    62914560,
+    62914560,
+    62914560,
+    62914560,
+    50331648
+  ],
+  "allocations": [
+    {
+      "nbytes": 262144,
+      "initial": "0057cb0a1c895b009ee6d5b3d0246a5cd4afbcb9242b86dcfc75fdf76a24e7e2",
+      "arena": 0,
+      "offset": 0
+    },
+    {
+      "nbytes": 393216,
+      "initial": "eae0f4c16c309331696b383f200a3a645fa62196773fcb214f85df0294320ccf",
+      "arena": 0,
+      "offset": 262144
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "60bc664bb3344cfd047e12a2517099af79c1c2113c4dea1be19791cadeb546fa",
+      "arena": 0,
+      "offset": 655360
+    },
+    {
+      "nbytes": 262144,
+      "initial": "67a8bf3541233409eb55ec131d35bd235df17b7c98125dbf5ce04d345844ab9f",
+      "arena": 0,
+      "offset": 6946816
+    },
+    {
+      "nbytes": 131072,
+      "initial": "84aa998967162b2a78b94c3cd19a3117ee2aff6856de1aa2a1b0f7fce148b371",
+      "arena": 0,
+      "offset": 7208960
+    },
+    {
+      "nbytes": 131072,
+      "initial": "84aa998967162b2a78b94c3cd19a3117ee2aff6856de1aa2a1b0f7fce148b371",
+      "arena": 0,
+      "offset": 7340032
+    },
+    {
+      "nbytes": 131072,
+      "initial": "84aa998967162b2a78b94c3cd19a3117ee2aff6856de1aa2a1b0f7fce148b371",
+      "arena": 0,
+      "offset": 7471104
+    },
+    {
+      "nbytes": 16384,
+      "initial": "47896981444e860b9941d33f7280d1f0f4b31b63db91295ced91e54d827fa3fa",
+      "arena": 0,
+      "offset": 7602176
+    },
+    {
+      "nbytes": 128,
+      "initial": "e72710531b01d91ee76a2457cdc9c6c89a197db47da8ebd4ae672e13ddd668cd",
+      "arena": 0,
+      "offset": 7618560
+    },
+    {
+      "nbytes": 1152,
+      "initial": "16283ac1ba0c9a5d31c6d005429081830aa08f44889c0bc6737e62e09e7369d0",
+      "arena": 0,
+      "offset": 7622656
+    },
+    {
+      "nbytes": 8192,
+      "initial": "0c1325d137cccc23b27ee89e049fdc12105f99461573d1cd205519d0faeed256",
+      "arena": 0,
+      "offset": 7626752
+    },
+    {
+      "nbytes": 131072,
+      "initial": "84aa998967162b2a78b94c3cd19a3117ee2aff6856de1aa2a1b0f7fce148b371",
+      "arena": 0,
+      "offset": 7634944
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "34fecc49cbec1c0147dbfa4ec521894c629bb7b410d9c4e1aa17d377cb2dee96",
+      "arena": 0,
+      "offset": 7766016
+    },
+    {
+      "nbytes": 32,
+      "initial": null,
+      "arena": 0,
+      "offset": 9863168
+    },
+    {
+      "nbytes": 393216,
+      "initial": "f1202d875e2e8ac08232d6558b2bbbccb0101edd40ae3e667bd16edf5c9f3e00",
+      "arena": 0,
+      "offset": 9867264
+    },
+    {
+      "nbytes": 262144,
+      "initial": "6ec72c86e0896f2241ff4a44c0e589ffafaa622681089e58b99e2e7fdcd9dbea",
+      "arena": 0,
+      "offset": 10260480
+    },
+    {
+      "nbytes": 335872,
+      "initial": "df46e46486bfb1a39bee95561cf6f851bf4b6300a350d82e896ab249a8302582",
+      "arena": 0,
+      "offset": 10522624
+    },
+    {
+      "nbytes": 65536,
+      "initial": "4607b767fe0998af8963747cdf44d3f3713697a7e22774ffbbdc480475e0d2d0",
+      "arena": 0,
+      "offset": 10858496
+    },
+    {
+      "nbytes": 5373952,
+      "initial": "328e294b65921eb2a3b4d2d9bd5028a953ac65099bce568a6b62878d794fddde",
+      "arena": 0,
+      "offset": 10924032
+    },
+    {
+      "nbytes": 393216,
+      "initial": "7216f0d49ad016ab8ba648d0dc921776ef7201c0dc4c1e780a992939563b1d3a",
+      "arena": 0,
+      "offset": 16297984
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "87f8507c65cc72f85ad32408ffea8959b8e1106d10bdc405a6420d868bd92e60",
+      "arena": 0,
+      "offset": 16691200
+    },
+    {
+      "nbytes": 262144,
+      "initial": "fae3eefc6a31cd2b93ff490efb6a191defd28def625808b609674149930abe4a",
+      "arena": 0,
+      "offset": 22982656
+    },
+    {
+      "nbytes": 1152,
+      "initial": "838b33fc338d4b75b144039d5261b98df5da69907fc6d877b4bd05836f442c6a",
+      "arena": 0,
+      "offset": 23244800
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "7dc59cb365814d99df81fadbe990f9235f12c6f0b9c6613ce0d9e85d76945b00",
+      "arena": 0,
+      "offset": 23248896
+    },
+    {
+      "nbytes": 393216,
+      "initial": "fb8b6eb50b85c92eff0269c5477f7a1dd7f57aa3e947da4d6506a83342cb5ee1",
+      "arena": 0,
+      "offset": 25346048
+    },
+    {
+      "nbytes": 5373952,
+      "initial": "31a751235f723c1946739ebad762a0bf367cd5bf495e47e13ad95e9c4a02e420",
+      "arena": 0,
+      "offset": 25739264
+    },
+    {
+      "nbytes": 393216,
+      "initial": "a81e671cc288aa090363c09701cc59fd73a7ed0104d9c945d0f90587fa305794",
+      "arena": 0,
+      "offset": 31113216
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "3d39bbcfe378eff691396c72a95846eb6a7f249321cd7c15eda00cd36f7afcf7",
+      "arena": 0,
+      "offset": 31506432
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "ab0ed4e98e1012e784a788fbc57ffdc6272552a5aa4fdc46b150215d2d73a1be",
+      "arena": 0,
+      "offset": 37797888
+    },
+    {
+      "nbytes": 393216,
+      "initial": "e6e186728c2d6f2b714ff809049de6148065cb208b4be3a1dd274535f87d12dd",
+      "arena": 0,
+      "offset": 39895040
+    },
+    {
+      "nbytes": 5373952,
+      "initial": "74bc6fa5a55e7fed514d39c00788a2a4abc6647c0c8d88089566c8f0e0838b6f",
+      "arena": 0,
+      "offset": 40288256
+    },
+    {
+      "nbytes": 393216,
+      "initial": "1654be093efbcf26a4ac2418638afbb2ada3fee667734d1f76fd962d92c44ab8",
+      "arena": 0,
+      "offset": 45662208
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "f304e03834a4031dd8b06e4732dafe797af4571921fc02e89b32999a561f0059",
+      "arena": 0,
+      "offset": 46055424
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "a187e05bb626eb3368f671d8f54361ed872014e1d232f829c973df2df0356f2d",
+      "arena": 0,
+      "offset": 52346880
+    },
+    {
+      "nbytes": 393216,
+      "initial": "7fb5ba8912c1f038f28f616ee2c5c1c9dd3663a0c660784878b5728b574633de",
+      "arena": 0,
+      "offset": 54444032
+    },
+    {
+      "nbytes": 5373952,
+      "initial": "7b822493a91cf2b7056adb86b734acdaa820f5ddebb404e639eec85a156bf5b4",
+      "arena": 0,
+      "offset": 54837248
+    },
+    {
+      "nbytes": 393216,
+      "initial": "5490234533175e2b2fcdaf22a47addf9f78549428fe06310bf3b1736dda1377c",
+      "arena": 0,
+      "offset": 60211200
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "c52fe02f515dcbed991585dd22ada47c1583795026a81377c71f7378feb07c62",
+      "arena": 0,
+      "offset": 60604416
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "53ec947d6f6c89c63ea438f405b80b6c2470e09b7fe79b39620664bd371f9b8d",
+      "arena": 1,
+      "offset": 0
+    },
+    {
+      "nbytes": 393216,
+      "initial": "e2f4e941eb869834f66146b7be65a3070ebb0ae51ad10b7672bc8d0ed843d983",
+      "arena": 1,
+      "offset": 2097152
+    },
+    {
+      "nbytes": 5373952,
+      "initial": "3dbb90b6ec38e7d8812f506ac05613c83c5636e57fdea0ce92f938c6780620ce",
+      "arena": 1,
+      "offset": 2490368
+    },
+    {
+      "nbytes": 393216,
+      "initial": "be1257eb6c36b86410db6d6a80d778a411958c87b076f89e01d31454a8aa071f",
+      "arena": 1,
+      "offset": 7864320
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "09ba727a97e27afae7da30d5a938caecc6b7c65c8528cb4dcafd9516fb43d521",
+      "arena": 1,
+      "offset": 8257536
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "3d9e1266af3304ad32cab86ebc5d98e6e53e6d46f98d611a9a9f255029795c72",
+      "arena": 1,
+      "offset": 14548992
+    },
+    {
+      "nbytes": 393216,
+      "initial": "2f2074854f6a59e0d9d651e54222d0c48c52910c1dd8f09f5f8d39c5dda4bce8",
+      "arena": 1,
+      "offset": 16646144
+    },
+    {
+      "nbytes": 5373952,
+      "initial": "b14e42886a3b2aa948438e15d05709b39964f7f1c518a3179db3219f2222d10e",
+      "arena": 1,
+      "offset": 17039360
+    },
+    {
+      "nbytes": 393216,
+      "initial": "fd49dcededcd1d42671d9bc91e3b2157596e5883a67f08e65440978a92422f7b",
+      "arena": 1,
+      "offset": 22413312
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "dd4e53aa171931842b160ad826e3da4d5c7cbcc749b145a7c56073f37aba628b",
+      "arena": 1,
+      "offset": 22806528
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "77aa5a4345310582ee784542ca2495195a92ef7574773b434d68f90b3547dcff",
+      "arena": 1,
+      "offset": 29097984
+    },
+    {
+      "nbytes": 393216,
+      "initial": "0d0cb1d98aaca2aa0f6688e852b3df888f6d84f416d3fae236f2cd47ec500a8e",
+      "arena": 1,
+      "offset": 31195136
+    },
+    {
+      "nbytes": 5373952,
+      "initial": "e8687ca45184d99d7b56b6f8a3ec23d25c2a1f5b9736b182506f952af67b9dda",
+      "arena": 1,
+      "offset": 31588352
+    },
+    {
+      "nbytes": 393216,
+      "initial": "30f0e04b8c48baf1a87da365c36b575d8b0571ce82d3c99f029fecde5c15f3ea",
+      "arena": 1,
+      "offset": 36962304
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "05c0be58e55b71517bae80b321b36fc6d156b9cefecff21236322ca76e9ea9b8",
+      "arena": 1,
+      "offset": 37355520
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "b27d204abff2bbdb1bf97a05d83a97d847cb3603e0739f494ff772d5426eab05",
+      "arena": 1,
+      "offset": 43646976
+    },
+    {
+      "nbytes": 393216,
+      "initial": "a1dfba55acabfb6d34518217e3c661e2e31715cf78427c82e5ff902bd7dfb4b8",
+      "arena": 1,
+      "offset": 45744128
+    },
+    {
+      "nbytes": 5373952,
+      "initial": "7e8db6641f726bc3df8bdfb59f13235899e7c6a5ffba4798edb3aa85c99e068b",
+      "arena": 1,
+      "offset": 46137344
+    },
+    {
+      "nbytes": 393216,
+      "initial": "b6c5915d50383dc332ff47f1bdc94083524923796290fb894f259fd7595d34fb",
+      "arena": 1,
+      "offset": 51511296
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "0d491a2d0a0de361ac99d0b7b0e9cf29ef24057f48712fde083f83b4e3b827f9",
+      "arena": 1,
+      "offset": 51904512
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "c5a458127adc62d0b2640fd39a31da38db63c3f0397461ca69d1c7576d6356c8",
+      "arena": 1,
+      "offset": 58195968
+    },
+    {
+      "nbytes": 393216,
+      "initial": "2fef6356b8bcb48d63aa69fb5961452179e49e4610991da16fb05b54eddbe32a",
+      "arena": 1,
+      "offset": 60293120
+    },
+    {
+      "nbytes": 5373952,
+      "initial": "244b9b5ffe778ba3d7c10b67180903f43446e285156bc5686545472ffe2502d1",
+      "arena": 1,
+      "offset": 60686336
+    },
+    {
+      "nbytes": 393216,
+      "initial": "0b9d9a7c91e175fdf5f0d7c56245e7a24b1c1e21c03bf3526662abbb16d3ab01",
+      "arena": 1,
+      "offset": 66060288
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "8d1c4f3c0d0f94de490cc2f8e9004a674d4acc8148edc1b093605a636e0430df",
+      "arena": 2,
+      "offset": 0
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "c96f60d322e47435bcd2683953514ae8d801bfaac0768dd1ad0fd90fd0d92de9",
+      "arena": 2,
+      "offset": 6291456
+    },
+    {
+      "nbytes": 393216,
+      "initial": "f61bdf8a4c84f8b9abf936f0f678dc159fb1f54f8d3e1f8c0d2e5fa530ca9120",
+      "arena": 2,
+      "offset": 8388608
+    },
+    {
+      "nbytes": 5373952,
+      "initial": "e27f15cd1921cd7152771a3354a3fe43ff87760e23d7b1450e69be594d831681",
+      "arena": 2,
+      "offset": 8781824
+    },
+    {
+      "nbytes": 393216,
+      "initial": "73433fd579188bc580a217e6d6f7d50e108697e314d6c7d731e05f5c955e49ed",
+      "arena": 2,
+      "offset": 14155776
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "86f1e0c5a806f66e948c5c87460e3676d15f3613e0df6ad1b2adc1cf23494981",
+      "arena": 2,
+      "offset": 14548992
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "9ee15a7101a626bd49c5bf36ec395fcf7d3738382c5da8387790cafc68303728",
+      "arena": 2,
+      "offset": 20840448
+    },
+    {
+      "nbytes": 393216,
+      "initial": "4ed85da7e2252931cdc0baed99a37dd38c684403edfc2bf16c37a18728adc53e",
+      "arena": 2,
+      "offset": 22937600
+    },
+    {
+      "nbytes": 5373952,
+      "initial": "c99021967cdf665df2cf6d1edcb42db6166b398d59ac8038eb68486e8a490b35",
+      "arena": 2,
+      "offset": 23330816
+    },
+    {
+      "nbytes": 393216,
+      "initial": "72046616c9c93a43d869574baecbaabd7e5a849e513df0bed3c87a86d0d8d59d",
+      "arena": 2,
+      "offset": 28704768
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "4d29d894b7cb1ae1e5e4011fb824fe35842235a5d57cc96b486167d4b613efbe",
+      "arena": 2,
+      "offset": 29097984
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "fa57f859d1ab3b258927a093addc6e20b3d31bfb8a3f1807184f49cc03bfa78b",
+      "arena": 2,
+      "offset": 35389440
+    },
+    {
+      "nbytes": 393216,
+      "initial": "628e5fd589cc07adbe940b7482740652974ffd5db5698710268bf413f5a5c6e4",
+      "arena": 2,
+      "offset": 37486592
+    },
+    {
+      "nbytes": 5373952,
+      "initial": "86b82ca86a3a4a10c21129f2eb5def20c1944734a295aab3988a74a1c6fc3260",
+      "arena": 2,
+      "offset": 37879808
+    },
+    {
+      "nbytes": 393216,
+      "initial": "9ede0a9c2021de26555483452c7e46e7b1ed6e79703bcf803205180c8779f809",
+      "arena": 2,
+      "offset": 43253760
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "f02ea3bd10eead70c60f1c43e9446e43942a75f4a1931239bc6d754852dfb16f",
+      "arena": 2,
+      "offset": 43646976
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "7e36598d2ed94baa01869786f0398af32016fdc09b9713d94f70397ff2e0912e",
+      "arena": 2,
+      "offset": 49938432
+    },
+    {
+      "nbytes": 393216,
+      "initial": "e860be7e97913123862b3d61ebfd7256bf3e711fb13bd0ad7d72633f587309c9",
+      "arena": 2,
+      "offset": 52035584
+    },
+    {
+      "nbytes": 5373952,
+      "initial": "e28a9cdcca80fdc30aea085f0534c9bedea7818a5c4392f5811c0075559ad1f1",
+      "arena": 2,
+      "offset": 52428800
+    },
+    {
+      "nbytes": 393216,
+      "initial": "2143362f83035ba9f4f6b992278b045cafd37f8fed6323089d8b91f355d5c7f8",
+      "arena": 2,
+      "offset": 57802752
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "27d7214d6b38fe4c92dbe8b352930d53a99629e01b1a1891b5fae0e4a4e6a753",
+      "arena": 2,
+      "offset": 58195968
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "715b809b52099a21665390932acb28e72608b527b324789647d64699a64f4938",
+      "arena": 2,
+      "offset": 64487424
+    },
+    {
+      "nbytes": 393216,
+      "initial": "3c81a441fa2ed4ef5d8bce8345bc4dea99a4a2b5bfe648259e55c7bc365b969c",
+      "arena": 2,
+      "offset": 66584576
+    },
+    {
+      "nbytes": 5373952,
+      "initial": "0d26a09f4ab8560672b5b446826eee644414a7ced231a1405049329067e7de84",
+      "arena": 3,
+      "offset": 0
+    },
+    {
+      "nbytes": 393216,
+      "initial": "84f8932b83019314ce20dc0c0d86ca50247cd02609d84627f4d217113aae3b75",
+      "arena": 3,
+      "offset": 5373952
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "b0dc32fea0bd0bdad217614a63b4e90e68d63381b893e0b3753be8702873105e",
+      "arena": 3,
+      "offset": 5767168
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "467a01c51b4986c212f40a9ad34f8de657d5db00f6ac31d646a0515a3cb80fa0",
+      "arena": 3,
+      "offset": 12058624
+    },
+    {
+      "nbytes": 393216,
+      "initial": "7b9677e873eb8eedc432651150f456efea163372269793a1bdba6cc620f6c664",
+      "arena": 3,
+      "offset": 14155776
+    },
+    {
+      "nbytes": 5373952,
+      "initial": "2767ea620637598eb929b48b4f5ab1f4233f148a1d6cc380ca8dbd1e2b7591ac",
+      "arena": 3,
+      "offset": 14548992
+    },
+    {
+      "nbytes": 393216,
+      "initial": "b02d5db0af6ac2ff51839f7c5126c5bfc43df0c88ebe995835da4d80ce44455e",
+      "arena": 3,
+      "offset": 19922944
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "a78caa7aff28194fe87e9e94e1ed9f525c00fbd8d43694a43f5e7c684bf1b7ad",
+      "arena": 3,
+      "offset": 20316160
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "d3ad1c850a7ae159029dbb81b9635a8d21d57b509d110b996dd85ed98ac67e59",
+      "arena": 3,
+      "offset": 26607616
+    },
+    {
+      "nbytes": 393216,
+      "initial": "73835ed2112f732fcf4098d28ff95e8cacf91aad84046ba74eff93a110d8a861",
+      "arena": 3,
+      "offset": 28704768
+    },
+    {
+      "nbytes": 5373952,
+      "initial": "a47bb7c609234c37aee97ae9867e8cb18931698c19e36d4e598e71a7c743a0e9",
+      "arena": 3,
+      "offset": 29097984
+    },
+    {
+      "nbytes": 393216,
+      "initial": "d4041997265da7e4fb48848f8ff6b4f610a0d1b177aa4c5014262a4db1e9cb5a",
+      "arena": 3,
+      "offset": 34471936
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "e9a77dd256edd90d72cd6db33db12531206c083f3d08389d4a70aa90af8d1939",
+      "arena": 3,
+      "offset": 34865152
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "1e39b478949133a67d37c5db54d382e6af9a78d888ce8673184ae1c91003ec03",
+      "arena": 3,
+      "offset": 41156608
+    },
+    {
+      "nbytes": 393216,
+      "initial": "a2363e9101032458f29799e2476df1cf1e15ec81173a0022f836ce5b90590a13",
+      "arena": 3,
+      "offset": 43253760
+    },
+    {
+      "nbytes": 5373952,
+      "initial": "418b7b5577e6ed609dfb3fa695e7908fb5a9b04b94c38d06732781591dfde36a",
+      "arena": 3,
+      "offset": 43646976
+    },
+    {
+      "nbytes": 393216,
+      "initial": "978c1f749b6464460905b393ea0cc6d1e9f358143b70d936a9c98d6cf76fa1fd",
+      "arena": 3,
+      "offset": 49020928
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "a298f52000c915d8239a5236b1d5bc4120bf88c88dd1d2da3c056cbd54a531fd",
+      "arena": 3,
+      "offset": 49414144
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "77d46b0167cb33e95a3bb2362dff984faa5da05423561d541816ebb790cd0a57",
+      "arena": 3,
+      "offset": 55705600
+    },
+    {
+      "nbytes": 393216,
+      "initial": "3c63af10943e3982b0df91a56dad672b87ae36b18a0f2da0baa6be78d1e1143d",
+      "arena": 3,
+      "offset": 57802752
+    },
+    {
+      "nbytes": 5373952,
+      "initial": "4c428ed2f3d283532824063c9be0d91e80acc3455d7581f01dd828a125f63c0c",
+      "arena": 3,
+      "offset": 58195968
+    },
+    {
+      "nbytes": 393216,
+      "initial": "de3230bce48fabcfcbadffcbdac0454a4193886f5e5dc83b1c43ba53a15ff64e",
+      "arena": 3,
+      "offset": 63569920
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "82a40ead901ad56b7d947b703b38747791b6710289671f9a496dc1a18a174a12",
+      "arena": 4,
+      "offset": 0
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "dc08c4edf3cc605720531d70b1efe19dce3485344ec062558be80b1773ce9792",
+      "arena": 4,
+      "offset": 6291456
+    },
+    {
+      "nbytes": 393216,
+      "initial": "3491a78753698c3f3d2fcb7cb6099774115ce4f416ef2438aa1f9527aeac69c6",
+      "arena": 4,
+      "offset": 8388608
+    },
+    {
+      "nbytes": 5373952,
+      "initial": "3d431e263f76c09efee5e3e40da210f08b8efc382c0594c5d8e7e1d1a77dfa50",
+      "arena": 4,
+      "offset": 8781824
+    },
+    {
+      "nbytes": 393216,
+      "initial": "e02500f26cf71d3e49f83f568cb5c04d550aa570fb76f5ee5b22783caf3cde8e",
+      "arena": 4,
+      "offset": 14155776
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "76e57bf4d06c70e95f9e0acc8c47f5d8c5c719de7a5836c34292f0aadd251ee0",
+      "arena": 4,
+      "offset": 14548992
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "704d713b5f00200340ab9bd3276df377bfc71698be80bba79adbc7924cb305c0",
+      "arena": 4,
+      "offset": 20840448
+    },
+    {
+      "nbytes": 393216,
+      "initial": "95adb7e1450acdbd21654d5a7613cab7c365313183a7c0b43312d27a3463d3c8",
+      "arena": 4,
+      "offset": 22937600
+    },
+    {
+      "nbytes": 5373952,
+      "initial": "a0682ab1f9daebab26af7833b9d3721f4b04fdf877a9ac960c9d98184e805b90",
+      "arena": 4,
+      "offset": 23330816
+    },
+    {
+      "nbytes": 393216,
+      "initial": "0f3cf45af899828521b633e63c9152e28af701ddd4c7dcfc8b8ddd5ffd967c2b",
+      "arena": 4,
+      "offset": 28704768
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "ef3e3d497e5b2fbe096997d4e87172da2631052644cb8b85e6dbf1e63fe2d85c",
+      "arena": 4,
+      "offset": 29097984
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "2af373692d1ea9cd87d4567ffa8de790a7c4ae60f50945c701cc4f96c4687b72",
+      "arena": 4,
+      "offset": 35389440
+    },
+    {
+      "nbytes": 393216,
+      "initial": "3c28bb9a99abe4b3d08289e0b9f1d2acb28695b859228ccd952fe17cdbd3c78c",
+      "arena": 4,
+      "offset": 37486592
+    },
+    {
+      "nbytes": 5373952,
+      "initial": "6eb80ff4fb1a23a80eac53d2439c71015865535c59ec04637e518148b0c38ac6",
+      "arena": 4,
+      "offset": 37879808
+    },
+    {
+      "nbytes": 393216,
+      "initial": "eef37e6792ff0a356ba77f76ada7043c69898afacb0e40e82fd71ac1153bd447",
+      "arena": 4,
+      "offset": 43253760
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "3e75928cefd4ef224805458b90646c46d73748791862084155ec7e1b46af3d6b",
+      "arena": 4,
+      "offset": 43646976
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "a6f09e371291707149c97938816dbd2eefa178523fc4fcb2b976021e1bd7068a",
+      "arena": 4,
+      "offset": 49938432
+    },
+    {
+      "nbytes": 393216,
+      "initial": "6e009ee7edda7c958470017be0ce48c2e016af0f21f4462362769e6843c1c1a2",
+      "arena": 4,
+      "offset": 52035584
+    },
+    {
+      "nbytes": 5373952,
+      "initial": "44fef3fe449cd38af8fdc412bbf07f9cc26237b11d04bfb60ef989606be93523",
+      "arena": 4,
+      "offset": 52428800
+    },
+    {
+      "nbytes": 393216,
+      "initial": "5ff0ad1d6956a1704586260d0c4571d0ebb7090515180067b534c666d29eee08",
+      "arena": 4,
+      "offset": 57802752
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "291851cc1c722b989a4ff3ec1bd1e0cb4ddb03313a906955b8d197521b0e88b9",
+      "arena": 4,
+      "offset": 58195968
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "6e7f433445c62d979e8e1f95c6481010b1dc669349584f0ee3a9f07a6b687f28",
+      "arena": 4,
+      "offset": 64487424
+    },
+    {
+      "nbytes": 393216,
+      "initial": "a3ea0f433fc6b3bfa2dc9956f089c9002f68707d533018788826739b84db6587",
+      "arena": 4,
+      "offset": 66584576
+    },
+    {
+      "nbytes": 5373952,
+      "initial": "6a10de15650cd08f99205b997d4817a0b8213fe8cac02b4bebc9a2859fee2520",
+      "arena": 5,
+      "offset": 0
+    },
+    {
+      "nbytes": 393216,
+      "initial": "3b4f8f32cb8755ecc8be34c67090ac7046ff72f88101acd3534bf73a3cd705e6",
+      "arena": 5,
+      "offset": 5373952
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "b28321361ec2e93a1919d0edb48cdf869ac374dea945168c1da4f200aa2bf984",
+      "arena": 5,
+      "offset": 5767168
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "9626a4f92aa6886a77f87c0ef14ab26df938aaf57855087026e3f63fb7f8dc1e",
+      "arena": 5,
+      "offset": 12058624
+    },
+    {
+      "nbytes": 393216,
+      "initial": "e442f9abcc6e36150c4864bb7edc295c67d511d7b34afa430aa9dd4a81e765c5",
+      "arena": 5,
+      "offset": 14155776
+    },
+    {
+      "nbytes": 5373952,
+      "initial": "3f82ff6b421e047214ddc46a27cf10ccd1839bce2db051fdd99dc2375365ebcd",
+      "arena": 5,
+      "offset": 14548992
+    },
+    {
+      "nbytes": 393216,
+      "initial": "c8e586938293a330c174596b81b48b09838d51998d35f42f03247d0abe4ab264",
+      "arena": 5,
+      "offset": 19922944
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "c214c1215c3a6220fffd3e8f61baadc82fc964a132d092853a2cc317f470fa62",
+      "arena": 5,
+      "offset": 20316160
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "923d996a209f24cd215a7a9b78f89f7b6c931366803b2101fdb41a1ca71c3c9f",
+      "arena": 5,
+      "offset": 26607616
+    },
+    {
+      "nbytes": 393216,
+      "initial": "c6256ec39527d943e14a41a934118a018bf48bc0c91f565565b04f4e36573b14",
+      "arena": 5,
+      "offset": 28704768
+    },
+    {
+      "nbytes": 5373952,
+      "initial": "fd41f3021a80c1e247c49f940d320c93e9b44b373168583f9733c020a7425e6f",
+      "arena": 5,
+      "offset": 29097984
+    },
+    {
+      "nbytes": 393216,
+      "initial": "c017c614a154940ce1e6251eabd8c10e47d111a0c22cf6b65926e5c70d1a5e66",
+      "arena": 5,
+      "offset": 34471936
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "c7e985df2f5fbdc43efe17ee7290df786712c25c2cc4d98db876a02c52dc4cda",
+      "arena": 5,
+      "offset": 34865152
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "588fee55e622570bd9d95e73179c029f851f1374c09c25872f5b505b49f9fcf8",
+      "arena": 5,
+      "offset": 41156608
+    },
+    {
+      "nbytes": 393216,
+      "initial": "fc97d184177433d74dfd63e8ae72421e11af64289f88e2c67cdedb913b30a9b6",
+      "arena": 5,
+      "offset": 43253760
+    },
+    {
+      "nbytes": 5373952,
+      "initial": "abaeda91ab0c83b43deac5cfaf64d7571f0b8a94381874fe1149165deb7149c5",
+      "arena": 5,
+      "offset": 43646976
+    },
+    {
+      "nbytes": 393216,
+      "initial": "f4925457301a06daccb0b7a22bcda136f5fc480f43b114aedc9f8b4741d97aee",
+      "arena": 5,
+      "offset": 49020928
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "26ec0da5077073cf3d18acd60c89cbece4c036e23ff28c7bf777196a4f07cc7b",
+      "arena": 5,
+      "offset": 49414144
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "394743a9cd7f4b1abb4aed519d42d8fc350c5f55f5769c474d7515f04fbb291c",
+      "arena": 5,
+      "offset": 55705600
+    },
+    {
+      "nbytes": 393216,
+      "initial": "e36d493b3338379ab507ca6e6a79f69c529f1f0a6033605778ab4058116aec4b",
+      "arena": 5,
+      "offset": 57802752
+    },
+    {
+      "nbytes": 5373952,
+      "initial": "89bce045fca77cb3041482d1ded94f70769b3adb8714ae91d636dc8a348102d7",
+      "arena": 5,
+      "offset": 58195968
+    },
+    {
+      "nbytes": 393216,
+      "initial": "f68aa1bb5520aea9cf18897fa30ec8d08a1820763947e1772c8df2120a7aeef7",
+      "arena": 5,
+      "offset": 63569920
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "1fc491f2436cb3af847a95f084d0dfc0bb89ff33703908a68ac3ec2c7fcaa4a6",
+      "arena": 6,
+      "offset": 0
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "c480a45c6844fe8c8b58722873ec9e95ffc12d821eb652958100815d9be81aad",
+      "arena": 6,
+      "offset": 6291456
+    },
+    {
+      "nbytes": 393216,
+      "initial": "394addb47bc3553d2c990fb41dd4c74947bdb1c7d02f70662bb8b84a2911c205",
+      "arena": 6,
+      "offset": 8388608
+    },
+    {
+      "nbytes": 5373952,
+      "initial": "3ec7763744e7555a9054d84da094d93ebfecbc8149c6cb1e66d12e7bfcf3f14d",
+      "arena": 6,
+      "offset": 8781824
+    },
+    {
+      "nbytes": 393216,
+      "initial": "dfb9ac924a42d1f293ebb559dc56e60b885a09848313a03c35c5f10ebae045a1",
+      "arena": 6,
+      "offset": 14155776
+    },
+    {
+      "nbytes": 262144,
+      "initial": "b2bce641bbb158ec7415ca92d958a5c9a4366b9432f84912e065699057e73dc0",
+      "arena": 6,
+      "offset": 14548992
+    },
+    {
+      "nbytes": 393216,
+      "initial": "2cd1af4e7c00e9713e841845f6c18a60115d187db06d07921167931aa9f1371a",
+      "arena": 6,
+      "offset": 14811136
+    },
+    {
+      "nbytes": 131072,
+      "initial": "84aa998967162b2a78b94c3cd19a3117ee2aff6856de1aa2a1b0f7fce148b371",
+      "arena": 6,
+      "offset": 15204352
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "4094f8256989ceae0edb5ab051054446bf5abf7df7446ac650189d83bb3fab0c",
+      "arena": 6,
+      "offset": 15335424
+    },
+    {
+      "nbytes": 1572864,
+      "initial": "30dc939da6f6c86a108124af345225178d12279936c2d6390d605c3a0df3ad33",
+      "arena": 6,
+      "offset": 21626880
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "3db4bff00711f6fbf23b36f9f86f9d28c920c730257155a8e4cad022fc7650f4",
+      "arena": 6,
+      "offset": 23199744
+    },
+    {
+      "nbytes": 524288,
+      "initial": "d535d80bb942c983f71f238e51df73337ab2c183eba94049804212a3d2920f83",
+      "arena": 6,
+      "offset": 25296896
+    },
+    {
+      "nbytes": 393216,
+      "initial": "bb45e0db817c8a3384b4db00c079e689273aa2770ad25c424d29556ac88fd8ff",
+      "arena": 6,
+      "offset": 25821184
+    },
+    {
+      "nbytes": 8388608,
+      "initial": "beaec449b7d4ed13ded2cf6326cc464030b22fe7f817b1c02d7b5c7e47308199",
+      "arena": 6,
+      "offset": 26214400
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "7ace4b2900148cc10bc74d64517b313dee8f18d1fd7ffc54d18709e128e3d8dc",
+      "arena": 6,
+      "offset": 34603008
+    },
+    {
+      "nbytes": 524288,
+      "initial": "2bc932a2cd270c671e4200fd92249cce1b18b867be28af1d81a34bc39c9fc3b3",
+      "arena": 6,
+      "offset": 36700160
+    },
+    {
+      "nbytes": 8388608,
+      "initial": "a360b8e2a5bda483189cdd44c2c2b5c29741cb87626344e0f8d768d0fcc0e6b7",
+      "arena": 6,
+      "offset": 37224448
+    },
+    {
+      "nbytes": 524288,
+      "initial": "252e5ea693c5a403ffe197b462e50e7bc7205888f0c08de82aee118346ba0573",
+      "arena": 6,
+      "offset": 45613056
+    },
+    {
+      "nbytes": 393216,
+      "initial": "ea251d1f1b94718c60f187d761b5011e882912b8d8f744dd7f59bf93839cc8f3",
+      "arena": 6,
+      "offset": 46137344
+    },
+    {
+      "nbytes": 6291456,
+      "initial": "ac303bd475774924cc1bc195ef46e28e293b4e598f3b46f1d41e1c64be78dd1d",
+      "arena": 6,
+      "offset": 46530560
+    },
+    {
+      "nbytes": 1572864,
+      "initial": "c79fa34d42a885757dc17af693882e25a02e6fe109618d30159bbdcd1a8d7eea",
+      "arena": 6,
+      "offset": 52822016
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "e8690ab0ae665eb4a4765f69feafbbad1b48f51d189707bef20b66ffbbd6482b",
+      "arena": 6,
+      "offset": 54394880
+    },
+    {
+      "nbytes": 524288,
+      "initial": "1630d4385f4795ac645f81bde920e3ea57f55cab9add75cbfee629348ccee930",
+      "arena": 6,
+      "offset": 56492032
+    },
+    {
+      "nbytes": 393216,
+      "initial": "b3310837da7d73d28f93ed2d1d936939d562e3defb48ccd54a8a88e5c5ec26f2",
+      "arena": 6,
+      "offset": 57016320
+    },
+    {
+      "nbytes": 8388608,
+      "initial": "408d26231b7c2bbaada31da8c8595e180f141aff382fb453e517c08a8b101dd6",
+      "arena": 6,
+      "offset": 57409536
+    },
+    {
+      "nbytes": 2097152,
+      "initial": "7c006267b635fb94b70b9b5049c9bc37358a402e18c3cc6764406e5cac643b65",
+      "arena": 7,
+      "offset": 0
+    },
+    {
+      "nbytes": 8388608,
+      "initial": "91f9f73924df2ea8b25a0d2a7ffef22eff623379b874414a9f5f125ef9b8fa74",
+      "arena": 7,
+      "offset": 2097152
+    },
+    {
+      "nbytes": 524288,
+      "initial": "b63231d09d833a1b5b4c3e08d4fcbf9c9413344ba625e8499b3776526b446d74",
+      "arena": 7,
+      "offset": 10485760
+    },
+    {
+      "nbytes": 12582912,
+      "initial": "eec8d8d3a5cd0fd7e9c24ff158fc6d8e632f36b3929c448ba3fde813a7f318ee",
+      "arena": 7,
+      "offset": 11010048
+    },
+    {
+      "nbytes": 12582912,
+      "initial": "99a3ceeaa77182377e5d26ec0c3f4d2278bfb218c1c96e621d7815bdcca0c823",
+      "arena": 7,
+      "offset": 23592960
+    },
+    {
+      "nbytes": 12582912,
+      "initial": "6e582e66761b2117603f1ab607c5abdce89a598d6eb46ae2933e7f607e03d387",
+      "arena": 7,
+      "offset": 36175872
+    },
+    {
+      "nbytes": 12582912,
+      "initial": "22e64e8d458212a1490c32050ae704033859863be811fcd7a8cf05a243caf552",
+      "arena": 7,
+      "offset": 48758784
+    },
+    {
+      "nbytes": 12582912,
+      "initial": "f38610ced19ca5c3d86ecac4ef97e9f640df3bbcb35fbc2f2bd0bbf2fcec1024",
+      "arena": 8,
+      "offset": 0
+    },
+    {
+      "nbytes": 12582912,
+      "initial": "d4f5a069c196a9e7a97a2c93b488c06a4ab907066511e2cdd73643f52be948ac",
+      "arena": 8,
+      "offset": 12582912
+    },
+    {
+      "nbytes": 12582912,
+      "initial": "ce1396a6472f5221368f539d8fd7e01f45279dfb976d408a324f00ff5bbe2fb8",
+      "arena": 8,
+      "offset": 25165824
+    },
+    {
+      "nbytes": 12582912,
+      "initial": "49f2fc5fd438aabac4e05df4b8106c7a89cf12b82e9685326d7008741d2b17b7",
+      "arena": 8,
+      "offset": 37748736
+    },
+    {
+      "nbytes": 12582912,
+      "initial": "8c8ee983086d111a3be4719ebe636333e0358ca8149aadc4ccc46cbb2bc15f6a",
+      "arena": 8,
+      "offset": 50331648
+    },
+    {
+      "nbytes": 12582912,
+      "initial": "41f3fc9ce2d6b74b4ee277428a38a41a633866ad9a25b4b4583dafd98e152d1c",
+      "arena": 9,
+      "offset": 0
+    },
+    {
+      "nbytes": 12582912,
+      "initial": "c4b43440c0aa34578a84c2a5a58acc908db0b88fccbf6f38e835010520e4c1df",
+      "arena": 9,
+      "offset": 12582912
+    },
+    {
+      "nbytes": 12582912,
+      "initial": "0bc8a4ec33903a59dbb11a8ad92671aba1e294bd77458e46ce78179b747ebf50",
+      "arena": 9,
+      "offset": 25165824
+    },
+    {
+      "nbytes": 12582912,
+      "initial": "dda61ca94189af0d5b3ae87423ac206170db0fba3c4713411a9c092881b9523a",
+      "arena": 9,
+      "offset": 37748736
+    },
+    {
+      "nbytes": 12582912,
+      "initial": "4c3f50b854719e7b892ed48f2b0b41491774d373d223a0dfb208e5ec8545129a",
+      "arena": 9,
+      "offset": 50331648
+    },
+    {
+      "nbytes": 12582912,
+      "initial": "55d66ea10f61bd4be1f00f1032b9f28d0b3ebe8f2b4ca94ae84d220b8eb04281",
+      "arena": 10,
+      "offset": 0
+    },
+    {
+      "nbytes": 12582912,
+      "initial": "c853c06fd88931bb88e75c46dafe65ce4d838c8e9255720634d29358a928d029",
+      "arena": 10,
+      "offset": 12582912
+    },
+    {
+      "nbytes": 12582912,
+      "initial": "f3f9150db828ff02692cf65a337d77fcad4b7e8960aa47995b8403adcad2810f",
+      "arena": 10,
+      "offset": 25165824
+    },
+    {
+      "nbytes": 12582912,
+      "initial": "1f82352dfb4f9b53ac9e25c805fcca9aca4bd011a67350ddaef8a2b7c86021d2",
+      "arena": 10,
+      "offset": 37748736
+    },
+    {
+      "nbytes": 12582912,
+      "initial": "9dc30fcabd8545de6069383e337c2acf41d80a1fd3da64680eaef1956d4c6074",
+      "arena": 10,
+      "offset": 50331648
+    },
+    {
+      "nbytes": 12582912,
+      "initial": "16fbed525fd75c06a2c5342e68afc991e0d84f65abbd7e1bdadbb5e45ce42415",
+      "arena": 11,
+      "offset": 0
+    },
+    {
+      "nbytes": 12582912,
+      "initial": "040b5832a805f65c70fad3978bfc5ec3e4b4232050a1d740d2b039f6e094fb4e",
+      "arena": 11,
+      "offset": 12582912
+    },
+    {
+      "nbytes": 12582912,
+      "initial": "8cb8e28498c3ff4e73b3af66d3891ed9dad3182876911bb796d69f0e6ec02cf2",
+      "arena": 11,
+      "offset": 25165824
+    },
+    {
+      "nbytes": 12582912,
+      "initial": "7b8089ba44be0c3abf8acfcae161891455e39d461d1d64f6dc143338573e20ac",
+      "arena": 11,
+      "offset": 37748736
+    },
+    {
+      "nbytes": 12582912,
+      "initial": "17263b36d5aa2560794deeb4bd3bd479d14b0d3deccc09d4322604acb115c98d",
+      "arena": 11,
+      "offset": 50331648
+    },
+    {
+      "nbytes": 12582912,
+      "initial": "b544111388c2ab46e218ad1c31c64f2a83f7a924f6d241f6304972157a2ccee7",
+      "arena": 12,
+      "offset": 0
+    },
+    {
+      "nbytes": 12582912,
+      "initial": "edadb9de90b194abee7f019a9551283fa0862125169d18ca62862e3a6602db27",
+      "arena": 12,
+      "offset": 12582912
+    },
+    {
+      "nbytes": 12582912,
+      "initial": "233acd6934413da1707c64f362cfddffb9f64644f18306d1bb42f9f59d663889",
+      "arena": 12,
+      "offset": 25165824
+    },
+    {
+      "nbytes": 12582912,
+      "initial": "e6096a829f2d3e923389e4270d414e9643c0a953be02ab429a5721ae3f14125f",
+      "arena": 12,
+      "offset": 37748736
+    }
+  ],
+  "dispatches": [
+    {
+      "sequence": "sequence_000",
+      "bindings": [
+        [
+          0,
+          0,
+          131072
+        ],
+        [
+          1,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "lnf",
+      "phase": "embedding"
+    },
+    {
+      "sequence": "cb_qkvR",
+      "bindings": [
+        [
+          0,
+          0,
+          131072
+        ],
+        [
+          2,
+          0,
+          6291456
+        ],
+        [
+          3,
+          0,
+          262144
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        3,
+        4,
+        5
+      ],
+      "label": "eng.qkvR",
+      "phase": "backbone.0"
+    },
+    {
+      "sequence": "cb_attn",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          9,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.backbone",
+      "phase": "backbone.0"
+    },
+    {
+      "sequence": "cb_out",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          12,
+          0,
+          2097152
+        ],
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.outF",
+      "phase": "backbone.0"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          14,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.0"
+    },
+    {
+      "sequence": "cb_gateup",
+      "bindings": [
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          180,
+          0,
+          12582912
+        ],
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          17,
+          0,
+          65536
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "eng.gateupF",
+      "phase": "backbone.0"
+    },
+    {
+      "sequence": "cb_down",
+      "bindings": [
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          18,
+          0,
+          5373952
+        ],
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.downF",
+      "phase": "backbone.0"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          19,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.1"
+    },
+    {
+      "sequence": "cb_qkvR",
+      "bindings": [
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          20,
+          0,
+          6291456
+        ],
+        [
+          21,
+          0,
+          262144
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        3,
+        4,
+        5
+      ],
+      "label": "eng.qkvR",
+      "phase": "backbone.1"
+    },
+    {
+      "sequence": "cb_attn",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          22,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.backbone",
+      "phase": "backbone.1"
+    },
+    {
+      "sequence": "cb_out",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          23,
+          0,
+          2097152
+        ],
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.outF",
+      "phase": "backbone.1"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          24,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.1"
+    },
+    {
+      "sequence": "cb_gateup",
+      "bindings": [
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          181,
+          0,
+          12582912
+        ],
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          17,
+          0,
+          65536
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "eng.gateupF",
+      "phase": "backbone.1"
+    },
+    {
+      "sequence": "cb_down",
+      "bindings": [
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          25,
+          0,
+          5373952
+        ],
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.downF",
+      "phase": "backbone.1"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          26,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.2"
+    },
+    {
+      "sequence": "cb_qkvR",
+      "bindings": [
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          27,
+          0,
+          6291456
+        ],
+        [
+          21,
+          0,
+          262144
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        3,
+        4,
+        5
+      ],
+      "label": "eng.qkvR",
+      "phase": "backbone.2"
+    },
+    {
+      "sequence": "cb_attn",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          22,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.backbone",
+      "phase": "backbone.2"
+    },
+    {
+      "sequence": "cb_out",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          28,
+          0,
+          2097152
+        ],
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.outF",
+      "phase": "backbone.2"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          29,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.2"
+    },
+    {
+      "sequence": "cb_gateup",
+      "bindings": [
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          182,
+          0,
+          12582912
+        ],
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          17,
+          0,
+          65536
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "eng.gateupF",
+      "phase": "backbone.2"
+    },
+    {
+      "sequence": "cb_down",
+      "bindings": [
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          30,
+          0,
+          5373952
+        ],
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.downF",
+      "phase": "backbone.2"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          31,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.3"
+    },
+    {
+      "sequence": "cb_qkvR",
+      "bindings": [
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          32,
+          0,
+          6291456
+        ],
+        [
+          3,
+          0,
+          262144
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        3,
+        4,
+        5
+      ],
+      "label": "eng.qkvR",
+      "phase": "backbone.3"
+    },
+    {
+      "sequence": "cb_attn",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          9,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.backbone",
+      "phase": "backbone.3"
+    },
+    {
+      "sequence": "cb_out",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          33,
+          0,
+          2097152
+        ],
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.outF",
+      "phase": "backbone.3"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          34,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.3"
+    },
+    {
+      "sequence": "cb_gateup",
+      "bindings": [
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          183,
+          0,
+          12582912
+        ],
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          17,
+          0,
+          65536
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "eng.gateupF",
+      "phase": "backbone.3"
+    },
+    {
+      "sequence": "cb_down",
+      "bindings": [
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          35,
+          0,
+          5373952
+        ],
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.downF",
+      "phase": "backbone.3"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          36,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.4"
+    },
+    {
+      "sequence": "cb_qkvR",
+      "bindings": [
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          37,
+          0,
+          6291456
+        ],
+        [
+          21,
+          0,
+          262144
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        3,
+        4,
+        5
+      ],
+      "label": "eng.qkvR",
+      "phase": "backbone.4"
+    },
+    {
+      "sequence": "cb_attn",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          22,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.backbone",
+      "phase": "backbone.4"
+    },
+    {
+      "sequence": "cb_out",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          38,
+          0,
+          2097152
+        ],
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.outF",
+      "phase": "backbone.4"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          39,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.4"
+    },
+    {
+      "sequence": "cb_gateup",
+      "bindings": [
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          184,
+          0,
+          12582912
+        ],
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          17,
+          0,
+          65536
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "eng.gateupF",
+      "phase": "backbone.4"
+    },
+    {
+      "sequence": "cb_down",
+      "bindings": [
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          40,
+          0,
+          5373952
+        ],
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.downF",
+      "phase": "backbone.4"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          41,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.5"
+    },
+    {
+      "sequence": "cb_qkvR",
+      "bindings": [
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          42,
+          0,
+          6291456
+        ],
+        [
+          21,
+          0,
+          262144
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        3,
+        4,
+        5
+      ],
+      "label": "eng.qkvR",
+      "phase": "backbone.5"
+    },
+    {
+      "sequence": "cb_attn",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          22,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.backbone",
+      "phase": "backbone.5"
+    },
+    {
+      "sequence": "cb_out",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          43,
+          0,
+          2097152
+        ],
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.outF",
+      "phase": "backbone.5"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          44,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.5"
+    },
+    {
+      "sequence": "cb_gateup",
+      "bindings": [
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          185,
+          0,
+          12582912
+        ],
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          17,
+          0,
+          65536
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "eng.gateupF",
+      "phase": "backbone.5"
+    },
+    {
+      "sequence": "cb_down",
+      "bindings": [
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          45,
+          0,
+          5373952
+        ],
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.downF",
+      "phase": "backbone.5"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          46,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.6"
+    },
+    {
+      "sequence": "cb_qkvR",
+      "bindings": [
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          47,
+          0,
+          6291456
+        ],
+        [
+          3,
+          0,
+          262144
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        3,
+        4,
+        5
+      ],
+      "label": "eng.qkvR",
+      "phase": "backbone.6"
+    },
+    {
+      "sequence": "cb_attn",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          9,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.backbone",
+      "phase": "backbone.6"
+    },
+    {
+      "sequence": "cb_out",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          48,
+          0,
+          2097152
+        ],
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.outF",
+      "phase": "backbone.6"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          49,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.6"
+    },
+    {
+      "sequence": "cb_gateup",
+      "bindings": [
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          186,
+          0,
+          12582912
+        ],
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          17,
+          0,
+          65536
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "eng.gateupF",
+      "phase": "backbone.6"
+    },
+    {
+      "sequence": "cb_down",
+      "bindings": [
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          50,
+          0,
+          5373952
+        ],
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.downF",
+      "phase": "backbone.6"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          51,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.7"
+    },
+    {
+      "sequence": "cb_qkvR",
+      "bindings": [
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          52,
+          0,
+          6291456
+        ],
+        [
+          21,
+          0,
+          262144
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        3,
+        4,
+        5
+      ],
+      "label": "eng.qkvR",
+      "phase": "backbone.7"
+    },
+    {
+      "sequence": "cb_attn",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          22,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.backbone",
+      "phase": "backbone.7"
+    },
+    {
+      "sequence": "cb_out",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          53,
+          0,
+          2097152
+        ],
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.outF",
+      "phase": "backbone.7"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          54,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.7"
+    },
+    {
+      "sequence": "cb_gateup",
+      "bindings": [
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          187,
+          0,
+          12582912
+        ],
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          17,
+          0,
+          65536
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "eng.gateupF",
+      "phase": "backbone.7"
+    },
+    {
+      "sequence": "cb_down",
+      "bindings": [
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          55,
+          0,
+          5373952
+        ],
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.downF",
+      "phase": "backbone.7"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          56,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.8"
+    },
+    {
+      "sequence": "cb_qkvR",
+      "bindings": [
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          57,
+          0,
+          6291456
+        ],
+        [
+          21,
+          0,
+          262144
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        3,
+        4,
+        5
+      ],
+      "label": "eng.qkvR",
+      "phase": "backbone.8"
+    },
+    {
+      "sequence": "cb_attn",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          22,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.backbone",
+      "phase": "backbone.8"
+    },
+    {
+      "sequence": "cb_out",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          58,
+          0,
+          2097152
+        ],
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.outF",
+      "phase": "backbone.8"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          59,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.8"
+    },
+    {
+      "sequence": "cb_gateup",
+      "bindings": [
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          188,
+          0,
+          12582912
+        ],
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          17,
+          0,
+          65536
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "eng.gateupF",
+      "phase": "backbone.8"
+    },
+    {
+      "sequence": "cb_down",
+      "bindings": [
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          60,
+          0,
+          5373952
+        ],
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.downF",
+      "phase": "backbone.8"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          61,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.9"
+    },
+    {
+      "sequence": "cb_qkvR",
+      "bindings": [
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          62,
+          0,
+          6291456
+        ],
+        [
+          3,
+          0,
+          262144
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        3,
+        4,
+        5
+      ],
+      "label": "eng.qkvR",
+      "phase": "backbone.9"
+    },
+    {
+      "sequence": "cb_attn",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          9,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.backbone",
+      "phase": "backbone.9"
+    },
+    {
+      "sequence": "cb_out",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          63,
+          0,
+          2097152
+        ],
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.outF",
+      "phase": "backbone.9"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          64,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.9"
+    },
+    {
+      "sequence": "cb_gateup",
+      "bindings": [
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          189,
+          0,
+          12582912
+        ],
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          17,
+          0,
+          65536
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "eng.gateupF",
+      "phase": "backbone.9"
+    },
+    {
+      "sequence": "cb_down",
+      "bindings": [
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          65,
+          0,
+          5373952
+        ],
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.downF",
+      "phase": "backbone.9"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          66,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.10"
+    },
+    {
+      "sequence": "cb_qkvR",
+      "bindings": [
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          67,
+          0,
+          6291456
+        ],
+        [
+          21,
+          0,
+          262144
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        3,
+        4,
+        5
+      ],
+      "label": "eng.qkvR",
+      "phase": "backbone.10"
+    },
+    {
+      "sequence": "cb_attn",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          22,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.backbone",
+      "phase": "backbone.10"
+    },
+    {
+      "sequence": "cb_out",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          68,
+          0,
+          2097152
+        ],
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.outF",
+      "phase": "backbone.10"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          69,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.10"
+    },
+    {
+      "sequence": "cb_gateup",
+      "bindings": [
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          190,
+          0,
+          12582912
+        ],
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          17,
+          0,
+          65536
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "eng.gateupF",
+      "phase": "backbone.10"
+    },
+    {
+      "sequence": "cb_down",
+      "bindings": [
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          70,
+          0,
+          5373952
+        ],
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.downF",
+      "phase": "backbone.10"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          71,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.11"
+    },
+    {
+      "sequence": "cb_qkvR",
+      "bindings": [
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          72,
+          0,
+          6291456
+        ],
+        [
+          21,
+          0,
+          262144
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        3,
+        4,
+        5
+      ],
+      "label": "eng.qkvR",
+      "phase": "backbone.11"
+    },
+    {
+      "sequence": "cb_attn",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          22,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.backbone",
+      "phase": "backbone.11"
+    },
+    {
+      "sequence": "cb_out",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          73,
+          0,
+          2097152
+        ],
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.outF",
+      "phase": "backbone.11"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          74,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.11"
+    },
+    {
+      "sequence": "cb_gateup",
+      "bindings": [
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          191,
+          0,
+          12582912
+        ],
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          17,
+          0,
+          65536
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "eng.gateupF",
+      "phase": "backbone.11"
+    },
+    {
+      "sequence": "cb_down",
+      "bindings": [
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          75,
+          0,
+          5373952
+        ],
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.downF",
+      "phase": "backbone.11"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          76,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.12"
+    },
+    {
+      "sequence": "cb_qkvR",
+      "bindings": [
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          77,
+          0,
+          6291456
+        ],
+        [
+          3,
+          0,
+          262144
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        3,
+        4,
+        5
+      ],
+      "label": "eng.qkvR",
+      "phase": "backbone.12"
+    },
+    {
+      "sequence": "cb_attn",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          9,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.backbone",
+      "phase": "backbone.12"
+    },
+    {
+      "sequence": "cb_out",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          78,
+          0,
+          2097152
+        ],
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.outF",
+      "phase": "backbone.12"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          79,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.12"
+    },
+    {
+      "sequence": "cb_gateup",
+      "bindings": [
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          192,
+          0,
+          12582912
+        ],
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          17,
+          0,
+          65536
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "eng.gateupF",
+      "phase": "backbone.12"
+    },
+    {
+      "sequence": "cb_down",
+      "bindings": [
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          80,
+          0,
+          5373952
+        ],
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.downF",
+      "phase": "backbone.12"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          81,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.13"
+    },
+    {
+      "sequence": "cb_qkvR",
+      "bindings": [
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          82,
+          0,
+          6291456
+        ],
+        [
+          21,
+          0,
+          262144
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        3,
+        4,
+        5
+      ],
+      "label": "eng.qkvR",
+      "phase": "backbone.13"
+    },
+    {
+      "sequence": "cb_attn",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          22,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.backbone",
+      "phase": "backbone.13"
+    },
+    {
+      "sequence": "cb_out",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          83,
+          0,
+          2097152
+        ],
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.outF",
+      "phase": "backbone.13"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          84,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.13"
+    },
+    {
+      "sequence": "cb_gateup",
+      "bindings": [
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          193,
+          0,
+          12582912
+        ],
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          17,
+          0,
+          65536
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "eng.gateupF",
+      "phase": "backbone.13"
+    },
+    {
+      "sequence": "cb_down",
+      "bindings": [
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          85,
+          0,
+          5373952
+        ],
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.downF",
+      "phase": "backbone.13"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          86,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.14"
+    },
+    {
+      "sequence": "cb_qkvR",
+      "bindings": [
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          87,
+          0,
+          6291456
+        ],
+        [
+          21,
+          0,
+          262144
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        3,
+        4,
+        5
+      ],
+      "label": "eng.qkvR",
+      "phase": "backbone.14"
+    },
+    {
+      "sequence": "cb_attn",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          22,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.backbone",
+      "phase": "backbone.14"
+    },
+    {
+      "sequence": "cb_out",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          88,
+          0,
+          2097152
+        ],
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.outF",
+      "phase": "backbone.14"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          89,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.14"
+    },
+    {
+      "sequence": "cb_gateup",
+      "bindings": [
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          194,
+          0,
+          12582912
+        ],
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          17,
+          0,
+          65536
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "eng.gateupF",
+      "phase": "backbone.14"
+    },
+    {
+      "sequence": "cb_down",
+      "bindings": [
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          90,
+          0,
+          5373952
+        ],
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.downF",
+      "phase": "backbone.14"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          91,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.15"
+    },
+    {
+      "sequence": "cb_qkvR",
+      "bindings": [
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          92,
+          0,
+          6291456
+        ],
+        [
+          3,
+          0,
+          262144
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        3,
+        4,
+        5
+      ],
+      "label": "eng.qkvR",
+      "phase": "backbone.15"
+    },
+    {
+      "sequence": "cb_attn",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          9,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.backbone",
+      "phase": "backbone.15"
+    },
+    {
+      "sequence": "cb_out",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          93,
+          0,
+          2097152
+        ],
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.outF",
+      "phase": "backbone.15"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          94,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.15"
+    },
+    {
+      "sequence": "cb_gateup",
+      "bindings": [
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          195,
+          0,
+          12582912
+        ],
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          17,
+          0,
+          65536
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "eng.gateupF",
+      "phase": "backbone.15"
+    },
+    {
+      "sequence": "cb_down",
+      "bindings": [
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          95,
+          0,
+          5373952
+        ],
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.downF",
+      "phase": "backbone.15"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          96,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.16"
+    },
+    {
+      "sequence": "cb_qkvR",
+      "bindings": [
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          97,
+          0,
+          6291456
+        ],
+        [
+          21,
+          0,
+          262144
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        3,
+        4,
+        5
+      ],
+      "label": "eng.qkvR",
+      "phase": "backbone.16"
+    },
+    {
+      "sequence": "cb_attn",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          22,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.backbone",
+      "phase": "backbone.16"
+    },
+    {
+      "sequence": "cb_out",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          98,
+          0,
+          2097152
+        ],
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.outF",
+      "phase": "backbone.16"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          99,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.16"
+    },
+    {
+      "sequence": "cb_gateup",
+      "bindings": [
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          196,
+          0,
+          12582912
+        ],
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          17,
+          0,
+          65536
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "eng.gateupF",
+      "phase": "backbone.16"
+    },
+    {
+      "sequence": "cb_down",
+      "bindings": [
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          100,
+          0,
+          5373952
+        ],
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.downF",
+      "phase": "backbone.16"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          101,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.17"
+    },
+    {
+      "sequence": "cb_qkvR",
+      "bindings": [
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          102,
+          0,
+          6291456
+        ],
+        [
+          21,
+          0,
+          262144
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        3,
+        4,
+        5
+      ],
+      "label": "eng.qkvR",
+      "phase": "backbone.17"
+    },
+    {
+      "sequence": "cb_attn",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          22,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.backbone",
+      "phase": "backbone.17"
+    },
+    {
+      "sequence": "cb_out",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          103,
+          0,
+          2097152
+        ],
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.outF",
+      "phase": "backbone.17"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          104,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.17"
+    },
+    {
+      "sequence": "cb_gateup",
+      "bindings": [
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          197,
+          0,
+          12582912
+        ],
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          17,
+          0,
+          65536
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "eng.gateupF",
+      "phase": "backbone.17"
+    },
+    {
+      "sequence": "cb_down",
+      "bindings": [
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          105,
+          0,
+          5373952
+        ],
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.downF",
+      "phase": "backbone.17"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          106,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.18"
+    },
+    {
+      "sequence": "cb_qkvR",
+      "bindings": [
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          107,
+          0,
+          6291456
+        ],
+        [
+          3,
+          0,
+          262144
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        3,
+        4,
+        5
+      ],
+      "label": "eng.qkvR",
+      "phase": "backbone.18"
+    },
+    {
+      "sequence": "cb_attn",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          9,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.backbone",
+      "phase": "backbone.18"
+    },
+    {
+      "sequence": "cb_out",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          108,
+          0,
+          2097152
+        ],
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.outF",
+      "phase": "backbone.18"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          109,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.18"
+    },
+    {
+      "sequence": "cb_gateup",
+      "bindings": [
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          198,
+          0,
+          12582912
+        ],
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          17,
+          0,
+          65536
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "eng.gateupF",
+      "phase": "backbone.18"
+    },
+    {
+      "sequence": "cb_down",
+      "bindings": [
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          110,
+          0,
+          5373952
+        ],
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.downF",
+      "phase": "backbone.18"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          111,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.19"
+    },
+    {
+      "sequence": "cb_qkvR",
+      "bindings": [
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          112,
+          0,
+          6291456
+        ],
+        [
+          21,
+          0,
+          262144
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        3,
+        4,
+        5
+      ],
+      "label": "eng.qkvR",
+      "phase": "backbone.19"
+    },
+    {
+      "sequence": "cb_attn",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          22,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.backbone",
+      "phase": "backbone.19"
+    },
+    {
+      "sequence": "cb_out",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          113,
+          0,
+          2097152
+        ],
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.outF",
+      "phase": "backbone.19"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          114,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.19"
+    },
+    {
+      "sequence": "cb_gateup",
+      "bindings": [
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          199,
+          0,
+          12582912
+        ],
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          17,
+          0,
+          65536
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "eng.gateupF",
+      "phase": "backbone.19"
+    },
+    {
+      "sequence": "cb_down",
+      "bindings": [
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          115,
+          0,
+          5373952
+        ],
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.downF",
+      "phase": "backbone.19"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          116,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.20"
+    },
+    {
+      "sequence": "cb_qkvR",
+      "bindings": [
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          117,
+          0,
+          6291456
+        ],
+        [
+          21,
+          0,
+          262144
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        3,
+        4,
+        5
+      ],
+      "label": "eng.qkvR",
+      "phase": "backbone.20"
+    },
+    {
+      "sequence": "cb_attn",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          22,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.backbone",
+      "phase": "backbone.20"
+    },
+    {
+      "sequence": "cb_out",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          118,
+          0,
+          2097152
+        ],
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.outF",
+      "phase": "backbone.20"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          119,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.20"
+    },
+    {
+      "sequence": "cb_gateup",
+      "bindings": [
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          200,
+          0,
+          12582912
+        ],
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          17,
+          0,
+          65536
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "eng.gateupF",
+      "phase": "backbone.20"
+    },
+    {
+      "sequence": "cb_down",
+      "bindings": [
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          120,
+          0,
+          5373952
+        ],
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.downF",
+      "phase": "backbone.20"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          121,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.21"
+    },
+    {
+      "sequence": "cb_qkvR",
+      "bindings": [
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          122,
+          0,
+          6291456
+        ],
+        [
+          3,
+          0,
+          262144
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        3,
+        4,
+        5
+      ],
+      "label": "eng.qkvR",
+      "phase": "backbone.21"
+    },
+    {
+      "sequence": "cb_attn",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          9,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.backbone",
+      "phase": "backbone.21"
+    },
+    {
+      "sequence": "cb_out",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          123,
+          0,
+          2097152
+        ],
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.outF",
+      "phase": "backbone.21"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          124,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.21"
+    },
+    {
+      "sequence": "cb_gateup",
+      "bindings": [
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          201,
+          0,
+          12582912
+        ],
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          17,
+          0,
+          65536
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "eng.gateupF",
+      "phase": "backbone.21"
+    },
+    {
+      "sequence": "cb_down",
+      "bindings": [
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          125,
+          0,
+          5373952
+        ],
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.downF",
+      "phase": "backbone.21"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          126,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.22"
+    },
+    {
+      "sequence": "cb_qkvR",
+      "bindings": [
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          127,
+          0,
+          6291456
+        ],
+        [
+          21,
+          0,
+          262144
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        3,
+        4,
+        5
+      ],
+      "label": "eng.qkvR",
+      "phase": "backbone.22"
+    },
+    {
+      "sequence": "cb_attn",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          22,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.backbone",
+      "phase": "backbone.22"
+    },
+    {
+      "sequence": "cb_out",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          128,
+          0,
+          2097152
+        ],
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.outF",
+      "phase": "backbone.22"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          129,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.22"
+    },
+    {
+      "sequence": "cb_gateup",
+      "bindings": [
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          202,
+          0,
+          12582912
+        ],
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          17,
+          0,
+          65536
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "eng.gateupF",
+      "phase": "backbone.22"
+    },
+    {
+      "sequence": "cb_down",
+      "bindings": [
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          130,
+          0,
+          5373952
+        ],
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.downF",
+      "phase": "backbone.22"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          131,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.23"
+    },
+    {
+      "sequence": "cb_qkvR",
+      "bindings": [
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          132,
+          0,
+          6291456
+        ],
+        [
+          21,
+          0,
+          262144
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        3,
+        4,
+        5
+      ],
+      "label": "eng.qkvR",
+      "phase": "backbone.23"
+    },
+    {
+      "sequence": "cb_attn",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          22,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.backbone",
+      "phase": "backbone.23"
+    },
+    {
+      "sequence": "cb_out",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          133,
+          0,
+          2097152
+        ],
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.outF",
+      "phase": "backbone.23"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          134,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.23"
+    },
+    {
+      "sequence": "cb_gateup",
+      "bindings": [
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          203,
+          0,
+          12582912
+        ],
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          17,
+          0,
+          65536
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "eng.gateupF",
+      "phase": "backbone.23"
+    },
+    {
+      "sequence": "cb_down",
+      "bindings": [
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          135,
+          0,
+          5373952
+        ],
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.downF",
+      "phase": "backbone.23"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          136,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.24"
+    },
+    {
+      "sequence": "cb_qkvR",
+      "bindings": [
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          137,
+          0,
+          6291456
+        ],
+        [
+          3,
+          0,
+          262144
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        3,
+        4,
+        5
+      ],
+      "label": "eng.qkvR",
+      "phase": "backbone.24"
+    },
+    {
+      "sequence": "cb_attn",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          9,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.backbone",
+      "phase": "backbone.24"
+    },
+    {
+      "sequence": "cb_out",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          138,
+          0,
+          2097152
+        ],
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.outF",
+      "phase": "backbone.24"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          139,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.24"
+    },
+    {
+      "sequence": "cb_gateup",
+      "bindings": [
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          204,
+          0,
+          12582912
+        ],
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          17,
+          0,
+          65536
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "eng.gateupF",
+      "phase": "backbone.24"
+    },
+    {
+      "sequence": "cb_down",
+      "bindings": [
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          140,
+          0,
+          5373952
+        ],
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.downF",
+      "phase": "backbone.24"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          141,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.25"
+    },
+    {
+      "sequence": "cb_qkvR",
+      "bindings": [
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          142,
+          0,
+          6291456
+        ],
+        [
+          21,
+          0,
+          262144
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        3,
+        4,
+        5
+      ],
+      "label": "eng.qkvR",
+      "phase": "backbone.25"
+    },
+    {
+      "sequence": "cb_attn",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          22,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.backbone",
+      "phase": "backbone.25"
+    },
+    {
+      "sequence": "cb_out",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          143,
+          0,
+          2097152
+        ],
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.outF",
+      "phase": "backbone.25"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          144,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.25"
+    },
+    {
+      "sequence": "cb_gateup",
+      "bindings": [
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          205,
+          0,
+          12582912
+        ],
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          17,
+          0,
+          65536
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "eng.gateupF",
+      "phase": "backbone.25"
+    },
+    {
+      "sequence": "cb_down",
+      "bindings": [
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          145,
+          0,
+          5373952
+        ],
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.downF",
+      "phase": "backbone.25"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          146,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.26"
+    },
+    {
+      "sequence": "cb_qkvR",
+      "bindings": [
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          147,
+          0,
+          6291456
+        ],
+        [
+          21,
+          0,
+          262144
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        3,
+        4,
+        5
+      ],
+      "label": "eng.qkvR",
+      "phase": "backbone.26"
+    },
+    {
+      "sequence": "cb_attn",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          22,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.backbone",
+      "phase": "backbone.26"
+    },
+    {
+      "sequence": "cb_out",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          148,
+          0,
+          2097152
+        ],
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.outF",
+      "phase": "backbone.26"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          149,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.26"
+    },
+    {
+      "sequence": "cb_gateup",
+      "bindings": [
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          206,
+          0,
+          12582912
+        ],
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          17,
+          0,
+          65536
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "eng.gateupF",
+      "phase": "backbone.26"
+    },
+    {
+      "sequence": "cb_down",
+      "bindings": [
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          150,
+          0,
+          5373952
+        ],
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.downF",
+      "phase": "backbone.26"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          151,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.27"
+    },
+    {
+      "sequence": "cb_qkvR",
+      "bindings": [
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          152,
+          0,
+          6291456
+        ],
+        [
+          3,
+          0,
+          262144
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        3,
+        4,
+        5
+      ],
+      "label": "eng.qkvR",
+      "phase": "backbone.27"
+    },
+    {
+      "sequence": "cb_attn",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          9,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.backbone",
+      "phase": "backbone.27"
+    },
+    {
+      "sequence": "cb_out",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          153,
+          0,
+          2097152
+        ],
+        [
+          0,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.outF",
+      "phase": "backbone.27"
+    },
+    {
+      "sequence": "cb_ln",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          154,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.lnr",
+      "phase": "backbone.27"
+    },
+    {
+      "sequence": "cb_gateup",
+      "bindings": [
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          207,
+          0,
+          12582912
+        ],
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          17,
+          0,
+          65536
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "eng.gateupF",
+      "phase": "backbone.27"
+    },
+    {
+      "sequence": "cb_down",
+      "bindings": [
+        [
+          16,
+          0,
+          335872
+        ],
+        [
+          155,
+          0,
+          5373952
+        ],
+        [
+          15,
+          131072,
+          131072
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          13,
+          0,
+          32
+        ],
+        [
+          7,
+          0,
+          16384
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "eng.downF",
+      "phase": "backbone.27"
+    },
+    {
+      "sequence": "sequence_006",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          156,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          131072
+        ],
+        [
+          157,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "lnr@gather",
+      "phase": "final_norm_type"
+    },
+    {
+      "sequence": "sequence_007",
+      "bindings": [
+        [
+          157,
+          0,
+          262144
+        ],
+        [
+          0,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        1
+      ],
+      "label": "residual@gather",
+      "phase": "final_norm_type"
+    },
+    {
+      "sequence": "sequence_000",
+      "bindings": [
+        [
+          0,
+          0,
+          131072
+        ],
+        [
+          158,
+          0,
+          393216
+        ],
+        [
+          159,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "lnf",
+      "phase": "decision.0"
+    },
+    {
+      "sequence": "sequence_008",
+      "bindings": [
+        [
+          159,
+          0,
+          131072
+        ],
+        [
+          160,
+          0,
+          6291456
+        ],
+        [
+          161,
+          0,
+          1572864
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "gemm_qkv@tile64",
+      "phase": "decision.0"
+    },
+    {
+      "sequence": "sequence_217",
+      "bindings": [
+        [
+          161,
+          0,
+          1572864
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        1,
+        2,
+        3
+      ],
+      "label": "cast8_196608@linear",
+      "phase": "decision.0"
+    },
+    {
+      "sequence": "sequence_192",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          9,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.decision",
+      "phase": "decision.0"
+    },
+    {
+      "sequence": "sequence_009",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          162,
+          0,
+          2097152
+        ],
+        [
+          163,
+          0,
+          524288
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "gemm_out@flat",
+      "phase": "decision.0"
+    },
+    {
+      "sequence": "sequence_218",
+      "bindings": [
+        [
+          163,
+          0,
+          524288
+        ],
+        [
+          0,
+          131072,
+          131072
+        ]
+      ],
+      "outputs": [
+        1
+      ],
+      "label": "cast8_65536",
+      "phase": "decision.0"
+    },
+    {
+      "sequence": "sequence_006",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          164,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          131072
+        ],
+        [
+          159,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "lnr@gather",
+      "phase": "decision.0"
+    },
+    {
+      "sequence": "sequence_010",
+      "bindings": [
+        [
+          159,
+          0,
+          131072
+        ],
+        [
+          165,
+          0,
+          8388608
+        ],
+        [
+          166,
+          0,
+          2097152
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "gemm_fc1@flat",
+      "phase": "decision.0"
+    },
+    {
+      "sequence": "sequence_219",
+      "bindings": [
+        [
+          166,
+          0,
+          2097152
+        ],
+        [
+          167,
+          0,
+          524288
+        ]
+      ],
+      "outputs": [
+        1
+      ],
+      "label": "castrelu8_262144",
+      "phase": "decision.0"
+    },
+    {
+      "sequence": "sequence_011",
+      "bindings": [
+        [
+          167,
+          0,
+          524288
+        ],
+        [
+          168,
+          0,
+          8388608
+        ],
+        [
+          169,
+          0,
+          524288
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "gemm_fc2@flat",
+      "phase": "decision.0"
+    },
+    {
+      "sequence": "sequence_218",
+      "bindings": [
+        [
+          169,
+          0,
+          524288
+        ],
+        [
+          15,
+          131072,
+          131072
+        ]
+      ],
+      "outputs": [
+        1
+      ],
+      "label": "cast8_65536",
+      "phase": "decision.0"
+    },
+    {
+      "sequence": "sequence_006",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          170,
+          0,
+          393216
+        ],
+        [
+          0,
+          0,
+          131072
+        ],
+        [
+          159,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "lnr@gather",
+      "phase": "decision.1"
+    },
+    {
+      "sequence": "sequence_008",
+      "bindings": [
+        [
+          159,
+          0,
+          131072
+        ],
+        [
+          171,
+          0,
+          6291456
+        ],
+        [
+          172,
+          0,
+          1572864
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "gemm_qkv@tile64",
+      "phase": "decision.1"
+    },
+    {
+      "sequence": "sequence_217",
+      "bindings": [
+        [
+          172,
+          0,
+          1572864
+        ],
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        1,
+        2,
+        3
+      ],
+      "label": "cast8_196608@linear",
+      "phase": "decision.1"
+    },
+    {
+      "sequence": "sequence_192",
+      "bindings": [
+        [
+          4,
+          0,
+          131072
+        ],
+        [
+          5,
+          0,
+          131072
+        ],
+        [
+          6,
+          0,
+          131072
+        ],
+        [
+          8,
+          0,
+          128
+        ],
+        [
+          9,
+          0,
+          1152
+        ],
+        [
+          10,
+          0,
+          8192
+        ],
+        [
+          11,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        5,
+        6
+      ],
+      "label": "all_head_attention.decision",
+      "phase": "decision.1"
+    },
+    {
+      "sequence": "sequence_009",
+      "bindings": [
+        [
+          11,
+          0,
+          131072
+        ],
+        [
+          173,
+          0,
+          2097152
+        ],
+        [
+          174,
+          0,
+          524288
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "gemm_out@flat",
+      "phase": "decision.1"
+    },
+    {
+      "sequence": "sequence_218",
+      "bindings": [
+        [
+          174,
+          0,
+          524288
+        ],
+        [
+          0,
+          131072,
+          131072
+        ]
+      ],
+      "outputs": [
+        1
+      ],
+      "label": "cast8_65536",
+      "phase": "decision.1"
+    },
+    {
+      "sequence": "sequence_006",
+      "bindings": [
+        [
+          0,
+          0,
+          262144
+        ],
+        [
+          175,
+          0,
+          393216
+        ],
+        [
+          15,
+          0,
+          131072
+        ],
+        [
+          159,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        2,
+        3
+      ],
+      "label": "lnr@gather",
+      "phase": "decision.1"
+    },
+    {
+      "sequence": "sequence_010",
+      "bindings": [
+        [
+          159,
+          0,
+          131072
+        ],
+        [
+          176,
+          0,
+          8388608
+        ],
+        [
+          177,
+          0,
+          2097152
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "gemm_fc1@flat",
+      "phase": "decision.1"
+    },
+    {
+      "sequence": "sequence_219",
+      "bindings": [
+        [
+          177,
+          0,
+          2097152
+        ],
+        [
+          167,
+          0,
+          524288
+        ]
+      ],
+      "outputs": [
+        1
+      ],
+      "label": "castrelu8_262144",
+      "phase": "decision.1"
+    },
+    {
+      "sequence": "sequence_011",
+      "bindings": [
+        [
+          167,
+          0,
+          524288
+        ],
+        [
+          178,
+          0,
+          8388608
+        ],
+        [
+          179,
+          0,
+          524288
+        ]
+      ],
+      "outputs": [
+        2
+      ],
+      "label": "gemm_fc2@flat",
+      "phase": "decision.1"
+    },
+    {
+      "sequence": "sequence_218",
+      "bindings": [
+        [
+          179,
+          0,
+          524288
+        ],
+        [
+          15,
+          131072,
+          131072
+        ]
+      ],
+      "outputs": [
+        1
+      ],
+      "label": "cast8_65536",
+      "phase": "decision.1"
+    },
+    {
+      "sequence": "sequence_007",
+      "bindings": [
+        [
+          15,
+          0,
+          262144
+        ],
+        [
+          0,
+          0,
+          131072
+        ]
+      ],
+      "outputs": [
+        1
+      ],
+      "label": "residual@gather",
+      "phase": "decision.1"
+    }
+  ],
+  "commands": [
+    {
+      "start": 0,
+      "end": 1,
+      "device": "device_12"
+    },
+    {
+      "start": 1,
+      "end": 196,
+      "device": "device_cb"
+    },
+    {
+      "start": 196,
+      "end": 197,
+      "device": "device_13"
+    },
+    {
+      "start": 197,
+      "end": 198,
+      "device": "device_11"
+    },
+    {
+      "start": 198,
+      "end": 199,
+      "device": "device_12"
+    },
+    {
+      "start": 199,
+      "end": 200,
+      "device": "device_00"
+    },
+    {
+      "start": 200,
+      "end": 201,
+      "device": "device_03"
+    },
+    {
+      "start": 201,
+      "end": 202,
+      "device": "device_05f"
+    },
+    {
+      "start": 202,
+      "end": 203,
+      "device": "device_00"
+    },
+    {
+      "start": 203,
+      "end": 204,
+      "device": "device_03"
+    },
+    {
+      "start": 204,
+      "end": 205,
+      "device": "device_13"
+    },
+    {
+      "start": 205,
+      "end": 206,
+      "device": "device_00"
+    },
+    {
+      "start": 206,
+      "end": 207,
+      "device": "device_04"
+    },
+    {
+      "start": 207,
+      "end": 208,
+      "device": "device_01"
+    },
+    {
+      "start": 208,
+      "end": 209,
+      "device": "device_03"
+    },
+    {
+      "start": 209,
+      "end": 210,
+      "device": "device_13"
+    },
+    {
+      "start": 210,
+      "end": 211,
+      "device": "device_00"
+    },
+    {
+      "start": 211,
+      "end": 212,
+      "device": "device_03"
+    },
+    {
+      "start": 212,
+      "end": 213,
+      "device": "device_05f"
+    },
+    {
+      "start": 213,
+      "end": 214,
+      "device": "device_00"
+    },
+    {
+      "start": 214,
+      "end": 215,
+      "device": "device_03"
+    },
+    {
+      "start": 215,
+      "end": 216,
+      "device": "device_13"
+    },
+    {
+      "start": 216,
+      "end": 217,
+      "device": "device_00"
+    },
+    {
+      "start": 217,
+      "end": 218,
+      "device": "device_04"
+    },
+    {
+      "start": 218,
+      "end": 219,
+      "device": "device_01"
+    },
+    {
+      "start": 219,
+      "end": 220,
+      "device": "device_03"
+    },
+    {
+      "start": 220,
+      "end": 221,
+      "device": "device_11"
+    }
+  ],
+  "groups": [
+    {
+      "instance": "whole_model_0",
+      "start": 0,
+      "end": 221,
+      "deadline": 1.5
+    }
+  ],
+  "inputs": {
+    "embedding": [
+      [
+        0,
+        0,
+        131072
+      ]
+    ],
+    "mask": [
+      [
+        8,
+        0,
+        128
+      ]
+    ],
+    "type": [
+      [
+        157,
+        131072,
+        131072
+      ]
+    ],
+    "type_blobs": [
+      "bfb7a2ef77c384749b0b18ff6f8397c3f5b755937f08ca5fcfb1de37cc58fcf8",
+      "ad5f7bbcb57f88e97c9e0ead8ee87a9c9348652bd396bd22546bc7fa42e223c3",
+      "2b25583ef1958627379fbe6be5c22b22e577a94a48c985c568f11635f6252ebd"
+    ]
+  },
+  "outputs": [
+    [
+      0,
+      0,
+      131072
+    ]
+  ],
+  "variant": "fast",
+  "numerical_contract": "approximate_shared_input_BFP_engine;native_or_validated_exact_vector_attention"
+}

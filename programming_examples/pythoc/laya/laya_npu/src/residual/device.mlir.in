@@ -1,0 +1,43 @@
+module {
+  aie.device(npu2_1col) {
+    %logical_core = aie.logical_tile<CoreTile>(0, 2)
+    %logical_shim_noc = aie.logical_tile<ShimNOCTile>(0, 0)
+    %logical_shim_noc_0 = aie.logical_tile<ShimNOCTile>(0, 0)
+    aie.objectfifo @input(%logical_shim_noc, {%logical_core}, 2 : i32) : !aie.objectfifo<memref<512xui16>>  
+    aie.objectfifo @output(%logical_core, {%logical_shim_noc_0}, 2 : i32) : !aie.objectfifo<memref<256xui16>>  
+    func.func private @residual(memref<512xui16>, memref<256xui16>) attributes {link_with = "@RESIDUAL_OBJECT@"}
+    %core_0_2 = aie.core(%logical_core) {
+      %c0 = arith.constant 0 : index
+      %c9223372036854775807 = arith.constant 9223372036854775807 : index
+      %c1 = arith.constant 1 : index
+      scf.for %arg0 = %c0 to %c9223372036854775807 step %c1 {
+        %c0_1 = arith.constant 0 : index
+        %c256 = arith.constant 256 : index
+        %c1_2 = arith.constant 1 : index
+        scf.for %arg1 = %c0_1 to %c256 step %c1_2 {
+          %0 = aie.objectfifo.acquire @input(Consume, 1) : memref<512xui16>
+          %1 = aie.objectfifo.acquire @output(Produce, 1) : memref<256xui16>
+          func.call @residual(%0, %1) : (memref<512xui16>, memref<256xui16>) -> ()
+          aie.objectfifo.release @input(Consume, 1)
+          aie.objectfifo.release @output(Produce, 1)
+        }
+      }
+      aie.end
+    } {stack_size = 3328 : i32}
+    aie.runtime_sequence(%arg0: memref<131072xui16>, %arg1: memref<65536xui16>) {
+      %0 = aiex.dma_configure_task_for @input {
+        aie.dma_bd(%arg0 : memref<131072xui16> offset = 0 len = 131072 sizes = [1, 1, 1, 131072] strides = [0, 0, 0, 1])
+        aie.end
+      }
+      aiex.dma_start_task(%0)
+      %1 = aiex.dma_configure_task_for @output {
+        aie.dma_bd(%arg1 : memref<65536xui16> offset = 0 len = 65536 sizes = [1, 1, 1, 65536] strides = [0, 0, 0, 1])
+        aie.end
+      } {issue_token = true}
+      aiex.dma_start_task(%1)
+      aiex.dma_await_task(%1)
+      aiex.dma_free_task(%0)
+      aiex.dma_free_task(%1)
+    }
+  }
+}

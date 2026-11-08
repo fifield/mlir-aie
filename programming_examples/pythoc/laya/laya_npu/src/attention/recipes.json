@@ -1,0 +1,362 @@
+{
+  "leaves": {
+    "m6_finish_output_f79cb25f2b759e13": {
+      "symbol": "m6_finish_output",
+      "source": "leaves/m11d_decision_l128.py",
+      "helpers": [],
+      "noinline": [
+        "exp_e1c"
+      ]
+    },
+    "s2_begin_f9e6c6ad9d17b01c": {
+      "symbol": "s2_begin",
+      "source": "leaves/m11d_decision_l128.py",
+      "helpers": [],
+      "noinline": [
+        "exp_e1c"
+      ]
+    },
+    "s2_header_05548b3c4b98a2c8": {
+      "symbol": "s2_header",
+      "source": "leaves/m11d_decision_l128.py",
+      "helpers": [],
+      "noinline": [
+        "exp_e1c"
+      ]
+    },
+    "s2_merge_51a5828c4a0e4929": {
+      "symbol": "s2_merge",
+      "source": "leaves/m11d_decision_l128.py",
+      "helpers": [],
+      "noinline": [
+        "exp_e1c"
+      ]
+    },
+    "s2_pass1_f36e76cfcf6085f1": {
+      "symbol": "s2_pass1",
+      "source": "leaves/m11d_decision_l128.py",
+      "helpers": [],
+      "noinline": [
+        "exp_e1c"
+      ]
+    },
+    "s2_pass2_6ecfd9b650de8c04": {
+      "symbol": "s2_pass2",
+      "source": "leaves/m11d_decision_l128.py",
+      "helpers": [],
+      "noinline": [
+        "exp_e1c"
+      ]
+    },
+    "s2_header_804f7e197f1b116a": {
+      "symbol": "s2_header",
+      "source": "leaves/m11d_decision_l256.py",
+      "helpers": [],
+      "noinline": [
+        "exp_e1c"
+      ]
+    },
+    "s2_pass1_211f172968ddb48f": {
+      "symbol": "s2_pass1",
+      "source": "leaves/m11d_decision_l256.py",
+      "helpers": [],
+      "noinline": [
+        "exp_e1c"
+      ]
+    },
+    "s2_pass2_18b0ec8f6b7866fc": {
+      "symbol": "s2_pass2",
+      "source": "leaves/m11d_decision_l256.py",
+      "helpers": [],
+      "noinline": [
+        "exp_e1c"
+      ]
+    },
+    "s2_begin_8be6c10aead754ab": {
+      "symbol": "s2_begin",
+      "source": "leaves/m11a_decision_l64.py",
+      "helpers": [],
+      "noinline": [
+        "exp_e1c"
+      ]
+    },
+    "s2_header_df3264bfcc2138f7": {
+      "symbol": "s2_header",
+      "source": "leaves/m11a_decision_l64.py",
+      "helpers": [],
+      "noinline": [
+        "exp_e1c"
+      ]
+    },
+    "s2_pass1_6480648f62a4cc87": {
+      "symbol": "s2_pass1",
+      "source": "leaves/m11a_decision_l64.py",
+      "helpers": [],
+      "noinline": [
+        "exp_e1c"
+      ]
+    },
+    "s2_pass2_fd930c5832b19cfc": {
+      "symbol": "s2_pass2",
+      "source": "leaves/m11a_decision_l64.py",
+      "helpers": [],
+      "noinline": [
+        "exp_e1c"
+      ]
+    },
+    "exp_v64_03b59d40c2c537c8": {
+      "symbol": "exp_v64",
+      "source": "leaves/m12a_exp.py",
+      "helpers": [],
+      "noinline": [
+        "exp_fallback"
+      ]
+    },
+    "s2_begin_5e516af2c73d5f38": {
+      "symbol": "s2_begin",
+      "source": "leaves/m12a_backbone_l128.py",
+      "helpers": [],
+      "noinline": [
+        "exp_e1c"
+      ]
+    },
+    "s2_header_99c9655ce6b27f69": {
+      "symbol": "s2_header",
+      "source": "leaves/m12a_backbone_l128.py",
+      "helpers": [],
+      "noinline": [
+        "exp_e1c"
+      ]
+    },
+    "s2_merge_9b06b4cea5aee8b5": {
+      "symbol": "s2_merge",
+      "source": "leaves/m12a_backbone_l128.py",
+      "helpers": [],
+      "noinline": [
+        "exp_e1c"
+      ]
+    },
+    "m12a_vscale_7e8a6f4069a8e37f": {
+      "symbol": "m12a_vscale",
+      "source": "leaves/m12a_vscale.py",
+      "helpers": [],
+      "noinline": []
+    },
+    "s2_pass1_6db20229a058e25e": {
+      "symbol": "s2_pass1",
+      "source": "leaves/m15_backbone_l128.py",
+      "helpers": [
+        "m12a_vscale_7e8a6f4069a8e37f"
+      ],
+      "noinline": [
+        "exp_e1c"
+      ]
+    },
+    "m12a_vdiv_fca9a3ae33b66667": {
+      "symbol": "m12a_vdiv",
+      "source": "leaves/m12a_vdiv.py",
+      "helpers": [],
+      "noinline": []
+    },
+    "s2_pass2_9039e040b1f46d62": {
+      "symbol": "s2_pass2",
+      "source": "leaves/m15_backbone_l128.py",
+      "helpers": [
+        "m12a_vdiv_fca9a3ae33b66667"
+      ],
+      "noinline": [
+        "exp_e1c"
+      ]
+    },
+    "m6_finish_output_2d76142d6167ab6d": {
+      "symbol": "m6_finish_output",
+      "source": "leaves/m12a_backbone_l512.py",
+      "helpers": [],
+      "noinline": [
+        "exp_e1c"
+      ]
+    },
+    "s2_begin_2e7f181b7c25ad81": {
+      "symbol": "s2_begin",
+      "source": "leaves/m12a_backbone_l512.py",
+      "helpers": [],
+      "noinline": [
+        "exp_e1c"
+      ]
+    },
+    "s2_header_7a27b5524fdc3f81": {
+      "symbol": "s2_header",
+      "source": "leaves/m12a_backbone_l512.py",
+      "helpers": [],
+      "noinline": [
+        "exp_e1c"
+      ]
+    },
+    "s2_merge_e67383387b20ddd7": {
+      "symbol": "s2_merge",
+      "source": "leaves/m12a_backbone_l512.py",
+      "helpers": [],
+      "noinline": [
+        "exp_e1c"
+      ]
+    },
+    "s2_pass1_9d8bef0ca67c239d": {
+      "symbol": "s2_pass1",
+      "source": "leaves/m15_backbone_l512.py",
+      "helpers": [
+        "m12a_vscale_7e8a6f4069a8e37f"
+      ],
+      "noinline": [
+        "exp_e1c"
+      ]
+    },
+    "s2_pass2_dccac058634c24ca": {
+      "symbol": "s2_pass2",
+      "source": "leaves/m15_backbone_l512.py",
+      "helpers": [
+        "m12a_vdiv_fca9a3ae33b66667"
+      ],
+      "noinline": [
+        "exp_e1c"
+      ]
+    },
+    "s2_header_1af60ac8bc044b64": {
+      "symbol": "s2_header",
+      "source": "leaves/m12a_backbone_l256.py",
+      "helpers": [],
+      "noinline": [
+        "exp_e1c"
+      ]
+    },
+    "s2_pass1_ca4314febf9b71f7": {
+      "symbol": "s2_pass1",
+      "source": "leaves/post_m15_backbone_l256.py",
+      "helpers": [
+        "m12a_vscale_7e8a6f4069a8e37f"
+      ],
+      "noinline": [
+        "exp_e1c"
+      ]
+    },
+    "s2_pass2_3b2c8538ca9ccaba": {
+      "symbol": "s2_pass2",
+      "source": "leaves/post_m15_backbone_l256.py",
+      "helpers": [
+        "m12a_vdiv_fca9a3ae33b66667"
+      ],
+      "noinline": [
+        "exp_e1c"
+      ]
+    },
+    "s2_begin_96b9312ae558bb45": {
+      "symbol": "s2_begin",
+      "source": "leaves/m12a_decision_l512.py",
+      "helpers": [],
+      "noinline": [
+        "exp_e1c"
+      ]
+    },
+    "s2_pass1_46dc9c7393c78ef3": {
+      "symbol": "s2_pass1",
+      "source": "leaves/post_m15_decision_l512.py",
+      "helpers": [
+        "m12a_vscale_7e8a6f4069a8e37f"
+      ],
+      "noinline": [
+        "exp_e1c"
+      ]
+    },
+    "exp_v64_1eddecdb1b08a033": {
+      "symbol": "exp_v64",
+      "source": "leaves/m28_exp.py",
+      "helpers": [],
+      "noinline": [
+        "exp_fallback",
+        "vmul16"
+      ]
+    }
+  },
+  "devices": {
+    "device_06": {
+      "template": "devices/device_06.mlir.in",
+      "bindings": {
+        "@m6_finish_output_f79cb25f2b759e13@": "m6_finish_output_f79cb25f2b759e13",
+        "@s2_begin_f9e6c6ad9d17b01c@": "s2_begin_f9e6c6ad9d17b01c",
+        "@s2_header_05548b3c4b98a2c8@": "s2_header_05548b3c4b98a2c8",
+        "@s2_merge_51a5828c4a0e4929@": "s2_merge_51a5828c4a0e4929",
+        "@s2_pass1_f36e76cfcf6085f1@": "s2_pass1_f36e76cfcf6085f1",
+        "@s2_pass2_6ecfd9b650de8c04@": "s2_pass2_6ecfd9b650de8c04"
+      }
+    },
+    "device_07": {
+      "template": "devices/device_07.mlir.in",
+      "bindings": {
+        "@m6_finish_output_f79cb25f2b759e13@": "m6_finish_output_f79cb25f2b759e13",
+        "@s2_begin_f9e6c6ad9d17b01c@": "s2_begin_f9e6c6ad9d17b01c",
+        "@s2_header_804f7e197f1b116a@": "s2_header_804f7e197f1b116a",
+        "@s2_merge_51a5828c4a0e4929@": "s2_merge_51a5828c4a0e4929",
+        "@s2_pass1_211f172968ddb48f@": "s2_pass1_211f172968ddb48f",
+        "@s2_pass2_18b0ec8f6b7866fc@": "s2_pass2_18b0ec8f6b7866fc"
+      }
+    },
+    "device_08": {
+      "template": "devices/device_08.mlir.in",
+      "bindings": {
+        "@m6_finish_output_f79cb25f2b759e13@": "m6_finish_output_f79cb25f2b759e13",
+        "@s2_begin_8be6c10aead754ab@": "s2_begin_8be6c10aead754ab",
+        "@s2_header_df3264bfcc2138f7@": "s2_header_df3264bfcc2138f7",
+        "@s2_merge_51a5828c4a0e4929@": "s2_merge_51a5828c4a0e4929",
+        "@s2_pass1_6480648f62a4cc87@": "s2_pass1_6480648f62a4cc87",
+        "@s2_pass2_fd930c5832b19cfc@": "s2_pass2_fd930c5832b19cfc"
+      }
+    },
+    "device_09": {
+      "template": "devices/device_09.mlir.in",
+      "bindings": {
+        "@exp_v64_03b59d40c2c537c8@": "exp_v64_03b59d40c2c537c8",
+        "@m6_finish_output_f79cb25f2b759e13@": "m6_finish_output_f79cb25f2b759e13",
+        "@s2_begin_5e516af2c73d5f38@": "s2_begin_5e516af2c73d5f38",
+        "@s2_header_99c9655ce6b27f69@": "s2_header_99c9655ce6b27f69",
+        "@s2_merge_9b06b4cea5aee8b5@": "s2_merge_9b06b4cea5aee8b5",
+        "@s2_pass1_6db20229a058e25e@": "s2_pass1_6db20229a058e25e",
+        "@s2_pass2_9039e040b1f46d62@": "s2_pass2_9039e040b1f46d62"
+      }
+    },
+    "device_10": {
+      "template": "devices/device_10.mlir.in",
+      "bindings": {
+        "@exp_v64_03b59d40c2c537c8@": "exp_v64_1eddecdb1b08a033",
+        "@m6_finish_output_2d76142d6167ab6d@": "m6_finish_output_2d76142d6167ab6d",
+        "@s2_begin_2e7f181b7c25ad81@": "s2_begin_2e7f181b7c25ad81",
+        "@s2_header_7a27b5524fdc3f81@": "s2_header_7a27b5524fdc3f81",
+        "@s2_merge_e67383387b20ddd7@": "s2_merge_e67383387b20ddd7",
+        "@s2_pass1_9d8bef0ca67c239d@": "s2_pass1_9d8bef0ca67c239d",
+        "@s2_pass2_dccac058634c24ca@": "s2_pass2_dccac058634c24ca"
+      }
+    },
+    "device_14": {
+      "template": "devices/device_14.mlir.in",
+      "bindings": {
+        "@exp_v64_03b59d40c2c537c8@": "exp_v64_03b59d40c2c537c8",
+        "@m6_finish_output_f79cb25f2b759e13@": "m6_finish_output_f79cb25f2b759e13",
+        "@s2_begin_5e516af2c73d5f38@": "s2_begin_5e516af2c73d5f38",
+        "@s2_header_1af60ac8bc044b64@": "s2_header_1af60ac8bc044b64",
+        "@s2_merge_9b06b4cea5aee8b5@": "s2_merge_9b06b4cea5aee8b5",
+        "@s2_pass1_ca4314febf9b71f7@": "s2_pass1_ca4314febf9b71f7",
+        "@s2_pass2_3b2c8538ca9ccaba@": "s2_pass2_3b2c8538ca9ccaba"
+      }
+    },
+    "device_15": {
+      "template": "devices/device_15.mlir.in",
+      "bindings": {
+        "@exp_v64_03b59d40c2c537c8@": "exp_v64_03b59d40c2c537c8",
+        "@m6_finish_output_2d76142d6167ab6d@": "m6_finish_output_2d76142d6167ab6d",
+        "@s2_begin_96b9312ae558bb45@": "s2_begin_96b9312ae558bb45",
+        "@s2_header_7a27b5524fdc3f81@": "s2_header_7a27b5524fdc3f81",
+        "@s2_merge_e67383387b20ddd7@": "s2_merge_e67383387b20ddd7",
+        "@s2_pass1_46dc9c7393c78ef3@": "s2_pass1_46dc9c7393c78ef3",
+        "@s2_pass2_dccac058634c24ca@": "s2_pass2_dccac058634c24ca"
+      }
+    }
+  }
+}

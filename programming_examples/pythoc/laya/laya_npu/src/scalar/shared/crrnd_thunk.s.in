@@ -1,0 +1,17 @@
+// M8b (production copy of m8b/research/crrnd_thunk.s): the rounding-register setter called immediately before every accepted laya_layer_norm call.
+// Hand-written assembly (assembled, never compiled), so no optimizer can delete, merge or move the
+// write (plan review B-1). The build substitutes CRRND_VALUE textually (0 in production, 1 for the mutant) and assembles with -x assembler.
+	.text
+	.globl	m8b_crrnd_set
+	.p2align	4
+	.type	m8b_crrnd_set,@function
+m8b_crrnd_set:
+	mov	crrnd, #CRRND_VALUE
+	ret	lr
+	nop
+	nop
+	nop
+	nop
+	nop
+.Lm8b_crrnd_set_end:
+	.size	m8b_crrnd_set, .Lm8b_crrnd_set_end-m8b_crrnd_set

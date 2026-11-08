@@ -1,0 +1,10 @@
+**/__pycache__/
+/.pytest_cache/
+
+# Builders are source files despite the parent repository's build* ignore rule.
+!/laya_npu/build*.py
+!/laya_npu/toolchain/provenance/build.sh
+
+# Staged runtimes and the fetched model checkpoint stay outside git.
+/laya_npu/staged/
+/laya_npu/inputs/model/model.safetensors*

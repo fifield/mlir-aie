@@ -1,0 +1,30 @@
+[
+  [
+    "  %.261 = getelementptr float, ptr %state_addr.2, i20 %10\n  br label %while_body31",
+    "  %.261 = getelementptr float, ptr %state_addr.2, i20 %10\n  %ssa_initial = load <64 x float>, ptr %.261, align 32\n  br label %while_body31"
+  ],
+  [
+    "while_body31:                                     ; preds = %merge29, %merge41\n",
+    "while_body31:                                     ; preds = %merge29, %merge41\n  %ssa_acc = phi <64 x float> [ %ssa_initial, %merge29 ], [ %ssa_next, %merge41 ]\n"
+  ],
+  [
+    "while_exit32:                                     ; preds = %merge41\n",
+    "while_exit32:                                     ; preds = %merge41\n  store <64 x float> %ssa_next, ptr %.261, align 32\n"
+  ],
+  [
+    "  %.263 = load <64 x float>, ptr %.261, align 32\n",
+    ""
+  ],
+  [
+    "@llvm.aie2p.ACC2048.accfloat.add.conf(<64 x float> %.263, <64 x float> %.265, i32 60)",
+    "@llvm.aie2p.ACC2048.accfloat.add.conf(<64 x float> %ssa_acc, <64 x float> %.265, i32 60)"
+  ],
+  [
+    "  store <64 x float> %.266, ptr %.261, align 32\n",
+    ""
+  ],
+  [
+    "merge41:                                          ; preds = %and_next35, %while_body31, %and_next34, %then40\n",
+    "merge41:                                          ; preds = %and_next35, %while_body31, %and_next34, %then40\n  %ssa_next = phi <64 x float> [ %ssa_acc, %and_next35 ], [ %ssa_acc, %while_body31 ], [ %ssa_acc, %and_next34 ], [ %.266, %then40 ]\n"
+  ]
+]

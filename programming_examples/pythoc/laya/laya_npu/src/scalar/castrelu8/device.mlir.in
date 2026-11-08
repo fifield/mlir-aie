@@ -1,0 +1,304 @@
+module {
+  aie.device(npu2) {
+    %logical_core = aie.logical_tile<CoreTile>(0, 2)
+    %logical_core_0 = aie.logical_tile<CoreTile>(1, 2)
+    %logical_core_1 = aie.logical_tile<CoreTile>(2, 2)
+    %logical_core_2 = aie.logical_tile<CoreTile>(3, 2)
+    %logical_core_3 = aie.logical_tile<CoreTile>(4, 2)
+    %logical_core_4 = aie.logical_tile<CoreTile>(5, 2)
+    %logical_core_5 = aie.logical_tile<CoreTile>(6, 2)
+    %logical_core_6 = aie.logical_tile<CoreTile>(7, 2)
+    %logical_shim_noc = aie.logical_tile<ShimNOCTile>(0, 0)
+    %logical_shim_noc_7 = aie.logical_tile<ShimNOCTile>(1, 0)
+    %logical_shim_noc_8 = aie.logical_tile<ShimNOCTile>(2, 0)
+    %logical_shim_noc_9 = aie.logical_tile<ShimNOCTile>(3, 0)
+    %logical_shim_noc_10 = aie.logical_tile<ShimNOCTile>(4, 0)
+    %logical_shim_noc_11 = aie.logical_tile<ShimNOCTile>(5, 0)
+    %logical_shim_noc_12 = aie.logical_tile<ShimNOCTile>(6, 0)
+    %logical_shim_noc_13 = aie.logical_tile<ShimNOCTile>(7, 0)
+    %logical_shim_noc_14 = aie.logical_tile<ShimNOCTile>(0, 0)
+    %logical_shim_noc_15 = aie.logical_tile<ShimNOCTile>(1, 0)
+    %logical_shim_noc_16 = aie.logical_tile<ShimNOCTile>(2, 0)
+    %logical_shim_noc_17 = aie.logical_tile<ShimNOCTile>(3, 0)
+    %logical_shim_noc_18 = aie.logical_tile<ShimNOCTile>(4, 0)
+    %logical_shim_noc_19 = aie.logical_tile<ShimNOCTile>(5, 0)
+    %logical_shim_noc_20 = aie.logical_tile<ShimNOCTile>(6, 0)
+    %logical_shim_noc_21 = aie.logical_tile<ShimNOCTile>(7, 0)
+    aie.objectfifo @in0(%logical_shim_noc, {%logical_core}, 2 : i32) : !aie.objectfifo<memref<512xf32>>  
+    aie.objectfifo @in1(%logical_shim_noc_7, {%logical_core_0}, 2 : i32) : !aie.objectfifo<memref<512xf32>>  
+    aie.objectfifo @in2(%logical_shim_noc_8, {%logical_core_1}, 2 : i32) : !aie.objectfifo<memref<512xf32>>  
+    aie.objectfifo @in3(%logical_shim_noc_9, {%logical_core_2}, 2 : i32) : !aie.objectfifo<memref<512xf32>>  
+    aie.objectfifo @in4(%logical_shim_noc_10, {%logical_core_3}, 2 : i32) : !aie.objectfifo<memref<512xf32>>  
+    aie.objectfifo @in5(%logical_shim_noc_11, {%logical_core_4}, 2 : i32) : !aie.objectfifo<memref<512xf32>>  
+    aie.objectfifo @in6(%logical_shim_noc_12, {%logical_core_5}, 2 : i32) : !aie.objectfifo<memref<512xf32>>  
+    aie.objectfifo @in7(%logical_shim_noc_13, {%logical_core_6}, 2 : i32) : !aie.objectfifo<memref<512xf32>>  
+    aie.objectfifo @out0(%logical_core, {%logical_shim_noc_14}, 2 : i32) : !aie.objectfifo<memref<256xui16>>  
+    aie.objectfifo @out1(%logical_core_0, {%logical_shim_noc_15}, 2 : i32) : !aie.objectfifo<memref<256xui16>>  
+    aie.objectfifo @out2(%logical_core_1, {%logical_shim_noc_16}, 2 : i32) : !aie.objectfifo<memref<256xui16>>  
+    aie.objectfifo @out3(%logical_core_2, {%logical_shim_noc_17}, 2 : i32) : !aie.objectfifo<memref<256xui16>>  
+    aie.objectfifo @out4(%logical_core_3, {%logical_shim_noc_18}, 2 : i32) : !aie.objectfifo<memref<256xui16>>  
+    aie.objectfifo @out5(%logical_core_4, {%logical_shim_noc_19}, 2 : i32) : !aie.objectfifo<memref<256xui16>>  
+    aie.objectfifo @out6(%logical_core_5, {%logical_shim_noc_20}, 2 : i32) : !aie.objectfifo<memref<256xui16>>  
+    aie.objectfifo @out7(%logical_core_6, {%logical_shim_noc_21}, 2 : i32) : !aie.objectfifo<memref<256xui16>>  
+    func.func private @cast_bias(memref<512xf32>, memref<256xui16>) attributes {link_with = "@LEAF_OBJECT@"}
+    func.func private @m13b_relu256(memref<256xui16>) attributes {link_with = "@LEAF_OBJECT@"}
+    %core_0_2 = aie.core(%logical_core) {
+      %c0 = arith.constant 0 : index
+      %c9223372036854775807 = arith.constant 9223372036854775807 : index
+      %c1 = arith.constant 1 : index
+      scf.for %arg0 = %c0 to %c9223372036854775807 step %c1 {
+        %c0_22 = arith.constant 0 : index
+        %c2147483647 = arith.constant 2147483647 : index
+        %c1_23 = arith.constant 1 : index
+        scf.for %arg1 = %c0_22 to %c2147483647 step %c1_23 {
+          %0 = aie.objectfifo.acquire @in0(Consume, 1) : memref<512xf32>
+          %1 = aie.objectfifo.acquire @out0(Produce, 1) : memref<256xui16>
+          func.call @cast_bias(%0, %1) : (memref<512xf32>, memref<256xui16>) -> ()
+          func.call @m13b_relu256(%1) : (memref<256xui16>) -> ()
+          aie.objectfifo.release @in0(Consume, 1)
+          aie.objectfifo.release @out0(Produce, 1)
+        }
+      }
+      aie.end
+    }
+    %core_1_2 = aie.core(%logical_core_0) {
+      %c0 = arith.constant 0 : index
+      %c9223372036854775807 = arith.constant 9223372036854775807 : index
+      %c1 = arith.constant 1 : index
+      scf.for %arg0 = %c0 to %c9223372036854775807 step %c1 {
+        %c0_22 = arith.constant 0 : index
+        %c2147483647 = arith.constant 2147483647 : index
+        %c1_23 = arith.constant 1 : index
+        scf.for %arg1 = %c0_22 to %c2147483647 step %c1_23 {
+          %0 = aie.objectfifo.acquire @in1(Consume, 1) : memref<512xf32>
+          %1 = aie.objectfifo.acquire @out1(Produce, 1) : memref<256xui16>
+          func.call @cast_bias(%0, %1) : (memref<512xf32>, memref<256xui16>) -> ()
+          func.call @m13b_relu256(%1) : (memref<256xui16>) -> ()
+          aie.objectfifo.release @in1(Consume, 1)
+          aie.objectfifo.release @out1(Produce, 1)
+        }
+      }
+      aie.end
+    }
+    %core_2_2 = aie.core(%logical_core_1) {
+      %c0 = arith.constant 0 : index
+      %c9223372036854775807 = arith.constant 9223372036854775807 : index
+      %c1 = arith.constant 1 : index
+      scf.for %arg0 = %c0 to %c9223372036854775807 step %c1 {
+        %c0_22 = arith.constant 0 : index
+        %c2147483647 = arith.constant 2147483647 : index
+        %c1_23 = arith.constant 1 : index
+        scf.for %arg1 = %c0_22 to %c2147483647 step %c1_23 {
+          %0 = aie.objectfifo.acquire @in2(Consume, 1) : memref<512xf32>
+          %1 = aie.objectfifo.acquire @out2(Produce, 1) : memref<256xui16>
+          func.call @cast_bias(%0, %1) : (memref<512xf32>, memref<256xui16>) -> ()
+          func.call @m13b_relu256(%1) : (memref<256xui16>) -> ()
+          aie.objectfifo.release @in2(Consume, 1)
+          aie.objectfifo.release @out2(Produce, 1)
+        }
+      }
+      aie.end
+    }
+    %core_3_2 = aie.core(%logical_core_2) {
+      %c0 = arith.constant 0 : index
+      %c9223372036854775807 = arith.constant 9223372036854775807 : index
+      %c1 = arith.constant 1 : index
+      scf.for %arg0 = %c0 to %c9223372036854775807 step %c1 {
+        %c0_22 = arith.constant 0 : index
+        %c2147483647 = arith.constant 2147483647 : index
+        %c1_23 = arith.constant 1 : index
+        scf.for %arg1 = %c0_22 to %c2147483647 step %c1_23 {
+          %0 = aie.objectfifo.acquire @in3(Consume, 1) : memref<512xf32>
+          %1 = aie.objectfifo.acquire @out3(Produce, 1) : memref<256xui16>
+          func.call @cast_bias(%0, %1) : (memref<512xf32>, memref<256xui16>) -> ()
+          func.call @m13b_relu256(%1) : (memref<256xui16>) -> ()
+          aie.objectfifo.release @in3(Consume, 1)
+          aie.objectfifo.release @out3(Produce, 1)
+        }
+      }
+      aie.end
+    }
+    %core_4_2 = aie.core(%logical_core_3) {
+      %c0 = arith.constant 0 : index
+      %c9223372036854775807 = arith.constant 9223372036854775807 : index
+      %c1 = arith.constant 1 : index
+      scf.for %arg0 = %c0 to %c9223372036854775807 step %c1 {
+        %c0_22 = arith.constant 0 : index
+        %c2147483647 = arith.constant 2147483647 : index
+        %c1_23 = arith.constant 1 : index
+        scf.for %arg1 = %c0_22 to %c2147483647 step %c1_23 {
+          %0 = aie.objectfifo.acquire @in4(Consume, 1) : memref<512xf32>
+          %1 = aie.objectfifo.acquire @out4(Produce, 1) : memref<256xui16>
+          func.call @cast_bias(%0, %1) : (memref<512xf32>, memref<256xui16>) -> ()
+          func.call @m13b_relu256(%1) : (memref<256xui16>) -> ()
+          aie.objectfifo.release @in4(Consume, 1)
+          aie.objectfifo.release @out4(Produce, 1)
+        }
+      }
+      aie.end
+    }
+    %core_5_2 = aie.core(%logical_core_4) {
+      %c0 = arith.constant 0 : index
+      %c9223372036854775807 = arith.constant 9223372036854775807 : index
+      %c1 = arith.constant 1 : index
+      scf.for %arg0 = %c0 to %c9223372036854775807 step %c1 {
+        %c0_22 = arith.constant 0 : index
+        %c2147483647 = arith.constant 2147483647 : index
+        %c1_23 = arith.constant 1 : index
+        scf.for %arg1 = %c0_22 to %c2147483647 step %c1_23 {
+          %0 = aie.objectfifo.acquire @in5(Consume, 1) : memref<512xf32>
+          %1 = aie.objectfifo.acquire @out5(Produce, 1) : memref<256xui16>
+          func.call @cast_bias(%0, %1) : (memref<512xf32>, memref<256xui16>) -> ()
+          func.call @m13b_relu256(%1) : (memref<256xui16>) -> ()
+          aie.objectfifo.release @in5(Consume, 1)
+          aie.objectfifo.release @out5(Produce, 1)
+        }
+      }
+      aie.end
+    }
+    %core_6_2 = aie.core(%logical_core_5) {
+      %c0 = arith.constant 0 : index
+      %c9223372036854775807 = arith.constant 9223372036854775807 : index
+      %c1 = arith.constant 1 : index
+      scf.for %arg0 = %c0 to %c9223372036854775807 step %c1 {
+        %c0_22 = arith.constant 0 : index
+        %c2147483647 = arith.constant 2147483647 : index
+        %c1_23 = arith.constant 1 : index
+        scf.for %arg1 = %c0_22 to %c2147483647 step %c1_23 {
+          %0 = aie.objectfifo.acquire @in6(Consume, 1) : memref<512xf32>
+          %1 = aie.objectfifo.acquire @out6(Produce, 1) : memref<256xui16>
+          func.call @cast_bias(%0, %1) : (memref<512xf32>, memref<256xui16>) -> ()
+          func.call @m13b_relu256(%1) : (memref<256xui16>) -> ()
+          aie.objectfifo.release @in6(Consume, 1)
+          aie.objectfifo.release @out6(Produce, 1)
+        }
+      }
+      aie.end
+    }
+    %core_7_2 = aie.core(%logical_core_6) {
+      %c0 = arith.constant 0 : index
+      %c9223372036854775807 = arith.constant 9223372036854775807 : index
+      %c1 = arith.constant 1 : index
+      scf.for %arg0 = %c0 to %c9223372036854775807 step %c1 {
+        %c0_22 = arith.constant 0 : index
+        %c2147483647 = arith.constant 2147483647 : index
+        %c1_23 = arith.constant 1 : index
+        scf.for %arg1 = %c0_22 to %c2147483647 step %c1_23 {
+          %0 = aie.objectfifo.acquire @in7(Consume, 1) : memref<512xf32>
+          %1 = aie.objectfifo.acquire @out7(Produce, 1) : memref<256xui16>
+          func.call @cast_bias(%0, %1) : (memref<512xf32>, memref<256xui16>) -> ()
+          func.call @m13b_relu256(%1) : (memref<256xui16>) -> ()
+          aie.objectfifo.release @in7(Consume, 1)
+          aie.objectfifo.release @out7(Produce, 1)
+        }
+      }
+      aie.end
+    }
+    aie.runtime_sequence(%arg0: memref<1048576xf32>, %arg1: memref<524288xui16>) {
+      %0 = aiex.dma_configure_task_for @in0 {
+        aie.dma_bd(%arg0 : memref<1048576xf32> offset = 0 len = 131072 sizes = [1, 1, 256, 512] strides = [0, 0, 512, 1])
+        aie.end
+      }
+      aiex.dma_start_task(%0)
+      %1 = aiex.dma_configure_task_for @in1 {
+        aie.dma_bd(%arg0 : memref<1048576xf32> offset = 131072 len = 131072 sizes = [1, 1, 256, 512] strides = [0, 0, 512, 1])
+        aie.end
+      }
+      aiex.dma_start_task(%1)
+      %2 = aiex.dma_configure_task_for @in2 {
+        aie.dma_bd(%arg0 : memref<1048576xf32> offset = 262144 len = 131072 sizes = [1, 1, 256, 512] strides = [0, 0, 512, 1])
+        aie.end
+      }
+      aiex.dma_start_task(%2)
+      %3 = aiex.dma_configure_task_for @in3 {
+        aie.dma_bd(%arg0 : memref<1048576xf32> offset = 393216 len = 131072 sizes = [1, 1, 256, 512] strides = [0, 0, 512, 1])
+        aie.end
+      }
+      aiex.dma_start_task(%3)
+      %4 = aiex.dma_configure_task_for @in4 {
+        aie.dma_bd(%arg0 : memref<1048576xf32> offset = 524288 len = 131072 sizes = [1, 1, 256, 512] strides = [0, 0, 512, 1])
+        aie.end
+      }
+      aiex.dma_start_task(%4)
+      %5 = aiex.dma_configure_task_for @in5 {
+        aie.dma_bd(%arg0 : memref<1048576xf32> offset = 655360 len = 131072 sizes = [1, 1, 256, 512] strides = [0, 0, 512, 1])
+        aie.end
+      }
+      aiex.dma_start_task(%5)
+      %6 = aiex.dma_configure_task_for @in6 {
+        aie.dma_bd(%arg0 : memref<1048576xf32> offset = 786432 len = 131072 sizes = [1, 1, 256, 512] strides = [0, 0, 512, 1])
+        aie.end
+      }
+      aiex.dma_start_task(%6)
+      %7 = aiex.dma_configure_task_for @in7 {
+        aie.dma_bd(%arg0 : memref<1048576xf32> offset = 917504 len = 131072 sizes = [1, 1, 256, 512] strides = [0, 0, 512, 1])
+        aie.end
+      }
+      aiex.dma_start_task(%7)
+      %8 = aiex.dma_configure_task_for @out0 {
+        aie.dma_bd(%arg1 : memref<524288xui16> offset = 0 len = 65536 sizes = [1, 1, 256, 256] strides = [0, 0, 256, 1])
+        aie.end
+      } {issue_token = true}
+      aiex.dma_start_task(%8)
+      %9 = aiex.dma_configure_task_for @out1 {
+        aie.dma_bd(%arg1 : memref<524288xui16> offset = 65536 len = 65536 sizes = [1, 1, 256, 256] strides = [0, 0, 256, 1])
+        aie.end
+      } {issue_token = true}
+      aiex.dma_start_task(%9)
+      %10 = aiex.dma_configure_task_for @out2 {
+        aie.dma_bd(%arg1 : memref<524288xui16> offset = 131072 len = 65536 sizes = [1, 1, 256, 256] strides = [0, 0, 256, 1])
+        aie.end
+      } {issue_token = true}
+      aiex.dma_start_task(%10)
+      %11 = aiex.dma_configure_task_for @out3 {
+        aie.dma_bd(%arg1 : memref<524288xui16> offset = 196608 len = 65536 sizes = [1, 1, 256, 256] strides = [0, 0, 256, 1])
+        aie.end
+      } {issue_token = true}
+      aiex.dma_start_task(%11)
+      %12 = aiex.dma_configure_task_for @out4 {
+        aie.dma_bd(%arg1 : memref<524288xui16> offset = 262144 len = 65536 sizes = [1, 1, 256, 256] strides = [0, 0, 256, 1])
+        aie.end
+      } {issue_token = true}
+      aiex.dma_start_task(%12)
+      %13 = aiex.dma_configure_task_for @out5 {
+        aie.dma_bd(%arg1 : memref<524288xui16> offset = 327680 len = 65536 sizes = [1, 1, 256, 256] strides = [0, 0, 256, 1])
+        aie.end
+      } {issue_token = true}
+      aiex.dma_start_task(%13)
+      %14 = aiex.dma_configure_task_for @out6 {
+        aie.dma_bd(%arg1 : memref<524288xui16> offset = 393216 len = 65536 sizes = [1, 1, 256, 256] strides = [0, 0, 256, 1])
+        aie.end
+      } {issue_token = true}
+      aiex.dma_start_task(%14)
+      %15 = aiex.dma_configure_task_for @out7 {
+        aie.dma_bd(%arg1 : memref<524288xui16> offset = 458752 len = 65536 sizes = [1, 1, 256, 256] strides = [0, 0, 256, 1])
+        aie.end
+      } {issue_token = true}
+      aiex.dma_start_task(%15)
+      aiex.dma_await_task(%8)
+      aiex.dma_await_task(%9)
+      aiex.dma_await_task(%10)
+      aiex.dma_await_task(%11)
+      aiex.dma_await_task(%12)
+      aiex.dma_await_task(%13)
+      aiex.dma_await_task(%14)
+      aiex.dma_await_task(%15)
+      aiex.dma_free_task(%0)
+      aiex.dma_free_task(%1)
+      aiex.dma_free_task(%2)
+      aiex.dma_free_task(%3)
+      aiex.dma_free_task(%4)
+      aiex.dma_free_task(%5)
+      aiex.dma_free_task(%6)
+      aiex.dma_free_task(%7)
+      aiex.dma_free_task(%8)
+      aiex.dma_free_task(%9)
+      aiex.dma_free_task(%10)
+      aiex.dma_free_task(%11)
+      aiex.dma_free_task(%12)
+      aiex.dma_free_task(%13)
+      aiex.dma_free_task(%14)
+      aiex.dma_free_task(%15)
+    }
+  }
+}

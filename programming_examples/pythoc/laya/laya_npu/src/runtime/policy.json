@@ -1,0 +1,2568 @@
+{
+  "default_variant": "exact",
+  "variants": {
+    "exact": {
+      "arithmetic": "native exact",
+      "eligible_shapes": [
+        "b1_l128",
+        "b1_l256",
+        "b1_l512",
+        "b1_l64",
+        "b2_l128",
+        "b2_l256",
+        "b2_l512",
+        "b2_l64",
+        "b4_l128",
+        "b4_l256",
+        "b4_l512",
+        "b4_l64",
+        "b8_l128",
+        "b8_l256",
+        "b8_l512",
+        "b8_l64"
+      ],
+      "rejected_shapes": {}
+    },
+    "fast": {
+      "arithmetic": "approximate dense BFP (m2n2 leaf) and native-float L64 backbone attention (l64_native); explicit opt-in",
+      "eligible_shapes": [
+        "b1_l64",
+        "b2_l64",
+        "b4_l64"
+      ],
+      "rejected_shapes": {
+        "b1_l128": {
+          "artifact": {
+            "audit_sha256": "2e4e80fe1a7d76d86ac380c64b5c5ffe8421bc250cd787bc414bad15bc825895",
+            "path": "variants/fast/build/b1_l128/plan.json",
+            "sha256": "97ecaf5bebadde9ce0f0cc05bf10bd8ea025b504246ff512ae9d1c2db72737ed"
+          },
+          "cases": [
+            {
+              "block": 0,
+              "case": "matrix.changed.b1_l128",
+              "gates": [
+                "probabilities[0].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.06797757428865113,
+                "probability_max_abs": 0.015672147274017334,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "matrix.changed.b1_l128",
+              "gates": [
+                "probabilities[0].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.06797757428865113,
+                "probability_max_abs": 0.015672147274017334,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            }
+          ],
+          "reason": "One or more tested calls failed the frozen fast numerical screen.",
+          "report": {
+            "path": "results/numerical_matrix.json",
+            "sha256": "b47164254253a322012f48a4aa5211c21b1578a52014f8a53c4d7f4e18b25571"
+          },
+          "worst_metrics": {
+            "argmax_disagreements": 0,
+            "hidden_relative_l2": 0.06797757428865113,
+            "probability_max_abs": 0.015672147274017334,
+            "probability_sum_max_error": 5.960464477539063e-08
+          }
+        },
+        "b1_l256": {
+          "artifact": {
+            "audit_sha256": "416340d4964cfd5845c3864eaa3642bc9b7a5e668a82b5c22b8d9a70e9996639",
+            "path": "variants/fast/build/b1_l256/plan.json",
+            "sha256": "eb7c22f4535c74bb51e0e41d89ad2cd83ad56fb24dbb9a93c4527565a64ef567"
+          },
+          "cases": [
+            {
+              "block": 0,
+              "case": "full.b1_l256",
+              "gates": [
+                "probabilities[0].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.05345549565586956,
+                "probability_max_abs": 0.033704400062561035,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b1_l256",
+              "gates": [
+                "probabilities[0].max_abs"
+              ],
+              "iteration": 1,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.05345549565586956,
+                "probability_max_abs": 0.033704400062561035,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b1_l256",
+              "gates": [
+                "probabilities[0].max_abs"
+              ],
+              "iteration": 2,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.05345549565586956,
+                "probability_max_abs": 0.033704400062561035,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b1_l256",
+              "gates": [
+                "probabilities[0].max_abs"
+              ],
+              "iteration": 3,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.05345549565586956,
+                "probability_max_abs": 0.033704400062561035,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b1_l256",
+              "gates": [
+                "probabilities[0].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.05345549565586956,
+                "probability_max_abs": 0.033704400062561035,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b1_l256",
+              "gates": [
+                "probabilities[0].max_abs"
+              ],
+              "iteration": 1,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.05345549565586956,
+                "probability_max_abs": 0.033704400062561035,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b1_l256",
+              "gates": [
+                "probabilities[0].max_abs"
+              ],
+              "iteration": 2,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.05345549565586956,
+                "probability_max_abs": 0.033704400062561035,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b1_l256",
+              "gates": [
+                "probabilities[0].max_abs"
+              ],
+              "iteration": 3,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.05345549565586956,
+                "probability_max_abs": 0.033704400062561035,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 0,
+              "case": "matrix.changed.b1_l256",
+              "gates": [
+                "probabilities[0].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.027048738233242775,
+                "probability_max_abs": 0.01688307523727417,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "matrix.changed.b1_l256",
+              "gates": [
+                "probabilities[0].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.027048738233242775,
+                "probability_max_abs": 0.01688307523727417,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 0,
+              "case": "matrix.return.b1_l256",
+              "gates": [
+                "probabilities[0].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.05345549565586956,
+                "probability_max_abs": 0.033704400062561035,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "matrix.return.b1_l256",
+              "gates": [
+                "probabilities[0].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.05345549565586956,
+                "probability_max_abs": 0.033704400062561035,
+                "probability_sum_max_error": 0.0
+              }
+            }
+          ],
+          "reason": "One or more tested calls failed the frozen fast numerical screen.",
+          "report": {
+            "path": "results/numerical_matrix.json",
+            "sha256": "b47164254253a322012f48a4aa5211c21b1578a52014f8a53c4d7f4e18b25571"
+          },
+          "worst_metrics": {
+            "argmax_disagreements": 0,
+            "hidden_relative_l2": 0.05345549565586956,
+            "probability_max_abs": 0.033704400062561035,
+            "probability_sum_max_error": 0
+          }
+        },
+        "b1_l512": {
+          "artifact": {
+            "audit_sha256": "ce8348ae59ce10a9fa0c1515229993b0d35bf1963f2c78f6f190809f9cb5265a",
+            "path": "variants/fast/build/b1_l512/plan.json",
+            "sha256": "7d84f9bdcdf5d3f5a827ea09ee915a482e9b05939109d8e9499a85b4dde22ed1"
+          },
+          "cases": [
+            {
+              "block": 0,
+              "case": "full.b1_l512",
+              "gates": [
+                "probabilities[0].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.037000352104503455,
+                "probability_max_abs": 0.01399943232536316,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b1_l512",
+              "gates": [
+                "probabilities[0].max_abs"
+              ],
+              "iteration": 1,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.037000352104503455,
+                "probability_max_abs": 0.01399943232536316,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b1_l512",
+              "gates": [
+                "probabilities[0].max_abs"
+              ],
+              "iteration": 2,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.037000352104503455,
+                "probability_max_abs": 0.01399943232536316,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b1_l512",
+              "gates": [
+                "probabilities[0].max_abs"
+              ],
+              "iteration": 3,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.037000352104503455,
+                "probability_max_abs": 0.01399943232536316,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b1_l512",
+              "gates": [
+                "probabilities[0].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.037000352104503455,
+                "probability_max_abs": 0.01399943232536316,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b1_l512",
+              "gates": [
+                "probabilities[0].max_abs"
+              ],
+              "iteration": 1,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.037000352104503455,
+                "probability_max_abs": 0.01399943232536316,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b1_l512",
+              "gates": [
+                "probabilities[0].max_abs"
+              ],
+              "iteration": 2,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.037000352104503455,
+                "probability_max_abs": 0.01399943232536316,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b1_l512",
+              "gates": [
+                "probabilities[0].max_abs"
+              ],
+              "iteration": 3,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.037000352104503455,
+                "probability_max_abs": 0.01399943232536316,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 0,
+              "case": "matrix.changed.b1_l512",
+              "gates": [
+                "probabilities[0].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.03334956423349362,
+                "probability_max_abs": 0.030739665031433105,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "matrix.changed.b1_l512",
+              "gates": [
+                "probabilities[0].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.03334956423349362,
+                "probability_max_abs": 0.030739665031433105,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 0,
+              "case": "matrix.return.b1_l512",
+              "gates": [
+                "probabilities[0].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.037000352104503455,
+                "probability_max_abs": 0.01399943232536316,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "matrix.return.b1_l512",
+              "gates": [
+                "probabilities[0].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.037000352104503455,
+                "probability_max_abs": 0.01399943232536316,
+                "probability_sum_max_error": 0.0
+              }
+            }
+          ],
+          "reason": "One or more tested calls failed the frozen fast numerical screen.",
+          "report": {
+            "path": "results/numerical_matrix.json",
+            "sha256": "b47164254253a322012f48a4aa5211c21b1578a52014f8a53c4d7f4e18b25571"
+          },
+          "worst_metrics": {
+            "argmax_disagreements": 0,
+            "hidden_relative_l2": 0.037000352104503455,
+            "probability_max_abs": 0.030739665031433105,
+            "probability_sum_max_error": 0
+          }
+        },
+        "b2_l128": {
+          "artifact": {
+            "audit_sha256": "5ba99b87f9bdb914599807f83535be1c808a7333e7684515e11f824b440554f9",
+            "path": "variants/fast/build/b2_l128/plan.json",
+            "sha256": "9cb00ed50cc00fdd1c9d493f46752ea37867dbfe69bfa7f6115bea3a51a8cb7c"
+          },
+          "cases": [
+            {
+              "block": 0,
+              "case": "full.b2_l128",
+              "gates": [
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.03004819889582215,
+                "probability_max_abs": 0.025389492511749268,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b2_l128",
+              "gates": [
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 1,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.03004819889582215,
+                "probability_max_abs": 0.025389492511749268,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b2_l128",
+              "gates": [
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 2,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.03004819889582215,
+                "probability_max_abs": 0.025389492511749268,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b2_l128",
+              "gates": [
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 3,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.03004819889582215,
+                "probability_max_abs": 0.025389492511749268,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b2_l128",
+              "gates": [
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.03004819889582215,
+                "probability_max_abs": 0.025389492511749268,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b2_l128",
+              "gates": [
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 1,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.03004819889582215,
+                "probability_max_abs": 0.025389492511749268,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b2_l128",
+              "gates": [
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 2,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.03004819889582215,
+                "probability_max_abs": 0.025389492511749268,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b2_l128",
+              "gates": [
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 3,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.03004819889582215,
+                "probability_max_abs": 0.025389492511749268,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 0,
+              "case": "matrix.return.b2_l128",
+              "gates": [
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.03004819889582215,
+                "probability_max_abs": 0.025389492511749268,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "matrix.return.b2_l128",
+              "gates": [
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.03004819889582215,
+                "probability_max_abs": 0.025389492511749268,
+                "probability_sum_max_error": 0.0
+              }
+            }
+          ],
+          "reason": "One or more tested calls failed the frozen fast numerical screen.",
+          "report": {
+            "path": "results/numerical_matrix.json",
+            "sha256": "b47164254253a322012f48a4aa5211c21b1578a52014f8a53c4d7f4e18b25571"
+          },
+          "worst_metrics": {
+            "argmax_disagreements": 0,
+            "hidden_relative_l2": 0.03004819889582215,
+            "probability_max_abs": 0.025389492511749268,
+            "probability_sum_max_error": 0
+          }
+        },
+        "b2_l256": {
+          "artifact": {
+            "audit_sha256": "4fe3f407dc43e8a104afac3b1f6ed711d0bd4046101d732ba894b9f35b29f310",
+            "path": "variants/fast/build/b2_l256/plan.json",
+            "sha256": "7e26bde0c65785e7e536b57ad9724bcb2bb75e204712b023638d721a270e83bd"
+          },
+          "cases": [
+            {
+              "block": 0,
+              "case": "full.b2_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.0399019084941915,
+                "probability_max_abs": 0.033704400062561035,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b2_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement"
+              ],
+              "iteration": 1,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.0399019084941915,
+                "probability_max_abs": 0.033704400062561035,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b2_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement"
+              ],
+              "iteration": 2,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.0399019084941915,
+                "probability_max_abs": 0.033704400062561035,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b2_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement"
+              ],
+              "iteration": 3,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.0399019084941915,
+                "probability_max_abs": 0.033704400062561035,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b2_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.0399019084941915,
+                "probability_max_abs": 0.033704400062561035,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b2_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement"
+              ],
+              "iteration": 1,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.0399019084941915,
+                "probability_max_abs": 0.033704400062561035,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b2_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement"
+              ],
+              "iteration": 2,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.0399019084941915,
+                "probability_max_abs": 0.033704400062561035,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b2_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement"
+              ],
+              "iteration": 3,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.0399019084941915,
+                "probability_max_abs": 0.033704400062561035,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 0,
+              "case": "matrix.changed.b2_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.0263694483237331,
+                "probability_max_abs": 0.023745596408843994,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "matrix.changed.b2_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.0263694483237331,
+                "probability_max_abs": 0.023745596408843994,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 0,
+              "case": "matrix.return.b2_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.0399019084941915,
+                "probability_max_abs": 0.033704400062561035,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "matrix.return.b2_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.0399019084941915,
+                "probability_max_abs": 0.033704400062561035,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            }
+          ],
+          "reason": "One or more tested calls failed the frozen fast numerical screen.",
+          "report": {
+            "path": "results/numerical_matrix.json",
+            "sha256": "b47164254253a322012f48a4aa5211c21b1578a52014f8a53c4d7f4e18b25571"
+          },
+          "worst_metrics": {
+            "argmax_disagreements": 1,
+            "hidden_relative_l2": 0.0399019084941915,
+            "probability_max_abs": 0.033704400062561035,
+            "probability_sum_max_error": 5.960464477539063e-08
+          }
+        },
+        "b2_l512": {
+          "artifact": {
+            "audit_sha256": "62aeb2a6d62db7d3c9d8e588bc50c322b26f2ba7f14cc0efd099b395547cda34",
+            "path": "variants/fast/build/b2_l512/plan.json",
+            "sha256": "cb9e708b9a1446be7b3117b1d1504af7df5c020197f1faf914c70229f060328c"
+          },
+          "cases": [
+            {
+              "block": 0,
+              "case": "full.b2_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.059058917481016666,
+                "probability_max_abs": 0.023361563682556152,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b2_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 1,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.059058917481016666,
+                "probability_max_abs": 0.023361563682556152,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b2_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 2,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.059058917481016666,
+                "probability_max_abs": 0.023361563682556152,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b2_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 3,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.059058917481016666,
+                "probability_max_abs": 0.023361563682556152,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b2_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.059058917481016666,
+                "probability_max_abs": 0.023361563682556152,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b2_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 1,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.059058917481016666,
+                "probability_max_abs": 0.023361563682556152,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b2_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 2,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.059058917481016666,
+                "probability_max_abs": 0.023361563682556152,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b2_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 3,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.059058917481016666,
+                "probability_max_abs": 0.023361563682556152,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 0,
+              "case": "matrix.changed.b2_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.06059585242272478,
+                "probability_max_abs": 0.03073960542678833,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "matrix.changed.b2_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.06059585242272478,
+                "probability_max_abs": 0.03073960542678833,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 0,
+              "case": "matrix.return.b2_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.059058917481016666,
+                "probability_max_abs": 0.023361563682556152,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "matrix.return.b2_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.059058917481016666,
+                "probability_max_abs": 0.023361563682556152,
+                "probability_sum_max_error": 0.0
+              }
+            }
+          ],
+          "reason": "One or more tested calls failed the frozen fast numerical screen.",
+          "report": {
+            "path": "results/numerical_matrix.json",
+            "sha256": "b47164254253a322012f48a4aa5211c21b1578a52014f8a53c4d7f4e18b25571"
+          },
+          "worst_metrics": {
+            "argmax_disagreements": 0,
+            "hidden_relative_l2": 0.06059585242272478,
+            "probability_max_abs": 0.03073960542678833,
+            "probability_sum_max_error": 0
+          }
+        },
+        "b4_l128": {
+          "artifact": {
+            "audit_sha256": "849bd219530bad24967469c47e8cc19765b1a7c72d4efbe78cd1e9c31f35b165",
+            "path": "variants/fast/build/b4_l128/plan.json",
+            "sha256": "eea6d8bef3b30ef805d987b87506e57e3175031b6ebe75ed94aa56e70eef504e"
+          },
+          "cases": [
+            {
+              "block": 0,
+              "case": "full.b4_l128",
+              "gates": [
+                "probabilities[1].max_abs",
+                "probabilities[2].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.038187916407554444,
+                "probability_max_abs": 0.025389552116394043,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b4_l128",
+              "gates": [
+                "probabilities[1].max_abs",
+                "probabilities[2].max_abs"
+              ],
+              "iteration": 1,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.038187916407554444,
+                "probability_max_abs": 0.025389552116394043,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b4_l128",
+              "gates": [
+                "probabilities[1].max_abs",
+                "probabilities[2].max_abs"
+              ],
+              "iteration": 2,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.038187916407554444,
+                "probability_max_abs": 0.025389552116394043,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b4_l128",
+              "gates": [
+                "probabilities[1].max_abs",
+                "probabilities[2].max_abs"
+              ],
+              "iteration": 3,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.038187916407554444,
+                "probability_max_abs": 0.025389552116394043,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b4_l128",
+              "gates": [
+                "probabilities[1].max_abs",
+                "probabilities[2].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.038187916407554444,
+                "probability_max_abs": 0.025389552116394043,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b4_l128",
+              "gates": [
+                "probabilities[1].max_abs",
+                "probabilities[2].max_abs"
+              ],
+              "iteration": 1,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.038187916407554444,
+                "probability_max_abs": 0.025389552116394043,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b4_l128",
+              "gates": [
+                "probabilities[1].max_abs",
+                "probabilities[2].max_abs"
+              ],
+              "iteration": 2,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.038187916407554444,
+                "probability_max_abs": 0.025389552116394043,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b4_l128",
+              "gates": [
+                "probabilities[1].max_abs",
+                "probabilities[2].max_abs"
+              ],
+              "iteration": 3,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.038187916407554444,
+                "probability_max_abs": 0.025389552116394043,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 0,
+              "case": "matrix.changed.b4_l128",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[2].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.040248514313902396,
+                "probability_max_abs": 0.015672147274017334,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "matrix.changed.b4_l128",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[2].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.040248514313902396,
+                "probability_max_abs": 0.015672147274017334,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 0,
+              "case": "matrix.return.b4_l128",
+              "gates": [
+                "probabilities[1].max_abs",
+                "probabilities[2].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.038187916407554444,
+                "probability_max_abs": 0.025389552116394043,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "matrix.return.b4_l128",
+              "gates": [
+                "probabilities[1].max_abs",
+                "probabilities[2].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.038187916407554444,
+                "probability_max_abs": 0.025389552116394043,
+                "probability_sum_max_error": 0.0
+              }
+            }
+          ],
+          "reason": "One or more tested calls failed the frozen fast numerical screen.",
+          "report": {
+            "path": "results/numerical_matrix.json",
+            "sha256": "b47164254253a322012f48a4aa5211c21b1578a52014f8a53c4d7f4e18b25571"
+          },
+          "worst_metrics": {
+            "argmax_disagreements": 0,
+            "hidden_relative_l2": 0.040248514313902396,
+            "probability_max_abs": 0.025389552116394043,
+            "probability_sum_max_error": 0
+          }
+        },
+        "b4_l256": {
+          "artifact": {
+            "audit_sha256": "70fd3a5881c333f73ba2ee63e54179dfbb883bcd884a28cbee6ff776545e7204",
+            "path": "variants/fast/build/b4_l256/plan.json",
+            "sha256": "408608076ba4ab78913177f2ebbc25f8854fe6bdbc10e7031dc67b8ef76090bf"
+          },
+          "cases": [
+            {
+              "block": 0,
+              "case": "full.b4_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement",
+                "probabilities[3].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.03598356297696239,
+                "probability_max_abs": 0.05331096053123474,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b4_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement",
+                "probabilities[3].max_abs"
+              ],
+              "iteration": 1,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.03598356297696239,
+                "probability_max_abs": 0.05331096053123474,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b4_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement",
+                "probabilities[3].max_abs"
+              ],
+              "iteration": 2,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.03598356297696239,
+                "probability_max_abs": 0.05331096053123474,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b4_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement",
+                "probabilities[3].max_abs"
+              ],
+              "iteration": 3,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.03598356297696239,
+                "probability_max_abs": 0.05331096053123474,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b4_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement",
+                "probabilities[3].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.03598356297696239,
+                "probability_max_abs": 0.05331096053123474,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b4_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement",
+                "probabilities[3].max_abs"
+              ],
+              "iteration": 1,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.03598356297696239,
+                "probability_max_abs": 0.05331096053123474,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b4_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement",
+                "probabilities[3].max_abs"
+              ],
+              "iteration": 2,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.03598356297696239,
+                "probability_max_abs": 0.05331096053123474,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b4_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement",
+                "probabilities[3].max_abs"
+              ],
+              "iteration": 3,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.03598356297696239,
+                "probability_max_abs": 0.05331096053123474,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 0,
+              "case": "frozen.medium",
+              "gates": [
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.0387577577326531,
+                "probability_max_abs": 0.03924781084060669,
+                "probability_sum_max_error": 1.1920928955078125e-07
+              }
+            },
+            {
+              "block": 0,
+              "case": "frozen.medium",
+              "gates": [
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 1,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.0387577577326531,
+                "probability_max_abs": 0.03924781084060669,
+                "probability_sum_max_error": 1.1920928955078125e-07
+              }
+            },
+            {
+              "block": 0,
+              "case": "frozen.medium",
+              "gates": [
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 2,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.0387577577326531,
+                "probability_max_abs": 0.03924781084060669,
+                "probability_sum_max_error": 1.1920928955078125e-07
+              }
+            },
+            {
+              "block": 0,
+              "case": "frozen.medium",
+              "gates": [
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 3,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.0387577577326531,
+                "probability_max_abs": 0.03924781084060669,
+                "probability_sum_max_error": 1.1920928955078125e-07
+              }
+            },
+            {
+              "block": 1,
+              "case": "frozen.medium",
+              "gates": [
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.0387577577326531,
+                "probability_max_abs": 0.03924781084060669,
+                "probability_sum_max_error": 1.1920928955078125e-07
+              }
+            },
+            {
+              "block": 1,
+              "case": "frozen.medium",
+              "gates": [
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 1,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.0387577577326531,
+                "probability_max_abs": 0.03924781084060669,
+                "probability_sum_max_error": 1.1920928955078125e-07
+              }
+            },
+            {
+              "block": 1,
+              "case": "frozen.medium",
+              "gates": [
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 2,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.0387577577326531,
+                "probability_max_abs": 0.03924781084060669,
+                "probability_sum_max_error": 1.1920928955078125e-07
+              }
+            },
+            {
+              "block": 1,
+              "case": "frozen.medium",
+              "gates": [
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 3,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.0387577577326531,
+                "probability_max_abs": 0.03924781084060669,
+                "probability_sum_max_error": 1.1920928955078125e-07
+              }
+            },
+            {
+              "block": 0,
+              "case": "matrix.return.b4_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement",
+                "probabilities[3].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.03598356297696239,
+                "probability_max_abs": 0.05331096053123474,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "matrix.return.b4_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement",
+                "probabilities[3].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.03598356297696239,
+                "probability_max_abs": 0.05331096053123474,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            }
+          ],
+          "reason": "One or more tested calls failed the frozen fast numerical screen.",
+          "report": {
+            "path": "results/numerical_matrix.json",
+            "sha256": "b47164254253a322012f48a4aa5211c21b1578a52014f8a53c4d7f4e18b25571"
+          },
+          "worst_metrics": {
+            "argmax_disagreements": 1,
+            "hidden_relative_l2": 0.0387577577326531,
+            "probability_max_abs": 0.05331096053123474,
+            "probability_sum_max_error": 1.1920928955078125e-07
+          }
+        },
+        "b4_l512": {
+          "artifact": {
+            "audit_sha256": "7d03c44e3117dd3d7de26a8fc7d377a63100c3500dae936ecb6951bb34d71dab",
+            "path": "variants/fast/build/b4_l512/plan.json",
+            "sha256": "7dfc12a78b92ecb43483ae905a2f62cf2dc11c392d2fbe7ed925eb3449f4e972"
+          },
+          "cases": [
+            {
+              "block": 0,
+              "case": "full.b4_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.04529522761876173,
+                "probability_max_abs": 0.023361623287200928,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b4_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 1,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.04529522761876173,
+                "probability_max_abs": 0.023361623287200928,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b4_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 2,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.04529522761876173,
+                "probability_max_abs": 0.023361623287200928,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b4_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 3,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.04529522761876173,
+                "probability_max_abs": 0.023361623287200928,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b4_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.04529522761876173,
+                "probability_max_abs": 0.023361623287200928,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b4_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 1,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.04529522761876173,
+                "probability_max_abs": 0.023361623287200928,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b4_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 2,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.04529522761876173,
+                "probability_max_abs": 0.023361623287200928,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b4_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 3,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.04529522761876173,
+                "probability_max_abs": 0.023361623287200928,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 0,
+              "case": "matrix.changed.b4_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[3].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.04528080277562082,
+                "probability_max_abs": 0.03073960542678833,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "matrix.changed.b4_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[3].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.04528080277562082,
+                "probability_max_abs": 0.03073960542678833,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 0,
+              "case": "matrix.return.b4_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.04529522761876173,
+                "probability_max_abs": 0.023361623287200928,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "matrix.return.b4_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.04529522761876173,
+                "probability_max_abs": 0.023361623287200928,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            }
+          ],
+          "reason": "One or more tested calls failed the frozen fast numerical screen.",
+          "report": {
+            "path": "results/numerical_matrix.json",
+            "sha256": "b47164254253a322012f48a4aa5211c21b1578a52014f8a53c4d7f4e18b25571"
+          },
+          "worst_metrics": {
+            "argmax_disagreements": 0,
+            "hidden_relative_l2": 0.04529522761876173,
+            "probability_max_abs": 0.03073960542678833,
+            "probability_sum_max_error": 5.960464477539063e-08
+          }
+        },
+        "b8_l128": {
+          "artifact": {
+            "audit_sha256": "56e8f128fe8416617981813680bc2685a5fa712a2ea0c13a7fd2b358ab7083ed",
+            "path": "variants/fast/build/b8_l128/plan.json",
+            "sha256": "fb61d270802c69178054f51437b7f1afc3a2e627666c56b21b6cde2d4b557cdb"
+          },
+          "cases": [
+            {
+              "block": 0,
+              "case": "full.b8_l128",
+              "gates": [
+                "probabilities[1].max_abs",
+                "probabilities[2].max_abs",
+                "probabilities[4].max_abs",
+                "probabilities[6].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.042327310960217024,
+                "probability_max_abs": 0.025389552116394043,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b8_l128",
+              "gates": [
+                "probabilities[1].max_abs",
+                "probabilities[2].max_abs",
+                "probabilities[4].max_abs",
+                "probabilities[6].max_abs"
+              ],
+              "iteration": 1,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.042327310960217024,
+                "probability_max_abs": 0.025389552116394043,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b8_l128",
+              "gates": [
+                "probabilities[1].max_abs",
+                "probabilities[2].max_abs",
+                "probabilities[4].max_abs",
+                "probabilities[6].max_abs"
+              ],
+              "iteration": 2,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.042327310960217024,
+                "probability_max_abs": 0.025389552116394043,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b8_l128",
+              "gates": [
+                "probabilities[1].max_abs",
+                "probabilities[2].max_abs",
+                "probabilities[4].max_abs",
+                "probabilities[6].max_abs"
+              ],
+              "iteration": 3,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.042327310960217024,
+                "probability_max_abs": 0.025389552116394043,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b8_l128",
+              "gates": [
+                "probabilities[1].max_abs",
+                "probabilities[2].max_abs",
+                "probabilities[4].max_abs",
+                "probabilities[6].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.042327310960217024,
+                "probability_max_abs": 0.025389552116394043,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b8_l128",
+              "gates": [
+                "probabilities[1].max_abs",
+                "probabilities[2].max_abs",
+                "probabilities[4].max_abs",
+                "probabilities[6].max_abs"
+              ],
+              "iteration": 1,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.042327310960217024,
+                "probability_max_abs": 0.025389552116394043,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b8_l128",
+              "gates": [
+                "probabilities[1].max_abs",
+                "probabilities[2].max_abs",
+                "probabilities[4].max_abs",
+                "probabilities[6].max_abs"
+              ],
+              "iteration": 2,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.042327310960217024,
+                "probability_max_abs": 0.025389552116394043,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b8_l128",
+              "gates": [
+                "probabilities[1].max_abs",
+                "probabilities[2].max_abs",
+                "probabilities[4].max_abs",
+                "probabilities[6].max_abs"
+              ],
+              "iteration": 3,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.042327310960217024,
+                "probability_max_abs": 0.025389552116394043,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 0,
+              "case": "matrix.changed.b8_l128",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[2].max_abs",
+                "probabilities[4].max_abs",
+                "probabilities[5].max_abs",
+                "probabilities[6].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.04594640445689743,
+                "probability_max_abs": 0.045620396733284,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "matrix.changed.b8_l128",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[2].max_abs",
+                "probabilities[4].max_abs",
+                "probabilities[5].max_abs",
+                "probabilities[6].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.04594640445689743,
+                "probability_max_abs": 0.045620396733284,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 0,
+              "case": "matrix.return.b8_l128",
+              "gates": [
+                "probabilities[1].max_abs",
+                "probabilities[2].max_abs",
+                "probabilities[4].max_abs",
+                "probabilities[6].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.042327310960217024,
+                "probability_max_abs": 0.025389552116394043,
+                "probability_sum_max_error": 0.0
+              }
+            },
+            {
+              "block": 1,
+              "case": "matrix.return.b8_l128",
+              "gates": [
+                "probabilities[1].max_abs",
+                "probabilities[2].max_abs",
+                "probabilities[4].max_abs",
+                "probabilities[6].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.042327310960217024,
+                "probability_max_abs": 0.025389552116394043,
+                "probability_sum_max_error": 0.0
+              }
+            }
+          ],
+          "reason": "One or more tested calls failed the frozen fast numerical screen.",
+          "report": {
+            "path": "results/numerical_matrix.json",
+            "sha256": "b47164254253a322012f48a4aa5211c21b1578a52014f8a53c4d7f4e18b25571"
+          },
+          "worst_metrics": {
+            "argmax_disagreements": 0,
+            "hidden_relative_l2": 0.04594640445689743,
+            "probability_max_abs": 0.045620396733284,
+            "probability_sum_max_error": 5.960464477539063e-08
+          }
+        },
+        "b8_l256": {
+          "artifact": {
+            "audit_sha256": "10df4dbe37f3f6777ece95093809c748b45d60a76f78595e99ee47f3e927ed49",
+            "path": "variants/fast/build/b8_l256/plan.json",
+            "sha256": "bd859cc4438c4baf6f791dae9547e6acc725800d7e0f2752b0af8fa65749dbe4"
+          },
+          "cases": [
+            {
+              "block": 0,
+              "case": "full.b8_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement",
+                "probabilities[3].max_abs",
+                "probabilities[5].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.033873383182004904,
+                "probability_max_abs": 0.05331096053123474,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b8_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement",
+                "probabilities[3].max_abs",
+                "probabilities[5].max_abs"
+              ],
+              "iteration": 1,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.033873383182004904,
+                "probability_max_abs": 0.05331096053123474,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b8_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement",
+                "probabilities[3].max_abs",
+                "probabilities[5].max_abs"
+              ],
+              "iteration": 2,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.033873383182004904,
+                "probability_max_abs": 0.05331096053123474,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b8_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement",
+                "probabilities[3].max_abs",
+                "probabilities[5].max_abs"
+              ],
+              "iteration": 3,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.033873383182004904,
+                "probability_max_abs": 0.05331096053123474,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b8_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement",
+                "probabilities[3].max_abs",
+                "probabilities[5].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.033873383182004904,
+                "probability_max_abs": 0.05331096053123474,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b8_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement",
+                "probabilities[3].max_abs",
+                "probabilities[5].max_abs"
+              ],
+              "iteration": 1,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.033873383182004904,
+                "probability_max_abs": 0.05331096053123474,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b8_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement",
+                "probabilities[3].max_abs",
+                "probabilities[5].max_abs"
+              ],
+              "iteration": 2,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.033873383182004904,
+                "probability_max_abs": 0.05331096053123474,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b8_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement",
+                "probabilities[3].max_abs",
+                "probabilities[5].max_abs"
+              ],
+              "iteration": 3,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.033873383182004904,
+                "probability_max_abs": 0.05331096053123474,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 0,
+              "case": "matrix.changed.b8_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[5].max_abs",
+                "probabilities[6].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.03358569335757983,
+                "probability_max_abs": 0.03936183452606201,
+                "probability_sum_max_error": 1.1920928955078125e-07
+              }
+            },
+            {
+              "block": 1,
+              "case": "matrix.changed.b8_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[5].max_abs",
+                "probabilities[6].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.03358569335757983,
+                "probability_max_abs": 0.03936183452606201,
+                "probability_sum_max_error": 1.1920928955078125e-07
+              }
+            },
+            {
+              "block": 0,
+              "case": "matrix.return.b8_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement",
+                "probabilities[3].max_abs",
+                "probabilities[5].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.033873383182004904,
+                "probability_max_abs": 0.05331096053123474,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "matrix.return.b8_l256",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[1].argmax_agreement",
+                "probabilities[3].max_abs",
+                "probabilities[5].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 1,
+                "hidden_relative_l2": 0.033873383182004904,
+                "probability_max_abs": 0.05331096053123474,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            }
+          ],
+          "reason": "One or more tested calls failed the frozen fast numerical screen.",
+          "report": {
+            "path": "results/numerical_matrix.json",
+            "sha256": "b47164254253a322012f48a4aa5211c21b1578a52014f8a53c4d7f4e18b25571"
+          },
+          "worst_metrics": {
+            "argmax_disagreements": 1,
+            "hidden_relative_l2": 0.033873383182004904,
+            "probability_max_abs": 0.05331096053123474,
+            "probability_sum_max_error": 1.1920928955078125e-07
+          }
+        },
+        "b8_l512": {
+          "artifact": {
+            "audit_sha256": "e86c03f50cc9971e42c2f1b3b7bd1f391a4396892cb44b97d5db8fd3b362572f",
+            "path": "variants/fast/build/b8_l512/plan.json",
+            "sha256": "ffb0fc7f773995b34583f09150b4e7da0f2efb1b9f2959b287f5148f9a4ff379"
+          },
+          "cases": [
+            {
+              "block": 0,
+              "case": "full.b8_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[5].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.041830763461315465,
+                "probability_max_abs": 0.024114370346069336,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b8_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[5].max_abs"
+              ],
+              "iteration": 1,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.041830763461315465,
+                "probability_max_abs": 0.024114370346069336,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b8_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[5].max_abs"
+              ],
+              "iteration": 2,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.041830763461315465,
+                "probability_max_abs": 0.024114370346069336,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 0,
+              "case": "full.b8_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[5].max_abs"
+              ],
+              "iteration": 3,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.041830763461315465,
+                "probability_max_abs": 0.024114370346069336,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b8_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[5].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.041830763461315465,
+                "probability_max_abs": 0.024114370346069336,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b8_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[5].max_abs"
+              ],
+              "iteration": 1,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.041830763461315465,
+                "probability_max_abs": 0.024114370346069336,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b8_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[5].max_abs"
+              ],
+              "iteration": 2,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.041830763461315465,
+                "probability_max_abs": 0.024114370346069336,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "full.b8_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[5].max_abs"
+              ],
+              "iteration": 3,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.041830763461315465,
+                "probability_max_abs": 0.024114370346069336,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 0,
+              "case": "frozen.long",
+              "gates": [
+                "probabilities[1].max_abs",
+                "probabilities[3].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.05448960712790156,
+                "probability_max_abs": 0.04770177602767944,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 0,
+              "case": "frozen.long",
+              "gates": [
+                "probabilities[1].max_abs",
+                "probabilities[3].max_abs"
+              ],
+              "iteration": 1,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.05448960712790156,
+                "probability_max_abs": 0.04770177602767944,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 0,
+              "case": "frozen.long",
+              "gates": [
+                "probabilities[1].max_abs",
+                "probabilities[3].max_abs"
+              ],
+              "iteration": 2,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.05448960712790156,
+                "probability_max_abs": 0.04770177602767944,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 0,
+              "case": "frozen.long",
+              "gates": [
+                "probabilities[1].max_abs",
+                "probabilities[3].max_abs"
+              ],
+              "iteration": 3,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.05448960712790156,
+                "probability_max_abs": 0.04770177602767944,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "frozen.long",
+              "gates": [
+                "probabilities[1].max_abs",
+                "probabilities[3].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.05448960712790156,
+                "probability_max_abs": 0.04770177602767944,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "frozen.long",
+              "gates": [
+                "probabilities[1].max_abs",
+                "probabilities[3].max_abs"
+              ],
+              "iteration": 1,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.05448960712790156,
+                "probability_max_abs": 0.04770177602767944,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "frozen.long",
+              "gates": [
+                "probabilities[1].max_abs",
+                "probabilities[3].max_abs"
+              ],
+              "iteration": 2,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.05448960712790156,
+                "probability_max_abs": 0.04770177602767944,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "frozen.long",
+              "gates": [
+                "probabilities[1].max_abs",
+                "probabilities[3].max_abs"
+              ],
+              "iteration": 3,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.05448960712790156,
+                "probability_max_abs": 0.04770177602767944,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 0,
+              "case": "matrix.return.b8_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[5].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.041830763461315465,
+                "probability_max_abs": 0.024114370346069336,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            },
+            {
+              "block": 1,
+              "case": "matrix.return.b8_l512",
+              "gates": [
+                "probabilities[0].max_abs",
+                "probabilities[1].max_abs",
+                "probabilities[5].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.041830763461315465,
+                "probability_max_abs": 0.024114370346069336,
+                "probability_sum_max_error": 5.960464477539063e-08
+              }
+            }
+          ],
+          "reason": "One or more tested calls failed the frozen fast numerical screen.",
+          "report": {
+            "path": "results/numerical_matrix.json",
+            "sha256": "b47164254253a322012f48a4aa5211c21b1578a52014f8a53c4d7f4e18b25571"
+          },
+          "worst_metrics": {
+            "argmax_disagreements": 0,
+            "hidden_relative_l2": 0.05448960712790156,
+            "probability_max_abs": 0.04770177602767944,
+            "probability_sum_max_error": 1.1920928955078125e-07
+          }
+        },
+        "b8_l64": {
+          "artifact": {
+            "audit_sha256": "6f7466530da97234eaafac0b4c0ea37cd1a58601101c38a35d5978c4443de413",
+            "path": "variants/fast/build/b8_l64/plan.json",
+            "sha256": "d34ca488c2170991e74d12a7ff9c188c5249acfd3b53f23a32eb3a5443a156c2"
+          },
+          "cases": [
+            {
+              "block": 0,
+              "case": "matrix.changed.b8_l64",
+              "gates": [
+                "probabilities[4].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.016668756337805103,
+                "probability_max_abs": 0.012060105800628662,
+                "probability_sum_max_error": 1.7881393432617188e-07
+              }
+            },
+            {
+              "block": 1,
+              "case": "matrix.changed.b8_l64",
+              "gates": [
+                "probabilities[4].max_abs"
+              ],
+              "iteration": 0,
+              "metrics": {
+                "argmax_disagreements": 0,
+                "hidden_relative_l2": 0.016668756337805103,
+                "probability_max_abs": 0.012060105800628662,
+                "probability_sum_max_error": 1.7881393432617188e-07
+              }
+            }
+          ],
+          "reason": "One or more tested calls failed the frozen fast numerical screen.",
+          "report": {
+            "path": "results/numerical_matrix.json",
+            "sha256": "b47164254253a322012f48a4aa5211c21b1578a52014f8a53c4d7f4e18b25571"
+          },
+          "worst_metrics": {
+            "argmax_disagreements": 0,
+            "hidden_relative_l2": 0.031229665657635387,
+            "probability_max_abs": 0.012060105800628662,
+            "probability_sum_max_error": 1.7881393432617188e-07
+          }
+        }
+      }
+    }
+  },
+  "phase_pairs": {
+    "exact": [
+      "b1_l64"
+    ],
+    "fast": [
+      "b1_l64"
+    ]
+  },
+  "mixed_requests": {
+    "exact": {
+      "b2_b1_l64": {
+        "arena_bytes": 1558560768,
+        "arithmetic": "native_exact",
+        "candidate_only": false,
+        "entry": "main:mixed_b2_b1",
+        "path": "mixed/b2_b1_l64/plan.json",
+        "schedule_kind": "phase_major_b2_b1_l64",
+        "sha256": "f78ed471d7d23ae6513c8e2abc1e71a565e14ef90c087daeef23026a77cf8a29"
+      }
+    }
+  }
+}

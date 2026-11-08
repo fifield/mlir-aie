@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Support desk · Laya local</title>
+<style>
+  :root { color-scheme: light; font-family: system-ui, sans-serif; color: #24372f; background: #f3f4ee; }
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  main { max-width: 1100px; padding: 48px 24px; margin: auto; }
+  header { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 56px; }
+  .brand { font-weight: 750; letter-spacing: -.04em; font-size: 22px; }
+  .pill { border: 1px solid #c5d1c4; border-radius: 30px; padding: 7px 12px; font-size: 12px; }
+  .eyebrow { text-transform: uppercase; letter-spacing: .13em; font-size: 11px; font-weight: 700; color: #557461; }
+  h1 { font-size: clamp(36px, 6vw, 60px); letter-spacing: -.055em; margin: 12px 0; line-height: 1.05; }
+  .intro { color: #66746a; max-width: 620px; line-height: 1.6; margin-bottom: 32px; }
+  .layout { display: grid; grid-template-columns: 1.1fr 1fr; gap: 24px; align-items: start; }
+  .panel { padding: 26px; border: 1px solid #dce1d7; background: #fff; border-radius: 18px; }
+  label, h2 { display: block; font-size: 16px; font-weight: 650; margin: 0 0 16px; }
+  textarea { font: inherit; width: 100%; resize: vertical; min-height: 210px; border: 1px solid #dce1d7; border-radius: 10px; padding: 16px; line-height: 1.6; color: inherit; background: #fafbf7; }
+  textarea:focus, button:focus-visible { outline: 3px solid #afd5be; outline-offset: 2px; }
+  .samples { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0 24px; }
+  button { cursor: pointer; font: inherit; border: 1px solid #dce1d7; border-radius: 8px; padding: 8px 12px; background: #fff; color: inherit; }
+  button:hover { background: #edf3ec; }
+  button:disabled { opacity: .55; cursor: wait; }
+  #run { background: #245840; color: white; width: 100%; padding: 13px; border: 0; font-weight: 650; }
+  .note { font-size: 12px; line-height: 1.6; color: #798477; }
+  #status { min-height: 24px; font-size: 13px; margin: 16px 0 0; }
+  #status.error { color: #a33232; }
+  .result { border-top: 1px solid #edf0e9; padding: 20px 0; }
+  .result:first-of-type { border-top: 0; }
+  .row { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+  .value { font-size: 27px; font-weight: 600; letter-spacing: -.035em; margin: 8px 0; }
+  .tag { font: 11px ui-monospace, monospace; color: #748579; }
+  .distribution { display: grid; gap: 8px; font-size: 12px; margin-top: 12px; }
+  .bar-row { display: grid; grid-template-columns: 78px 1fr 36px; align-items: center; gap: 8px; }
+  .track { height: 6px; border-radius: 3px; background: #edf0e9; overflow: hidden; }
+  .fill { height: 100%; background: #72a88a; }
+  details { margin-top: 24px; font-size: 13px; }
+  summary { cursor: pointer; color: #557461; }
+  pre { overflow: auto; font-size: 12px; padding: 16px; background: #edf0e9; border-radius: 10px; max-height: 360px; }
+  [hidden] { display: none !important; }
+  @media (max-width: 720px) { .layout { grid-template-columns: 1fr; } header { margin-bottom: 36px; } main { padding-top: 24px; } }
+</style>
+<main>
+  <header><div class="brand">laya / local</div><a class="pill" href="/snake">Snake demo ↗</a></header>
+  <div class="eyebrow">Interactive demo · Support desk</div>
+  <h1>A message in.<br>Three decisions out.</h1>
+  <p class="intro">Turn a customer message into a department, an urgency score, and a cancellation signal. Edit a sample or try your own.</p>
+  <div class="layout">
+    <section class="panel">
+      <form id="form">
+        <label for="message">Customer message</label>
+        <textarea id="message" required maxlength="12000">I was charged twice for this month. Please refund the duplicate charge today or I will cancel my subscription.</textarea>
+        <div class="samples" aria-label="Sample messages">
+          <button type="button" data-sample="billing">Duplicate charge</button>
+          <button type="button" data-sample="outage">App outage</button>
+          <button type="button" data-sample="question">Quick question</button>
+        </div>
+        <button id="run" type="submit">Analyze message →</button>
+      </form>
+      <p id="status" role="status" aria-live="polite">Ready when you are.</p>
+      <p class="note">English text · Runs on this machine · Long messages may be truncated.<br>Model predictions are shown as-is; review them before acting.</p>
+    </section>
+    <section class="panel" aria-labelledby="result-title" aria-busy="false" id="results">
+      <div class="row"><h2 id="result-title">Decision sheet</h2><span id="latency" class="tag">—</span></div>
+      <p id="empty" class="note">Your results will appear here after analysis.</p>
+      <div id="answers" hidden>
+        <div class="result"><div class="row"><span>Route to</span><span class="tag">choice</span></div><div id="department" class="value"></div><div id="distribution" class="distribution"></div></div>
+        <div class="result"><div class="row"><span>Urgency</span><span class="tag">score</span></div><div id="urgency" class="value"></div><span class="note">0 = low · 1 = medium · 2 = high</span></div>
+        <div class="result"><div class="row"><span>Wants to cancel</span><span class="tag">yes / no</span></div><div id="cancel" class="value"></div><span class="note">Model probability of yes</span></div>
+      </div>
+    </section>
+  </div>
+  <details><summary>View API request and response</summary><pre id="request"></pre><pre id="response">No response yet.</pre></details>
+</main>
+<script>
+const questions = {
+  department: {type: 'choice', instructions: 'Which department should handle this customer message?', criteria: {billing: 'invoices, payments, refunds, subscriptions', technical: 'bugs, crashes, outages, errors', general: 'general questions and product information'}},
+  urgency: {type: 'score', instructions: 'How urgent is this customer request?', criteria: ['low: routine question, no time pressure', 'medium: needs attention soon', 'high: blocking problem or immediate action needed']},
+  cancel: {type: 'noul', instructions: 'Does the customer want or threaten to cancel their subscription?'}
+};
+const samples = {
+  billing: 'I was charged twice for this month. Please refund the duplicate charge today or I will cancel my subscription.',
+  outage: 'The app crashes every time our team opens a project. We cannot work and our deadline is in two hours. Please fix this immediately.',
+  question: 'Hi! Does your app support exporting reports as a PDF? No rush, just exploring the features. Thanks!'
+};
+const el = id => document.getElementById(id);
+const payload = () => ({state: el('message').value, questions});
+const showRequest = () => { el('request').textContent = 'POST /predict\n' + JSON.stringify(payload(), null, 2); };
+document.querySelectorAll('[data-sample]').forEach(button => button.addEventListener('click', () => {
+  el('message').value = samples[button.dataset.sample]; showRequest();
+}));
+el('message').addEventListener('input', showRequest);
+showRequest();
+el('form').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (!el('message').value.trim()) { el('status').textContent = 'Enter a message first.'; return; }
+  const buttons = document.querySelectorAll('button');
+  buttons.forEach(b => b.disabled = true); el('message').disabled = true;
+  el('results').setAttribute('aria-busy', 'true'); el('answers').hidden = true;
+  el('empty').hidden = false; el('empty').textContent = 'Analyzing your message…';
+  el('status').className = ''; el('status').textContent = 'Running locally… The first request may take longer.';
+  el('latency').textContent = '—'; el('response').textContent = 'Waiting for response…';
+  try {
+    const response = await fetch('/predict', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload())});
+    const result = await response.json();
+    el('response').textContent = JSON.stringify(result, null, 2);
+    if (!response.ok) throw new Error(result.error || 'Request failed');
+    const a = result.answers;
+    el('department').textContent = a.department.choice;
+    el('urgency').textContent = a.urgency.score.toFixed(2) + ' / 2';
+    el('cancel').textContent = (a.cancel.noul * 100).toFixed(1) + '%';
+    el('distribution').replaceChildren();
+    for (const [label, probability] of Object.entries(a.department.probabilities)) {
+      const row = document.createElement('div'); row.className = 'bar-row';
+      const name = document.createElement('span'); name.textContent = label;
+      const track = document.createElement('div'); track.className = 'track';
+      const fill = document.createElement('div'); fill.className = 'fill'; fill.style.width = `${Math.max(0, Math.min(1, probability)) * 100}%`;
+      const percent = document.createElement('span'); percent.textContent = Math.round(probability * 100) + '%';
+      track.append(fill); row.append(name, track, percent); el('distribution').append(row);
+    }
+    el('latency').textContent = `${(result.elapsed_seconds * 1000).toFixed(0)} ms`;
+    el('answers').hidden = false; el('empty').hidden = true;
+    el('status').textContent = 'Done. Edit the message to try another decision.';
+  } catch (error) {
+    el('status').className = 'error'; el('status').textContent = error.message;
+    el('empty').textContent = 'No result. Check the message or the local server and try again.';
+  } finally {
+    buttons.forEach(b => b.disabled = false); el('message').disabled = false;
+    el('results').setAttribute('aria-busy', 'false');
+  }
+});
+</script>
+</html>

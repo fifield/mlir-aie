@@ -1,0 +1,1768 @@
+{
+ "exact_b1_l128": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_056", "sequence_057", "sequence_058"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_059"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_native/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_049", "sequence_050", "sequence_051", "sequence_052", "sequence_053"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_229", "sequence_230"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_231"]
+  },
+  {
+   "device": "device_06",
+   "cores": "attention_baseline/device_06/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_196"]
+  },
+  {
+   "device": "device_09",
+   "cores": "attention_baseline/device_09/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_207"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_055"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_048"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_054"]
+  }
+ ],
+ "exact_b1_l256": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_104", "sequence_105", "sequence_106"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_107"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_native/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_097", "sequence_098", "sequence_099", "sequence_100", "sequence_101"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_241", "sequence_242"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_243"]
+  },
+  {
+   "device": "device_07",
+   "cores": "attention_baseline/device_07/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_197"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_103"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_096"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_102"]
+  },
+  {
+   "device": "device_14",
+   "cores": "attention_special/l256_promoted/elfs_attention_core_{tile}.elf",
+   "sequences": ["sequence_211"]
+  }
+ ],
+ "exact_b1_l512": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_152", "sequence_153", "sequence_154"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_155"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_native/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_145", "sequence_146", "sequence_147", "sequence_148", "sequence_149"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_253", "sequence_254"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_255"]
+  },
+  {
+   "device": "device_10",
+   "cores": "attention_baseline/device_10/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_215"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_151"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_144"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_150"]
+  },
+  {
+   "device": "device_15",
+   "cores": "attention_baseline/device_15/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_198"]
+  }
+ ],
+ "exact_b1_l64": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_008", "sequence_009", "sequence_010"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_011"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_217", "sequence_218"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_219"]
+  },
+  {
+   "device": "device_05",
+   "cores": "attention_special/l64_exact/elfs_attention_core_{tile}.elf",
+   "sequences": ["sequence_192"]
+  },
+  {
+   "device": "device_08",
+   "cores": "attention_baseline/device_08/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_199"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_007"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_000"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_006"]
+  },
+  {
+   "device": "device_s8",
+   "cores": "dense_native_s8/elfs_main_core_{tile}.elf",
+   "sequences": ["s8_qkvR", "s8_out", "s8_ln", "s8_gateup", "s8_down"]
+  }
+ ],
+ "exact_b2_l128": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_068", "sequence_069", "sequence_070"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_071"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_native/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_061", "sequence_062", "sequence_063", "sequence_064", "sequence_065"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_232", "sequence_233"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_234"]
+  },
+  {
+   "device": "device_06",
+   "cores": "attention_baseline/device_06/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_203"]
+  },
+  {
+   "device": "device_09",
+   "cores": "attention_baseline/device_09/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_208"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_067"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_060"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_066"]
+  }
+ ],
+ "exact_b2_l256": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_116", "sequence_117", "sequence_118"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_119"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_native/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_109", "sequence_110", "sequence_111", "sequence_112", "sequence_113"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_244", "sequence_245"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_246"]
+  },
+  {
+   "device": "device_07",
+   "cores": "attention_baseline/device_07/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_206"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_115"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_108"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_114"]
+  },
+  {
+   "device": "device_14",
+   "cores": "attention_special/l256_promoted/elfs_attention_core_{tile}.elf",
+   "sequences": ["sequence_212"]
+  }
+ ],
+ "exact_b2_l512": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_164", "sequence_165", "sequence_166"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_167"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_native/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_157", "sequence_158", "sequence_159", "sequence_160", "sequence_161"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_256", "sequence_257"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_258"]
+  },
+  {
+   "device": "device_10",
+   "cores": "attention_baseline/device_10/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_216"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_163"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_156"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_162"]
+  },
+  {
+   "device": "device_15",
+   "cores": "attention_baseline/device_15/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_198"]
+  }
+ ],
+ "exact_b2_l64": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_020", "sequence_021", "sequence_022"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_023"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_native/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_013", "sequence_014", "sequence_015", "sequence_016", "sequence_017"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_220", "sequence_221"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_222"]
+  },
+  {
+   "device": "device_05",
+   "cores": "attention_special/l64_exact/elfs_attention_core_{tile}.elf",
+   "sequences": ["sequence_193"]
+  },
+  {
+   "device": "device_08",
+   "cores": "attention_baseline/device_08/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_200"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_019"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_012"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_018"]
+  }
+ ],
+ "exact_b4_l128": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_080", "sequence_081", "sequence_082"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_083"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_native/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_073", "sequence_074", "sequence_075", "sequence_076", "sequence_077"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_235", "sequence_236"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_237"]
+  },
+  {
+   "device": "device_06",
+   "cores": "attention_baseline/device_06/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_204"]
+  },
+  {
+   "device": "device_09",
+   "cores": "attention_baseline/device_09/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_209"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_079"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_072"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_078"]
+  }
+ ],
+ "exact_b4_l256": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_128", "sequence_129", "sequence_130"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_131"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_native/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_121", "sequence_122", "sequence_123", "sequence_124", "sequence_125"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_247", "sequence_248"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_249"]
+  },
+  {
+   "device": "device_07",
+   "cores": "attention_baseline/device_07/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_206"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_127"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_120"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_126"]
+  },
+  {
+   "device": "device_14",
+   "cores": "attention_special/l256_promoted/elfs_attention_core_{tile}.elf",
+   "sequences": ["sequence_213"]
+  }
+ ],
+ "exact_b4_l512": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_176", "sequence_177", "sequence_178"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_179"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_native/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_169", "sequence_170", "sequence_171", "sequence_172", "sequence_173"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_259", "sequence_260"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_261"]
+  },
+  {
+   "device": "device_10",
+   "cores": "attention_baseline/device_10/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_216"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_175"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_168"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_174"]
+  },
+  {
+   "device": "device_15",
+   "cores": "attention_baseline/device_15/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_198"]
+  }
+ ],
+ "exact_b4_l64": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_032", "sequence_033", "sequence_034"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_035"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_native/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_025", "sequence_026", "sequence_027", "sequence_028", "sequence_029"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_223", "sequence_224"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_225"]
+  },
+  {
+   "device": "device_05",
+   "cores": "attention_special/l64_exact/elfs_attention_core_{tile}.elf",
+   "sequences": ["sequence_194"]
+  },
+  {
+   "device": "device_08",
+   "cores": "attention_baseline/device_08/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_201"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_031"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_024"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_030"]
+  }
+ ],
+ "exact_b8_l128": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_092", "sequence_093", "sequence_094"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_095"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_native/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_085", "sequence_086", "sequence_087", "sequence_088", "sequence_089"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_238", "sequence_239"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_240"]
+  },
+  {
+   "device": "device_06",
+   "cores": "attention_baseline/device_06/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_205"]
+  },
+  {
+   "device": "device_09",
+   "cores": "attention_baseline/device_09/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_210"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_091"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_084"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_090"]
+  }
+ ],
+ "exact_b8_l256": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_140", "sequence_141", "sequence_142"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_143"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_native/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_133", "sequence_134", "sequence_135", "sequence_136", "sequence_137"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_250", "sequence_251"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_252"]
+  },
+  {
+   "device": "device_07",
+   "cores": "attention_baseline/device_07/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_206"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_139"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_132"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_138"]
+  },
+  {
+   "device": "device_14",
+   "cores": "attention_special/l256_promoted/elfs_attention_core_{tile}.elf",
+   "sequences": ["sequence_214"]
+  }
+ ],
+ "exact_b8_l512": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_188", "sequence_189", "sequence_190"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_191"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_native/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_181", "sequence_182", "sequence_183", "sequence_184", "sequence_185"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_262", "sequence_263"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_264"]
+  },
+  {
+   "device": "device_10",
+   "cores": "attention_baseline/device_10/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_216"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_187"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_180"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_186"]
+  },
+  {
+   "device": "device_15",
+   "cores": "attention_baseline/device_15/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_198"]
+  }
+ ],
+ "exact_b8_l64": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_044", "sequence_045", "sequence_046"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_047"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_native/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_037", "sequence_038", "sequence_039", "sequence_040", "sequence_041"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_226", "sequence_227"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_228"]
+  },
+  {
+   "device": "device_05",
+   "cores": "attention_special/l64_exact/elfs_attention_core_{tile}.elf",
+   "sequences": ["sequence_195"]
+  },
+  {
+   "device": "device_08",
+   "cores": "attention_baseline/device_08/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_202"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_043"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_036"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_042"]
+  }
+ ],
+ "fast_b1_l64": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_008", "sequence_009", "sequence_010"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_011"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_217", "sequence_218"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_219"]
+  },
+  {
+   "device": "device_05f",
+   "cores": "attention_special/l64_fast/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_192"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_007"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_000"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_006"]
+  },
+  {
+   "device": "device_cb",
+   "cores": {
+    "0-3": "dense_m2n2_cb/elfs_main_core_{tile}.elf",
+    "4-7": "attention_special/l64_native_cb/elfs_main_core_{tile}.elf"
+   },
+   "sequences": ["cb_qkvR", "cb_out", "cb_ln", "cb_gateup", "cb_down", "cb_attn"]
+  }
+ ],
+ "fast_b2_l64": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_020", "sequence_021", "sequence_022"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_023"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_fast/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_013:fast", "sequence_014:fast", "sequence_015", "sequence_016:fast", "sequence_017:fast"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_220", "sequence_221"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_222"]
+  },
+  {
+   "device": "device_05",
+   "cores": "attention_special/l64_native/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_193"]
+  },
+  {
+   "device": "device_05f",
+   "cores": "attention_special/l64_fast/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_193"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_019"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_012"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_018"]
+  }
+ ],
+ "fast_b4_l64": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_032", "sequence_033", "sequence_034"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_035"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_fast/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_025:fast", "sequence_026:fast", "sequence_027", "sequence_028:fast", "sequence_029:fast"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_223", "sequence_224"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_225"]
+  },
+  {
+   "device": "device_05",
+   "cores": "attention_special/l64_native/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_194"]
+  },
+  {
+   "device": "device_05f",
+   "cores": "attention_special/l64_fast/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_194"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_031"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_024"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_030"]
+  }
+ ],
+ "pair_fast_b1_l64": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_008", "sequence_009", "sequence_010"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_011"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_217", "sequence_218"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_219"]
+  },
+  {
+   "device": "device_05",
+   "cores": "attention_special/l64_native/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_192"]
+  },
+  {
+   "device": "device_05f",
+   "cores": "attention_special/l64_fast/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_192"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_007"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_000"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_006"]
+  },
+  {
+   "device": "device_s8",
+   "cores": "dense_fast_s8/elfs_main_core_{tile}.elf",
+   "sequences": ["s8_qkvR", "s8_out", "s8_ln", "s8_gateup", "s8_down"]
+  }
+ ],
+ "mixed_exact_b2_b1_l64": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["b2_sequence_020", "b2_sequence_021", "b2_sequence_022", "b1_sequence_008", "b1_sequence_009", "b1_sequence_010"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["b2_sequence_023", "b1_sequence_011"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_native/elfs_main_core_{tile}.elf",
+   "sequences": ["b2_sequence_013", "b2_sequence_014", "b2_sequence_015", "b2_sequence_016", "b2_sequence_017", "b1_sequence_001", "b1_sequence_002", "b1_sequence_003", "b1_sequence_004", "b1_sequence_005"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["b2_sequence_220", "b2_sequence_221", "b1_sequence_217", "b1_sequence_218"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["b2_sequence_222", "b1_sequence_219"]
+  },
+  {
+   "device": "device_05",
+   "cores": "attention_special/l64_exact/elfs_attention_core_{tile}.elf",
+   "sequences": ["b2_sequence_193", "b1_sequence_192"]
+  },
+  {
+   "device": "device_08",
+   "cores": "attention_baseline/device_08/elfs_main_core_{tile}.elf",
+   "sequences": ["b2_sequence_200", "b1_sequence_199"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["b2_sequence_019", "b1_sequence_007"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["b2_sequence_012", "b1_sequence_000"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["b2_sequence_018", "b1_sequence_006"]
+  }
+ ],
+ "fast_b1_l128": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_056", "sequence_057", "sequence_058"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_059"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_fast/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_049:fast", "sequence_050:fast", "sequence_051", "sequence_052:fast", "sequence_053:fast"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_229", "sequence_230"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_231"]
+  },
+  {
+   "device": "device_06",
+   "cores": "attention_baseline/device_06/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_196"]
+  },
+  {
+   "device": "device_09",
+   "cores": "attention_baseline/device_09/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_207"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_055"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_048"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_054"]
+  }
+ ],
+ "fast_b1_l256": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_104", "sequence_105", "sequence_106"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_107"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_fast/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_097:fast", "sequence_098:fast", "sequence_099", "sequence_100:fast", "sequence_101:fast"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_241", "sequence_242"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_243"]
+  },
+  {
+   "device": "device_07",
+   "cores": "attention_baseline/device_07/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_197"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_103"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_096"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_102"]
+  },
+  {
+   "device": "device_14",
+   "cores": "attention_baseline/device_14/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_211"]
+  }
+ ],
+ "fast_b1_l512": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_152", "sequence_153", "sequence_154"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_155"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_fast/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_145:fast", "sequence_146:fast", "sequence_147", "sequence_148:fast", "sequence_149:fast"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_253", "sequence_254"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_255"]
+  },
+  {
+   "device": "device_10",
+   "cores": "attention_baseline/device_10/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_215"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_151"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_144"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_150"]
+  },
+  {
+   "device": "device_15",
+   "cores": "attention_baseline/device_15/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_198"]
+  }
+ ],
+ "fast_b2_l128": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_068", "sequence_069", "sequence_070"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_071"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_fast/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_061:fast", "sequence_062:fast", "sequence_063", "sequence_064:fast", "sequence_065:fast"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_232", "sequence_233"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_234"]
+  },
+  {
+   "device": "device_06",
+   "cores": "attention_baseline/device_06/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_203"]
+  },
+  {
+   "device": "device_09",
+   "cores": "attention_baseline/device_09/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_208"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_067"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_060"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_066"]
+  }
+ ],
+ "fast_b2_l256": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_116", "sequence_117", "sequence_118"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_119"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_fast/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_109:fast", "sequence_110:fast", "sequence_111", "sequence_112:fast", "sequence_113:fast"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_244", "sequence_245"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_246"]
+  },
+  {
+   "device": "device_07",
+   "cores": "attention_baseline/device_07/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_206"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_115"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_108"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_114"]
+  },
+  {
+   "device": "device_14",
+   "cores": "attention_baseline/device_14/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_212"]
+  }
+ ],
+ "fast_b2_l512": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_164", "sequence_165", "sequence_166"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_167"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_fast/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_157:fast", "sequence_158:fast", "sequence_159", "sequence_160:fast", "sequence_161:fast"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_256", "sequence_257"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_258"]
+  },
+  {
+   "device": "device_10",
+   "cores": "attention_baseline/device_10/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_216"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_163"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_156"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_162"]
+  },
+  {
+   "device": "device_15",
+   "cores": "attention_baseline/device_15/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_198"]
+  }
+ ],
+ "fast_b4_l128": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_080", "sequence_081", "sequence_082"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_083"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_fast/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_073:fast", "sequence_074:fast", "sequence_075", "sequence_076:fast", "sequence_077:fast"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_235", "sequence_236"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_237"]
+  },
+  {
+   "device": "device_06",
+   "cores": "attention_baseline/device_06/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_204"]
+  },
+  {
+   "device": "device_09",
+   "cores": "attention_baseline/device_09/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_209"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_079"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_072"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_078"]
+  }
+ ],
+ "fast_b4_l256": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_128", "sequence_129", "sequence_130"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_131"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_fast/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_121:fast", "sequence_122:fast", "sequence_123", "sequence_124:fast", "sequence_125:fast"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_247", "sequence_248"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_249"]
+  },
+  {
+   "device": "device_07",
+   "cores": "attention_baseline/device_07/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_206"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_127"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_120"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_126"]
+  },
+  {
+   "device": "device_14",
+   "cores": "attention_baseline/device_14/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_213"]
+  }
+ ],
+ "fast_b4_l512": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_176", "sequence_177", "sequence_178"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_179"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_fast/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_169:fast", "sequence_170:fast", "sequence_171", "sequence_172:fast", "sequence_173:fast"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_259", "sequence_260"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_261"]
+  },
+  {
+   "device": "device_10",
+   "cores": "attention_baseline/device_10/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_216"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_175"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_168"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_174"]
+  },
+  {
+   "device": "device_15",
+   "cores": "attention_baseline/device_15/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_198"]
+  }
+ ],
+ "fast_b8_l128": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_092", "sequence_093", "sequence_094"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_095"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_fast/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_085:fast", "sequence_086:fast", "sequence_087", "sequence_088:fast", "sequence_089:fast"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_238", "sequence_239"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_240"]
+  },
+  {
+   "device": "device_06",
+   "cores": "attention_baseline/device_06/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_205"]
+  },
+  {
+   "device": "device_09",
+   "cores": "attention_baseline/device_09/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_210"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_091"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_084"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_090"]
+  }
+ ],
+ "fast_b8_l256": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_140", "sequence_141", "sequence_142"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_143"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_fast/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_133:fast", "sequence_134:fast", "sequence_135", "sequence_136:fast", "sequence_137:fast"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_250", "sequence_251"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_252"]
+  },
+  {
+   "device": "device_07",
+   "cores": "attention_baseline/device_07/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_206"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_139"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_132"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_138"]
+  },
+  {
+   "device": "device_14",
+   "cores": "attention_baseline/device_14/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_214"]
+  }
+ ],
+ "fast_b8_l512": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_188", "sequence_189", "sequence_190"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_191"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_fast/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_181:fast", "sequence_182:fast", "sequence_183", "sequence_184:fast", "sequence_185:fast"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_262", "sequence_263"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_264"]
+  },
+  {
+   "device": "device_10",
+   "cores": "attention_baseline/device_10/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_216"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_187"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_180"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_186"]
+  },
+  {
+   "device": "device_15",
+   "cores": "attention_baseline/device_15/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_198"]
+  }
+ ],
+ "fast_b8_l64": [
+  {
+   "device": "device_00",
+   "cores": "decision_k1024/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_044", "sequence_045", "sequence_046"]
+  },
+  {
+   "device": "device_01",
+   "cores": "decision_k4096/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_047"]
+  },
+  {
+   "device": "device_02",
+   "cores": "dense_fast/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_037:fast", "sequence_038:fast", "sequence_039", "sequence_040:fast", "sequence_041:fast"]
+  },
+  {
+   "device": "device_03",
+   "cores": "cast8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_226", "sequence_227"]
+  },
+  {
+   "device": "device_04",
+   "cores": "castrelu8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_228"]
+  },
+  {
+   "device": "device_05",
+   "cores": "attention_special/l64_fast/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_195"]
+  },
+  {
+   "device": "device_08",
+   "cores": "attention_baseline/device_08/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_202"]
+  },
+  {
+   "device": "device_11",
+   "cores": "residual/0",
+   "sequences": ["sequence_043"]
+  },
+  {
+   "device": "device_12",
+   "cores": "lnf/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_036"]
+  },
+  {
+   "device": "device_13",
+   "cores": "lnr8/elfs_main_core_{tile}.elf",
+   "sequences": ["sequence_042"]
+  }
+ ]
+}

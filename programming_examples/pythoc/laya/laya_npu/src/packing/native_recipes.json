@@ -1,0 +1,2702 @@
+{
+  "fa03787c1c8c9ee5616e2a877afbe9aa4ef2faf98e83274e380fdac7bc15a1e5": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.0.attn.Wo.weight",
+    "repeat": 1
+  },
+  "aae1e57b4f8ba883877bda74f7944d98006bc6af5ac3941ee57d5e7e7274c6a6": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.0.attn.Wqkv.weight",
+    "repeat": 1
+  },
+  "ed614ea0acd0bb91b8865df0b849fa285ef1c4633bea117947bdd92b91a5a356": {
+    "kind": "matrix_gateup_tile64",
+    "tensor": "encoder.layers.0.mlp.Wi.weight",
+    "repeat": 1
+  },
+  "689777600fb65d7446b7230cdbb766ad646ab6f6155118a1aaf306ee109e7f91": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.0.mlp.Wo.weight",
+    "repeat": 1
+  },
+  "32afc87d28a283de306f2ff04f008b936425931bd06e36f386dd3e6014ebb772": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.1.attn.Wo.weight",
+    "repeat": 1
+  },
+  "d3af5fc61104f430ea62f99272cf931e9fef7673686976631aef7e925a6e3d05": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.1.attn.Wqkv.weight",
+    "repeat": 1
+  },
+  "b376c93d6941a964354016575a4e0e5518d0dd7541cee8f7ae83c8a046a036ac": {
+    "kind": "matrix_gateup_tile64",
+    "tensor": "encoder.layers.1.mlp.Wi.weight",
+    "repeat": 1
+  },
+  "48ac88cb02e84e91ee4c0d3d0dda814286055ce46564c746ead1c95468d693af": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.1.mlp.Wo.weight",
+    "repeat": 1
+  },
+  "671bf7fb3e1956350928566f4d477de8e72663c7f39bf5f0e7391c4c8e4bd9c1": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.10.attn.Wo.weight",
+    "repeat": 1
+  },
+  "c959c9b441f27de975c792aa5fd96e18a3340b14f931dd096d9b3e0692b7033f": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.10.attn.Wqkv.weight",
+    "repeat": 1
+  },
+  "0c16e06ae0905b006452ce965546f8c5761b0092f4ff54e6c1071da8e5916884": {
+    "kind": "matrix_gateup_tile64",
+    "tensor": "encoder.layers.10.mlp.Wi.weight",
+    "repeat": 1
+  },
+  "733cd8694550643734d35663529864eaeba5c26e907cac095ffd15243990280e": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.10.mlp.Wo.weight",
+    "repeat": 1
+  },
+  "66ff50dd13dd3e08ee40b7b59b09e22f936823d2b562d08b4536e7830d3d00cf": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.11.attn.Wo.weight",
+    "repeat": 1
+  },
+  "fefae718cef20316a31b389c56a288aa5892eece9f724052614f65f737434d41": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.11.attn.Wqkv.weight",
+    "repeat": 1
+  },
+  "f8131a248181cb44654615b1b4fe7782314f282b0621a35612b2c847f874e63b": {
+    "kind": "matrix_gateup_tile64",
+    "tensor": "encoder.layers.11.mlp.Wi.weight",
+    "repeat": 1
+  },
+  "1060b57d87f1c9682a882d5e47d52287688ed04de2a0733e48862ddf77168817": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.11.mlp.Wo.weight",
+    "repeat": 1
+  },
+  "ab86a90b228a8e5d7bc1cdf5f508e6b4185b9d95914d2afc7f47df846a99f0e1": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.12.attn.Wo.weight",
+    "repeat": 1
+  },
+  "f419d272ace83d8e69671b1c5207f2b87dca12d2c397aeed59afae759e8679bf": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.12.attn.Wqkv.weight",
+    "repeat": 1
+  },
+  "d7fdd520d37335d31126a8f6037da360f54355964431f3c46f78ac0b5e253835": {
+    "kind": "matrix_gateup_tile64",
+    "tensor": "encoder.layers.12.mlp.Wi.weight",
+    "repeat": 1
+  },
+  "bd80cab06a607f14704cbe4c4161577e4eee87611c3a90ac07061ddb08e37f39": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.12.mlp.Wo.weight",
+    "repeat": 1
+  },
+  "77f3e7184f5bb6db9fa16eaf297db309e879f55a9d1f459e81a1a499a66840b6": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.13.attn.Wo.weight",
+    "repeat": 1
+  },
+  "436e290985ce19488a16d02b7fecb1dd1a3ef71a671beb853352525b4a630dee": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.13.attn.Wqkv.weight",
+    "repeat": 1
+  },
+  "0a93ae9717045c8ba1613460d4dd10c8e8fbb1a18e99fd3a7c646050ee63468d": {
+    "kind": "matrix_gateup_tile64",
+    "tensor": "encoder.layers.13.mlp.Wi.weight",
+    "repeat": 1
+  },
+  "582564b6bbd457ea39dbb480fba68d94bbdddf7136f99aebecab568349697ddd": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.13.mlp.Wo.weight",
+    "repeat": 1
+  },
+  "5cdbdb36cc699761267be347891e211bfc29694a33d6cb217beccff56d99f2bd": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.14.attn.Wo.weight",
+    "repeat": 1
+  },
+  "f28735ba05e15ba1fc4580f33cbbd090e6d2ce6aa62951f197c93ac4a47f8039": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.14.attn.Wqkv.weight",
+    "repeat": 1
+  },
+  "582004ca41f43c75ec8599fe6b069e02aeb591fff5749e89da3bb4730410649c": {
+    "kind": "matrix_gateup_tile64",
+    "tensor": "encoder.layers.14.mlp.Wi.weight",
+    "repeat": 1
+  },
+  "d7033c78742872d76fc6a18149af8022486576fb6618feb8a54e8dba95bf7918": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.14.mlp.Wo.weight",
+    "repeat": 1
+  },
+  "2eef7fb151395e4574ceae2ba5cdedfde0d9db09b7628b1b04b1b7964b3b8afb": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.15.attn.Wo.weight",
+    "repeat": 1
+  },
+  "e38b827e9bccfe161def865d8110335bcbf55078a457db6042fae6eb04f9ab53": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.15.attn.Wqkv.weight",
+    "repeat": 1
+  },
+  "e57a1604681f1d9783765a2c2aa4a7a4bb96dd1bc280304ef7b8886a0ee941a2": {
+    "kind": "matrix_gateup_tile64",
+    "tensor": "encoder.layers.15.mlp.Wi.weight",
+    "repeat": 1
+  },
+  "9837078445afc290562e7f6ec7a0823ada2e9606251af5103f6d41526dc50cf2": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.15.mlp.Wo.weight",
+    "repeat": 1
+  },
+  "193d2ae23eb7227333fc233a9db401e98fb26e53333d56f4462c5fe2c996f39c": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.16.attn.Wo.weight",
+    "repeat": 1
+  },
+  "696bf7ac3af8abdd9e6ea8ceed307dc10d17ef4f239929fe81e41ce0d7358404": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.16.attn.Wqkv.weight",
+    "repeat": 1
+  },
+  "dfbbfd4e270cf552ad357977ed275d6072c41273536dc6569a5e56c9e9b8703e": {
+    "kind": "matrix_gateup_tile64",
+    "tensor": "encoder.layers.16.mlp.Wi.weight",
+    "repeat": 1
+  },
+  "0c3d7b2020b46d8c318fbcb7fd25349dfa16f430b1a52ea9faa7304146825b3a": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.16.mlp.Wo.weight",
+    "repeat": 1
+  },
+  "56205307af6eb71779bdd5a1b53f3e3b5bf9d0513072c5712b005895f488db2b": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.17.attn.Wo.weight",
+    "repeat": 1
+  },
+  "79d8ef8659f96c3dff042aeeb139456a56acd1dd6ed3f999690d22193ec21f2d": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.17.attn.Wqkv.weight",
+    "repeat": 1
+  },
+  "2aa6ab66f917fd66036c351c5e567c42c0a3babedcb82878081f11a6bea410b1": {
+    "kind": "matrix_gateup_tile64",
+    "tensor": "encoder.layers.17.mlp.Wi.weight",
+    "repeat": 1
+  },
+  "625fa407a2b15fe8db5bc56819f276fa4832157c3e67ffea082398e0edc614e4": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.17.mlp.Wo.weight",
+    "repeat": 1
+  },
+  "f575db560f0037e78b34b205ad04f7fbd5c977d7b4d0ca4d651d85c83852d772": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.18.attn.Wo.weight",
+    "repeat": 1
+  },
+  "e32d549126a16e176ba287dfc4330f69b333e18088a226c3f015e25ed618deb1": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.18.attn.Wqkv.weight",
+    "repeat": 1
+  },
+  "b30d83f31e65d65309808ed79fcc9c9966f85a880caaec52677056c9bdd52328": {
+    "kind": "matrix_gateup_tile64",
+    "tensor": "encoder.layers.18.mlp.Wi.weight",
+    "repeat": 1
+  },
+  "ab3ee6a56f2b325bd4608b9b28a3330de066157a8d61a27370c1e868518a85fb": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.18.mlp.Wo.weight",
+    "repeat": 1
+  },
+  "cce38e79ef8e8499a01d2ef917a019a5198cfc40809e2258eeedc7ea3466a8a6": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.19.attn.Wo.weight",
+    "repeat": 1
+  },
+  "94362cf3da4b3aaf3a9c8af36e252a47e7ea138fbab5d2f66d3b763ee792da47": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.19.attn.Wqkv.weight",
+    "repeat": 1
+  },
+  "c8c37df30286aecad116d2ac220d55bd66f62c76b1077c6a8fc5ee66e9593db1": {
+    "kind": "matrix_gateup_tile64",
+    "tensor": "encoder.layers.19.mlp.Wi.weight",
+    "repeat": 1
+  },
+  "3761402189963840183bcbcddf3e211c306a9912ee486eb375caa9ea0e33244e": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.19.mlp.Wo.weight",
+    "repeat": 1
+  },
+  "87cdf5c33005701acabdd8ddad08c6f1f2b01d643f3d0491b511b29d01291831": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.2.attn.Wo.weight",
+    "repeat": 1
+  },
+  "dd734f5e9b1c3baba506952e19b08c8259eeec905552c7dba7a9b2ae6f259866": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.2.attn.Wqkv.weight",
+    "repeat": 1
+  },
+  "f7b64525f3c0d6d65d0b264c982731f7a5b92810523ca189f9897f11c2750a49": {
+    "kind": "matrix_gateup_tile64",
+    "tensor": "encoder.layers.2.mlp.Wi.weight",
+    "repeat": 1
+  },
+  "e4e740070443fe697c7a4308dc85d69c76f69c4ea2da878aa8e2bbf589873dfd": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.2.mlp.Wo.weight",
+    "repeat": 1
+  },
+  "b51d28efc8e56f0b8e62675906cd10f84db4da81e197123b1cac5a0c7add49a0": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.20.attn.Wo.weight",
+    "repeat": 1
+  },
+  "15d6362cda2a2fe5167685feda371d22407e0f997566c64bd0eba964ef95b50b": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.20.attn.Wqkv.weight",
+    "repeat": 1
+  },
+  "0e042e033486d8781b20d429c862f2aa7b94a0b4a06b1e6b6585df1b96448e39": {
+    "kind": "matrix_gateup_tile64",
+    "tensor": "encoder.layers.20.mlp.Wi.weight",
+    "repeat": 1
+  },
+  "16948bd5ff7de8dfdd9432aaaf64f0c9fbc03f4a96f0a9e66e99352b792db9bf": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.20.mlp.Wo.weight",
+    "repeat": 1
+  },
+  "043585c1682fbb9fdac1f65a2ce588dd02cb821afe1e1e7a58021cb309323bff": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.21.attn.Wo.weight",
+    "repeat": 1
+  },
+  "5316c9d62f28c8a36fe0d1a158b1ee3ac2c3f36dd7dd1c25d286a0eea79c1a12": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.21.attn.Wqkv.weight",
+    "repeat": 1
+  },
+  "bb88986f763413c62fe4e03e6c9cdd3d59627b02e1ea37d3b81bb8b683f6b530": {
+    "kind": "matrix_gateup_tile64",
+    "tensor": "encoder.layers.21.mlp.Wi.weight",
+    "repeat": 1
+  },
+  "9da3c0d0a078496494d772204d4414c1477f19865deef36ea2b97999ac83ab70": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.21.mlp.Wo.weight",
+    "repeat": 1
+  },
+  "cfe64c08acef86068cc76a04630d2002bbb97b4d0ca492076909f5597497edb9": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.22.attn.Wo.weight",
+    "repeat": 1
+  },
+  "c1eaafcd85096bf5ac7672cbc19961faa2d894f52a0b3ad7ea9fd25d6f44de05": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.22.attn.Wqkv.weight",
+    "repeat": 1
+  },
+  "1c5bf3ac6dc9386163a8776f2b80cbcc432949da1ac088704216cef0af02cc1c": {
+    "kind": "matrix_gateup_tile64",
+    "tensor": "encoder.layers.22.mlp.Wi.weight",
+    "repeat": 1
+  },
+  "01c41c7678a002dd4192e73070d601741a6508b48045a3d502f6e9bfcd627c1f": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.22.mlp.Wo.weight",
+    "repeat": 1
+  },
+  "eae5e62cece5e030b5d3c06c11d108d4ff679060452185058615aa8846e1273c": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.23.attn.Wo.weight",
+    "repeat": 1
+  },
+  "150682f6e7da65d6698013cb0c54f2e2a9b84f24881a94c8d5a25c9cd3d758a3": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.23.attn.Wqkv.weight",
+    "repeat": 1
+  },
+  "996ed55eddefb51b8c9fe4f5b30e944a7457fcd5730094df383077921b2c5459": {
+    "kind": "matrix_gateup_tile64",
+    "tensor": "encoder.layers.23.mlp.Wi.weight",
+    "repeat": 1
+  },
+  "1a8c1e527de359bfa27a0989c8105ee43bd74965ebf51af7efc2ef52c632cda1": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.23.mlp.Wo.weight",
+    "repeat": 1
+  },
+  "a3e348636cc78104e8900ebfbe7abafb052f41ec6a6c2747342a8836550b80cd": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.24.attn.Wo.weight",
+    "repeat": 1
+  },
+  "e317ff948177e33c48e54e419b710f88758384d69a18dd0a45976e8fdaafc8ae": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.24.attn.Wqkv.weight",
+    "repeat": 1
+  },
+  "638cef3544f200b87822f27894b9af6249c4e1af0e5ad180830b0a07d276301f": {
+    "kind": "matrix_gateup_tile64",
+    "tensor": "encoder.layers.24.mlp.Wi.weight",
+    "repeat": 1
+  },
+  "08e7159bc5a066841a8681c5782b1ff5cb12316a0abd43ced62a21815d466881": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.24.mlp.Wo.weight",
+    "repeat": 1
+  },
+  "aed204421ee181ff0d279ee385ee6b818dc4351a08cbbdb0df7fdd38ecf02a1d": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.25.attn.Wo.weight",
+    "repeat": 1
+  },
+  "ddf89d4eb87f87bcbdd8b0cdcf4ca6ec3033f009cd53f3ba6c2f818ddcc9a492": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.25.attn.Wqkv.weight",
+    "repeat": 1
+  },
+  "d508bc9a3cd99624ab855cfc50c10dc6af9ed9e33c30cd25bd88df60923e0608": {
+    "kind": "matrix_gateup_tile64",
+    "tensor": "encoder.layers.25.mlp.Wi.weight",
+    "repeat": 1
+  },
+  "11fc2d918de389d56c228c584f7a7bb057541536ff5f4ad7dbc763084a758bd3": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.25.mlp.Wo.weight",
+    "repeat": 1
+  },
+  "a418c89dc783f6706cc9fccf06d7bd832c9bf8f41d0f9437c01309ca4226e4f9": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.26.attn.Wo.weight",
+    "repeat": 1
+  },
+  "451a997e8a0ef4e4167e9e5e605c9829a9ff9088415ce389dcb7ea1921f19502": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.26.attn.Wqkv.weight",
+    "repeat": 1
+  },
+  "fea0df66572514e0c8ee5d43941ba5fe770c14cbaf9e8208850dce7362eebba4": {
+    "kind": "matrix_gateup_tile64",
+    "tensor": "encoder.layers.26.mlp.Wi.weight",
+    "repeat": 1
+  },
+  "a9b2d32141c21b4e3204a27774e952b535dc8da22ef0500b856c6a3489a33a75": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.26.mlp.Wo.weight",
+    "repeat": 1
+  },
+  "eece4235ad76f06e7f7eacaa92a71f9ed94ebb0b92e3ddcf63311eb3f46c69ee": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.27.attn.Wo.weight",
+    "repeat": 1
+  },
+  "33dc2778c95625bba4ad5f8725079e13823188e3dd11c615c8c283e30c36f469": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.27.attn.Wqkv.weight",
+    "repeat": 1
+  },
+  "bd7ad65d25eae614d602f902a51a8467f24f59d80bb813cbefdab0e386dcec18": {
+    "kind": "matrix_gateup_tile64",
+    "tensor": "encoder.layers.27.mlp.Wi.weight",
+    "repeat": 1
+  },
+  "6674e0ee9db648732af100cf4b42a91ee5caab2921273d94c43dcbffb70c19e9": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.27.mlp.Wo.weight",
+    "repeat": 1
+  },
+  "9cd64a67e2bca6cfdce9f4e542a70200741250a9d724e22435ae1641188943a0": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.3.attn.Wo.weight",
+    "repeat": 1
+  },
+  "9023b2a56ff8e0d72518d0ebe20585d2bb042f285ca89a9f34ada551f7c4d1d8": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.3.attn.Wqkv.weight",
+    "repeat": 1
+  },
+  "07b508911144bd8d84218b0d1e22eb55a952a46630537a7cd9e830d9504aba31": {
+    "kind": "matrix_gateup_tile64",
+    "tensor": "encoder.layers.3.mlp.Wi.weight",
+    "repeat": 1
+  },
+  "c16643da81594d12c1597c373ec192d336d12b1c79dcf17382a42db4ffabef04": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.3.mlp.Wo.weight",
+    "repeat": 1
+  },
+  "fde42256bf181217dc3e296686e80ee2e39146dcf25bc14ff381286447880ba4": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.4.attn.Wo.weight",
+    "repeat": 1
+  },
+  "62d801a9473ce57fc26ae9d803ceda2bcdd893e934db69c9fbcf4c7045160ebd": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.4.attn.Wqkv.weight",
+    "repeat": 1
+  },
+  "d6e369d9f96791389d2d6e43b406a2a2658178c3a998a7c6ede8307a774e7c61": {
+    "kind": "matrix_gateup_tile64",
+    "tensor": "encoder.layers.4.mlp.Wi.weight",
+    "repeat": 1
+  },
+  "02c055619c94a65ca8e01d525c275e1f9ae820d1ef8d0265a5c655e9749e5410": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.4.mlp.Wo.weight",
+    "repeat": 1
+  },
+  "9060c06b8c5340d3fd0902dbfc5bc414f1d506b0d3ab22141d9d1ee0db21188c": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.5.attn.Wo.weight",
+    "repeat": 1
+  },
+  "966ae3ba67b02e6e6f42d825cfcda4e49d770011799097adaf6ca7689f38c186": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.5.attn.Wqkv.weight",
+    "repeat": 1
+  },
+  "d7d957c7e3138c497639dea67de0dd584836c744565ef1adf7343049f91fed93": {
+    "kind": "matrix_gateup_tile64",
+    "tensor": "encoder.layers.5.mlp.Wi.weight",
+    "repeat": 1
+  },
+  "ebf9fc000031fe3176ab44b54254b1655a823dbed38ba15c76eba0f22d7140d7": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.5.mlp.Wo.weight",
+    "repeat": 1
+  },
+  "dcb6a39a9191c74db6ebe24c7d0f8a690abbeef9aeeaf27dfea9d3a8c5e63819": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.6.attn.Wo.weight",
+    "repeat": 1
+  },
+  "85a893c19879c1ba58b8a8e9ab65a7cbbf13e4cb2ef59a24abff646447b3d74f": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.6.attn.Wqkv.weight",
+    "repeat": 1
+  },
+  "4f60c452c57adc95d67e35d580be6351c58e66949a98473e9db9fff6a6435fe5": {
+    "kind": "matrix_gateup_tile64",
+    "tensor": "encoder.layers.6.mlp.Wi.weight",
+    "repeat": 1
+  },
+  "e62afbf51b901bc81ef4831bd59e4fb15ddd62ed44df850e67e29dc86ace0bb3": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.6.mlp.Wo.weight",
+    "repeat": 1
+  },
+  "7d514b83f232de98b532b41c1a4130a8b69f119a6158c5f405274d603715c039": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.7.attn.Wo.weight",
+    "repeat": 1
+  },
+  "41a9795554f3061d92948a54dbb04d13533a26ef5d7223c148f7d4729e9ebd8e": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.7.attn.Wqkv.weight",
+    "repeat": 1
+  },
+  "98f1e5d2ad071a76e47e2354e03c048a53322c2a2576fbe6b9071976b58c2916": {
+    "kind": "matrix_gateup_tile64",
+    "tensor": "encoder.layers.7.mlp.Wi.weight",
+    "repeat": 1
+  },
+  "ba6ed2b96cdf372919ac81cba32afef56390d292818033d1ebec5417dde74da3": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.7.mlp.Wo.weight",
+    "repeat": 1
+  },
+  "2ae69d3542fe766cb87bfe6fd25a5485e446d28f6ba813106f2d4ab05d97ecf1": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.8.attn.Wo.weight",
+    "repeat": 1
+  },
+  "3b03b753e3665689dd1f5d69d91a25d0b59beef8b9f10f639edc782bde372ce5": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.8.attn.Wqkv.weight",
+    "repeat": 1
+  },
+  "2ccba731f3852646fb2ab6e07130def6416c2d6d3c3d5d38a69d6421dbd8a6ec": {
+    "kind": "matrix_gateup_tile64",
+    "tensor": "encoder.layers.8.mlp.Wi.weight",
+    "repeat": 1
+  },
+  "835742406ae38f99b8f775dc4bd69d9f1be2d4fcdbba430533ef3bdd3dfffa34": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.8.mlp.Wo.weight",
+    "repeat": 1
+  },
+  "bb1b13456aed70eb0976b3bfa877b2d66fe3a4d2f13127cb25638469ab47d627": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.9.attn.Wo.weight",
+    "repeat": 1
+  },
+  "cb209860f412103d5b0be578c35742b3d75e1b5c4ae037b5e97baa5be9275b98": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.9.attn.Wqkv.weight",
+    "repeat": 1
+  },
+  "6276220cc95f1eff111d712995f6dada7cce35b3207b192708a9486402961de6": {
+    "kind": "matrix_gateup_tile64",
+    "tensor": "encoder.layers.9.mlp.Wi.weight",
+    "repeat": 1
+  },
+  "76056f662f87ef0d6fcfbee998b6ae95761dfde6a595035a58129edd755ee5f6": {
+    "kind": "matrix_kn",
+    "tensor": "encoder.layers.9.mlp.Wo.weight",
+    "repeat": 1
+  },
+  "beaec449b7d4ed13ded2cf6326cc464030b22fe7f817b1c02d7b5c7e47308199": {
+    "kind": "matrix_kn",
+    "tensor": "head.layers.0.linear1.weight",
+    "repeat": 1
+  },
+  "a360b8e2a5bda483189cdd44c2c2b5c29741cb87626344e0f8d768d0fcc0e6b7": {
+    "kind": "matrix_kn",
+    "tensor": "head.layers.0.linear2.weight",
+    "repeat": 1
+  },
+  "4094f8256989ceae0edb5ab051054446bf5abf7df7446ac650189d83bb3fab0c": {
+    "kind": "matrix_kn",
+    "tensor": "head.layers.0.self_attn.in_proj_weight",
+    "repeat": 1
+  },
+  "3db4bff00711f6fbf23b36f9f86f9d28c920c730257155a8e4cad022fc7650f4": {
+    "kind": "matrix_kn",
+    "tensor": "head.layers.0.self_attn.out_proj.weight",
+    "repeat": 1
+  },
+  "408d26231b7c2bbaada31da8c8595e180f141aff382fb453e517c08a8b101dd6": {
+    "kind": "matrix_kn",
+    "tensor": "head.layers.1.linear1.weight",
+    "repeat": 1
+  },
+  "91f9f73924df2ea8b25a0d2a7ffef22eff623379b874414a9f5f125ef9b8fa74": {
+    "kind": "matrix_kn",
+    "tensor": "head.layers.1.linear2.weight",
+    "repeat": 1
+  },
+  "ac303bd475774924cc1bc195ef46e28e293b4e598f3b46f1d41e1c64be78dd1d": {
+    "kind": "matrix_kn",
+    "tensor": "head.layers.1.self_attn.in_proj_weight",
+    "repeat": 1
+  },
+  "e8690ab0ae665eb4a4765f69feafbbad1b48f51d189707bef20b66ffbbd6482b": {
+    "kind": "matrix_kn",
+    "tensor": "head.layers.1.self_attn.out_proj.weight",
+    "repeat": 1
+  },
+  "eae0f4c16c309331696b383f200a3a645fa62196773fcb214f85df0294320ccf": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.embeddings.norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "1b233c29dc6dd09c512b788d8014391bfcd14ad9513a9752d613fc951f51276f": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.embeddings.norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "9522bbbf60c0a752bacb25b50d521aec4c8c49d2894714ca2854dbe9bf1e5cdf": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.embeddings.norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "735f606c13170a5d09f8fe94e911b34f14159235c60fec81e9402dbe80c13741": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.embeddings.norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "dfb9ac924a42d1f293ebb559dc56e60b885a09848313a03c35c5f10ebae045a1": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.final_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "5bcfa0a678ce22169713fde28a45c425e0645f53eaeed7666fa5f4f03289ed90": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.final_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "94fd2002954fb8ad85bd2a4fe0cb8fb7c8a4b3acbb751bce55c93f31669757ee": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.final_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "6a58b63f66cc73280d63307869cc83270f7426edb88d908b9bc44c4133c4416b": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.final_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "f1202d875e2e8ac08232d6558b2bbbccb0101edd40ae3e667bd16edf5c9f3e00": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.0.mlp_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "daf9560c2fe55249162dec22df208f7fb53caf700dbb44cf4b9a7180b30545b5": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.0.mlp_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "642e21ad148b83524ae9635d3408c5d9f9204bfd42d9468ceb29c8b2c13c579e": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.0.mlp_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "db9735546664c82a0ed712ece0b3332124e1a707b44e76749ea27ccdcf621749": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.0.mlp_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "7216f0d49ad016ab8ba648d0dc921776ef7201c0dc4c1e780a992939563b1d3a": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.1.attn_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "7486fb1c06d2c135929be3e51601da14ac7b36c2a69c2dcfd87c068633b245ac": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.1.attn_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "a0b70f54bda33a80ccef872affbdd15b111f4c6bfaa704ad6c31f8a2e0033f42": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.1.attn_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "f38fa899d94f852af4b1dc8dc5fbbd11736f9d257d707b04d8a1a02ba65135cb": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.1.attn_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "fb8b6eb50b85c92eff0269c5477f7a1dd7f57aa3e947da4d6506a83342cb5ee1": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.1.mlp_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "a09d08f63f5318e8458bc261f02450a5a2bb62ccabe85d45858e403155caec19": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.1.mlp_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "8efdc6beaec0c6fbfd185beedbb75fcac2f79e02cb02b74f70e595587d1f3e98": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.1.mlp_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "d1b532632d3c8cda6900c40cd79cbbcd6794255bfa0405571408c97529c6d6d1": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.1.mlp_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "73433fd579188bc580a217e6d6f7d50e108697e314d6c7d731e05f5c955e49ed": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.10.attn_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "21bdb0acc2bda630db3cc27cdbcd84f3dedb08578e81c9dcdd6b8f1e9707f228": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.10.attn_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "e43e6c849fbf99c445180987a7c86f0178a919de5d25a5816773c0b640f2bea5": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.10.attn_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "7dd12f1bcaa36849b9789d923f6b0e1cdf50e02711d6603d1a5614cb621636b2": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.10.attn_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "4ed85da7e2252931cdc0baed99a37dd38c684403edfc2bf16c37a18728adc53e": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.10.mlp_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "cc4e8e82c23bafe299501a3237e7d08afed8ae2c31e263296b43b0d2d5f005c5": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.10.mlp_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "27d41c584d3d97d33533d8b424c8873bf0051877b6b76fb9956a147d7c2ed8ce": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.10.mlp_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "07ebaad48c97f7207933189f87bad3fb2f1ce6407ac0f404ba5ee0c11ca65901": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.10.mlp_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "72046616c9c93a43d869574baecbaabd7e5a849e513df0bed3c87a86d0d8d59d": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.11.attn_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "8e7eab3e4b9ba5fecac45d15223f5d8d0e1705df45d6c27464bbe52ddb700224": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.11.attn_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "00d7305bef53236fd7cc8997611b6a8ec87e28ff6086a798f3b65fa64893bb65": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.11.attn_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "ab614178c30e8d12c0523d55323ba766afa42344520019cfffa4d55f9fc3aef7": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.11.attn_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "628e5fd589cc07adbe940b7482740652974ffd5db5698710268bf413f5a5c6e4": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.11.mlp_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "e65940ad8cf102fd1e8cb54488ac1be8c373fa8191ba2e608166cebe5335fa53": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.11.mlp_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "58180a49bdeb1fd9b1bedfd970d522d8218d0e5af05e6fed8eb1fab716104725": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.11.mlp_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "5f8df4db1be01b90c2143ece636448ffdd6b3673974582f7fd5c4c5c649e274d": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.11.mlp_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "9ede0a9c2021de26555483452c7e46e7b1ed6e79703bcf803205180c8779f809": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.12.attn_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "c557acab466275621b7c1c049f697c9ad970543dd9de18e36862f6226e3c4f78": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.12.attn_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "e845791c31d1088f62ae7768a301e17dabf427cd7dc1eca6ef3dde994eb0126b": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.12.attn_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "2444eaf7514f78759477e673d1520e0dc1a41e8e305a44f52181481ef0b84320": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.12.attn_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "e860be7e97913123862b3d61ebfd7256bf3e711fb13bd0ad7d72633f587309c9": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.12.mlp_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "782bf6593faa7873e28da31141b8c35c5bf63ecd62b620d8618a8aa9cdad8f6d": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.12.mlp_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "2bef617575a38d3940d7f646df3374f70ddf29e29e8a9dd9cbca9cd07abdef71": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.12.mlp_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "64e3136c6d9abefe68d7890a13af86a2b1475e1ef8d1d37766bdecbea3fa2d12": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.12.mlp_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "2143362f83035ba9f4f6b992278b045cafd37f8fed6323089d8b91f355d5c7f8": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.13.attn_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "8c35059691c473005749f005cdca2e4bc154aac7bb06552ba89b932d8c1a9139": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.13.attn_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "0693a1371ebd0aab04afc6e0151cab97394e3c424815867078149ab2dc051e78": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.13.attn_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "21541a44a8cebe06bd11a6141f1efb1aae3da32fff6dd84fecb2db70d1001146": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.13.attn_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "3c81a441fa2ed4ef5d8bce8345bc4dea99a4a2b5bfe648259e55c7bc365b969c": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.13.mlp_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "92bb45a8f0399254fad1454a65e86199f34c4cb8c80b7aa3a7499de57321dbab": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.13.mlp_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "5350d7a97f6e50016a2cb34eecd0bf545a4d62297b120d5b948d90f17dd6ccfb": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.13.mlp_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "42e51774d7a046bcb32fc64d60626103b0c920e096848d402c3a12281839175d": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.13.mlp_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "84f8932b83019314ce20dc0c0d86ca50247cd02609d84627f4d217113aae3b75": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.14.attn_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "fef756a34ced8de941f698c4b7da31d95eb155b07fe7eb88be6eed8b03c0fbd5": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.14.attn_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "684323213e69f5c20d2fc0fe30d62a05231decb7821bb00712fa53c18f417d64": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.14.attn_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "85218776ecf26a1ee4cc138ab3cef444ab1e07e3046225a9935899fae3c1584f": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.14.attn_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "7b9677e873eb8eedc432651150f456efea163372269793a1bdba6cc620f6c664": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.14.mlp_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "8a2da6c8c447e497aa0e6692a83cbf9c2f046fceddb823eb0d98c7f201b8a800": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.14.mlp_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "a71c1d6f7d129001ade51f817685112144c27911d83b92feeb38df784d9bbb3e": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.14.mlp_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "dbd75a707eac707e176d1aa8804cf7cd0087c94e59ce2854f1c03e4f8ea73950": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.14.mlp_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "b02d5db0af6ac2ff51839f7c5126c5bfc43df0c88ebe995835da4d80ce44455e": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.15.attn_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "8ea9e9cb2d75f51a85959af0237c0244be4108819ae8872202570da0a69ee9e4": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.15.attn_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "87acdac2464099d6171bf0f898a7be9dc22e04a1eb822de2a05577e3b32177aa": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.15.attn_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "5c7b27e8978b5322d640a882e8e7e641973273af334cef87bd84bf38426cf13e": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.15.attn_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "73835ed2112f732fcf4098d28ff95e8cacf91aad84046ba74eff93a110d8a861": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.15.mlp_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "069ed44d0c512d6c2cc6ee9b370446d06cc7eeffe4ce39e02bc30b4cedb853e0": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.15.mlp_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "055fde324623fa9eda43624b441ad58a3841995c3c6e20379f4e71f36c482b0f": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.15.mlp_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "f0d2225f10ac601d1eb1c1b452917e76963ecffe34675cf355c508f5846017d9": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.15.mlp_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "d4041997265da7e4fb48848f8ff6b4f610a0d1b177aa4c5014262a4db1e9cb5a": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.16.attn_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "ad0dd163ae1cfe5d55f079abc68c44fecc4e23b82f2ad6d04db35bcddd2629a4": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.16.attn_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "088925e3bd98664696cb3eb451b30dc5b6326d0c8a519b504dadda7ff7a706f5": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.16.attn_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "6ed2edd7003a2bf1e167a900682d5865098d0b74eb242d986e3eefb94fcf05e5": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.16.attn_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "a2363e9101032458f29799e2476df1cf1e15ec81173a0022f836ce5b90590a13": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.16.mlp_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "5a2f1ede9f2c5e08ffc5699de577eaef519254bd81f4445423ec44265ddfcc76": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.16.mlp_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "93cff72e8e99d5bc484a8386d5f867919a08332ae3fdf0e57a4b66226c4c45ce": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.16.mlp_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "fb7faf4d0bb5992654eaba94f2ea7067eeba9dc6d134af24c1bd696cd20363f2": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.16.mlp_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "978c1f749b6464460905b393ea0cc6d1e9f358143b70d936a9c98d6cf76fa1fd": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.17.attn_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "6fdd5f9a1cc6013e6f57c76bcaf653650fc923f888eef354dae7a68de27dcba6": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.17.attn_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "6d05294e0814f225b8087bf606a2c61af24448123d8d07f242ecbf767d81ba06": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.17.attn_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "9503a0e8b558e8c3a7c22ffbbb2765d01747db8c47792cf4a3fb76f096bc7223": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.17.attn_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "3c63af10943e3982b0df91a56dad672b87ae36b18a0f2da0baa6be78d1e1143d": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.17.mlp_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "d93ad40c64cba6076abaf841a97d560bf897bb7614b3b5dee82c63445268665c": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.17.mlp_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "a4155348dc0e81791d0433938fbb8b26b76997010d3d05f776908fa8ceb1c8dc": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.17.mlp_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "6d006d708f3af6a50dd2cd0b859f3f6c8a6f9e90af6a039861fa03a95e8cbd70": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.17.mlp_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "de3230bce48fabcfcbadffcbdac0454a4193886f5e5dc83b1c43ba53a15ff64e": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.18.attn_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "9785e3e9da063be5c433c64d6bb57ce7ede85ee0b631ccda67042356d7e7b901": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.18.attn_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "935ca76ed105726fba3be5c2eca80dd44b40bae283535e1a3c5a0f997214ae86": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.18.attn_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "6d5bf9bc5bebdb25da3d34956b8e9338163983d1f663beffb40a64aa69fb5f35": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.18.attn_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "3491a78753698c3f3d2fcb7cb6099774115ce4f416ef2438aa1f9527aeac69c6": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.18.mlp_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "3265a55b97fe171a630ff9e69d9ab9c6b0c74887791ac8e2bf1cadfc76c77f66": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.18.mlp_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "fde9eb00a65e595c7887b7a2eb10276c024ce010de55d2b8e02456dfbda6c32b": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.18.mlp_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "f63385a1563239bb2219f12e0fbe3dfe36da55f26bf2a14efdce627728c2814c": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.18.mlp_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "e02500f26cf71d3e49f83f568cb5c04d550aa570fb76f5ee5b22783caf3cde8e": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.19.attn_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "c23fbd35db06b070a3e1ddc95c93a1e192e0f5bf09ea9c5bf683d56bb4415713": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.19.attn_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "4ced800e11d7ed9032bb57d76a0a4e8bd0838907bea03acb0355abb46f55c631": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.19.attn_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "e36045e8542b9c6032ff094398e4a2779292e589b72405081e9f0e5f37399de5": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.19.attn_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "95adb7e1450acdbd21654d5a7613cab7c365313183a7c0b43312d27a3463d3c8": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.19.mlp_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "d2324ebe6141a9b7daa02526e6bbfee5cbafc6ec9bbcd28f8d6a8deb3bd4ec9b": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.19.mlp_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "da5ca1d77127d82e362af685bedcd8388b3e4128697e1e3b657a68431cf60ad2": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.19.mlp_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "a7cc5919f1716646c0aa2fb548b38d6a4687df936be6219b7175ed8a4c1980a4": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.19.mlp_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "a81e671cc288aa090363c09701cc59fd73a7ed0104d9c945d0f90587fa305794": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.2.attn_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "3cfc38bc005430f6463dcc3c0d60b8d69114851fb26c0799aedf780871824589": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.2.attn_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "e4d8138bcdb461c477bf711addb9b7b566e445c2e2874e399d30bd882da8bd22": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.2.attn_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "df9171e406a36dad08922fe67177099e7abf6bbafa3bfdab243164beda4ca441": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.2.attn_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "e6e186728c2d6f2b714ff809049de6148065cb208b4be3a1dd274535f87d12dd": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.2.mlp_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "a0963ca3e50523b32b87992ed1bf28c3d545e8f24ff0c73c802e536f9519fc85": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.2.mlp_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "9851c2243e8692fb392a46c21686475a24367d0554443e5951c3c095c6a3033d": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.2.mlp_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "6e59249ca89cdd8880ee537b33d75e16cffc5a86ed225a36223c75a741dff81f": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.2.mlp_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "0f3cf45af899828521b633e63c9152e28af701ddd4c7dcfc8b8ddd5ffd967c2b": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.20.attn_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "d7f9092e1b05eb19a9abc45dd1c1dfe849c124c35887e1045a1839f25e37b9f6": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.20.attn_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "401dfcdb20c7aac3457ab887aaf0cd6334f0abffe3e3e9ba44fc24467aca1c67": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.20.attn_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "2f48a05fac5c710e61ac3bc7608f1f2cf8a1424a722678829c33b95606f3face": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.20.attn_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "3c28bb9a99abe4b3d08289e0b9f1d2acb28695b859228ccd952fe17cdbd3c78c": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.20.mlp_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "6b5c1038a25339b57f84523f096af1fd71ff2ac5955a0e61924c4e3fa366703c": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.20.mlp_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "9a3fbca99e1e6707119a3bb813a10b72cf8998e789c1d09d0b65a743d8a9bb39": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.20.mlp_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "2d1c163aa158f51ff8c540a8057ad2ca9f5053709f7f7da86697b38d014e3926": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.20.mlp_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "eef37e6792ff0a356ba77f76ada7043c69898afacb0e40e82fd71ac1153bd447": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.21.attn_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "a3df388a1e4bf7b628b088fee8bc103bfbc2ed24ee51119a04d68c5d3af2759e": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.21.attn_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "61b7969e60571448404b7c974c1fe2c57c2760741ca490a3340ddfc0193f4765": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.21.attn_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "5c282ec7c9dadb5cf3b508d7b9e46a478e7996f91e64cb6786f23a78a26a37bf": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.21.attn_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "6e009ee7edda7c958470017be0ce48c2e016af0f21f4462362769e6843c1c1a2": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.21.mlp_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "b6499a807d478e504ba555ca81fd5246a597f8afbee53a2987b6ac8f24eb6451": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.21.mlp_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "cd155d3aae866299142b3fe0bf41d3707030efcde5939fedebc2b5ab8b6ba827": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.21.mlp_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "90a8ff4c0a2787655bc5eb9e036d7c667a43294a105d4e37a17832bd88678172": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.21.mlp_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "5ff0ad1d6956a1704586260d0c4571d0ebb7090515180067b534c666d29eee08": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.22.attn_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "88ad64a77c5cc4394c64df7da7e03367f7235a36a58ff5307779a17d66313a26": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.22.attn_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "47ad38a6ac2c8af86da691d6a6446be134c24aebaa2fc8b71584ed5caede957e": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.22.attn_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "0123913446330c6df0dc779da85fc81be0c52303a51e31421746103343de557e": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.22.attn_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "a3ea0f433fc6b3bfa2dc9956f089c9002f68707d533018788826739b84db6587": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.22.mlp_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "4d7b511625883a8b76a826ee1b6bdd7ba2eae2be750d15a33fa485f4d4b5db48": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.22.mlp_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "2297c30c7f009ae34460080dddf27139e44d8e9aa4fa7552461d59d3d43bd189": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.22.mlp_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "635a099118b2ac7d3fdb412e5e4c47fc6a2e4a6c18f0a502e4e282ae96cb80e5": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.22.mlp_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "3b4f8f32cb8755ecc8be34c67090ac7046ff72f88101acd3534bf73a3cd705e6": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.23.attn_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "c1c3a6f0c943940b9ea3bb876caaef05bb9403c0ac8f9a07558e45a6a574491f": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.23.attn_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "07e278ea7feb28bf200cdd66fccfa0f97025e85c404c3baf6261fe229dca15e9": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.23.attn_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "5f0213fd0e38e3f59e880ebb99f03d1a4e7309295481df01b2776942b321d6e2": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.23.attn_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "e442f9abcc6e36150c4864bb7edc295c67d511d7b34afa430aa9dd4a81e765c5": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.23.mlp_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "11b9513afc91d10c7a9c21731a5c181b333b6d88caf1ba8f5575d3b9cfb662d9": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.23.mlp_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "2d05e09d45df82f3bfe68438a97f449330c7f4e25955e945da55bfb24c2305e8": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.23.mlp_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "9e354c69e9cf6d231ed679c57d9d974af25141bc6cd9539aa2a6ac17a0ba835d": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.23.mlp_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "c8e586938293a330c174596b81b48b09838d51998d35f42f03247d0abe4ab264": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.24.attn_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "7320f4c520c9ca10762ae8b53c1ff3e393b897e549d263e7fb1897a1519df383": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.24.attn_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "4f6c81c8022ab91e156a2b8ec1a06b69f052b3336db3a8c61b2bfda9d82855a0": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.24.attn_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "3e5139e3452b2058fba62c06f5c4e2e6555254a0f8a98c4990b3488b19cff221": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.24.attn_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "c6256ec39527d943e14a41a934118a018bf48bc0c91f565565b04f4e36573b14": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.24.mlp_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "1bd6b0f74dd87ce89c308f31f01b24a2eafcada6342b58bd0cc345a3a8ccadcc": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.24.mlp_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "cae4bbfe2d287e585d19e86d6d3612eb6442956b1d9e369a70948308ffdf32ff": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.24.mlp_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "03f302055e6a12693f7b15b5f9e82715fb44f90b63d1f2b75655e813563ad100": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.24.mlp_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "c017c614a154940ce1e6251eabd8c10e47d111a0c22cf6b65926e5c70d1a5e66": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.25.attn_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "f57fe2d651e6a75add5ec5cd84a46b832355bb70ca9d54603c63f878811b2374": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.25.attn_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "c709b48ca01396c354d39124a904bd76e72513d9f07db0898b5d10cba227b1c5": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.25.attn_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "6750f0a88673be42f9f6bed97835fecb0b87f519e43ad4ec1fd5f86de326c815": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.25.attn_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "fc97d184177433d74dfd63e8ae72421e11af64289f88e2c67cdedb913b30a9b6": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.25.mlp_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "16eb4b5dc02fb4fae37787fd557a858b5bbf82904a04fcee5f020dcc41574757": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.25.mlp_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "cf7ef01770a2c470ec8e8ebb4ef3a41d0d711c7c308d851033d66983cf880360": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.25.mlp_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "813da0250dd6606deadcaba08fc5bab0b4258cd7396db91c6fd92d595003d6a6": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.25.mlp_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "f4925457301a06daccb0b7a22bcda136f5fc480f43b114aedc9f8b4741d97aee": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.26.attn_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "70a76427f3d6426cd0dd9a747df448893c080667c93ff74ec365d469f81b941b": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.26.attn_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "933fac4ea3fbfc3b9cae19d81e8db11812c89b73295e221e2a619b6c15b61608": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.26.attn_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "858c1195e9361cd84e7945c759a4d80535b221aeedc994f67c6223ec241c841d": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.26.attn_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "e36d493b3338379ab507ca6e6a79f69c529f1f0a6033605778ab4058116aec4b": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.26.mlp_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "ddef6b5ba9ba5c3b88bff5e3cc3b41125fdaedcf68ef879310db15dbe48975c1": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.26.mlp_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "240a6e19eea1f06c57b6425940e1c286520fa180c2c50dcf7963da51d797f6e1": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.26.mlp_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "7868824370d1a08ff353a58396bf9907cce6d496bee7ea22a4b090f3d0fa0bf0": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.26.mlp_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "f68aa1bb5520aea9cf18897fa30ec8d08a1820763947e1772c8df2120a7aeef7": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.27.attn_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "4f771376a0b956cc8b9914d1ab69df2922e0d5fd813d1878ee103a9e3136d7dd": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.27.attn_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "84a430ae4be7a8a0b495705132463c9a5cb11adde2f935a3c031ec7e3418eb24": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.27.attn_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "a40870349a5159b297e1a2c8ecdda610104ff9db8fa46ecd5cd8fbd6b1151347": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.27.attn_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "394addb47bc3553d2c990fb41dd4c74947bdb1c7d02f70662bb8b84a2911c205": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.27.mlp_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "5eb03b4700072254ef55bf10cecae5b85a7462e6fd40b6eba6b8317a382b20a3": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.27.mlp_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "54e0097a9181ad92f51e4905264960a516d619c809a43562471444c363e139b0": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.27.mlp_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "74f44a519bb52873cbb7bdab2bd780d3f3116c96ea23c071171bf9a1a54569c1": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.27.mlp_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "1654be093efbcf26a4ac2418638afbb2ada3fee667734d1f76fd962d92c44ab8": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.3.attn_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "eb1e4f994f5babc8d154fa23edd65c2c09f87fd863f91bb2cc49bd9006a7acca": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.3.attn_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "530b648e2a04847c82b219e7071a998c7c4a9d6e1014a242358253ac798cd533": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.3.attn_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "b77a1aba4a30e51bff24c803f8e462f6fa4b1be8cc6b2f14045c739791239432": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.3.attn_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "7fb5ba8912c1f038f28f616ee2c5c1c9dd3663a0c660784878b5728b574633de": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.3.mlp_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "0ce73b0f29a688677f89514a19ff4bd08b463611c836ba2eb5142c22fccd9613": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.3.mlp_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "768cfefba257ea7822a82c9885e5db1d635a73d256becbbc44bbfcfd27ccf42b": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.3.mlp_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "b4fae4dd00c29cc89976d39918d5423c72f73293928bb9c8db10c6333a633ca7": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.3.mlp_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "5490234533175e2b2fcdaf22a47addf9f78549428fe06310bf3b1736dda1377c": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.4.attn_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "c4f7406b2a069ae35a3b04c5b8b2685ca32d53a8ee7bc91d973a443e7ef79815": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.4.attn_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "3f7830626927315231ae7c522fa3d9b968b8e3d6cdf0559124fe2971a957b9e8": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.4.attn_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "f6b4ff198fa5e87f3e0c26e47d6abf8556be38c861ba2f43c9901a4cc776433a": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.4.attn_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "e2f4e941eb869834f66146b7be65a3070ebb0ae51ad10b7672bc8d0ed843d983": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.4.mlp_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "3617e4abe3a34bbb718c5c5f34212687ba40afe40f79444ed38c40a238fd5923": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.4.mlp_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "47a23b830f54ab2fd072a723e20331b459acc37fb60b63751e65f09be478ffc4": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.4.mlp_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "8d9ba8c71018ac9927557777bad376d52aeba25222e3b269d15de4e6e5d7c49f": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.4.mlp_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "be1257eb6c36b86410db6d6a80d778a411958c87b076f89e01d31454a8aa071f": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.5.attn_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "c09de6474bac065f4fb7968ea68bde3bc5e82cc060a70a5b6f58028625abb8c8": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.5.attn_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "7f7322787f48d38e9400fb505b65e6f0e34112f4ba06d1177b07c6af69a76566": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.5.attn_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "cc7b56721a4208b6de00346d3418b243efecb4b1427a334d20b30e495e490bb7": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.5.attn_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "2f2074854f6a59e0d9d651e54222d0c48c52910c1dd8f09f5f8d39c5dda4bce8": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.5.mlp_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "c1d086103e43849a41648b98c1924ec800d5ac92ee1b0eb734288bc70dc42ad3": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.5.mlp_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "eb52584d57794d82b5fda13ec660d43d311a1f0cb13a2b62965f27443fec57bc": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.5.mlp_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "7e07a0fb667cd95ff4b2c81902f6be489cbf491e5a8cb697876885704aeff487": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.5.mlp_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "fd49dcededcd1d42671d9bc91e3b2157596e5883a67f08e65440978a92422f7b": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.6.attn_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "bd8caf557f381ec8c7dce18378ff9726578b90ec51343dd1c1068af8deef926c": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.6.attn_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "6524bbec42f396a45375c7ff2bcc2dac96e4115e8293a41afced5c55587fa32a": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.6.attn_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "eb1d19e8664b48f1c682bcfc4137940c55e5157f3e2db3cfe8d8dadc716ed67d": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.6.attn_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "0d0cb1d98aaca2aa0f6688e852b3df888f6d84f416d3fae236f2cd47ec500a8e": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.6.mlp_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "ea1e1ff5b4283a2e95b95a1e3cc496c29cb6ad90c0fd52020cb54d8ce999bd49": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.6.mlp_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "8306597d9f40d56cd3dd8bd8cd1034b2c2922fa5c8d7a0f7129321ec98cc029e": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.6.mlp_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "1b0bf6e5f58402631bfbad53cc24405ed80eb6f0c082c26c325dd0dcfd9202bf": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.6.mlp_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "30f0e04b8c48baf1a87da365c36b575d8b0571ce82d3c99f029fecde5c15f3ea": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.7.attn_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "a57ff72781b83f5da6f20690ef0bfea8ba37ae3e3be2bf540ef35483cd2d292b": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.7.attn_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "a211e1267ac60f4e2640aa3fac3c712283ae541defe850ccc5515dbd0abc70b2": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.7.attn_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "4d3b37afc8e1ace60075b3324c30d84d1d8d92a523b9b8a9dd4837d1304a8124": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.7.attn_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "a1dfba55acabfb6d34518217e3c661e2e31715cf78427c82e5ff902bd7dfb4b8": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.7.mlp_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "170ec71ce0296fd20ec82be22217a7406f02ed744391531e9d0dcd7eef8d9e89": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.7.mlp_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "3ed74f2c6c2fa662572bd6fe9c553f56769948590590ff7d15778f11b9b2859e": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.7.mlp_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "4f69f059eb602304c3b03d555c25dd89fabf58dc6d983c340b0dfcaca847ed11": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.7.mlp_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "b6c5915d50383dc332ff47f1bdc94083524923796290fb894f259fd7595d34fb": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.8.attn_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "bc5c1ed3852c27c6e3df4d2e71d60dac4553fa201fef12da197ccca84ebad16f": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.8.attn_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "acf0710b6c9a045e652cafadbb70341df444c16e99a3c6e42caea086b367802e": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.8.attn_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "f236ff462fdcca1c07072d318a793f77d89ccc214d11bbc64f12bc8902a15c00": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.8.attn_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "2fef6356b8bcb48d63aa69fb5961452179e49e4610991da16fb05b54eddbe32a": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.8.mlp_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "7e1b1255a64ef07e174c80667d594ac22e99ddfc7682401b353739b987ef2b5b": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.8.mlp_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "a6d657bf57a0ba743aa39c8e6446a5480415c2208d03d95bb76db13c4d0ff0e6": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.8.mlp_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "41ce5cca06f6dd985e00d74a88520cd6f2ec10e3ffed4fc002fcecb8cd150a88": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.8.mlp_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "0b9d9a7c91e175fdf5f0d7c56245e7a24b1c1e21c03bf3526662abbb16d3ab01": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.9.attn_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "ac7be8bbba3ded1ac70523be743e8df6887f8b52e4b7bd554ae99e5d51103b12": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.9.attn_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "d46cc9f8b9192c6776088061cc2ef08283e16f4d43adcd468ee6941bbf49dcb7": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.9.attn_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "6a29e735f262beb13e5cb18fa833d3c8b8ab490bfeb3eb9c5cfaa77451778447": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.9.attn_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "f61bdf8a4c84f8b9abf936f0f678dc159fb1f54f8d3e1f8c0d2e5fa530ca9120": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.9.mlp_norm.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "141ab13e643ac7b3bd7d4837b486bed6dad41cf50e818f1d42325e18168ec50a": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.9.mlp_norm.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "b71613c91def531bed83232a71082ed0da9ca40afab78c586aab6c58d501d883": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.9.mlp_norm.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "192b078e8e1f0aa7b9713029480c8632fe7b7ef9e73000b2cfacb4ed8c2d75db": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "encoder.layers.9.mlp_norm.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "7ace4b2900148cc10bc74d64517b313dee8f18d1fd7ffc54d18709e128e3d8dc": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.0.linear1.bias",
+    "length": 64,
+    "repeat": 1
+  },
+  "c3015e6c3c0c4a85a57503e0951840d197d0e58be832487b3ac1771eef0df691": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.0.linear1.bias",
+    "length": 128,
+    "repeat": 1
+  },
+  "9b9246301b23f58993182cfa438d042f1bf89de3c11c071678da2d34fc5d8bc6": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.0.linear1.bias",
+    "length": 256,
+    "repeat": 1
+  },
+  "47219d6982b67b139aa305ec8fe9fa94f60d78ce5d009080fac3ce9715e8085a": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.0.linear1.bias",
+    "length": 512,
+    "repeat": 1
+  },
+  "252e5ea693c5a403ffe197b462e50e7bc7205888f0c08de82aee118346ba0573": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.0.linear2.bias",
+    "length": 64,
+    "repeat": 1
+  },
+  "74d529624a9259e77b73b5d93204479f35313799af159cc2e916198275a7af23": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.0.linear2.bias",
+    "length": 128,
+    "repeat": 1
+  },
+  "ec9c6cd48952e59709a274a2a6552d7e1ba3afe6c9ebd749b458a9e662ee11b3": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.0.linear2.bias",
+    "length": 256,
+    "repeat": 1
+  },
+  "8956359f29a4b2382bdd8529412c763ead8cb07a77c79e213429d6bc365a5152": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.0.linear2.bias",
+    "length": 512,
+    "repeat": 1
+  },
+  "2cd1af4e7c00e9713e841845f6c18a60115d187db06d07921167931aa9f1371a": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "head.layers.0.norm1.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "7931a74014c406196b5b554eb1eb22ab0551c9d3c51c9c2a5e8802400c098876": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "head.layers.0.norm1.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "9e67bc34c8bbdfe5379959bab7cdcef274c95b1883cd8fb7dfd4498230d9bc89": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "head.layers.0.norm1.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "e4ff4ffb91b84cd71899a8a72b2e92c29db37786f05eae784210129e7ac1c530": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "head.layers.0.norm1.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "bb45e0db817c8a3384b4db00c079e689273aa2770ad25c424d29556ac88fd8ff": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "head.layers.0.norm2.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "374e1174a871fffa302c4890250aff98bde2edca07b965eb921da8c8f7eebd0d": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "head.layers.0.norm2.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "a0c3f9707b7df77be503689daf095c8687c9067a5762c2bcce38e666f793e999": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "head.layers.0.norm2.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "f0920fc7397e9ac147c17a1ffe3201f9312b0ac092913cc29ae9e8c015126da5": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "head.layers.0.norm2.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "30dc939da6f6c86a108124af345225178d12279936c2d6390d605c3a0df3ad33": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.0.self_attn.in_proj_bias",
+    "length": 64,
+    "repeat": 1
+  },
+  "5445fb105b27c3dd3106c3afa068c2309eb1592b7aefd492955c8d7efa1effec": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.0.self_attn.in_proj_bias",
+    "length": 64,
+    "repeat": 2
+  },
+  "2ec50e02d2dad43bf4b5f0051e752a87819abe419ab3b7d4eb6bb653a09977bc": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.0.self_attn.in_proj_bias",
+    "length": 64,
+    "repeat": 4
+  },
+  "b1964bb8c3348859c5d3d8b94cf5e649312ffb1526e58939779261c8c485c223": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.0.self_attn.in_proj_bias",
+    "length": 64,
+    "repeat": 8
+  },
+  "d535d80bb942c983f71f238e51df73337ab2c183eba94049804212a3d2920f83": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.0.self_attn.out_proj.bias",
+    "length": 64,
+    "repeat": 1
+  },
+  "5ba2ee387224a4cbcf03c34649a5d7440dc2a433ffceae959a8d1f88cfd6d01d": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.0.self_attn.out_proj.bias",
+    "length": 128,
+    "repeat": 1
+  },
+  "ad73201fb97ae07ac6dd301d8c187f1270eb343cce1abbb6baa5b51dfab31547": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.0.self_attn.out_proj.bias",
+    "length": 256,
+    "repeat": 1
+  },
+  "b3d90dbddf90de02ef5b79a783917cdfb7bb08c119917a8e5571dea61dd14010": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.0.self_attn.out_proj.bias",
+    "length": 512,
+    "repeat": 1
+  },
+  "7c006267b635fb94b70b9b5049c9bc37358a402e18c3cc6764406e5cac643b65": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.1.linear1.bias",
+    "length": 64,
+    "repeat": 1
+  },
+  "9a7ce7b9e83af719653504fc301c2000706663359e5ef892dc42a0015c03fbaa": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.1.linear1.bias",
+    "length": 128,
+    "repeat": 1
+  },
+  "e5836ca814373b523a52464ff78cd7ae1dbe03a6be33632dd6a09672db955efb": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.1.linear1.bias",
+    "length": 256,
+    "repeat": 1
+  },
+  "25aa958dad24525b6fb61be7e16e730b7dc4a8dc405737279fa821d888fe2701": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.1.linear1.bias",
+    "length": 512,
+    "repeat": 1
+  },
+  "b63231d09d833a1b5b4c3e08d4fcbf9c9413344ba625e8499b3776526b446d74": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.1.linear2.bias",
+    "length": 64,
+    "repeat": 1
+  },
+  "cf622cdc63e01ab705d82d93d53c447a036e2b2246fb7904e94756d4306038f4": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.1.linear2.bias",
+    "length": 128,
+    "repeat": 1
+  },
+  "7f2a8e1b5ae9e923aa8f63a39435022775a1947c1533174bed1bae97e27a0d7d": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.1.linear2.bias",
+    "length": 256,
+    "repeat": 1
+  },
+  "70fd4dca221551949439c0d580f58a5659093042810a9d5e48ea68b7e592afc4": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.1.linear2.bias",
+    "length": 512,
+    "repeat": 1
+  },
+  "ea251d1f1b94718c60f187d761b5011e882912b8d8f744dd7f59bf93839cc8f3": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "head.layers.1.norm1.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "cc073a5f72981be60ee3be5086eb285eee68087c5c8d42ee4e0bb4acc0e1af9f": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "head.layers.1.norm1.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "b98108471a17fbabaccaeb49f444afa185e4947495d2798939b2a3a929580a9c": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "head.layers.1.norm1.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "659b5fbda226e973f265efb301d98ab0ea3b9b96ab3f13a5cde647d56cd66765": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "head.layers.1.norm1.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "b3310837da7d73d28f93ed2d1d936939d562e3defb48ccd54a8a88e5c5ec26f2": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "head.layers.1.norm2.weight",
+    "length": 64,
+    "repeat": 1
+  },
+  "3425886685d3628b7f15c3caa097c5c07a9139969db17d3be016060e1d25ff3c": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "head.layers.1.norm2.weight",
+    "length": 128,
+    "repeat": 1
+  },
+  "425e1f308312103c8640751663a5f376334d987a56d277354d830fdbc6eb2af8": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "head.layers.1.norm2.weight",
+    "length": 256,
+    "repeat": 1
+  },
+  "01087dbc783dd55126cae41b87df104cab2286e5c6f57022a7a9a20979886774": {
+    "kind": "norm_x_gamma_beta",
+    "tensor": "head.layers.1.norm2.weight",
+    "length": 512,
+    "repeat": 1
+  },
+  "c79fa34d42a885757dc17af693882e25a02e6fe109618d30159bbdcd1a8d7eea": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.1.self_attn.in_proj_bias",
+    "length": 64,
+    "repeat": 1
+  },
+  "4c568efc98caca27380120de0a32156e0ddff0b5ff6fcf81bd80158b3d56bb1f": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.1.self_attn.in_proj_bias",
+    "length": 64,
+    "repeat": 2
+  },
+  "9a72cc4500a38e15afb7ad7b4e9718fe31db9aa2bffcf4c79b010ee22f1b1f6b": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.1.self_attn.in_proj_bias",
+    "length": 64,
+    "repeat": 4
+  },
+  "5133e304eae543f32865f7c734431ff8adc449d829fb7f8238c329634c24a35d": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.1.self_attn.in_proj_bias",
+    "length": 64,
+    "repeat": 8
+  },
+  "1630d4385f4795ac645f81bde920e3ea57f55cab9add75cbfee629348ccee930": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.1.self_attn.out_proj.bias",
+    "length": 64,
+    "repeat": 1
+  },
+  "cf7b825f0963ac6e0c2ad02c30f9c45852fa98799c11e4e2b6c4d9f4ae7cfa4e": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.1.self_attn.out_proj.bias",
+    "length": 128,
+    "repeat": 1
+  },
+  "c731e4682557465873ab7e83c0538a82aa58e8d41075c697d1cc2d3cc0b26ac3": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.1.self_attn.out_proj.bias",
+    "length": 256,
+    "repeat": 1
+  },
+  "8513b7ed8c73afa7cfd6e7386de9739af02c9aea786429172d3101aca7886229": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.1.self_attn.out_proj.bias",
+    "length": 512,
+    "repeat": 1
+  },
+  "bfb7a2ef77c384749b0b18ff6f8397c3f5b755937f08ca5fcfb1de37cc58fcf8": {
+    "kind": "type",
+    "row": 0,
+    "length": 64,
+    "repeat": 1
+  },
+  "de84ee850206564e8d7617dd778b9bc13b282121ed78da0c8b409218c599a689": {
+    "kind": "type",
+    "row": 0,
+    "length": 128,
+    "repeat": 1
+  },
+  "9d6bcc63981bbdb05cb278dd2c12858db1f5ff9f83461c267b6d3c96b64a8aee": {
+    "kind": "type",
+    "row": 0,
+    "length": 256,
+    "repeat": 1
+  },
+  "ccec0d364472e3b5212b703dd96bcbd8e74850f9d0ed92acd02afec3231dc01c": {
+    "kind": "type",
+    "row": 0,
+    "length": 512,
+    "repeat": 1
+  },
+  "b2bce641bbb158ec7415ca92d958a5c9a4366b9432f84912e065699057e73dc0": {
+    "kind": "type_pair",
+    "row": 0,
+    "length": 64,
+    "repeat": 1
+  },
+  "ad5f7bbcb57f88e97c9e0ead8ee87a9c9348652bd396bd22546bc7fa42e223c3": {
+    "kind": "type",
+    "row": 1,
+    "length": 64,
+    "repeat": 1
+  },
+  "cbfa13963da9e58aaab29f0acca30f9fc1915d0e08b9c0c2bc0ec7e3a786efdc": {
+    "kind": "type",
+    "row": 1,
+    "length": 128,
+    "repeat": 1
+  },
+  "5ca441034e485a33b64b2510b70722e2a9e5b625ff319129d6d2570fac666d22": {
+    "kind": "type",
+    "row": 1,
+    "length": 256,
+    "repeat": 1
+  },
+  "b905342d6958390ade216bc7dd8cc2012c17e8e4a6750bfd92476c560be767ad": {
+    "kind": "type",
+    "row": 1,
+    "length": 512,
+    "repeat": 1
+  },
+  "2b25583ef1958627379fbe6be5c22b22e577a94a48c985c568f11635f6252ebd": {
+    "kind": "type",
+    "row": 2,
+    "length": 64,
+    "repeat": 1
+  },
+  "32dc68d811131032b003b755b1a5dde6bb45b7f782a2dc80a6718714041fe3fa": {
+    "kind": "type",
+    "row": 2,
+    "length": 128,
+    "repeat": 1
+  },
+  "c880019c5c2316f21943354d1428a82d1e0dc2a12d8b7a9d0712604f830664b8": {
+    "kind": "type",
+    "row": 2,
+    "length": 256,
+    "repeat": 1
+  },
+  "a225184b5e7443af1c21315f5ee11807dca6ad0969a7e7b869ed3997b673026d": {
+    "kind": "type",
+    "row": 2,
+    "length": 512,
+    "repeat": 1
+  },
+  "fae3eefc6a31cd2b93ff490efb6a191defd28def625808b609674149930abe4a": {
+    "kind": "rope",
+    "theta": 10000,
+    "length": 64,
+    "repeat": 1
+  },
+  "67a8bf3541233409eb55ec131d35bd235df17b7c98125dbf5ce04d345844ab9f": {
+    "kind": "rope",
+    "theta": 160000,
+    "length": 64,
+    "repeat": 1
+  },
+  "16283ac1ba0c9a5d31c6d005429081830aa08f44889c0bc6737e62e09e7369d0": {
+    "kind": "attention_metadata",
+    "local": 0,
+    "length": 64,
+    "repeat": 1
+  },
+  "838b33fc338d4b75b144039d5261b98df5da69907fc6d877b4bd05836f442c6a": {
+    "kind": "attention_metadata",
+    "local": 1,
+    "length": 64,
+    "repeat": 1
+  },
+  "ee8d59ef7f2afb73a25f9b3a2b371b88d86c661e0118e95041559140f0f58972": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.0.linear1.bias",
+    "length": 512,
+    "repeat": 2
+  },
+  "0da21a248dcfd16b28b13b9ba5a713b3ce1d6df93abdfa5b0368b99dc97abb40": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.0.linear2.bias",
+    "length": 512,
+    "repeat": 2
+  },
+  "642f317744bc7aa1b9e35c7949413a179c44e39548d6541e182df98532dd7ae8": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.0.self_attn.in_proj_bias",
+    "length": 128,
+    "repeat": 1
+  },
+  "4dc65ccfb6205fcaebdedc60f5f3c41c1850af944b4d22d0ee26560fee64b9e7": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.0.self_attn.in_proj_bias",
+    "length": 128,
+    "repeat": 2
+  },
+  "8e7257c2654b297f6fcef418cdf78656b0e8f6959d8ec431fd6642708002ee95": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.0.self_attn.in_proj_bias",
+    "length": 128,
+    "repeat": 4
+  },
+  "ccd26422a4f2d37af4714e7c24261222ce11d9e7ea8bb37db0c08f3f643a8fe9": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.0.self_attn.in_proj_bias",
+    "length": 128,
+    "repeat": 8
+  },
+  "7d2c1129b398ddf1bc6354eaa25ff338b236d759d2779cd848ebde0a47a34633": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.0.self_attn.out_proj.bias",
+    "length": 512,
+    "repeat": 2
+  },
+  "7489a87780a5d87bf16e21ce845e5f3027c0b6194b60b01403070e38f07e9a27": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.1.linear1.bias",
+    "length": 512,
+    "repeat": 2
+  },
+  "b806f73db734008ff31620b41575783d6102402c1ea2b290390c72ae10c177e7": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.1.linear2.bias",
+    "length": 512,
+    "repeat": 2
+  },
+  "8f64b254fa773fc8ac10c0924782c00311bd6543e55b14af6098ccc061da5f4a": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.1.self_attn.in_proj_bias",
+    "length": 128,
+    "repeat": 1
+  },
+  "f17de3fe620da817e1b0cbfe5dc89c23776a732e3747c4c1094fd7366764b5db": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.1.self_attn.in_proj_bias",
+    "length": 128,
+    "repeat": 2
+  },
+  "f6d54adf4726e9b7c465a8e3800c13aa2cc0f23165a78f5d4087e34cbf0bb2a2": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.1.self_attn.in_proj_bias",
+    "length": 128,
+    "repeat": 4
+  },
+  "3d61fc0d0e303d8b61230930b33fc57c4cd4448a4703b35c99bf921842c96560": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.1.self_attn.in_proj_bias",
+    "length": 128,
+    "repeat": 8
+  },
+  "be94a7af66f98ac9d7737cfecc2d2728055bcae9bf8f492f4ee8314f16ff8e0f": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.1.self_attn.out_proj.bias",
+    "length": 512,
+    "repeat": 2
+  },
+  "1024bc79e88fc9ce027dc5e78dfb6db2d59ce0fbf01a2dac6697c0a31cbe9ab1": {
+    "kind": "type_pair",
+    "row": 0,
+    "length": 128,
+    "repeat": 1
+  },
+  "281d25435f740a5f817aceb53f465435d65d9ce886fcacaae68555a85a111694": {
+    "kind": "rope",
+    "theta": 10000,
+    "length": 128,
+    "repeat": 1
+  },
+  "d91f010d03c5e094942960adb346c9f8f8d9b94542881f7fb9475bdf61e8b259": {
+    "kind": "rope",
+    "theta": 160000,
+    "length": 128,
+    "repeat": 1
+  },
+  "3f250bf48d9cc94d04dd03b89d92a0463cc4b6eeba2f377c3b0bf25e7f52ab14": {
+    "kind": "attention_metadata",
+    "local": 0,
+    "length": 128,
+    "repeat": 1
+  },
+  "a690721e704c4763e8f2799fda1fffdf0018debefeccae5e79118771331a298a": {
+    "kind": "attention_metadata",
+    "local": 1,
+    "length": 128,
+    "repeat": 1
+  },
+  "fd33e6f2000efa737265a717190e7d292123f0630387da7dd7d3d280fe54fd5f": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.0.linear1.bias",
+    "length": 512,
+    "repeat": 4
+  },
+  "7543bb0385465a1a02f9b4103d6d899185f075ff4edaccb23263cb62cdbdb1ca": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.0.linear2.bias",
+    "length": 512,
+    "repeat": 4
+  },
+  "194a30f0ba54192c8e5436e9c15eaa331f7038db48ed01c159604c6c8728eea0": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.0.self_attn.in_proj_bias",
+    "length": 256,
+    "repeat": 1
+  },
+  "c7b2be2c7f61d825c9c31cf173b2de7f200a8d98b49c24cd0f94cf89ffb1e3ea": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.0.self_attn.in_proj_bias",
+    "length": 256,
+    "repeat": 2
+  },
+  "356701df28faa889ef2c6f5197d1e67bbd3cdefaf7b0f980ac6240ef8a564381": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.0.self_attn.in_proj_bias",
+    "length": 256,
+    "repeat": 4
+  },
+  "c30d9514dc663c2f1c2007db74704fe5cdb358498f30c26f072eb886c32837d9": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.0.self_attn.in_proj_bias",
+    "length": 256,
+    "repeat": 8
+  },
+  "b600510d5b4e2ed264b515f79d00cf3384b8c32c9b39cd74703fc9a541ae8a5a": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.0.self_attn.out_proj.bias",
+    "length": 512,
+    "repeat": 4
+  },
+  "6bccc4d56861f55a1d8bec9a2f26b24e2b8f2cf3b6dd261c7e061790e8d8f562": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.1.linear1.bias",
+    "length": 512,
+    "repeat": 4
+  },
+  "032dd6484cea4857764d5165e455b074b602e004e86fc771298bec2d91875cbf": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.1.linear2.bias",
+    "length": 512,
+    "repeat": 4
+  },
+  "53f1a9c0d6e36ce7e1de327e2a681a9a93b137f24a7c48882c15484bbffddc63": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.1.self_attn.in_proj_bias",
+    "length": 256,
+    "repeat": 1
+  },
+  "26ef51c9f3111bfad33ff9b5c2a53b3765e17ff31e5525a096836c3945227da1": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.1.self_attn.in_proj_bias",
+    "length": 256,
+    "repeat": 2
+  },
+  "409a7622bec82abade53ca542f3fe07b2ceaf08d9ab4b915a334948ec823a51a": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.1.self_attn.in_proj_bias",
+    "length": 256,
+    "repeat": 4
+  },
+  "fe8ca275be8a48fdc3d220ed2fce7e17782ed2fcc8b51ac25990322e282d38f4": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.1.self_attn.in_proj_bias",
+    "length": 256,
+    "repeat": 8
+  },
+  "29323c876bdea6917c7d6f5b7c050f6e58645ef2fb9b9725a71abc3eec159b20": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.1.self_attn.out_proj.bias",
+    "length": 512,
+    "repeat": 4
+  },
+  "3da917b804669bae0b283c0089dfbadf845d7229d75a4400096b40fc7a15accc": {
+    "kind": "type_pair",
+    "row": 0,
+    "length": 256,
+    "repeat": 1
+  },
+  "6fe3f80c0e4ad516aeb36d391ed7c7dce66659eed6b2032d5ce7b8d1c5382ee8": {
+    "kind": "rope",
+    "theta": 10000,
+    "length": 256,
+    "repeat": 1
+  },
+  "b6b28ee2e366e4d3c748e0cf98d3dbae496b8be8fa2eca82b6d4c750fe61c72b": {
+    "kind": "rope",
+    "theta": 160000,
+    "length": 256,
+    "repeat": 1
+  },
+  "2cdf52d8b693dbe2e6885245c3cca22c6dd7e64bd814fa23d6b01169f215a023": {
+    "kind": "attention_metadata",
+    "local": 0,
+    "length": 256,
+    "repeat": 1
+  },
+  "0ab04c88cc81bb73c64a077838c58ce33d8bf20b485b78783ee2aee107f7c375": {
+    "kind": "attention_metadata",
+    "local": 1,
+    "length": 256,
+    "repeat": 1
+  },
+  "15da8cda2c1fabea239744ec4f51171cee6e544b6c998b5b6848abe1d2b709ff": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.0.linear1.bias",
+    "length": 512,
+    "repeat": 8
+  },
+  "c08364ee2de9b25d53d7756c2043ae93076a4539f7cdbefde694c87d0f99d212": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.0.linear2.bias",
+    "length": 512,
+    "repeat": 8
+  },
+  "4263e5c6cf78bd3a514f0417e1f66f06c2d9fa9ea82b0d605b90d277649f3979": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.0.self_attn.in_proj_bias",
+    "length": 512,
+    "repeat": 1
+  },
+  "6f3a2c7f71e0a30cbfd89808242ba975e65f875f2953dca362e4815185c64c64": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.0.self_attn.in_proj_bias",
+    "length": 512,
+    "repeat": 2
+  },
+  "abe1ebfe014899bbefcc48077a1a085fb5b288e46238388620b0a705569101fe": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.0.self_attn.in_proj_bias",
+    "length": 512,
+    "repeat": 4
+  },
+  "3c16ed24f6d741c36822b6f849abc7d58affc3a9b8e4c04986bbe9ea9344dd57": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.0.self_attn.in_proj_bias",
+    "length": 512,
+    "repeat": 8
+  },
+  "5efffd38e070210e0e5fd1e7924e1339c58d392c206421bb7faa6a24d80d549f": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.0.self_attn.out_proj.bias",
+    "length": 512,
+    "repeat": 8
+  },
+  "65bcf9362ba13fedb9e5d9ee1b24c7cd53bc01a9d28862e931aa243b048387fa": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.1.linear1.bias",
+    "length": 512,
+    "repeat": 8
+  },
+  "631cad1ab9c743ed7a67e5dfb4cbeeda9b1ea470f959f6ea6e1ca042a4a7b0a9": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.1.linear2.bias",
+    "length": 512,
+    "repeat": 8
+  },
+  "cf604b3f83e78a714c5ab8d73785f91542ba87986cd5b0973c8a7eb91725204c": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.1.self_attn.in_proj_bias",
+    "length": 512,
+    "repeat": 1
+  },
+  "017a0c113c91f7b01fabc60589b7ea92da4f70728f3a1e1fd2adbf21b49f2248": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.1.self_attn.in_proj_bias",
+    "length": 512,
+    "repeat": 2
+  },
+  "18e6c752299eed8d725eb7f75fc307dc1b3de7a06be02f11abeec3206aefab20": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.1.self_attn.in_proj_bias",
+    "length": 512,
+    "repeat": 4
+  },
+  "fe60f745f8e62f8c22469aa9e4ea366b46b09006094284814fb6a6956f641205": {
+    "kind": "decision_bias_tile64",
+    "tensor": "head.layers.1.self_attn.in_proj_bias",
+    "length": 512,
+    "repeat": 8
+  },
+  "f230981b41de71c4681ebd1eddd25ae08e2a1f290b2e1ad9dafa2169bd6cd25a": {
+    "kind": "decision_bias",
+    "tensor": "head.layers.1.self_attn.out_proj.bias",
+    "length": 512,
+    "repeat": 8
+  },
+  "ea5cccd5f0252c5dea072e374af42a7e553820432c238a78c75ae1f896be5b1b": {
+    "kind": "type_pair",
+    "row": 0,
+    "length": 512,
+    "repeat": 1
+  },
+  "2a4c364453e8d468392ffa58314597036d9bc0eb62c4298a5c401ee4e5c2b572": {
+    "kind": "rope",
+    "theta": 10000,
+    "length": 512,
+    "repeat": 1
+  },
+  "a75fc8aa1bacdbdaa74d518b1c7da8a987ed49888f0bf33c9522f9158b9709a2": {
+    "kind": "rope",
+    "theta": 160000,
+    "length": 512,
+    "repeat": 1
+  },
+  "1e925dd29d910d732cc498fb39e2e0a08a1aa1beb4363c987b1be3d224c599f0": {
+    "kind": "attention_metadata",
+    "local": 0,
+    "length": 512,
+    "repeat": 1
+  },
+  "d5bc7ae7bf9ac68948399991880b666e3b65d5ebe8ce7651b7114380b0742903": {
+    "kind": "attention_metadata",
+    "local": 1,
+    "length": 512,
+    "repeat": 1
+  }
+}
