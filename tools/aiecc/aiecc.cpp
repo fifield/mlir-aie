@@ -1916,7 +1916,22 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
         .map<ModRef>(
             "npu_expanded.mlir",
             PassPipeline{&context,
-                         [ctrlPkt](mlir::MLIRContext *ctx, mlir::ModuleOp) {
+                         [ctrlPkt](mlir::MLIRContext *ctx, mlir::ModuleOp mod)
+                             -> std::unique_ptr<mlir::PassManager> {
+                           // The teardown and the init entry are written for
+                           // AIE2, where each runtime sequence is its own
+                           // kernel entry. An AIE4 full ELF runs every sequence
+                           // of the entry device in one cert program, so an
+                           // init entry would run on every dispatch, and only
+                           // the first configuration would reset the partition.
+                           if ((reconfigTeardown || reconfigInitEntry) &&
+                               moduleHasAie4Device(mod)) {
+                             llvm::errs()
+                                 << "aiecc: --reconfig-teardown and "
+                                    "--reconfig-init-entry "
+                                    "are not supported for AIE4 devices\n";
+                             return nullptr;
+                           }
                            return getExpandLoadPdiPipeline(ctx, ctrlPkt);
                          }})
         .takesInput();
