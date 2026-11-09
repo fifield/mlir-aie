@@ -1,0 +1,16 @@
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+// The three configurations written in line with --reconfig-teardown: only the
+// first is preceded by the reset (aiex.npu.write_reset), each later one by the
+// previous configuration's teardown. The baseline resets before each one.
+//
+// REQUIRES: ryzen_ai_npu3, peano
+//
+// RUN: rm -rf teardown_npu3 && mkdir -p teardown_npu3
+// RUN: cd teardown_npu3
+// RUN: %host_clang -o test %S/test.cpp -std=c++17 %host_link_flags %xrt_flags
+// RUN: %aiecc --get-full-elf --expand-load-pdis --reconfig-teardown %S/aie.mlir
+// RUN: %run_on_npu3% ./test sequence
+// RUN: %aiecc --get-full-elf --expand-load-pdis %S/aie.mlir
+// RUN: %run_on_npu3% ./test sequence

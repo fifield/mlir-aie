@@ -1103,6 +1103,23 @@ LogicalResult xilinx::AIE::AIERTControl::resetDmaChannels(DeviceOp &targetOp) {
                               &defaults, tileLoc);
       TRY_XAIE_API_EMIT_ERROR((*op), XAie_DmaWriteChannel, &aiert->devInst,
                               &defaults, tileLoc, channel, direction);
+      // An AIE4 memtile MM2S channel also has a constant pad value, which the
+      // descriptor does not cover. Starting a BD queue writes it only when it
+      // is non-zero, so a pad left behind would leak into the next
+      // configuration.
+      if (isa<AIE4TargetModel>(targetModel) && dir == DMAChannelDir::MM2S &&
+          targetModel.isMemTile(tile.col, tile.row)) {
+        std::string name =
+            (Twine("DMA_MM2S_") + Twine(channel) + "_Constant_Pad_Value").str();
+        const RegisterInfo *pad =
+            targetModel.lookupRegister(name, tile, /*isMem=*/true);
+        if (!pad)
+          return op->emitOpError()
+                 << "register database has no " << name << " for memory tiles";
+        TRY_XAIE_API_EMIT_ERROR(
+            (*op), XAie_Write32, &aiert->devInst,
+            targetModel.getTileAddress(tile.col, tile.row) + pad->offset, 0);
+      }
       return success();
     };
     Region &region = memOp.getOperation()->getRegion(0);
