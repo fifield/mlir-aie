@@ -110,14 +110,10 @@ def test_macros_the_headers_ignore_share_one_pch(tmp_path):
 @pytest.mark.parametrize(
     "args",
     [
-        ["-D_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER"],
-        ["-D__int_least64_t=long"],
         ["-ffast-math"],
         ["-I", "shadow"],
     ],
     ids=[
-        "macro-the-headers-test",
-        "macro-a-header-defines",
         "language-flag",
         "shadowing-dir",
     ],
@@ -135,6 +131,53 @@ def test_command_the_headers_read_differently_gets_its_own_pch(tmp_path, args):
     assert ret.returncode == 0, ret.stderr
     assert with_pch.read_bytes() == plain.read_bytes()
     assert len(_pchs(cache)) == 2
+
+
+@pytest.mark.parametrize(
+    "macro",
+    ["PCH_TEST_CONDITION", "PCH_TEST_DEFINED=2"],
+    ids=["macro-the-headers-test", "macro-a-header-defines"],
+)
+def test_macro_in_an_injected_header_gets_its_own_pch(tmp_path, macro):
+    # Use our own header: compiler-private macros may stop affecting the
+    # injected headers when Peano changes its standard library includes.
+    shadow = tmp_path / "shadow"
+    shadow.mkdir()
+    (shadow / "stdint.h").write_text(
+        "#ifdef PCH_TEST_CONDITION\n"
+        "typedef int pch_test_type;\n"
+        "#else\n"
+        "typedef char pch_test_type;\n"
+        "#endif\n"
+        "#define PCH_TEST_DEFINED 1\n"
+        "#include_next <stdint.h>\n"
+    )
+    # CPATH makes this header visible to both the bare and caller commands.
+    # The conditional changes the preprocessed text; the redefined macro
+    # leaves that text unchanged but still requires a separate PCH.
+    environ = {"CPATH": str(shadow)}
+    source = 'extern "C" void fill(int *out) { out[0] = sizeof(pch_test_type); }\n'
+    cache = tmp_path / "cache"
+    ret, bare = _compile(tmp_path, cache, "bare", source=source, environ=environ)
+    assert ret.returncode == 0, ret.stderr
+    ret, with_pch = _compile(
+        tmp_path, cache, "own", [f"-D{macro}"], source=source, environ=environ
+    )
+    assert ret.returncode == 0, ret.stderr
+    ret, plain = _compile(
+        tmp_path,
+        cache,
+        "plain",
+        [f"-D{macro}"],
+        source=source,
+        pch=False,
+        environ=environ,
+    )
+    assert ret.returncode == 0, ret.stderr
+    assert with_pch.read_bytes() == plain.read_bytes()
+    assert len(_pchs(cache)) == 2
+    if macro == "PCH_TEST_CONDITION":
+        assert bare.read_bytes() != plain.read_bytes()
 
 
 def test_refused_pch_falls_back_and_is_rebuilt(tmp_path):
