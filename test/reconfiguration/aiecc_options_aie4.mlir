@@ -5,14 +5,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-// --reconfig-teardown and --reconfig-init-entry are AIE2-only: an AIE4 full ELF
-// runs every runtime sequence of the entry device in one cert program, so there
-// is no separate once-per-context init entry.
+// --reconfig-init-entry is rejected for AIE4: it moves each sequence's
+// leading reset into an entry run once per hardware context, but the
+// partition may be torn down whenever the context is idle, and what that
+// resets is not known. --reconfig-teardown alone builds.
 
-// RUN: not %aiecc --get-full-elf --expand-load-pdis --reconfig-teardown --tmpdir=aiecc_options_aie4_prj/teardown %s 2>&1 | FileCheck %s
 // RUN: not %aiecc --get-full-elf --expand-load-pdis --reconfig-teardown --reconfig-init-entry --tmpdir=aiecc_options_aie4_prj/init %s 2>&1 | FileCheck %s
-// CHECK: aiecc: --reconfig-teardown and --reconfig-init-entry are not supported for AIE4 devices
-
+// CHECK: aiecc: --reconfig-init-entry is not supported for AIE4 devices
+// RUN: %aiecc --get-full-elf --expand-load-pdis --reconfig-teardown --tmpdir=aiecc_options_aie4_prj/teardown --full-elf-name=aiecc_options_aie4_prj/teardown.elf %s
 
 module {
   aie.device(npu3_1col) @main {

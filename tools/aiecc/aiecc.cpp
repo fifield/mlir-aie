@@ -1918,18 +1918,16 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
             PassPipeline{&context,
                          [ctrlPkt](mlir::MLIRContext *ctx, mlir::ModuleOp mod)
                              -> std::unique_ptr<mlir::PassManager> {
-                           // The teardown and the init entry are written for
-                           // AIE2, where each runtime sequence is its own
-                           // kernel entry. An AIE4 full ELF runs every sequence
-                           // of the entry device in one cert program, so an
-                           // init entry would run on every dispatch, and only
-                           // the first configuration would reset the partition.
-                           if ((reconfigTeardown || reconfigInitEntry) &&
-                               moduleHasAie4Device(mod)) {
-                             llvm::errs()
-                                 << "aiecc: --reconfig-teardown and "
-                                    "--reconfig-init-entry "
-                                    "are not supported for AIE4 devices\n";
+                           // The init entry takes each sequence's leading
+                           // reset into an entry the host runs once per
+                           // hardware context. On AIE4 the array state does
+                           // not last for the context: the partition may be
+                           // torn down whenever the context is idle, and what
+                           // that resets is not known, so every sequence keeps
+                           // its own reset.
+                           if (reconfigInitEntry && moduleHasAie4Device(mod)) {
+                             llvm::errs() << "aiecc: --reconfig-init-entry is "
+                                             "not supported for AIE4 devices\n";
                              return nullptr;
                            }
                            return getExpandLoadPdiPipeline(ctx, ctrlPkt);
