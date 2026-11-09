@@ -319,22 +319,18 @@ struct NpuBlockWriteToCertUcDma : OpConversionPattern<AIEX::NpuBlockWriteOp> {
     }
     uint32_t dataSize = dataType.getNumElements();
 
+    std::optional<uint32_t> absAddress = op.getAbsoluteAddress();
+    if (!absAddress)
+      return failure();
+
+    auto parentDevice = op->getParentOfType<AIE::DeviceOp>();
+
     // Continue past previously allocated names instead of rescanning them.
     std::string symbolName = "chain_" + std::to_string(nextChainId++);
     while (op->getParentOfType<AIE::DeviceOp>().lookupSymbol(symbolName))
       symbolName = "chain_" + std::to_string(nextChainId++);
 
-    // Create a new uc_dma_write_des_sync operation
-    rewriter.replaceOpWithNewOp<AIEX::CertUcDmaWriteDesSyncOp>(op, symbolName);
-
     // Create the uc_dma_chain operation
-    // Find the nearest device to insert the chain
-    auto parentDevice = op->getParentOfType<AIE::DeviceOp>();
-    if (!parentDevice) {
-      // No parent device - this shouldn't happen but handle gracefully
-      return failure();
-    }
-
     // Insert after the last existing uc_dma_chain (before any pages/jobs),
     // preserving the order of blockwrite ops. Globals are allowed to precede
     // the chains, so skip over them too.
@@ -359,10 +355,13 @@ struct NpuBlockWriteToCertUcDma : OpConversionPattern<AIEX::NpuBlockWriteOp> {
     chainOp.getRegion().push_back(bb);
     rewriter.setInsertionPointToStart(bb);
     AIEX::CertUcDmaBdOp::create(rewriter, op.getLoc(), dataOperand.getName(),
-                                op.getAddress(), dataSize, false);
+                                *absAddress, dataSize, false);
 
     AIEX::CertUcDmaChainOp::ensureTerminator(chainOp.getBody(), rewriter,
                                              op->getLoc());
+
+    rewriter.setInsertionPoint(op);
+    rewriter.replaceOpWithNewOp<AIEX::CertUcDmaWriteDesSyncOp>(op, symbolName);
     return success();
   }
 };
@@ -952,6 +951,12 @@ struct SplitNpuBlockWriteOpPattern : OpRewritePattern<AIEX::NpuBlockWriteOp> {
     if (!denseData)
       return failure();
 
+    // Resolve tile coordinates and buffer-relative word offsets once, before
+    // splitting. The children carry absolute addresses and byte increments.
+    std::optional<uint32_t> absAddress = op.getAbsoluteAddress();
+    if (!absAddress)
+      return failure();
+
     // Split the data into two chunks
     auto dataValues = denseData.getValues<APInt>();
     std::vector<APInt> firstChunkData(dataValues.begin(),
@@ -1007,7 +1012,7 @@ struct SplitNpuBlockWriteOpPattern : OpRewritePattern<AIEX::NpuBlockWriteOp> {
     auto secondGetGlobal =
         memref::GetGlobalOp::create(rewriter, loc, secondChunkType, secondName);
 
-    uint32_t baseAddr = op.getAddress();
+    uint32_t baseAddr = *absAddress;
 
     AIEX::NpuBlockWriteOp::create(rewriter, loc, baseAddr,
                                   firstGetGlobal.getResult(), nullptr, nullptr,
