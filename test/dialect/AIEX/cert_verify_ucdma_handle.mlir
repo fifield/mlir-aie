@@ -68,7 +68,7 @@ aie.device(npu2) {
 // Negative: no producer at all.
 aie.device(npu2) {
   aiex.cert.job(0) {
-    // expected-error@+1 {{cert.wait_uc_dma waits on $r3, which has no reaching cert.uc_dma_write_des in this job}}
+    // expected-error@+1 {{cert.wait_uc_dma waits on r3, which no earlier cert.uc_dma_write_des in this job writes}}
     aiex.cert.wait_uc_dma(3)
   }
 }
@@ -85,7 +85,7 @@ aie.device(npu2) {
   aiex.cert.job(0) {
     aiex.cert.uc_dma_write_des(3, @chain)
     aiex.cert.read32_d(4, 3)
-    // expected-error@+1 {{cert.wait_uc_dma waits on $r3, whose reaching definition is a 'aiex.cert.read32_d' that clobbers the uC-DMA wait handle}}
+    // expected-error@+1 {{cert.wait_uc_dma waits on r3, but its last write is a 'aiex.cert.read32_d', which replaced the handle}}
     aiex.cert.wait_uc_dma(3)
   }
 }
@@ -101,7 +101,7 @@ aie.device(npu2) {
   aiex.cert.job(0) {
     aiex.cert.uc_dma_write_des(3, @chain)
     aiex.cert.read32(3, 0x02100000)
-    // expected-error@+1 {{cert.wait_uc_dma waits on $r3, whose reaching definition is a 'aiex.cert.read32' that clobbers the uC-DMA wait handle}}
+    // expected-error@+1 {{cert.wait_uc_dma waits on r3, but its last write is a 'aiex.cert.read32', which replaced the handle}}
     aiex.cert.wait_uc_dma(3)
   }
 }
@@ -119,7 +119,7 @@ aie.device(npu2) {
     aiex.cert.uc_dma_write_des(3, @chain)
   }
   aiex.cert.job(1) {
-    // expected-error@+1 {{cert.wait_uc_dma waits on $r3, which has no reaching cert.uc_dma_write_des in this job}}
+    // expected-error@+1 {{cert.wait_uc_dma waits on r3, which no earlier cert.uc_dma_write_des in this job writes}}
     aiex.cert.wait_uc_dma(3)
   }
 }
@@ -135,7 +135,7 @@ aie.device(npu2) {
   }
   aiex.cert.job(0) {
     aiex.cert.uc_dma_write_des(8, @chain)
-    // expected-error@+1 {{cert.wait_uc_dma wait handle $r8 is a global register}}
+    // expected-error@+1 {{cert.wait_uc_dma handle r8 is a shared register}}
     aiex.cert.wait_uc_dma(8)
   }
 }

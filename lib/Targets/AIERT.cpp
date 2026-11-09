@@ -742,8 +742,7 @@ LogicalResult xilinx::AIE::AIERTControl::configureLocksAndBd(Block &block,
 LogicalResult xilinx::AIE::AIERTControl::initLocks(DeviceOp &targetOp) {
   for (auto tileOp : targetOp.getOps<TileOp>()) {
     auto tileLoc = XAie_TileLoc(tileOp.colIndex(), tileOp.rowIndex());
-    if (!tileOp.isShimTile() && tileOp.getCoreOp() &&
-        tileOp.getCoreOp().getElfFile()) {
+    if (!tileOp.isShimTile() && tileOp.getCoreOp()) {
       TxnLocBracket bracket(*this, tileOp.getLoc());
       TRY_XAIE_API_EMIT_ERROR(tileOp, XAie_CoreReset, &aiert->devInst, tileLoc);
       TRY_XAIE_API_EMIT_ERROR(tileOp, XAie_CoreUnreset, &aiert->devInst,
@@ -982,7 +981,7 @@ xilinx::AIE::AIERTControl::configureSwitches(DeviceOp &targetOp,
         XAie_TileLoc(muxOp.getTileOp().getCol(), muxOp.getTileOp().getRow());
     Block &b = muxOp.getConnections().front();
     for (auto connectOp : b.getOps<ConnectOp>()) {
-      if (skipCtrlPktOverlay && overlay.isAttrPresent(connectOp))
+      if (skipCtrlPktOverlay && isControlPacketOverlay(connectOp))
         continue;
       TxnLocBracket bracket(*this, connectOp.getLoc());
       // demux!

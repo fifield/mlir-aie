@@ -280,8 +280,8 @@ struct AIEAssignBufferDescriptorIDsPass
         auto dma = bd->getParentOfType<DMAOp>();
         int channel =
             dma ? dma.getChannelIndex() : channels.lookup(bd->getBlock()).first;
-        DMAChannelDir dir = dma ? dma.getChannelDir()
-                                : channels.lookup(bd->getBlock()).second;
+        DMAChannelDir dir =
+            dma ? dma.getChannelDir() : channels.lookup(bd->getBlock()).second;
         if (auto tag = bd.getBdTag())
           receiversOfTag[*tag].push_back(assignments.size());
         assignments.push_back(
@@ -314,8 +314,10 @@ struct AIEAssignBufferDescriptorIDsPass
           auto tile = std::make_pair(a.col, a.row);
           if (!tiles.insert(tile).second ||
               id >= targetModel.getNumBDs(a.col, a.row) ||
-              !targetModel.isBdChannelAccessible(a.col, a.row, id, a.channel, a.dir) ||
-              (!a.bd.getBdId() && gens.at(tile).bdIdAlreadyAssigned(a.row, a.channel, a.dir, id)))
+              !targetModel.isBdChannelAccessible(a.col, a.row, id, a.channel,
+                                                 a.dir) ||
+              (!a.bd.getBdId() &&
+               gens.at(tile).bdIdAlreadyAssigned(a.row, a.channel, a.dir, id)))
             return false;
         }
         return true;
@@ -343,7 +345,8 @@ struct AIEAssignBufferDescriptorIDsPass
     for (auto &a : assignments) {
       auto &gen = gens.at({a.col, a.row});
       if (auto id = a.bd.getBdId()) {
-        if (!targetModel.isBdChannelAccessible(a.col, a.row, *id, a.channel, a.dir)) {
+        if (!targetModel.isBdChannelAccessible(a.col, a.row, *id, a.channel,
+                                               a.dir)) {
           a.bd.emitOpError()
               << "assigned bd_id " << *id << " is not accessible from channel "
               << a.channel << " on this tile";

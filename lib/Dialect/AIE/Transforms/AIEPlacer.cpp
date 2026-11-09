@@ -1533,9 +1533,18 @@ Placer::collectShareableShimEnds(DeviceOp device,
 std::optional<ShimTransferSpans::End> Placer::shimEndOf(DeviceOp device,
                                                         StringAttr symbol) {
   if (auto endpoint = dyn_cast_or_null<RouteEndpointOp>(
-          SymbolTable::lookupNearestSymbolFrom(device, symbol)))
+          SymbolTable::lookupNearestSymbolFrom(device, symbol))) {
+    // Allocation can precede placement and leave endpoints behind after
+    // lowering their routes. They no longer have a direction to infer or
+    // an unassigned channel to share.
+    if (llvm::none_of(device.getOps<RouteOp>(), [&](RouteOp route) {
+          return route.namesAsSource(endpoint.getSymName()) ||
+                 route.namesAsDestination(endpoint.getSymName());
+        }))
+      return std::nullopt;
     return ShimTransferSpans::End{symbol, endpoint.getRouteDirection() ==
                                               DMAChannelDir::MM2S};
+  }
   auto fifo = dyn_cast_or_null<ObjectFifoCreateOp>(
       SymbolTable::lookupNearestSymbolFrom(device, symbol));
   if (!fifo)

@@ -2748,7 +2748,7 @@ LogicalResult PacketPlan::emit(DeviceOp device, OpBuilder &builder,
                                          hop.src.bundle, hop.src.channel,
                                          hop.dst.bundle, hop.dst.channel);
         if (overlayCircuitHops.count({tileId, hop}))
-          overlay.setAttr(connect, unit);
+          priority.setAttr(connect, unit);
       }
 
     // The master sets of this tile, in port order, and the amsels they take.

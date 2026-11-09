@@ -47,7 +47,7 @@ aie.device(xcve3858) {
     }
   }
   aiex.cert.page {
-    // expected-error@+1 {{job 1 must be split around its aiex.cert.preempt, but local register r2 is written before it and read after it}}
+    // expected-error@+1 {{job 1 mixes cert.preempt with other operations and must be broken into separate jobs, but register r2 is written before it and read after it}}
     aiex.cert.job(1) {
       aiex.cert.read32(2, 0x3000)
       aiex.cert.preempt(0, @save, @restore)

@@ -773,7 +773,7 @@ void Pathfinder::excludeTile(TileID coords) {
 }
 
 void Pathfinder::avoidPort(TileID coords, Port port) {
-  auto it = graph.find({coords, coords});
+  auto it = graph.find(crossbarKey(coords));
   if (it == graph.end())
     return;
   SwitchboxConnect &sb = it->second;

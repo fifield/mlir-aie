@@ -179,8 +179,9 @@ getOrderedChainOfBlocks(Region *region) {
   return blockVector;
 }
 
-llvm::SmallPtrSet<Block *, 8>
-collectUnchainedBlocks(const llvm::SetVector<std::tuple<Block *, uint32_t, DMAChannelDir>> &blockVector) {
+llvm::SmallPtrSet<Block *, 8> collectUnchainedBlocks(
+    const llvm::SetVector<std::tuple<Block *, uint32_t, DMAChannelDir>>
+        &blockVector) {
   // Scoped to this channel only.
   llvm::SmallPtrSet<Block *, 8> channelHeads;
   for (auto &t : blockVector) {

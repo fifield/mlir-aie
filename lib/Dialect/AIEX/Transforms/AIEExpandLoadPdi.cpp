@@ -15,8 +15,8 @@
 //       translation emits (or, with inline-config, those writes as ops).
 //    c. with teardown, an `aiex.npu.write_teardown @device` where it ends.
 //    The AIE4 firmware does not reset the array on a load, so an empty
-//    device load would reset nothing. On AIE4, each write_config is
-//    expanded on its own.
+//    device load would reset nothing. On AIE4 an `aiex.npu.write_reset`
+//    takes its place.
 // 2. With ctrl-pkt=true: replaces each `load_pdi @device` with
 //    a. a `load_pdi @ctrl_pkt_overlay`, which configures the NPU to stream
 //       further configuration as control packets, and
@@ -206,12 +206,13 @@ static void lowerResets(ModuleOp moduleOp, ArrayRef<PlacedReset> resets) {
 // `teardownData`, in program order, since masked writes fold onto the control
 // packets before them. Without teardown, control packets go in once every
 // load_pdi is known (`ctrlPktReloads`), so a sequence's loads share them.
-static LogicalResult transformLoadPdi(
-    NpuLoadPdiOp loadPdiOp, ModuleOp moduleOp, unsigned index,
-    AIEX::ExpandMode defaultMode, bool keepPreload, bool teardown,
-    AIEX::BlockwriteData *configData, AIEX::BlockwriteData *teardownData,
-    SmallVectorImpl<CtrlPktReload> &ctrlPktReloads, OverlayCopies &copies,
-    SmallVectorImpl<PlacedReset> &resets) {
+static LogicalResult
+transformLoadPdi(NpuLoadPdiOp loadPdiOp, ModuleOp moduleOp, unsigned index,
+                 AIEX::ExpandMode defaultMode, bool keepPreload, bool teardown,
+                 AIEX::BlockwriteData *configData,
+                 AIEX::BlockwriteData *teardownData,
+                 SmallVectorImpl<CtrlPktReload> &ctrlPktReloads,
+                 OverlayCopies &copies, SmallVectorImpl<PlacedReset> &resets) {
   OpBuilder builder(loadPdiOp);
 
   // Only process load_pdi ops that reference a device
@@ -248,8 +249,8 @@ static LogicalResult transformLoadPdi(
     if (ctrlPkt) {
       auto preloadRef = FlatSymbolRefAttr::get(
           overlayPreload(overlay, index % 2, copies).getSymNameAttr());
-      NpuLoadPdiOp::create(builder, loadPdiOp.getLoc(), preloadRef,
-                           nullptr, nullptr, nullptr,
+      NpuLoadPdiOp::create(builder, loadPdiOp.getLoc(), preloadRef, nullptr,
+                           nullptr, nullptr,
                            AIEX::ExpandModeAttr::get(builder.getContext(),
                                                      AIEX::ExpandMode::none));
     } else {
@@ -532,8 +533,8 @@ struct AIEExpandLoadPdiPass
           AIE::TraceBufferAttr{}, ArrayAttr{}, ArrayAttr{});
       builder.setInsertionPointToStart(&init.getBody().emplaceBlock());
       if (kind.first == AIEX::ExpandMode::ctrlpkt)
-        NpuLoadPdiOp::create(builder, device.getLoc(), kind.second,
-                             nullptr, nullptr, nullptr,
+        NpuLoadPdiOp::create(builder, device.getLoc(), kind.second, nullptr,
+                             nullptr, nullptr,
                              AIEX::ExpandModeAttr::get(builder.getContext(),
                                                        AIEX::ExpandMode::none));
       else
@@ -554,30 +555,31 @@ struct AIEExpandLoadPdiPass
     // few hundred bytes, so the cost is negligible next to the configuration it
     // guards.
     if (!clTeardown)
-    for (auto &[seq, loads] : sequences) {
-      for (auto [ctrlPkt, info] : llvm::enumerate(loads.preloads)) {
-        if (!info.seen || info.firstParity != info.lastParity ||
-            info.firstOverlay != info.lastOverlay)
-          continue;
-        unsigned parity = 1 - info.lastParity;
-        OpBuilder builder(seq.getContext());
-        Block &body = seq.getBody().front();
-        if (!body.empty() && body.back().hasTrait<OpTrait::IsTerminator>())
-          builder.setInsertionPoint(&body.back());
-        else
-          builder.setInsertionPointToEnd(&body);
-        if (ctrlPkt) {
-          auto preloadRef = FlatSymbolRefAttr::get(
-              overlayPreload(info.lastOverlay, parity, copies).getSymNameAttr());
-          NpuLoadPdiOp::create(builder, seq.getLoc(), preloadRef,
-                               nullptr, nullptr, nullptr,
-                               AIEX::ExpandModeAttr::get(seq.getContext(),
-                                                         AIEX::ExpandMode::none));
-        } else {
-          placeReset(builder, seq.getLoc(), info.device, parity, resets);
+      for (auto &[seq, loads] : sequences) {
+        for (auto [ctrlPkt, info] : llvm::enumerate(loads.preloads)) {
+          if (!info.seen || info.firstParity != info.lastParity ||
+              info.firstOverlay != info.lastOverlay)
+            continue;
+          unsigned parity = 1 - info.lastParity;
+          OpBuilder builder(seq.getContext());
+          Block &body = seq.getBody().front();
+          if (!body.empty() && body.back().hasTrait<OpTrait::IsTerminator>())
+            builder.setInsertionPoint(&body.back());
+          else
+            builder.setInsertionPointToEnd(&body);
+          if (ctrlPkt) {
+            auto preloadRef = FlatSymbolRefAttr::get(
+                overlayPreload(info.lastOverlay, parity, copies)
+                    .getSymNameAttr());
+            NpuLoadPdiOp::create(builder, seq.getLoc(), preloadRef, nullptr,
+                                 nullptr, nullptr,
+                                 AIEX::ExpandModeAttr::get(
+                                     seq.getContext(), AIEX::ExpandMode::none));
+          } else {
+            placeReset(builder, seq.getLoc(), info.device, parity, resets);
+          }
         }
       }
-    }
     lowerResets(module, resets);
     if (clInlineConfig && failed(AIE::inlineWriteConfigs(module)))
       return signalPassFailure();

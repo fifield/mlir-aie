@@ -1450,11 +1450,9 @@ inline std::unique_ptr<mlir::PassManager> getInputWithAddressesPipeline(
     bool packetSwObjFifos, bool ctrlPktOverlay, bool bf16Emulation,
     unsigned optLevel, bool loadPdiToCtrlPkt = false,
     bool skipObjectFifoVerify = false, bool enableAie4Vectorization = false,
-    bool assignAddresses = true,
-    llvm::ArrayRef<int> coverColumns = {}, bool adaptiveOverlay = true,
-    bool checkQueueSpace = true) {
+    bool assignAddresses = true, llvm::ArrayRef<int> coverColumns = {},
+    bool adaptiveOverlay = true, bool checkQueueSpace = true) {
   using namespace xilinx::AIE;
-  namespace X = xilinx::AIEX;
   auto pm = std::make_unique<mlir::PassManager>(ctx);
   std::string target = detectAIETarget(mod);
   bool aie2Family = target == "aie2" || target == "aieml" || target == "aie2p";
@@ -1483,9 +1481,9 @@ inline std::unique_ptr<mlir::PassManager> getInputWithAddressesPipeline(
   }
   // params.txt is materialized as a separate graph edge, so the scratchpad
   // lowering in this stage writes no `outputParamsFile`.
-  xilinx::AIEX::addLoweringStage(*pm, dynamicObjFifos, packetSwObjFifos, ctrlPktOverlay,
-                      loadPdiToCtrlPkt, skipObjectFifoVerify, coverColumns,
-                      adaptiveOverlay, checkQueueSpace);
+  xilinx::AIEX::addLoweringStage(
+      *pm, dynamicObjFifos, packetSwObjFifos, ctrlPktOverlay, loadPdiToCtrlPkt,
+      skipObjectFifoVerify, coverColumns, adaptiveOverlay, checkQueueSpace);
 
   mlir::OpPassManager &dpm2 = pm->nest<xilinx::AIE::DeviceOp>();
   if (assignAddresses) {

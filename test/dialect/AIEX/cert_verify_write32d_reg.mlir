@@ -39,7 +39,7 @@ aie.device(npu2) {
 // Negative: address_is_reg with address 24, one past the maximum.
 aie.device(npu2) {
   aiex.cert.job(0) {
-    // expected-error@+1 {{cert.write32_d has address_is_reg, so address 24 must be a register index in [0, 23]}}
+    // expected-error@+1 {{'aiex.cert.write32_d' op has address_is_reg, so address 24 must be a register index in [0, 23]}}
     aiex.cert.write32_d(24, 5) {address_is_reg}
   }
 }
@@ -49,7 +49,7 @@ aie.device(npu2) {
 // Negative: value_is_reg with value 24, one past the maximum.
 aie.device(npu2) {
   aiex.cert.job(0) {
-    // expected-error@+1 {{cert.write32_d has value_is_reg, so value 24 must be a register index in [0, 23]}}
+    // expected-error@+1 {{'aiex.cert.write32_d' op has value_is_reg, so value 24 must be a register index in [0, 23]}}
     aiex.cert.write32_d(0, 24) {value_is_reg}
   }
 }

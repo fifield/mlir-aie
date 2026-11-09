@@ -133,10 +133,11 @@ struct AIEGenerateColumnControlOverlayPass
       if (auto attr =
               controller->getAttrOfType<PacketInfoAttr>("controller_id"))
         id = attr.assignedId();
-      auto packet = PacketFlowOp::create(builder, controller.getLoc(), id,
-                                         builder.getBoolAttr(!(isa<AIE4TargetModel>(model) &&
-                                               dst.bundle == WireBundle::TileControl)),
-                                         builder.getBoolAttr(true));
+      auto packet = PacketFlowOp::create(
+          builder, controller.getLoc(), id,
+          builder.getBoolAttr(!(isa<AIE4TargetModel>(model) &&
+                                dst.bundle == WireBundle::TileControl)),
+          builder.getBoolAttr(true));
       OpBuilder::InsertionGuard guard(builder);
       builder.createBlock(&packet.getPorts());
       PacketSourceOp::create(builder, packet.getLoc(), source, src.bundle,
@@ -154,28 +155,27 @@ struct AIEGenerateColumnControlOverlayPass
       TileOp shim = TileOp::getOrCreate(builder, overlay, col, 0);
       // AIE4 task-complete return wiring is provided by tile placement.
       if (!isa<AIE4TargetModel>(model)) {
-      flow(shim, {WireBundle::TileControl, 0}, shim, {WireBundle::South, 0},
-           shim);
-      for (TileID tile : tokenTiles)
-        if (tile.col == col && tile.row != 0) {
-          builder.setInsertionPointToStart(overlay.getBody());
-          TileOp source = TileOp::getOrCreate(builder, overlay, col, tile.row);
-          flow(source, {WireBundle::TileControl, 0}, shim,
-               {WireBundle::South, 0}, source);
-        }
+        flow(shim, {WireBundle::TileControl, 0}, shim, {WireBundle::South, 0},
+             shim);
+        for (TileID tile : tokenTiles)
+          if (tile.col == col && tile.row != 0) {
+            builder.setInsertionPointToStart(overlay.getBody());
+            TileOp source =
+                TileOp::getOrCreate(builder, overlay, col, tile.row);
+            flow(source, {WireBundle::TileControl, 0}, shim,
+                 {WireBundle::South, 0}, source);
+          }
       }
       if (!configuration)
         continue;
       bool aie4 = isa<AIE4TargetModel>(model);
       WireBundle bundle = aie4 ? WireBundle::DMAControl : WireBundle::DMA;
-      DMAChannelDir direction = aie4 ? DMAChannelDir::ControlMM2S
-                                     : DMAChannelDir::MM2S;
+      DMAChannelDir direction =
+          aie4 ? DMAChannelDir::ControlMM2S : DMAChannelDir::MM2S;
       int channel = -1;
       unsigned best = std::numeric_limits<unsigned>::max();
       int count =
-          adaptive
-              ? model.getNumSourceShimMuxConnections(col, 0, bundle)
-              : 1;
+          adaptive ? model.getNumSourceShimMuxConnections(col, 0, bundle) : 1;
       for (int ch = 0; ch < count; ++ch)
         if ((aie4 || !fixedCircuits.lookup(col).contains(ch)) &&
             packetDemand.lookup({col, ch}) < best) {
@@ -196,8 +196,7 @@ struct AIEGenerateColumnControlOverlayPass
       for (int row = aie4 ? 1 : 0; row < model.rows(); ++row) {
         builder.setInsertionPointToStart(overlay.getBody());
         TileOp dest = TileOp::getOrCreate(builder, overlay, col, row);
-        flow(shim, {bundle, channel}, dest,
-             {WireBundle::TileControl, 0}, dest);
+        flow(shim, {bundle, channel}, dest, {WireBundle::TileControl, 0}, dest);
       }
     }
     for (DeviceOp device : users) {

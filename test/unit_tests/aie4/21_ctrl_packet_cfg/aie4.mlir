@@ -11,9 +11,9 @@
 // REQUIRES: mesimulator
 //
 // RUN: rm -rf project_base aie_overlay.mlir ctrlpkt_overlay.mlir transaction.bin ctrlpkt.bin
-// RUN: aie-opt -aie-assign-tile-controller-ids -aie-generate-column-control-overlay="route-shim-to-tile-ctrl=true" %s -o aie_overlay.mlir
+// RUN: aie-opt -aie-assign-tile-controller-ids -aie-generate-column-control-overlay="configuration=true adaptive=false" --aie-import-overlay %s -o aie_overlay.mlir
 // RUN: aiecc --tmpdir=project_base --alloc-scheme=basic-sequential --xchesscc --xbridge --no-compile --aie-generate-txn --txn-name=transaction.bin --aiesim aie_overlay.mlir %test_utils_flags %S/test.cpp
-// RUN: aie-opt -aie-assign-tile-controller-ids -aie-generate-column-control-overlay="route-shim-to-tile-ctrl=true" %S/ctrlpkt.mlir -o ctrlpkt_overlay.mlir
+// RUN: aie-opt -aie-assign-tile-controller-ids -aie-generate-column-control-overlay="configuration=true adaptive=false" --aie-import-overlay %S/ctrlpkt.mlir -o ctrlpkt_overlay.mlir
 // RUN: aie-translate --aie-ctrlpkt-to-bin ctrlpkt_overlay.mlir -o ctrlpkt.bin
 // RUN: project_base/mesim.sh | FileCheck %s
 //
