@@ -279,6 +279,19 @@ buildObjectSubgraph(EdgeWithTypedOutput<ModRef> &lowered,
                        }
                        std::string wrapper =
                            getChessIntrinsicWrapperPath(arch, installDir);
+                       if (!dryRun &&
+                           !llvm::sys::fs::is_regular_file(wrapper)) {
+                         llvm::errs()
+                             << "aiecc: missing Chess intrinsic wrapper: "
+                             << wrapper << "\n"
+                             << "aiecc: install a wheel built with AIETools "
+                                "and "
+                             << arch.upper()
+                             << " enabled in AIE_VITIS_COMPONENTS, or rebuild "
+                                "with AIE_BUILD_CHESS_CLANG=ON and AIETools "
+                                "on PATH\n";
+                         return mlir::failure();
+                       }
                        auto cmd = ShellCommand{linkTool}
                                       .input()
                                       .arg(wrapper)
