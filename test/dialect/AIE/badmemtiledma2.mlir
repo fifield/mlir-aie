@@ -6,7 +6,7 @@
 //===----------------------------------------------------------------------===//
 
 // RUN: not aie-opt %s 2>&1 | FileCheck %s
-// CHECK: 'aie.memtile_dma' op uses more output channels than available on this tile
+// CHECK: 'aie.dma_start' op DMA channel (MM2S, 6) does not exist on tile (1, 2), which has 6 MM2S channel(s)
 
 module @test {
   aie.device(xcve2802) {

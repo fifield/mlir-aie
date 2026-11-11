@@ -533,6 +533,16 @@ verifyOutOfOrderChannel(mlir::Operation *op, DMAChannelDir dir, bool outOfOrder,
                         llvm::ArrayRef<DMABDOp> bds,
                         bool packetEnabledByContext = false);
 
+// Check that the tile at (col, row) has DMA channel `channel` in direction
+// `dir`. Shim PL tiles have no DMA.
+mlir::LogicalResult verifyDMAChannel(mlir::Operation *op,
+                                     const AIETargetModel &targetModel, int col,
+                                     int row, DMAChannelDir dir,
+                                     int64_t channel);
+// As above for a TileLike; an unplaced tile is checked after placement.
+mlir::LogicalResult verifyDMAChannel(mlir::Operation *op, TileLike tile,
+                                     DMAChannelDir dir, int64_t channel);
+
 // Validate the use_locks of one BD block and return them. A BD has one acquire
 // field and one release field; by convention the block uses either no lock or
 // both, except that an out-of-order BD may release alone. Either result is

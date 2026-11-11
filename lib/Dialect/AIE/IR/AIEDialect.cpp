@@ -496,6 +496,33 @@ struct HasSomeTerminator {
   }
 };
 
+LogicalResult xilinx::AIE::verifyDMAChannel(Operation *op,
+                                            const AIETargetModel &targetModel,
+                                            int col, int row, DMAChannelDir dir,
+                                            int64_t channel) {
+  if (targetModel.isShimPLTile(col, row))
+    return op->emitOpError("tile (")
+           << col << ", " << row << ") is a shim PL tile and has no DMA";
+  uint32_t numChannels = targetModel.getNumDMAChannels(col, row, dir);
+  if (channel < 0 || channel >= numChannels)
+    return op->emitOpError("DMA channel (")
+           << stringifyDMAChannelDir(dir) << ", " << channel
+           << ") does not exist on tile (" << col << ", " << row
+           << "), which has " << numChannels << " "
+           << stringifyDMAChannelDir(dir) << " channel(s)";
+  return success();
+}
+
+LogicalResult xilinx::AIE::verifyDMAChannel(Operation *op, TileLike tile,
+                                            DMAChannelDir dir,
+                                            int64_t channel) {
+  std::optional<int> col = tile.tryGetCol();
+  std::optional<int> row = tile.tryGetRow();
+  if (!col || !row)
+    return success();
+  return verifyDMAChannel(op, getTargetModel(op), *col, *row, dir, channel);
+}
+
 // Check that the given DMA-like op (e.g. MemOp, ShimDMAOp)
 // has valid BDs.
 template <typename ConcreteType>
@@ -574,6 +601,9 @@ LogicalResult HasValidDMAChannels<ConcreteType>::verifyTrait(Operation *op) {
   Region &body = element.getBody();
   if (body.empty())
     return op->emitOpError("should have non-empty body");
+  TileLike tile = element.getTileLike();
+  if (!tile)
+    return op->emitOpError("tile must implement TileLike interface");
   for (auto &bodyOp : body.getOps()) {
     // check for duplicate DMA channels within the same ShimDMAOp
     if (auto dmaStart = dyn_cast<DMAStartOp>(bodyOp)) {
@@ -583,6 +613,11 @@ LogicalResult HasValidDMAChannels<ConcreteType>::verifyTrait(Operation *op) {
       }
       DMAChannel dmaChan = {dmaStart.getChannelDir(),
                             dmaStart.getChannelIndex()};
+      // A negative index fails the dma_start's own attribute constraint.
+      if (dmaChan.channel >= 0 &&
+          failed(verifyDMAChannel(dmaStart, tile, dmaChan.direction,
+                                  dmaChan.channel)))
+        return failure();
       // check if number of input and output channels is more than available
       // hardware
       if (dmaChan.direction == DMAChannelDir::S2MM)
@@ -591,10 +626,6 @@ LogicalResult HasValidDMAChannels<ConcreteType>::verifyTrait(Operation *op) {
         outputChannels.insert(dmaChan);
     }
   }
-
-  TileLike tile = element.getTileLike();
-  if (!tile)
-    return op->emitOpError("tile must implement TileLike interface");
 
   auto named = [&](DMAChannelDir dir) -> size_t {
     return llvm::count_if(namedChannels,
@@ -4390,6 +4421,11 @@ LogicalResult DMAOp::verify() {
     return emitOpError("DMAOp can only appear in single block region");
   if (!parentOp->getRegion(0).getOps<DMAStartOp>().empty())
     return emitOpError("DMAOp is not compatible with DMAStart ops");
+  if (auto element = dyn_cast<TileElement>(parentOp))
+    if (TileLike tile = element.getTileLike();
+        tile && failed(verifyDMAChannel(getOperation(), tile, getChannelDir(),
+                                        getChannelIndex())))
+      return failure();
   auto bdRegions = getBds();
   for (auto &bdRegion : bdRegions) {
     if (!bdRegion.hasOneBlock())
@@ -6052,7 +6088,13 @@ LogicalResult ShimDMAAllocationOp::verify() {
     return emitOpError("tile must be a shim tile");
   }
 
-  return verifyAssignedPacket(*this, getPacketAttr());
+  if (failed(verifyAssignedPacket(*this, getPacketAttr())))
+    return failure();
+  // A PLIO allocation names a stream port, not a DMA channel.
+  if (getPlio())
+    return success();
+  return verifyDMAChannel(getOperation(), tileLike, getChannelDir(),
+                          getChannelIndex());
 }
 
 TileOp ShimDMAAllocationOp::getTileOp() {

@@ -6,7 +6,7 @@
 //===----------------------------------------------------------------------===//
 
 // RUN: not aie-opt %s 2>&1 | FileCheck %s
-// CHECK: error{{.*}}'aie.mem' op uses more output channels than available on this tile
+// CHECK: error{{.*}}'aie.dma_start' op DMA channel (MM2S, 2) does not exist on tile (0, 3), which has 2 MM2S channel(s)
 
 module @test {
   aie.device(npu1) {
