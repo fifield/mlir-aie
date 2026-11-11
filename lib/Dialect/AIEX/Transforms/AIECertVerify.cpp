@@ -378,6 +378,19 @@ static uint32_t memTileDataOffset(const AIE::AIETargetModel &tm) {
   return isa<AIE::AIE4TargetModel>(tm) ? 0x00100000 : 0;
 }
 
+// cert.apply_offset_57 patches `num_entries` contiguous shim
+// DMA BDs (isa-spec.yaml), so a zero count is meaningless.
+static LogicalResult checkApplyOffset57(AIE::DeviceOp device) {
+  LogicalResult result = success();
+  device.walk([&](AIEX::CertApplyOffset57Op op) {
+    if (op.getNumEntries() == 0) {
+      op.emitError() << "cert.apply_offset_57 num_entries must be at least 1";
+      result = failure();
+    }
+  });
+  return result;
+}
+
 // Preemption rule 1: restore brings memtile data back from DDR and then
 // replays the whole last-loaded section. A section that writes memtile data
 // memory (a buffer initializer) would overwrite the restored data. Checks
@@ -501,6 +514,8 @@ struct AIECertVerifyPass
     if (failed(checkRemoteBarrierParties(device)))
       signalPassFailure();
     if (failed(checkUcDmaWaitHandles(device)))
+      signalPassFailure();
+    if (failed(checkApplyOffset57(device)))
       signalPassFailure();
   }
 };

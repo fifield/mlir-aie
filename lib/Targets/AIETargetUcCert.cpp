@@ -48,6 +48,21 @@ static std::string mn(llvm::StringRef mnemonic) {
   return s;
 }
 
+// The assembler's `.target <arch>[-<sub-arch>]` directive (isa-spec.yaml).
+static llvm::StringRef certTargetString(const AIE::AIETargetModel &tm) {
+  switch (tm.getTargetArch()) {
+  case AIE::AIEArch::AIE4:
+    return "aie4";
+  case AIE::AIEArch::AIE2ps:
+    return "aie2ps";
+  case AIE::AIEArch::AIE1:
+  case AIE::AIEArch::AIE2:
+  case AIE::AIEArch::AIE2p:
+    return "";
+  }
+  return "";
+}
+
 // NOP
 void emitNop(CertNopOp op, std::string &text) { text += "  NOP\n"; }
 
@@ -540,6 +555,9 @@ LogicalResult xilinx::AIE::AIETranslateToUcDma(ModuleOp module,
   chains.emplace_back("\n;\n; Data (chains)\n;\n\n");
 
   auto &tm = deviceOp.getTargetModel();
+  llvm::StringRef target = certTargetString(tm);
+  if (!target.empty())
+    text[0] += ".target " + target.str() + "\n";
   text[0] += ".partition " + std::to_string(tm.columns()) + "column\n";
 
   // Process sections first

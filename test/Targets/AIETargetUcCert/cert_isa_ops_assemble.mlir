@@ -6,10 +6,10 @@
 //===----------------------------------------------------------------------===//
 
 // This is the tier that matters: it proves the emitted text is accepted by the
-// real assembler, the only ground truth for CERT syntax. Note `-t aie4`
-// selects only the family; the sub-arch would come from a `.target`
-// directive, which the emitter does not yet write, so this assembles against
-// the default variant.
+// real assembler, the only ground truth for CERT syntax. `-t aie4` selects
+// the architecture family; the emitter writes a matching `.target` directive,
+// which the assembler cross-checks against `-t` and which supplies the AIE4
+// sub-arch.
 
 // REQUIRES: aiebu_asm
 // RUN: rm -rf %t.d && mkdir -p %t.d
