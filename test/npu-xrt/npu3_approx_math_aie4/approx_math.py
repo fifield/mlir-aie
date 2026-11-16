@@ -135,6 +135,7 @@ def approx_math_design(dev):
                             5 * VEC_LANES + HALF,
                             packed(math_d.tanh(xb, fastmath=afn)),
                         )
+                        out_at(5 * VEC_LANES + 2 * HALF, packed(raw_exp2(r, v32bf16)))
                         for k, alt in enumerate(ALT_BIAS):
                             alt_bias = arith_d.constant(
                                 v32f32,
@@ -146,26 +147,6 @@ def approx_math_design(dev):
                                 (7 + k) * VEC_LANES,
                                 raw_exp2(arith_d.addf(x, alt_bias), v32f32),
                             )
-                    # Raw bf16 VEXP2 of r runs in its own loop. In the same
-                    # block as the f32 VEXP2 of r, Peano's post-RA scheduler
-                    # (llvm-aie g663a9e74) moves `x12 = VEXP2_bf16 y6` one
-                    # cycle ahead of `y7 = VEXP2_fp32 y6`. x12 is the low half
-                    # of y6, so f32 lanes 0-15 then read the bf16 results.
-                    for c in range_(CHUNKS_PER_TILE):
-                        pad = arith_d.constant(f32, 0.0)
-                        cin = arith_d.muli(c, arith_d.constant(c.type, IN_WORDS))
-                        cout = arith_d.muli(c, arith_d.constant(c.type, OUT_WORDS))
-                        r_idx = arith_d.addi(cin, arith_d.constant(c.type, VEC_LANES))
-                        r = vector_d.transfer_read(
-                            v32f32, elem_in, [r_idx], id_map, pad, [True]
-                        )
-                        raw16 = vector_d.bitcast(v16f32, raw_exp2(r, v32bf16))
-                        out_idx = arith_d.addi(
-                            cout, arith_d.constant(c.type, 5 * VEC_LANES + 2 * HALF)
-                        )
-                        vector_d.transfer_write(
-                            None, raw16, elem_out, [out_idx], id_map, [True]
-                        )
                     in_fifo.release(ObjectFifoPort.Consume, 1)
                     out_fifo.release(ObjectFifoPort.Produce, 1)
 
