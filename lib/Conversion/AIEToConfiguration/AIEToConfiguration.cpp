@@ -115,6 +115,18 @@ std::optional<int> xilinx::AIE::parseTransactionBinary(
     return true;
   };
 
+  // An operation's size covers at least the header read from it; a smaller
+  // size would misparse the next operation, and zero would never advance.
+  auto requireOpSize = [](uint32_t opSize, size_t headerBytes) -> bool {
+    if (opSize < headerBytes) {
+      llvm::errs() << "Transaction op size " << opSize
+                   << " is smaller than its " << headerBytes
+                   << "-byte header\n";
+      return false;
+    }
+    return true;
+  };
+
   auto read32 = [&](size_t offset) -> uint32_t {
     uint32_t value;
     std::memcpy(&value, data.data() + offset, sizeof(uint32_t));
@@ -162,7 +174,7 @@ std::optional<int> xilinx::AIE::parseTransactionBinary(
         uint32_t addrHi = read32(i + 12);
         uint32_t value = read32(i + 16);
         uint32_t opSize = read32(i + 20);
-        if (!requireBytes(i, opSize))
+        if (!requireOpSize(opSize, 24) || !requireBytes(i, opSize))
           return std::nullopt;
         uint64_t addr = (static_cast<uint64_t>(addrHi) << 32) | addrLo;
         op.cmd.RegOff = addr;
@@ -177,7 +189,7 @@ std::optional<int> xilinx::AIE::parseTransactionBinary(
           return std::nullopt;
         uint32_t addr = read32(i + 8);
         uint32_t opSize = read32(i + 12);
-        if (opSize < 16 || !requireBytes(i, opSize))
+        if (!requireOpSize(opSize, 16) || !requireBytes(i, opSize))
           return std::nullopt;
         const uint8_t *payload = data.data() + i + 16;
         uint32_t payloadBytes = opSize - 16;
@@ -201,12 +213,7 @@ std::optional<int> xilinx::AIE::parseTransactionBinary(
         uint32_t value = read32(i + 16);
         uint32_t mask = read32(i + 20);
         uint32_t opSize = read32(i + 24);
-        if (opSize < 28) {
-          llvm::errs() << "Transaction op size " << opSize
-                       << " is smaller than its 28-byte header\n";
-          return std::nullopt;
-        }
-        if (!requireBytes(i, opSize))
+        if (!requireOpSize(opSize, 28) || !requireBytes(i, opSize))
           return std::nullopt;
         uint64_t addr = (static_cast<uint64_t>(addrHi) << 32) | addrLo;
         op.cmd.RegOff = addr;
@@ -217,8 +224,10 @@ std::optional<int> xilinx::AIE::parseTransactionBinary(
         break;
       }
       case XAie_TxnOpcode::XAIE_IO_CUSTOM_OP_TCT: {
+        if (!requireBytes(i, 8))
+          return std::nullopt;
         uint32_t opSize = read32(i + 4);
-        if (opSize < 16 || !requireBytes(i, opSize))
+        if (!requireOpSize(opSize, 16) || !requireBytes(i, opSize))
           return std::nullopt;
         uint32_t descriptor = read32(i + 8);
         uint32_t config = read32(i + 12);
@@ -252,8 +261,10 @@ std::optional<int> xilinx::AIE::parseTransactionBinary(
         break;
       }
       case XAie_TxnOpcode::XAIE_IO_CUSTOM_OP_DDR_PATCH: {
+        if (!requireBytes(i, 8))
+          return std::nullopt;
         uint32_t opSize = read32(i + 4);
-        if (opSize < 44 || !requireBytes(i, opSize))
+        if (!requireOpSize(opSize, 48) || !requireBytes(i, opSize))
           return std::nullopt;
         uint32_t action = read32(i + 20);
         uint32_t addr = read32(i + 24);
@@ -317,7 +328,7 @@ std::optional<int> xilinx::AIE::parseTransactionBinary(
           return std::nullopt;
         uint32_t addr = read32(i + 4);
         uint32_t opSize = read32(i + 8);
-        if (opSize < 12 || !requireBytes(i, opSize))
+        if (!requireOpSize(opSize, 12) || !requireBytes(i, opSize))
           return std::nullopt;
         const uint8_t *payload = data.data() + i + 12;
         uint32_t payloadBytes = opSize - 12;
@@ -344,8 +355,10 @@ std::optional<int> xilinx::AIE::parseTransactionBinary(
         break;
       }
       case XAie_TxnOpcode::XAIE_IO_CUSTOM_OP_TCT: {
+        if (!requireBytes(i, 8))
+          return std::nullopt;
         uint32_t opSize = read32(i + 4);
-        if (opSize < 16 || !requireBytes(i, opSize))
+        if (!requireOpSize(opSize, 16) || !requireBytes(i, opSize))
           return std::nullopt;
         uint32_t descriptor = read32(i + 8);
         uint32_t config = read32(i + 12);
@@ -378,8 +391,10 @@ std::optional<int> xilinx::AIE::parseTransactionBinary(
         break;
       }
       case XAie_TxnOpcode::XAIE_IO_CUSTOM_OP_DDR_PATCH: {
+        if (!requireBytes(i, 8))
+          return std::nullopt;
         uint32_t opSize = read32(i + 4);
-        if (opSize < 44 || !requireBytes(i, opSize))
+        if (!requireOpSize(opSize, 48) || !requireBytes(i, opSize))
           return std::nullopt;
         uint32_t action = read32(i + 20);
         uint32_t addr = read32(i + 24);
