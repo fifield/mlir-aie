@@ -43,12 +43,13 @@ module {
 
 // -----
 
-// Case 2: the identical crossing on a GLOBAL register r8. Globals are "shared
-// among all the jobs" (isa-spec.yaml), so the value survives becoming distinct
-// jobs and the rewrite must go through. FileCheck sees both cases' output in
-// one stream (--split-input-file), so this prefix's first match is anchored on
-// the r8 read32, which case 1 does not contain.
-// GLOBAL: aiex.cert.read32(8, 68157440)
+// Case 2: a GLOBAL register r8 read on both sides of the load_pdi. Globals are
+// "shared among all the jobs" (isa-spec.yaml) and no instruction writes them,
+// so the value survives becoming distinct jobs and the rewrite must go
+// through. FileCheck sees both cases' output in one stream
+// (--split-input-file), so this prefix's first match is anchored on the
+// first r8 write32_d, which case 1 does not contain.
+// GLOBAL: aiex.cert.write32_d(8, 6) {address_is_reg}
 // GLOBAL: aiex.cert.load_pdi(1, @config)
 // GLOBAL: aiex.cert.write32_d(8, 7) {address_is_reg}
 module {
@@ -58,7 +59,7 @@ module {
     }
     aiex.cert.page {
       aiex.cert.job(1) {
-        aiex.cert.read32(8, 68157440)
+        aiex.cert.write32_d(8, 6) {address_is_reg}
         aiex.cert.load_pdi(1, @config)
         aiex.cert.write32_d(8, 7) {address_is_reg}
       }

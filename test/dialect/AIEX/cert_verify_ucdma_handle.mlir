@@ -11,10 +11,9 @@
 // G-uchandle: a cert.wait_uc_dma handle must be a job-private local register
 // r0..r7 whose reaching definition in the same job is a cert.uc_dma_write_des.
 // This is a reaching-definition check, not merely "a producer exists
-// somewhere earlier": an intervening write clobbers the handle. The dialect
-// deliberately imposes the stricter same-job rule and rejects global
-// registers r8..r23 (isa-spec.yaml permits them across jobs; this dialect
-// does not).
+// somewhere earlier": an intervening write clobbers the handle. The op
+// itself rejects r8..r23 as a handle, since the firmware accepts only
+// r0..r7.
 
 // RUN: aie-opt %s --aie-cert-verify --split-input-file --verify-diagnostics
 
@@ -121,21 +120,5 @@ aie.device(npu2) {
   aiex.cert.job(1) {
     // expected-error@+1 {{cert.wait_uc_dma waits on r3, which no earlier cert.uc_dma_write_des in this job writes}}
     aiex.cert.wait_uc_dma(3)
-  }
-}
-
-// -----
-
-// Negative: a global register (r8..r23) wait handle is rejected even with a
-// producer in the same job.
-aie.device(npu2) {
-  memref.global "private" constant @d : memref<8xi32> = dense<0>
-  aiex.cert.uc_dma_chain @chain {
-    aiex.cert.uc_dma_bd @d, 0, 8, false
-  }
-  aiex.cert.job(0) {
-    aiex.cert.uc_dma_write_des(8, @chain)
-    // expected-error@+1 {{cert.wait_uc_dma handle r8 is a shared register}}
-    aiex.cert.wait_uc_dma(8)
   }
 }

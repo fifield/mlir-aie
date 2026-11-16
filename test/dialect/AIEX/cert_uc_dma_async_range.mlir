@@ -5,7 +5,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// uC DMA wait handles are register indices r0..r23.
+// uC DMA wait handles are job-local register indices r0..r7.
 
 // RUN: aie-opt --split-input-file --verify-diagnostics %s
 
@@ -13,7 +13,7 @@ aie.device(xcve3858) {
   aiex.cert.page {
     aiex.cert.job(1) {
       // expected-error@+1 {{attribute 'wait_handle' failed to satisfy constraint}}
-      aiex.cert.wait_uc_dma(24)
+      aiex.cert.wait_uc_dma(8)
     }
   }
 }

@@ -2225,8 +2225,7 @@ struct IsolateFullPageOpsPattern : OpRewritePattern<AIEX::CertJobOp> {
                "job-private, so that value does not survive; move the "
                "local-register sequence to one side of the "
             << (isa<AIEX::CertLoadPdiOp>(fullPageOp) ? "cert.load_pdi"
-                                                     : "cert.preempt")
-            << ", or use a global register r8..r23";
+                                                     : "cert.preempt");
         return failure();
       }
 
@@ -2354,8 +2353,7 @@ struct SplitCertPageOpPattern : OpRewritePattern<AIEX::CertPageOp> {
               << blocker.getJobId()
               << " uses job-private local registers r0..r7, whose values do "
                  "not survive a page split (the two halves become distinct "
-                 "jobs); move the local-register sequence into a smaller job, "
-                 "or use global registers r8..r23";
+                 "jobs); move the local-register sequence into a smaller job";
         else
           op.emitError() << "cert.page is an estimated " << cost
                          << " bytes, over the " << cert_page_limit

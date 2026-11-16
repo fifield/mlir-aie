@@ -5,8 +5,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-// Register operands are r0..r23; a write32_d field is a register index only
-// when flagged.
+// Source register operands are r0..r23 and destinations r0..r7; a write32_d
+// field is a register index only when flagged.
 
 // RUN: aie-opt --split-input-file --verify-diagnostics %s
 

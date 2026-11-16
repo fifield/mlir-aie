@@ -301,9 +301,9 @@ static std::optional<uint32_t> registerWrittenBy(Operation &op) {
   return std::nullopt;
 }
 
-// A cert.wait_uc_dma handle must be a local register r0..r7 whose last write
-// earlier in the same job is a cert.uc_dma_write_des. A read into that register
-// in between replaces the handle.
+// A cert.wait_uc_dma handle's last write earlier in the same job must be a
+// cert.uc_dma_write_des. A read into that register in between replaces the
+// handle. The op itself restricts the handle to a local register r0..r7.
 static LogicalResult checkUcDmaWaitHandles(AIE::DeviceOp device) {
   LogicalResult result = success();
   device.walk([&](AIEX::CertJobOp job) {
@@ -312,13 +312,7 @@ static LogicalResult checkUcDmaWaitHandles(AIE::DeviceOp device) {
       if (auto wait = dyn_cast<AIEX::CertWaitUcDmaOp>(o)) {
         uint32_t r = wait.getWaitHandle();
         auto it = lastWrite.find(r);
-        if (r >= 8) {
-          wait.emitError() << "cert.wait_uc_dma handle r" << r
-                           << " is a shared register; the handle must be a "
-                              "local register r0..r7 written by a "
-                              "cert.uc_dma_write_des in the same job";
-          result = failure();
-        } else if (it == lastWrite.end()) {
+        if (it == lastWrite.end()) {
           wait.emitError() << "cert.wait_uc_dma waits on r" << r
                            << ", which no earlier cert.uc_dma_write_des in "
                               "this job writes";

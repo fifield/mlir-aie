@@ -14,8 +14,9 @@
 // does not survive the split -- unlike the backward TCT/memory dependencies
 // blessed at AIENpuToCert.cpp, which live outside the job-private
 // register file. A job that touches any local register (r0..r7) is therefore
-// not a split candidate at all; only jobs restricted to global registers
-// (r8..r23) may be cut.
+// not a split candidate at all; only jobs that touch nothing but global
+// registers (r8..r23, which no instruction writes but any may read) may be
+// cut.
 
 // RUN: aie-opt -cert-legalize-pages --split-input-file %s | FileCheck %s --check-prefix=LOCAL
 // RUN: aie-opt -cert-legalize-pages --split-input-file %s | FileCheck %s --check-prefix=UCDMA
@@ -89,28 +90,30 @@ aie.device(npu2) {
 
 // -----
 
-// Case 3: the control case. Identical shape but on GLOBAL register r8, which
-// survives a split, so the page DOES split exactly where the cost model
-// predicts. Estimate = 32 + 8 (START_JOB) + 8 (read32) + 4
-// (uc_dma_write_des_sync) + (16 + 5200 data for @cA) + 4 (read32_d) + 4
-// (uc_dma_write_des_sync) + (16 + 5200 data for @cB) + 4 (END_JOB) = 10496.
-// Running cost first reaches the 4000 split_target right after
-// uc_dma_write_des_sync(@cA) (5268), so the cut lands before `read32_d`.
+// Case 3: the control case. The same shape, but the register accesses read
+// GLOBAL registers r8/r9, which survive a split, so the page DOES split
+// exactly where the cost model predicts. Estimate = 32 + 8 (START_JOB) + 12
+// (write32_d) + 4 (uc_dma_write_des_sync) + (16 + 5200 data for @cA) + 12
+// (write32_d) + 4 (uc_dma_write_des_sync) + (16 + 5200 data for @cB) + 4
+// (END_JOB) = 10508. Running cost first reaches the 4000 split_target right
+// after uc_dma_write_des_sync(@cA) (5272), so the cut lands before the second
+// `write32_d`.
 // This directive set is for the THIRD case: anchor past cases 1 and 2 first
 // with a line unique to case 2 ("wait_uc_dma(0)"), then pin the two
 // resulting pages contiguously with -NEXT (including the intervening
 // job/page-closing braces) to prove the cut falls exactly between
-// uc_dma_write_des_sync(@cA) and read32_d(8, 9), as the cost model predicts.
+// uc_dma_write_des_sync(@cA) and the second write32_d, as the cost model
+// predicts.
 // GLOBAL: aiex.cert.wait_uc_dma(0)
 // GLOBAL: aiex.cert.page
 // GLOBAL-NEXT: aiex.cert.job(1)
-// GLOBAL-NEXT: aiex.cert.read32(8, 16)
+// GLOBAL-NEXT: aiex.cert.write32_d(16, 8) {value_is_reg}
 // GLOBAL-NEXT: aiex.cert.uc_dma_write_des_sync(@cA)
 // GLOBAL-NEXT: }
 // GLOBAL-NEXT: }
 // GLOBAL-NEXT: aiex.cert.page
 // GLOBAL-NEXT: aiex.cert.job(2)
-// GLOBAL-NEXT: aiex.cert.read32_d(8, 9)
+// GLOBAL-NEXT: aiex.cert.write32_d(8, 9) {address_is_reg, value_is_reg}
 // GLOBAL-NEXT: aiex.cert.uc_dma_write_des_sync(@cB)
 aie.device(npu2) {
   memref.global "private" constant @dA : memref<1300xi32> = dense<0>
@@ -123,9 +126,9 @@ aie.device(npu2) {
   }
   aiex.cert.page {
     aiex.cert.job(1) {
-      aiex.cert.read32(8, 16)
+      aiex.cert.write32_d(16, 8) {value_is_reg}
       aiex.cert.uc_dma_write_des_sync(@cA)
-      aiex.cert.read32_d(8, 9)
+      aiex.cert.write32_d(8, 9) {address_is_reg, value_is_reg}
       aiex.cert.uc_dma_write_des_sync(@cB)
     }
   }

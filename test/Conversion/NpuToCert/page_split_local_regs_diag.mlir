@@ -12,7 +12,7 @@
 // never be silently split (its local-register state would not survive
 // becoming two distinct jobs) and must never be silently emitted oversized
 // either: it must produce a loud, specific diagnostic.
-// The second case here is the control: the identical shape on global
+// The second case here is the control: the same shape reading only global
 // registers r8..r23 splits cleanly and must NOT produce any diagnostic.
 
 // RUN: aie-opt -cert-legalize-pages --split-input-file --verify-diagnostics %s
@@ -47,8 +47,9 @@ module {
 
 // -----
 
-// Case 2: the control. Identical shape and identical estimated cost (10496
-// bytes), but on GLOBAL registers (r8), which survive a split. The page
+// Case 2: the control. The same shape (estimated 10508 bytes), but the
+// register accesses read GLOBAL registers r8/r9, which survive a split. The
+// page
 // splits cleanly into two legal pages and emits NO diagnostic at all --
 // --verify-diagnostics failing on an unexpected diagnostic is the assertion.
 module {
@@ -63,9 +64,9 @@ module {
     }
     aiex.cert.page {
       aiex.cert.job(1) {
-        aiex.cert.read32(8, 16)
+        aiex.cert.write32_d(16, 8) {value_is_reg}
         aiex.cert.uc_dma_write_des_sync(@c1)
-        aiex.cert.read32_d(8, 9)
+        aiex.cert.write32_d(8, 9) {address_is_reg, value_is_reg}
         aiex.cert.uc_dma_write_des_sync(@c2)
       }
     }

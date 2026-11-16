@@ -82,23 +82,6 @@ aie.device(xcve3858) {
 
 // -----
 
-// A shared register cannot hold the handle in this dialect.
-aie.device(xcve3858) {
-  memref.global "private" constant @data : memref<1xi32> = dense<1>
-  aiex.cert.uc_dma_chain @chain {
-    aiex.cert.uc_dma_bd @data, 0x1000, 1, false
-  }
-  aiex.cert.page {
-    aiex.cert.job(1) {
-      aiex.cert.uc_dma_write_des(8, @chain)
-      // expected-error@+1 {{cert.wait_uc_dma handle r8 is a shared register}}
-      aiex.cert.wait_uc_dma(8)
-    }
-  }
-}
-
-// -----
-
 // A read into the handle's register between the push and the wait replaces
 // the handle.
 aie.device(xcve3858) {

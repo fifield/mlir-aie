@@ -13,7 +13,7 @@
 // CHECK-LABEL: aie.device(xcve3858)
 // CHECK: aiex.cert.uc_dma_write_des(2, @chain)
 // CHECK-NEXT: aiex.cert.wait_uc_dma(2)
-// CHECK: aiex.cert.uc_dma_write_des(23, @chain)
+// CHECK: aiex.cert.uc_dma_write_des(7, @chain)
 aie.device(xcve3858) {
   memref.global "private" constant @data : memref<1xi32> = dense<1>
   aiex.cert.uc_dma_chain @chain {
@@ -23,7 +23,7 @@ aie.device(xcve3858) {
     aiex.cert.job(1) {
       aiex.cert.uc_dma_write_des(2, @chain)
       aiex.cert.wait_uc_dma(2)
-      aiex.cert.uc_dma_write_des(23, @chain)
+      aiex.cert.uc_dma_write_des(7, @chain)
     }
   }
 }

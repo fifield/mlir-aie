@@ -747,7 +747,8 @@ def cert_uc_dma_chain(sym_name):
 
 # CERT register operands
 #
-# `aiex.cert_reg` is a ConfinedAttr<I32Attr, [0, 23]>. ODS types such a
+# CERT register operands are ConfinedAttr<I32Attr, ...>: [0, 23] for a source
+# register, [0, 7] for a destination or uC DMA wait handle. ODS types such a
 # constrained attribute as `Any` rather than `int`, so the generated builders
 # reject a plain Python int with `std::bad_cast`. These wrappers accept an int
 # (or an already-built attribute) and do the conversion, so a register operand

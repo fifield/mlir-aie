@@ -8,33 +8,37 @@
 //
 //===----------------------------------------------------------------------===//
 
-// AIEX_CertRegisterAttr bounds a job-runner register index to [0, 23]
-// (isa-spec.yaml). This is an ODS ConfinedAttr, so it fires without any
-// pass -- a plain aie-opt parse is enough.
+// AIEX_CertRegisterAttr bounds a source register index to [0, 23]
+// (isa-spec.yaml); AIEX_CertLocalRegisterAttr bounds a destination register
+// to [0, 7]. These are ODS ConfinedAttrs, so they fire without any pass -- a
+// plain aie-opt parse is enough.
 
 // RUN: aie-opt %s -split-input-file -verify-diagnostics
 
-// Positive: the in-range extremes, 0 and 23.
+// Positive: the in-range extremes, 0 and 7 for a destination and 23 for a
+// source.
 aie.device(npu2) {
   aiex.cert.job(0) {
     aiex.cert.read32(0, 1)
-    aiex.cert.read32(23, 1)
+    aiex.cert.read32(7, 1)
+    aiex.cert.read32_d(23, 0)
   }
 }
 
 // -----
 
-// Negative: 24 is one past the maximum.
+// Negative: 8 is one past the destination maximum.
 aie.device(npu2) {
   aiex.cert.job(0) {
     // expected-error@+1 {{attribute 'value' failed to satisfy constraint}}
-    aiex.cert.read32(24, 1)
+    aiex.cert.read32(8, 1)
   }
 }
 
 // -----
 
-// Negative: same bound applies to cert.read32_d's `address` operand.
+// Negative: 24 is one past the source maximum, for cert.read32_d's
+// `address` operand.
 aie.device(npu2) {
   aiex.cert.job(0) {
     // expected-error@+1 {{attribute 'address' failed to satisfy constraint}}
@@ -44,11 +48,11 @@ aie.device(npu2) {
 
 // -----
 
-// Negative: same bound applies to cert.wait_uc_dma's `wait_handle` operand.
+// Negative: cert.wait_uc_dma's `wait_handle` is bounded like a destination.
 aie.device(npu2) {
   aiex.cert.job(0) {
     // expected-error@+1 {{attribute 'wait_handle' failed to satisfy constraint}}
-    aiex.cert.wait_uc_dma(24)
+    aiex.cert.wait_uc_dma(8)
   }
 }
 

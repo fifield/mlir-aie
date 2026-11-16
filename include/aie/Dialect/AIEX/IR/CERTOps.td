@@ -9,9 +9,15 @@
 #define CERT_OPS
 
 // A CERT microcontroller register index: r0..r7 are local to a job and
-// r8..r23 are shared by all jobs.
+// r8..r23 are shared by all jobs. Any of them may be read.
 def AIEX_CertRegisterAttr
     : ConfinedAttr<I32Attr, [IntMinValue<0>, IntMaxValue<23>]>;
+
+// A job-local register index r0..r7. The firmware writes an instruction's
+// destination register into the running job's local register file, and
+// asserts (hanging the uC) if the index is 8 or above.
+def AIEX_CertLocalRegisterAttr
+    : ConfinedAttr<I32Attr, [IntMinValue<0>, IntMaxValue<7>]>;
 
 def AIE_CertUcDmaChainOp
     : AIEX_Op<"cert.uc_dma_chain", [AIESymbol, SingleBlockImplicitTerminator<
@@ -188,14 +194,16 @@ def AIE_CertWrite32DOp : AIEX_Op<"cert.write32_d", [HasParent<"CertJobOp">]> {
 def AIE_CertRead32Op : AIEX_Op<"cert.read32", [HasParent<"CertJobOp">]> {
   let summary = "Read a 32-bit value from an address into a register";
   let description = [{
-    Reads the 32-bit value at `address` into register `value`.
+    Reads the 32-bit value at `address` into register `value`, which must be
+    a job-local register r0..r7.
 
     Example:
     ```
       cert.read32(1, 0x1000)
     ```
   }];
-  let arguments = (ins AIEX_CertRegisterAttr:$value, UI32Attr:$address);
+  let arguments = (ins AIEX_CertLocalRegisterAttr:$value,
+      UI32Attr:$address);
   let assemblyFormat = [{
     `(` $value `,` $address `)` attr-dict
   }];
@@ -205,8 +213,8 @@ def AIE_CertRead32DOp : AIEX_Op<"cert.read32_d", [HasParent<"CertJobOp">]> {
   let summary = "Read a 32-bit value from a register-held address into a "
                 "register";
   let description = [{
-    Reads the 32-bit value at the address held in register `address` into
-    register `value`.
+    Reads the 32-bit value at the address held in register `address` (any of
+    r0..r23) into register `value`, which must be a job-local register r0..r7.
 
     Example:
     ```
@@ -214,7 +222,7 @@ def AIE_CertRead32DOp : AIEX_Op<"cert.read32_d", [HasParent<"CertJobOp">]> {
     ```
   }];
   let arguments = (ins AIEX_CertRegisterAttr:$address,
-      AIEX_CertRegisterAttr:$value);
+      AIEX_CertLocalRegisterAttr:$value);
   let assemblyFormat = [{
     `(` $address `,` $value `)` attr-dict
   }];
@@ -331,14 +339,15 @@ def AIE_CertUcDmaWriteDesOp
   let description = [{
     Enqueues a uC DMA transfer without waiting for it, and stores a wait
     handle in register `wait_handle` for a later `cert.wait_uc_dma`. The
-    symbol operand refers to a `cert.uc_dma_chain`.
+    handle register must be a job-local register r0..r7. The symbol operand
+    refers to a `cert.uc_dma_chain`.
 
     Example:
     ```
       cert.uc_dma_write_des(2, @dma_chain)
     ```
   }];
-  let arguments = (ins AIEX_CertRegisterAttr:$wait_handle,
+  let arguments = (ins AIEX_CertLocalRegisterAttr:$wait_handle,
       FlatSymbolRefAttr:$symbol);
   let assemblyFormat = [{
     `(` $wait_handle `,` $symbol `)` attr-dict
@@ -353,15 +362,15 @@ def AIE_CertWaitUcDmaOp
 
     The handle must be a job-local register r0..r7 whose reaching definition
     in the same job is a `cert.uc_dma_write_des`; `aie-cert-verify` checks
-    this. The instruction also accepts a shared register r8..r23 carrying a
-    handle across jobs, but this dialect does not.
+    the reaching definition. The firmware accepts only r0..r7 here, so a
+    handle cannot be carried across jobs in a shared register.
 
     Example:
     ```
       cert.wait_uc_dma(2)
     ```
   }];
-  let arguments = (ins AIEX_CertRegisterAttr:$wait_handle);
+  let arguments = (ins AIEX_CertLocalRegisterAttr:$wait_handle);
   let assemblyFormat = [{
     `(` $wait_handle `)` attr-dict
   }];

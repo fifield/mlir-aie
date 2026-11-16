@@ -161,8 +161,8 @@ aie.device(npu2) @repeated_push {
 // -----
 
 // Patches accumulate across pushes, including through distinct chains sharing
-// a payload. Keep both patches with the asynchronous push; its global wait
-// handle allows the wait to move to a later page.
+// a payload. Keep both patches with the last push of @tA; only the trailing
+// write32 may move to a later page.
 //
 // CHECK-LABEL: aie.device(npu2) @shared_patched_payload
 // CHECK: aiex.cert.page
@@ -174,9 +174,9 @@ aie.device(npu2) @repeated_push {
 // CHECK-NOT: aiex.cert.page
 // CHECK: aiex.cert.apply_offset_57(@tA, 1, 2)
 // CHECK-NOT: aiex.cert.page
-// CHECK: aiex.cert.uc_dma_write_des(8, @chainTA2)
+// CHECK: aiex.cert.uc_dma_write_des_sync(@chainTA2)
 // CHECK: aiex.cert.page
-// CHECK: aiex.cert.wait_uc_dma(8)
+// CHECK: aiex.cert.write32(4108, 4)
 // CHECK-NOT: aiex.cert.page
 aie.device(npu2) @shared_patched_payload {
   memref.global "private" constant @tA : memref<980xi32> = dense<0>
@@ -199,8 +199,8 @@ aie.device(npu2) @shared_patched_payload {
       aiex.cert.write32(0x1008, 3)
       aiex.cert.uc_dma_write_des_sync(@chainTB)
       aiex.cert.apply_offset_57(@tA, 1, 2)
-      aiex.cert.uc_dma_write_des(8, @chainTA2)
-      aiex.cert.wait_uc_dma(8)
+      aiex.cert.uc_dma_write_des_sync(@chainTA2)
+      aiex.cert.write32(0x100C, 4)
     }
   }
 }
