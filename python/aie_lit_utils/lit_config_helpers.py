@@ -1057,6 +1057,11 @@ class LitConfigHelper:
         # _prepend_env_paths dedupes, so the usual case of both naming the same
         # directory collapses to a single entry.
         xrt_python_dir = getattr(config_obj, "xrt_python_dir", "")
+        if not xrt_python_dir:
+            xrt_dir = getattr(config_obj, "xrt_dir", "")
+            candidate = os.path.join(xrt_dir, "python") if xrt_dir else ""
+            if candidate and os.path.isdir(candidate):
+                xrt_python_dir = candidate
         if xrt_python_dir:
             current_pythonpath = LitConfigHelper._prepend_env_paths(
                 xrt_python_dir, current_pythonpath

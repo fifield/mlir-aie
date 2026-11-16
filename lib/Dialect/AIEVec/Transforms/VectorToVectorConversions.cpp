@@ -1292,6 +1292,11 @@ struct CanonicalizeVectorForAIEVecPass
       return;
     }
     AIEVecTargetInfo targetInfo = *maybeTargetInfo;
+    if (targetInfo.isAIE2PS()) {
+      op->emitError() << "AIEVec has no vector lowering for target 'aie2ps'";
+      signalPassFailure();
+      return;
+    }
     if (!isVectorLoweringEnabled(targetInfo)) {
       op->emitError() << "Vector canonicalization is not enabled for target "
                       << aieTarget;
@@ -1322,7 +1327,7 @@ struct CanonicalizeVectorForAIEVecPass
       RewritePatternSet patterns(context);
       patterns.add<CanonicalizeTrivialReadAccessSubviewOpPattern,
                    CanonicalizeTrivialWriteAccessSubviewOpPattern>(context);
-      if (targetInfo->isAIE2P())
+      if (targetInfo.isAIE2P())
         patterns.add<FlattenVectorIterArgsPattern, FuseExactMulAddFPattern>(
             context);
       (void)applyPatternsGreedily(op, std::move(patterns));
@@ -1423,9 +1428,6 @@ void xilinx::aievec::buildCanonicalizeVectorForAIEVec(
 
   pm.addPass(createReorderOperationsPass());
   pm.addPass(createCopyRemovalPass());
-  std::string parseError;
-  std::optional<AIEVecTargetInfo> targetInfo =
-      parseAIEVecTarget(options.aieTarget, parseError);
   pm.addPass(
       createVectorBroadcastLoweringPass(targetInfo && targetInfo->isAIE2P()));
   pm.addPass(createCanonicalizeVectorForAIEVecPass(options));

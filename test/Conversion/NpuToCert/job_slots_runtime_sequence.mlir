@@ -22,4 +22,3 @@ aie.device(npu3) @main {
     aiex.npu.write32(%a, %v) : i32, i32
   }
 }
-

@@ -65,7 +65,7 @@ module @test_aie2ps {
  aie.device(xcve3858) {
   %tile23 = aie.tile(2, 3)
   %core23 = aie.core(%tile23) {
-    // expected-error@+2 {{'aie.event' op aie.event is not yet supported on the AIE2PS}}
+    // expected-error@+2 {{'aie.event' op has no core lowering for AIE2ps}}
     // expected-error@+1 {{failed to legalize operation 'aie.event' that was explicitly marked illegal}}
     aie.event(0)
     aie.end

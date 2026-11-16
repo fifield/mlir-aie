@@ -411,8 +411,6 @@ configureLocksInBdBlock(const AIE::AIETargetModel &targetModel,
     }
   }
 
-
-
   bool relEn = false;
   if (!acqLockId) {
     // Release-only BD (out-of-order, or a semaphore-lock sync BD): point the

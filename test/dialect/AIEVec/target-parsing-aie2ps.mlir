@@ -1,4 +1,4 @@
-// expected-error@-1 {{AIE2PS is not a supported AIEVec target}}
+// expected-error@-1 {{AIEVec has no vector lowering for target 'aie2ps'}}
 //
 // target-parsing-aie2ps.mlir
 //

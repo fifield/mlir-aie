@@ -311,6 +311,11 @@ struct AIEVecTransformationPass
       return;
     }
     AIEVecTargetInfo targetInfo = *maybeTargetInfo;
+    if (targetInfo.isAIE2PS()) {
+      op->emitError() << "AIEVec has no vector lowering for target 'aie2ps'";
+      signalPassFailure();
+      return;
+    }
 
     if (targetInfo.isAIE1()) {
       populateAIEVecV1TransformationPatterns(patterns);
@@ -425,6 +430,11 @@ struct AIEVecConvOpTransformationPass
       return;
     }
     AIEVecTargetInfo targetInfo = *maybeTargetInfo;
+    if (targetInfo.isAIE2PS()) {
+      op->emitError() << "AIEVec has no vector lowering for target 'aie2ps'";
+      signalPassFailure();
+      return;
+    }
 
     AnalysisManager am = getAnalysisManager();
     if (targetInfo.isAIE2() || targetInfo.isAIE2P()) {

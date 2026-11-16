@@ -8905,6 +8905,11 @@ struct LowerVectorToAIEVec : PassWrapper<LowerVectorToAIEVec, OperationPass<>> {
     if (!maybeTargetInfo.has_value())
       return signalPassFailure();
     AIEVecTargetInfo targetInfo = *maybeTargetInfo;
+    if (targetInfo.isAIE2PS()) {
+      op->emitError() << "AIEVec has no vector lowering for target 'aie2ps'";
+      signalPassFailure();
+      return;
+    }
 
     if (!isVectorLoweringEnabled(targetInfo)) {
       op->emitError() << "Vector lowering is not enabled for target "

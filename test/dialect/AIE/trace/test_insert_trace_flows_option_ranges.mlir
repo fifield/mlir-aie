@@ -8,16 +8,17 @@
 // The trace DMA uses a shim S2MM channel (0 or 1) and a shim BD. Options
 // outside those ranges are rejected up front instead of producing an invalid
 // packet destination or aborting while encoding the task queue push.
+// -1 selects the target-specific default; -2 remains invalid.
 
 // RUN: not aie-opt %s -aie-insert-trace-flows="shim-channel=2" 2>&1 | FileCheck %s --check-prefix=CHAN2
-// RUN: not aie-opt %s -aie-insert-trace-flows="shim-channel=-1" 2>&1 | FileCheck %s --check-prefix=CHANNEG
+// RUN: not aie-opt %s -aie-insert-trace-flows="shim-channel=-2" 2>&1 | FileCheck %s --check-prefix=CHANNEG
 // RUN: not aie-opt %s -aie-insert-trace-flows="default-bd-id=16" 2>&1 | FileCheck %s --check-prefix=BD16
-// RUN: not aie-opt %s -aie-insert-trace-flows="default-bd-id=-1" 2>&1 | FileCheck %s --check-prefix=BDNEG
+// RUN: not aie-opt %s -aie-insert-trace-flows="default-bd-id=-2" 2>&1 | FileCheck %s --check-prefix=BDNEG
 
-// CHAN2: error: shim-channel 2 is not a shim S2MM channel; expected 0 or 1
-// CHANNEG: error: shim-channel -1 is not a shim S2MM channel; expected 0 or 1
+// CHAN2: error: trace shim channel 2 is outside the range [0, 2) for S2MM
+// CHANNEG: error: trace shim channel -2 is outside the range [0, 2) for S2MM
 // BD16: error: default-bd-id 16 is not a shim BD; expected [0, 16)
-// BDNEG: error: default-bd-id -1 is not a shim BD; expected [0, 16)
+// BDNEG: error: default-bd-id -2 is not a shim BD; expected [0, 16)
 
 module {
   aie.device(npu1_1col) {

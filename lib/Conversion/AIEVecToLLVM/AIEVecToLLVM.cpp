@@ -5663,20 +5663,17 @@ struct ConvertAIEVecToLLVMPass
 
     if (!isAIEVecToLLVMLoweringEnabled(targetInfo)) {
       // Only fail if the module actually contains an AIEVec op to lower.
-      bool hasAIEVecOp = false;
-      module.walk([&](Operation *op) {
-        Dialect *dialect = op->getDialect();
-        if (dialect && isa<AIEVecDialect, aie1::AIEVecAIE1Dialect>(dialect)) {
-          hasAIEVecOp = true;
+      WalkResult result = module.walk([&](Operation *op) {
+        if (isa_and_present<AIEVecDialect, aie1::AIEVecAIE1Dialect>(
+                op->getDialect())) {
+          op->emitOpError() << "has no LLVM lowering for target '"
+                            << getCanonicalAIEVecTargetName(targetInfo) << "'";
           return WalkResult::interrupt();
         }
         return WalkResult::advance();
       });
-      if (hasAIEVecOp) {
-        module.emitError() << "AIEVec lowering is not enabled for target "
-                           << getCanonicalAIEVecTargetName(targetInfo);
+      if (result.wasInterrupted())
         signalPassFailure();
-      }
       return;
     }
 

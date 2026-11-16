@@ -8,8 +8,8 @@
 // RUN: not aie-opt --aie-npu-to-cert %t/unassigned-large.mlir 2>&1 | FileCheck %s --check-prefix=UNASSIGNED
 
 // Both direct lowering and splitting must reject unresolved buffer addresses.
-// MISSING-SMALL: error: buffer 'missing_small' not found in device
-// MISSING-LARGE: error: buffer 'missing_large' not found in device
+// MISSING-SMALL: error: 'aiex.npu.blockwrite' op buffer 'missing_small' not found in device
+// MISSING-LARGE: error: 'aiex.npu.blockwrite' op buffer 'missing_large' not found in device
 // UNASSIGNED: error: referenced buffer must have address assigned
 // UNASSIGNED: note: This buffer must have an address.
 
