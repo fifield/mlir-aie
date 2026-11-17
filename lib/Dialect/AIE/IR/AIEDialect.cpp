@@ -260,6 +260,9 @@ static VirtualizedNPU2TargetModel NPU2model4col(4);
 static VirtualizedNPU2TargetModel NPU2model5col(5);
 static VirtualizedNPU2TargetModel NPU2model6col(6);
 static VirtualizedNPU2TargetModel NPU2model7col(7);
+static NPU3TargetModel NPU3model;
+static VirtualizedNPU3TargetModel NPU3model1col(1);
+static VirtualizedNPU3TargetModel NPU3model2col(2);
 
 const AIETargetModel &xilinx::AIE::getTargetModel(Operation *op) {
   if (auto t = dyn_cast<AIETarget>(op))
@@ -311,6 +314,12 @@ const AIETargetModel &xilinx::AIE::getTargetModel(AIEDevice device) {
     return NPU2model7col;
   case AIEDevice::xcve3858:
     return VE3858model;
+  case AIEDevice::npu3:
+    return NPU3model;
+  case AIEDevice::npu3_1col:
+    return NPU3model1col;
+  case AIEDevice::npu3_2col:
+    return NPU3model2col;
   }
   // No default: label above, so -Wswitch still reports a newly added device.
   // This handles values that are not enumerators at all, which
@@ -5454,6 +5463,14 @@ LogicalResult DMAOp::verify() {
           getOperation(), cast<TileLike>(program.getTile().getDefiningOp()),
           getChannelDir(), getChannelIndex())))
     return failure();
+  if (auto parent = dyn_cast<TileElement>(parentOp);
+      parent && isa<AIE4TargetModel>(getTargetModel(getOperation()))) {
+    if (TileLike tile = parent.getTileLike();
+        tile && failed(verifyBdPoolIsModelled(getOperation(), tile.tryGetCol(),
+                                              tile.tryGetRow(), getChannelDir(),
+                                              getChannelIndex())))
+      return failure();
+  }
   auto bdRegions = getBds();
   for (auto &bdRegion : bdRegions) {
     if (!bdRegion.hasOneBlock())
@@ -6637,7 +6654,37 @@ LogicalResult DMAStartOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
   return success();
 }
 
+LogicalResult xilinx::AIE::verifyBdPoolIsModelled(Operation *op,
+                                                  std::optional<int> col,
+                                                  std::optional<int> row,
+                                                  DMAChannelDir dir,
+                                                  int64_t channel) {
+  const AIETargetModel &tm = getTargetModel(op);
+  if (!col || !row || !isa<AIE4TargetModel>(tm))
+    return success();
+  if (tm.isMemTile(*col, *row))
+    return op->emitOpError("AIE4 memtile DMA channels have a private BD pool "
+                           "per channel and direction, which the target model "
+                           "cannot describe yet");
+  if (tm.isShimNOCTile(*col, *row) && channel == 1)
+    return op->emitOpError("AIE4 shim DMA channel 1 uses BDs 0-15 as MM2S and "
+                           "16-31 as S2MM; the target model cannot describe a "
+                           "direction-dependent BD pool yet");
+  return success();
+}
+
 LogicalResult DMAStartOp::verify() {
+  // A start naming a route endpoint has no channel until
+  // --aie-objectfifo-allocate resolves it; it is checked again then.
+  if (auto parent = dyn_cast<TileElement>(getOperation()->getParentOp());
+      parent && !getEndpoint() &&
+      isa<AIE4TargetModel>(getTargetModel(getOperation()))) {
+    if (TileLike tile = parent.getTileLike();
+        tile && failed(verifyBdPoolIsModelled(getOperation(), tile.tryGetCol(),
+                                              tile.tryGetRow(), getChannelDir(),
+                                              getChannelIndex())))
+      return failure();
+  }
   if (getPadValue() != 0) {
     if (!isa<MemTileDMAOp>(getOperation()->getParentOp()))
       return emitOpError("pad_value is only supported on memtile DMA channels");
@@ -7076,6 +7123,18 @@ WireBundle xilinx::AIE::getConnectingBundle(WireBundle dir) {
     return WireBundle::West;
   case WireBundle::West:
     return WireBundle::East;
+  case WireBundle::North32:
+    return WireBundle::South32;
+  case WireBundle::South32:
+    return WireBundle::North32;
+  case WireBundle::East32:
+    return WireBundle::West32;
+  case WireBundle::West32:
+    return WireBundle::East32;
+  case WireBundle::NorthControl:
+    return WireBundle::SouthControl;
+  case WireBundle::SouthControl:
+    return WireBundle::NorthControl;
   default:
     return dir;
   }

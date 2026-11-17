@@ -221,8 +221,8 @@ public:
     uint32_t queue_offset = tm.getDmaQueueAddress(
         op.getColumn(), op.getRow(), op.getChannel(), op.getDirection());
 
-    // Command word: bd_id in the START_BD_ID field, repeat_count [23:16],
-    // issue-token bit [31]. START_BD_ID is as wide as the tile's BD ids.
+    // Command word: bd_id in the START_BD_ID field, repeat_count based at bit
+    // 16, issue-token bit [31]. START_BD_ID is as wide as the tile's BD ids.
     // bd_id and repeat_count may be runtime SSA; all-constant folds to one
     // constant (byte-identical to the static path), else built with arith.
     Location loc = op->getLoc();
@@ -230,6 +230,13 @@ public:
     uint32_t bdIdMask =
         (1u << llvm::Log2_32_Ceil(tm.getNumBDs(op.getColumn(), op.getRow()))) -
         1;
+    // AIE4 shim BD banks number from 0: bank-1 ids 16-31 are written as id-16.
+    if (isa<AIE::AIE4TargetModel>(tm) &&
+        tm.isShimNOCTile(op.getColumn(), op.getRow()))
+      bdIdMask = 0xFu;
+    // getMaxRepeatCount() is the repeat field's all-ones value.
+    uint32_t repeatMask =
+        tm.getMaxRepeatCount() ? tm.getMaxRepeatCount() : 0xFFu;
     std::optional<uint32_t> bd_id = getConstantIntOperand(op.getBdId());
     std::optional<uint64_t> repeat_cnt =
         getConstantInt64Operand(op.getRepeatCount());
@@ -253,14 +260,13 @@ public:
 
     Value cmdVal;
     if (bd_id && repeat_cnt) {
-      cmdVal = createConstantI32(rewriter, loc,
-                                 (*bd_id & bdIdMask) |
-                                     ((*repeat_cnt & 0xFF) << 16) | issueBit);
+      cmdVal = createConstantI32(
+          rewriter, loc,
+          (*bd_id & bdIdMask) | ((*repeat_cnt & repeatMask) << 16) | issueBit);
     } else {
-      // (bd_id & bdIdMask) | ((repeat & 0xFF) << 16) | issueBit, as arith over
-      // the runtime operands (a constant field folds to its contribution).
-      // A runtime repeat_count is masked to its 8-bit field below, so an
-      // out-of-range value would silently wrap to a different number of
+      // Built with arith (constant fields fold). A runtime repeat_count is
+      // masked to its field below, so an out-of-range value would silently wrap
+      // to a different number of
       // executions. Refuse the dispatch instead (host-side guard); the
       // unsigned compare also rejects a negative count (zero executions).
       Value repeat;
@@ -290,7 +296,7 @@ public:
           createConstantI32(rewriter, loc, bdIdMask));
       cmd = rewriter.createOrFold<arith::OrIOp>(loc, cmd, bdField);
       Value masked = rewriter.createOrFold<arith::AndIOp>(
-          loc, repeat, createConstantI32(rewriter, loc, 0xFF));
+          loc, repeat, createConstantI32(rewriter, loc, repeatMask));
       Value shifted = rewriter.createOrFold<arith::ShLIOp>(
           loc, masked, createConstantI32(rewriter, loc, 16));
       cmdVal = rewriter.createOrFold<arith::OrIOp>(loc, cmd, shifted);
@@ -619,6 +625,8 @@ public:
     argIdx = static_cast<int>(*hostIdx);
 
     const auto &targetModel = AIE::getTargetModel(op);
+    if (!targetModel.getDmaBdLayout(tileCol, tileRow))
+      return op->emitOpError("has no buffer descriptor layout on this tile");
     uint64_t patchAddr =
         targetModel.getDmaBdAddress(tileCol, tileRow, op.getId()) +
         targetModel.getDmaBdAddressOffset(tileCol, tileRow);

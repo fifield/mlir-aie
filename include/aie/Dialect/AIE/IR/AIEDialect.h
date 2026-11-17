@@ -628,6 +628,13 @@ mlir::LogicalResult verifyDMAChannel(mlir::Operation *op,
                                      const AIETargetModel &targetModel, int col,
                                      int row, DMAChannelDir dir,
                                      int64_t channel);
+// Reject a DMA channel whose BD pool the target model cannot describe: on
+// AIE4, a memtile channel's private pool and shim channel 1, whose bank
+// depends on the direction. `col`/`row` unset (logical tile) defers the check.
+mlir::LogicalResult verifyBdPoolIsModelled(mlir::Operation *op,
+                                           std::optional<int> col,
+                                           std::optional<int> row,
+                                           DMAChannelDir dir, int64_t channel);
 
 // Validate an out-of-order S2MM channel and its receive BDs.
 mlir::LogicalResult

@@ -3117,6 +3117,39 @@ llvm::Expected<PacketPlan> AIEPathfinderPass::route(
           .str());
 }
 
+// The router reaches a shim DMA, NOC or PLIO endpoint through the shim mux.
+// AIE4 shim DMAs attach to the stream switch directly, without a shim mux.
+static LogicalResult checkShimMuxEndpoints(DeviceOp device) {
+  if (!isa<AIE4TargetModel>(device.getTargetModel()))
+    return success();
+  auto check = [&](Operation *flow, Value value, Port port) -> LogicalResult {
+    auto tile = cast<TileOp>(value.getDefiningOp());
+    if (!tile.isShimNOCorPLTile() ||
+        !llvm::is_contained(
+            {WireBundle::DMA, WireBundle::NOC, WireBundle::PLIO}, port.bundle))
+      return success();
+    return flow->emitOpError("cannot route ")
+           << describeTilePort(tile.getTileID(), port)
+           << " on AIE4: the router reaches shim DMA, NOC and PLIO ports "
+              "through a shim mux, which AIE4 does not have";
+  };
+  for (PacketFlowOp flow : device.getOps<PacketFlowOp>()) {
+    for (PacketSourceOp source : flow.getPorts().getOps<PacketSourceOp>())
+      if (failed(check(flow, source.getTile(), source.port())))
+        return failure();
+    for (PacketDestOp dest : flow.getPorts().getOps<PacketDestOp>())
+      if (failed(check(flow, dest.getTile(), dest.port())))
+        return failure();
+  }
+  for (FlowOp flow : device.getOps<FlowOp>())
+    if (failed(check(flow, flow.getSource(),
+                     {flow.getSourceBundle(), flow.getSourceChannel()})) ||
+        failed(check(flow, flow.getDest(),
+                     {flow.getDestBundle(), flow.getDestChannel()})))
+      return failure();
+  return success();
+}
+
 static LogicalResult checkFixedFlowEndpoints(DeviceOp device) {
   DenseMap<PhysPort, Operation *> inputs, outputs;
   for (SwitchboxOp box : device.getOps<SwitchboxOp>()) {
@@ -3217,7 +3250,7 @@ void AIEPathfinderPass::runOnOperation() {
   LLVM_DEBUG(llvm::dbgs() << "---Begin AIEPathfinderPass---\n");
 
   DeviceOp d = getOperation();
-  if (failed(verifyDMAChannelsResolved(d)))
+  if (failed(verifyDMAChannelsResolved(d)) || failed(checkShimMuxEndpoints(d)))
     return signalPassFailure();
   OpBuilder builder = OpBuilder::atBlockTerminator(d.getBody());
   if (clRoutePacket)

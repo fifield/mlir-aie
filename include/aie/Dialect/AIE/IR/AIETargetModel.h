@@ -125,6 +125,11 @@ public:
     TK_AIE2PS_VE3858 = TK_AIE2_NPU2_Last,
     TK_AIE2PS_Last,
     TK_AIE2_Last = TK_AIE2PS_Last,
+    TK_AIE4_NPU3,
+    TK_AIE4_NPU3_1Col,
+    TK_AIE4_NPU3_2Col,
+    TK_AIE4_NPU3_Last,
+    TK_AIE4_Last = TK_AIE4_NPU3_Last,
   };
 
   // One-hot encoded list of target model properties.
@@ -1361,10 +1366,263 @@ public:
   }
 };
 
+/// AIE4 (npu3) base model.
+///
+/// This model is written against the target-model API as it stands. Where
+/// that API cannot describe AIE4 it reports "unsupported" rather than an
+/// AIE2-shaped answer:
+///  - BD pools: shim BDs are split into two 16-BD banks by channel *and*
+///    direction (MM2S 0-1 and S2MM 0 use BDs 0-15; MM2S 2-3 and S2MM 1 use
+///    16-31), and every memtile channel has a private 16-BD pool per
+///    direction. isBdChannelAccessible() has no direction, so it answers only
+///    where the direction does not matter and returns false otherwise.
+///  - Tile addresses: a memtile spans five 1 MiB address rows, so core row r
+///    sits at address row r + 4 * getNumMemTileRows(). The model's own address
+///    queries (getDmaBdAddress(), getDmaControlAddress()) encode this; code
+///    that open-codes (col << colShift) | (row << rowShift) does not, and
+///    refuses AIE4 memtile and core tiles.
+///  - Control-MM2S and trace-S2MM shim DMAs: there is no DMAChannelDir for
+///    them, so only their stream-switch ports (DMAControl, DMATrace) exist.
+///  - The memtile's lock and memory windows reach seven columns either side;
+///    getLockLocalBaseIndex()/getMemLocalBaseAddress() are not virtual, so the
+///    memtile cases are refused by their callers.
+///  - No register database, BD layout or stream-switch port index map yet.
+class AIE4TargetModel : public AIETargetModel {
+public:
+  AIE4TargetModel(TargetModelKind k) : AIETargetModel(k) {
+    addModelProperty(AIETargetModel::UsesSemaphoreLocks);
+    addModelProperty(AIETargetModel::UsesMultiDimensionalBDs);
+    addModelProperty(AIETargetModel::UsesBDIteration);
+    addModelProperty(AIETargetModel::SupportsOutOfOrderDMA);
+    addModelProperty(AIETargetModel::SupportsControlPackets);
+  }
+
+  AIEArch getTargetArch() const override;
+
+  uint32_t getAddressGenGranularity() const override { return 32; }
+
+  uint32_t getNumSlaveSlots() const override { return 4; }
+  uint32_t getNumArbiters() const override { return 6; }
+  uint32_t getNumMselsPerArbiter() const override { return 4; }
+  uint32_t getMaxPacketId() const override { return 31; }
+  /// 4-bit index into the receiving channel's 16-BD bank.
+  uint32_t getMaxOutOfOrderId() const override { return 15; }
+  uint32_t getMaxRepeatCount() const override { return 4095; }
+  /// Not modelled yet.
+  uint32_t getDmaTaskQueueDepth() const override { return 0; }
+
+  uint32_t getNumControllersPerColumn() const override { return 2; }
+
+  std::optional<TileID> getMemWest(TileID src) const override;
+  std::optional<TileID> getMemEast(TileID src) const override;
+  std::optional<TileID> getMemNorth(TileID src) const override;
+  std::optional<TileID> getMemSouth(TileID src) const override;
+
+  bool isMemWest(int srcCol, int srcRow, int dstCol, int dstRow) const override;
+  bool isMemEast(int srcCol, int srcRow, int dstCol, int dstRow) const override;
+  bool isMemNorth(int srcCol, int srcRow, int dstCol,
+                  int dstRow) const override;
+  bool isMemSouth(int srcCol, int srcRow, int dstCol,
+                  int dstRow) const override;
+
+  bool isLegalMemAffinity(int coreCol, int coreRow, int memCol,
+                          int memRow) const override;
+
+  uint32_t getMemInternalBaseAddress(TileID src) const override {
+    return getMemEastBaseAddress();
+  }
+  uint32_t getMemSouthBaseAddress() const override { return 0x00080000; }
+  uint32_t getMemWestBaseAddress() const override { return 0x000A0000; }
+  uint32_t getMemNorthBaseAddress() const override { return 0x000C0000; }
+  uint32_t getMemEastBaseAddress() const override { return 0x000E0000; }
+  uint32_t getLocalMemorySize() const override { return 0x00020000; }
+  uint32_t getProgramMemorySize() const override { return 0x00008000; }
+  uint32_t getCoreDataAddressSpaceSize() const override { return 0x00100000; }
+  uint32_t getComputeTileLoadStoreBusWidth() const override { return 1024; }
+  uint32_t getAccumulatorCascadeSize() const override { return 512; }
+
+  using AIETargetModel::getNumLocks;
+  uint32_t getNumLocks(AIETileType tileType) const override {
+    if (tileType == AIETileType::MemTile)
+      return 64;
+    if (tileType == AIETileType::ShimNOCTile)
+      return 32;
+    return 16;
+  }
+  uint32_t getMaxLockValue() const override { return 0x3F; }
+  std::optional<uint32_t> getLocalLockAddress(uint32_t lockId,
+                                              TileID tile) const override;
+
+  /// The BD ids a dma_bd can name: 16 on core tiles and in every memtile
+  /// channel's private pool, 32 across the two shim banks.
+  uint32_t getNumBDs(AIETileType tileType) const override {
+    return tileType == AIETileType::ShimNOCTile ? 32 : 16;
+  }
+  /// Memtile and shim BDs have four addressing dimensions; core BDs three.
+  uint32_t getBDMaxDims(AIETileType tileType) const override {
+    return tileType == AIETileType::CoreTile ? 3 : 4;
+  }
+  /// Buffer_Length: core 15 bits, memtile 23 bits, shim a full register.
+  uint64_t getDmaBdMaxLen(AIETileType tileType) const override {
+    switch (tileType) {
+    case AIETileType::MemTile:
+      return (1ull << 23) - 1;
+    case AIETileType::CoreTile:
+      return (1ull << 15) - 1;
+    default:
+      return 0xFFFFFFFFull;
+    }
+  }
+  /// Wrap fields: core 9 bits, memtile and shim 12 bits.
+  uint32_t getDmaBdWrapBits(AIETileType tileType) const override {
+    return tileType == AIETileType::CoreTile ? 9 : 12;
+  }
+  /// Step size fields: core 15 bits, memtile 23 bits, shim 22 bits.
+  uint32_t getDmaBdStepBits(AIETileType tileType) const override {
+    switch (tileType) {
+    case AIETileType::MemTile:
+      return 23;
+    case AIETileType::CoreTile:
+      return 15;
+    default:
+      return 22;
+    }
+  }
+  /// Iteration fields: memtile 8 bits, core and shim 6 bits.
+  uint32_t getDmaBdIterBits(AIETileType tileType) const override {
+    return tileType == AIETileType::MemTile ? 8 : 6;
+  }
+
+  /// Answers only where the BD pool does not depend on the direction: any
+  /// core-tile BD, shim channel 0 (BDs 0-15) and shim channels 2-3, which are
+  /// MM2S only (BDs 16-31). Shim channel 1 (MM2S: BDs 0-15, S2MM: BDs 16-31)
+  /// and every memtile channel (private pool per direction) return false.
+  bool isBdChannelAccessible(int col, int row, uint32_t bd_id,
+                             int channel) const override;
+
+  /// Refuses (fatal error) a shim or memtile BD without a channel: the BD's
+  /// bank depends on the channel and direction there.
+  uint64_t getDmaBdAddress(int col, int row, uint32_t bd_id, int channel,
+                           AIE::DMAChannelDir direction) const override;
+  uint32_t getDmaBdAddressOffset(int col, int row) const override;
+  uint32_t getDmaControlAddress(int col, int row, int channel,
+                                AIE::DMAChannelDir direction) const override;
+
+  uint32_t getMemTileSize() const override { return 0x00300000; }
+  uint32_t getNumBanks(int col, int row) const override {
+    return isMemTile(col, row) ? 24 : 4;
+  }
+  uint32_t getMaxChannelNumForAdjacentMemTile(int col, int row) const override {
+    return 10;
+  }
+
+  uint32_t getNumDestSwitchboxConnections(int col, int row,
+                                          WireBundle bundle) const override;
+  uint32_t getNumSourceSwitchboxConnections(int col, int row,
+                                            WireBundle bundle) const override;
+  uint32_t getNumDestShimMuxConnections(int col, int row,
+                                        WireBundle bundle) const override;
+  uint32_t getNumSourceShimMuxConnections(int col, int row,
+                                          WireBundle bundle) const override;
+  bool isLegalTileConnection(int col, int row, WireBundle srcBundle,
+                             int srcChan, WireBundle dstBundle,
+                             int dstChan) const override;
+
+  /// Not modelled yet.
+  std::optional<uint32_t> getStreamSwitchPortIndex(int col, int row,
+                                                   WireBundle bundle,
+                                                   uint32_t channel,
+                                                   bool master) const override {
+    return std::nullopt;
+  }
+
+  uint32_t getColumnShift() const override { return 25; }
+  uint32_t getRowShift() const override { return 20; }
+
+  std::vector<std::pair<uint32_t, uint32_t>>
+  getShimBurstEncodingsAndLengths() const override;
+
+  /// The address row of a tile. A memtile spans five address rows; this is
+  /// the first.
+  uint32_t getAddressRow(int col, int row) const;
+
+  /// Absolute address of offset 0 of tile (col, row).
+  uint64_t getTileBaseAddress(int col, int row) const {
+    return (static_cast<uint64_t>(col & 0xff) << getColumnShift()) |
+           (static_cast<uint64_t>(getAddressRow(col, row) & 0xff)
+            << getRowShift());
+  }
+
+  static bool classof(const AIETargetModel *model) {
+    return model->getKind() >= TK_AIE4_NPU3 && model->getKind() < TK_AIE4_Last;
+  }
+};
+
+class BaseNPU3TargetModel : public AIE4TargetModel {
+public:
+  BaseNPU3TargetModel(TargetModelKind k) : AIE4TargetModel(k) {
+    addModelProperty(AIETargetModel::IsNPU);
+  }
+
+  int rows() const override {
+    return 6; /* 1 Shim row, 1 memtile row, and 4 Core rows. */
+  }
+
+  AIETileType getTileType(int col, int row) const override {
+    if (row == 0)
+      return AIETileType::ShimNOCTile;
+    if (row == 1)
+      return AIETileType::MemTile;
+    return AIETileType::CoreTile;
+  }
+
+  uint32_t getNumMemTileRows() const override { return 1; }
+
+  static bool classof(const AIETargetModel *model) {
+    return model->getKind() >= TK_AIE4_NPU3 &&
+           model->getKind() < TK_AIE4_NPU3_Last;
+  }
+};
+
+// The full npu3 array.
+class NPU3TargetModel : public BaseNPU3TargetModel {
+public:
+  NPU3TargetModel() : BaseNPU3TargetModel(TK_AIE4_NPU3) {}
+
+  int columns() const override { return 3; }
+
+  static bool classof(const AIETargetModel *model) {
+    return model->getKind() == TK_AIE4_NPU3;
+  }
+};
+
+// A sub-portion of the npu3 array.
+class VirtualizedNPU3TargetModel : public BaseNPU3TargetModel {
+  int cols;
+
+public:
+  VirtualizedNPU3TargetModel(int _cols)
+      : BaseNPU3TargetModel(static_cast<TargetModelKind>(
+            static_cast<std::underlying_type_t<TargetModelKind>>(TK_AIE4_NPU3) +
+            _cols)),
+        cols(_cols) {
+    addModelProperty(AIETargetModel::IsVirtualized);
+  }
+
+  int columns() const override { return cols; }
+
+  static bool classof(const AIETargetModel *model) {
+    return model->getKind() >= TK_AIE4_NPU3_1Col &&
+           model->getKind() < TK_AIE4_NPU3_Last;
+  }
+};
+
 /// \brief Device generation ID written into the TXN header
 /// (aie_runtime::TxnDeviceInfo::devGen). Both the static binary emitter and the
 /// generated-C++ builder read it from here, so a new device family is one edit.
 inline uint8_t txnDeviceGen(const AIETargetModel &tm) {
+  if (llvm::isa<AIE4TargetModel>(tm))
+    return 42; // XAIE_DEV_GEN_AIE4
   return llvm::isa<BaseNPU2TargetModel>(tm) ? 4 : 3;
 }
 

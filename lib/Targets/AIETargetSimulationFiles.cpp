@@ -26,6 +26,9 @@ mlir::LogicalResult AIE::AIETranslateSCSimConfig(mlir::ModuleOp module,
     return mlir::failure();
   }
   AIEArch arch = targetOp.getTargetModel().getTargetArch();
+  if (arch == AIEArch::AIE4)
+    return targetOp.emitOpError("simulation files are not supported for the "
+                                "AIE4 architecture");
 
   if (arch == AIEArch::AIE2p) {
     output << "{\n"
@@ -160,6 +163,9 @@ mlir::LogicalResult AIE::AIETranslateShimSolution(mlir::ModuleOp module,
   }
   if (failed(verifyDMAChannelsResolved(targetOp)))
     return mlir::failure();
+  if (targetOp.getTargetModel().getTargetArch() == AIEArch::AIE4)
+    return targetOp.emitOpError("simulation files are not supported for the "
+                                "AIE4 architecture");
 
   // Generate boilerplate header
   output << "{\n";
@@ -231,6 +237,9 @@ mlir::LogicalResult AIE::AIETranslateGraphXPE(mlir::ModuleOp module,
     return mlir::failure();
   }
   AIEArch arch = targetOp.getTargetModel().getTargetArch();
+  if (arch == AIEArch::AIE4)
+    return targetOp.emitOpError("simulation files are not supported for the "
+                                "AIE4 architecture");
 
   // Generate boilerplate header
   // TODO: date and version should probably not be hardcoded

@@ -1203,6 +1203,21 @@ AIEX::NpuWrite32Op::verifyNamedOpUses(AIE::NamedOpTableCollection &names) {
                            sizeof(uint32_t), names);
 }
 
+// The address computations below place a tile at
+// (col << colShift) | (row << rowShift). On AIE4 that holds only for shim
+// tiles: a memtile spans five address rows, which shifts every row above it.
+static LogicalResult verifyOpenCodedTileAddress(Operation *op,
+                                                const AIE::AIETargetModel &tm,
+                                                uint32_t col, uint32_t row) {
+  if (!isa<AIE::AIE4TargetModel>(tm) ||
+      tm.isShimNOCorPLTile(static_cast<int>(col), static_cast<int>(row)))
+    return success();
+  return op->emitOpError("cannot encode the address of tile (")
+         << col << ", " << row
+         << ") on AIE4: memtile and core tile addresses are not "
+            "(col << colShift) | (row << rowShift)";
+}
+
 template <typename T>
 static std::optional<uint32_t>
 getAbsoluteAddress(T *op, uint32_t addressOffset,
@@ -1238,6 +1253,8 @@ getAbsoluteAddress(T *op, uint32_t addressOffset,
 
     uint32_t col = buffer.getTileOp().getCol();
     uint32_t row = buffer.getTileOp().getRow();
+    if (failed(verifyOpenCodedTileAddress(op->getOperation(), tm, col, row)))
+      return std::nullopt;
     address = static_cast<uint32_t>(*bufferAddress) +
               addressOffset * sizeof(uint32_t);
     address = ((col & 0xff) << tm.getColumnShift()) |
@@ -1247,6 +1264,9 @@ getAbsoluteAddress(T *op, uint32_t addressOffset,
     std::optional<uint32_t> col = op->getColumn();
     std::optional<uint32_t> row = op->getRow();
     if (col && row) {
+      if (failed(
+              verifyOpenCodedTileAddress(op->getOperation(), tm, *col, *row)))
+        return std::nullopt;
       // If col and row are set, only the lower 20 bits of the address are
       // used, and col and row dictate the upper bits (ignored)
       address = ((*col & 0xff) << tm.getColumnShift()) |
@@ -1616,6 +1636,9 @@ LogicalResult AIEX::DMAConfigureTaskOp::verify() {
   // The verifier runs again on the concrete tile once placement resolves it.
   std::optional<int> col = getTileLike().tryGetCol();
   std::optional<int> row = getTileLike().tryGetRow();
+  if (failed(AIE::verifyBdPoolIsModelled(getOperation(), col, row,
+                                         getDirection(), getChannel())))
+    return failure();
   if (col && row &&
       failed(verifyTaskBDDimensions(targetModel, *col, *row, getBody())))
     return failure();
@@ -2198,6 +2221,10 @@ bool AIEX::NpuControlPacketOp::isOrdinaryWrite(
 }
 
 LogicalResult AIEX::NpuControlPacketOp::verify() {
+  // AIE4 control packets have a different header and payload size, and their
+  // addresses do not decode as (col << colShift) | (row << rowShift).
+  if (isa<AIE::AIE4TargetModel>(AIE::getTargetModel(*this)))
+    return emitOpError("control packets are not yet supported on AIE4");
   // The 2-bit operation field: 0 write, 1 read, 2 write with response, 3
   // reserved. A wider value would also spill into the stream ID.
   uint32_t opcode = getOpcode();

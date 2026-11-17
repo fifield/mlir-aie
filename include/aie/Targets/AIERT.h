@@ -48,6 +48,11 @@ struct AIERTControl {
   AIERTControl(const xilinx::AIE::AIETargetModel &tm);
   ~AIERTControl();
 
+  /// Diagnose, on `op`, a target this aie-rt lowering cannot configure.
+  /// Constructing an AIERTControl for such a target is a fatal error.
+  static mlir::LogicalResult isSupported(mlir::Operation *op,
+                                         const AIETargetModel &tm);
+
   mlir::LogicalResult setIOBackend(bool aieSim, bool xaieDebug);
   mlir::LogicalResult
   pushToBdQueueAndEnable(mlir::Operation &op, int col, int row, int chNum,

@@ -55,11 +55,34 @@ def NOCWire : I32EnumAttrCase<"NOC", 8>;
 def TraceWire : I32EnumAttrCase<"Trace", 9>;
 def TileControlWire : I32EnumAttrCase<"TileControl", 10>;
 def Controller32Wire : I32EnumAttrCase<"Controller32", 11>;
+// AIE4 control-network ports of the 512-bit switch (vertical neighbours).
+def NorthControlWire : I32EnumAttrCase<"NorthControl", 12>;
+def SouthControlWire : I32EnumAttrCase<"SouthControl", 13>;
+// AIE4 switch bridge: Switch32 is the port on the 512-bit switch, Switch512
+// the one on the 32-bit switch.
+def Switch32Wire : I32EnumAttrCase<"Switch32", 14>;
+// AIE4 32-bit stream switch ports.
+def Control32Wire : I32EnumAttrCase<"Control32", 15>;
+def Trace32Wire : I32EnumAttrCase<"Trace32", 16>;
+def South32Wire : I32EnumAttrCase<"South32", 17>;
+def West32Wire : I32EnumAttrCase<"West32", 18>;
+def North32Wire : I32EnumAttrCase<"North32", 19>;
+def East32Wire : I32EnumAttrCase<"East32", 20>;
+def PLIO32Wire : I32EnumAttrCase<"PLIO32", 21>;
+def Switch512Wire : I32EnumAttrCase<"Switch512", 22>;
+// AIE4 shim dedicated trace S2MM and control MM2S DMAs.
+def DMATraceWire : I32EnumAttrCase<"DMATrace", 23>;
+def DMAControlWire : I32EnumAttrCase<"DMAControl", 24>;
 
-def WireBundle : I32EnumAttr<"WireBundle", "Bundle of wires",
-                             [CoreWire, DMAWire, FIFOWire, SouthWire, WestWire,
-                              NorthWire, EastWire, PLIOWire, NOCWire, TraceWire,
-                              TileControlWire, Controller32Wire]> {
+// Append new cases: the values are part of the C API and Python bindings.
+def WireBundle
+    : I32EnumAttr<"WireBundle", "Bundle of wires",
+                  [CoreWire, DMAWire, FIFOWire, SouthWire, WestWire, NorthWire,
+                   EastWire, PLIOWire, NOCWire, TraceWire, TileControlWire,
+                   Controller32Wire, NorthControlWire, SouthControlWire,
+                   Switch32Wire, Control32Wire, Trace32Wire, South32Wire,
+                   West32Wire, North32Wire, East32Wire, PLIO32Wire,
+                   Switch512Wire, DMATraceWire, DMAControlWire]> {
 
   let cppNamespace = "xilinx::AIE";
 }
@@ -120,6 +143,7 @@ def AIEArch
     : I32EnumAttr<"AIEArch", "AIE Architecture",
                   [I32EnumAttrCase<"AIE1", 1>, I32EnumAttrCase<"AIE2", 2>,
                    I32EnumAttrCase<"AIE2p", 3>, I32EnumAttrCase<"AIE2ps", 4>,
+                   I32EnumAttrCase<"AIE4", 5>,
 ]> {
 
   let cppNamespace = "xilinx::AIE";
@@ -146,6 +170,8 @@ def AIEDevice
            I32EnumAttrCase<"npu2_3col", 11>, I32EnumAttrCase<"npu2_4col", 12>,
            I32EnumAttrCase<"npu2_5col", 13>, I32EnumAttrCase<"npu2_6col", 14>,
            I32EnumAttrCase<"npu2_7col", 15>, I32EnumAttrCase<"xcve3858", 16>,
+           I32EnumAttrCase<"npu3", 17>, I32EnumAttrCase<"npu3_1col", 18>,
+           I32EnumAttrCase<"npu3_2col", 19>,
 ]> {
 
   let cppNamespace = "xilinx::AIE";
@@ -580,5 +606,6 @@ def ObjectFifoEndPortArrayAttr
 include "AIEEventsAIE.td.inc"
 include "AIEEventsAIE2.td.inc"
 include "AIEEventsAIE2P.td.inc"
+include "AIEEventsAIE4.td.inc"
 
 #endif // AIE_ATTRS

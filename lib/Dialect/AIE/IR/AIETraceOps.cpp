@@ -92,6 +92,8 @@ static bool isValidEventForTile(TileLike tile, Attribute eventAttr,
         return prefix == "CoreEventAIE2" || prefix == "MemEventAIE2";
       case AIEArch::AIE2p:
         return prefix == "CoreEventAIE2P" || prefix == "MemEventAIE2P";
+      case AIEArch::AIE4:
+        return prefix == "CoreEventAIE4" || prefix == "MemEventAIE4";
       default:
         return false;
       }
@@ -102,6 +104,8 @@ static bool isValidEventForTile(TileLike tile, Attribute eventAttr,
         return prefix == "MemTileEventAIE2";
       case AIEArch::AIE2p:
         return prefix == "MemTileEventAIE2P";
+      case AIEArch::AIE4:
+        return prefix == "MemTileEventAIE4";
       default:
         return false;
       }
@@ -114,6 +118,8 @@ static bool isValidEventForTile(TileLike tile, Attribute eventAttr,
         return prefix == "ShimTileEventAIE2";
       case AIEArch::AIE2p:
         return prefix == "ShimTileEventAIE2P";
+      case AIEArch::AIE4:
+        return prefix == "ShimTileEventAIE4";
       default:
         return false;
       }
@@ -276,6 +282,15 @@ ParseResult xilinx::AIE::parseTraceEvent(AsmParser &parser, Attribute &result) {
          auto result = symbolizeShimTileEventAIE2P(s);
          return result.has_value();
        }},
+      // AIE4 event enums
+      {"CoreEventAIE4",
+       [](StringRef s) { return symbolizeCoreEventAIE4(s).has_value(); }},
+      {"MemEventAIE4",
+       [](StringRef s) { return symbolizeMemEventAIE4(s).has_value(); }},
+      {"MemTileEventAIE4",
+       [](StringRef s) { return symbolizeMemTileEventAIE4(s).has_value(); }},
+      {"ShimTileEventAIE4",
+       [](StringRef s) { return symbolizeShimTileEventAIE4(s).has_value(); }},
   };
 
   // Look up and validate the enum type

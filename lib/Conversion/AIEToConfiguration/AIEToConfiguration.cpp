@@ -800,6 +800,8 @@ LogicalResult xilinx::AIE::generateAndInsertConfigOps(
 
   if (!targetModel.hasProperty(AIETargetModel::IsNPU))
     return failure();
+  if (failed(AIERTControl::isSupported(device, targetModel)))
+    return failure();
 
   bool aieSim = false;
   bool xaieDebug = false;
@@ -1102,6 +1104,8 @@ LogicalResult xilinx::AIE::generateAndInsertTeardownOps(
   const AIETargetModel &targetModel =
       (const AIETargetModel &)device.getTargetModel();
   if (!targetModel.hasProperty(AIETargetModel::IsNPU))
+    return failure();
+  if (failed(AIERTControl::isSupported(device, targetModel)))
     return failure();
 
   AIERTControl ctl(targetModel);

@@ -469,6 +469,9 @@ xilinx::AIE::AIETranslateToXAIEV2(ModuleOp module, raw_ostream &output,
     // raises -Wswitch.
     return targetOp.emitOpError(
         "--aie-generate-xaie is not supported for the AIE2PS architecture");
+  case AIEArch::AIE4:
+    return targetOp.emitOpError(
+        "--aie-generate-xaie is not supported for the AIE4 architecture");
   }
   output << "  ctx->XAieConfig->AieGen = " << device << ";\n";
   output << "  ctx->XAieConfig->BaseAddr = 0x20000000000;\n";

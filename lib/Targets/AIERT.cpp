@@ -64,6 +64,22 @@ static const std::map<xilinx::AIE::WireBundle, StrmSwPortType>
         // missing PLIO from WireBundle
         // missing NOC from WireBundle
         {xilinx::AIE::WireBundle::Trace, StrmSwPortType::TRACE},
+        // AIE4 ports of the 512-bit switch.
+        {xilinx::AIE::WireBundle::DMATrace, StrmSwPortType::DMA_Trace},
+        {xilinx::AIE::WireBundle::DMAControl, StrmSwPortType::DMA_CTRL},
+        {xilinx::AIE::WireBundle::NorthControl, StrmSwPortType::NORTH_CTRL},
+        {xilinx::AIE::WireBundle::SouthControl, StrmSwPortType::SOUTH_CTRL},
+        {xilinx::AIE::WireBundle::Switch32, StrmSwPortType::SWITCH_32b},
+        // AIE4 ports of the 32-bit switch.
+        {xilinx::AIE::WireBundle::Control32, StrmSwPortType::_32B_CTRL},
+        {xilinx::AIE::WireBundle::Trace32, StrmSwPortType::_32B_TRACE},
+        {xilinx::AIE::WireBundle::South32, StrmSwPortType::_32B_SOUTH},
+        {xilinx::AIE::WireBundle::West32, StrmSwPortType::_32B_WEST},
+        {xilinx::AIE::WireBundle::North32, StrmSwPortType::_32B_NORTH},
+        {xilinx::AIE::WireBundle::East32, StrmSwPortType::_32B_EAST},
+        {xilinx::AIE::WireBundle::Switch512, StrmSwPortType::_32B_SWITCH_512b},
+        {xilinx::AIE::WireBundle::Controller32, StrmSwPortType::_32B_UCTRLR},
+        {xilinx::AIE::WireBundle::PLIO32, StrmSwPortType::_32B_PL},
 };
 
 #ifndef NDEBUG
@@ -236,6 +252,14 @@ xilinx::AIE::TxnLocBracket::~TxnLocBracket() {
 
 xilinx::AIE::AIERTControl::~AIERTControl() { XAie_Finish(&aiert->devInst); }
 
+LogicalResult xilinx::AIE::AIERTControl::isSupported(Operation *op,
+                                                     const AIETargetModel &tm) {
+  if (isa<AIE4TargetModel>(tm))
+    return op->emitOpError("aie-codegen configuration is not yet supported "
+                           "for the AIE4 architecture");
+  return success();
+}
+
 xilinx::AIE::AIERTControl::AIERTControl(const AIE::AIETargetModel &tm)
     : targetModel(tm), aiert(std::make_unique<AIERtImpl>()) {
   // The first column in the NPU lacks a shim tile.  AIE-RT exposes some of
@@ -267,6 +291,11 @@ xilinx::AIE::AIERTControl::AIERTControl(const AIE::AIETargetModel &tm)
     llvm::report_fatal_error(
         "aie-codegen configuration is not supported for the "
         "AIE2PS architecture");
+  case AIEArch::AIE4:
+    // Callers diagnose AIE4 first (see AIERTControl::isSupported).
+    llvm::report_fatal_error(
+        "aie-codegen configuration is not yet supported for the AIE4 "
+        "architecture");
   }
   aiert->configPtr = XAie_Config{
       /*AieGen*/ devGen,

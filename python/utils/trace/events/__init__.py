@@ -56,6 +56,8 @@ NUM_TRACE_TYPES = len(PacketType)
 
 
 def get_events_for_device(device: str):
+    if "npu3" in device:
+        raise NotImplementedError("trace events are not available for AIE4 (npu3)")
     if "xcvc1902" in device:
         return SimpleNamespace(
             CoreEvent=CoreEventAIE,

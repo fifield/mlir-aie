@@ -49,16 +49,23 @@ static StringRef getArchTargetTriple(AIEArch arch) {
     return "aie2p";
   case AIEArch::AIE2ps:
     return "aie2ps";
+  case AIEArch::AIE4:
+    return "aie4";
   }
   llvm::report_fatal_error("unsupported arch");
 }
 
-// AIE2PS has no core intrinsic set (see declareAIEIntrinsics), so an op that
-// lowers to an intrinsic call is diagnosed rather than left behind.
+// AIE2PS and AIE4 have no core intrinsic set (see declareAIEIntrinsics).
+static bool hasCoreIntrinsics(const AIETargetModel &targetModel) {
+  return !isa<AIE2PSTargetModel, AIE4TargetModel>(targetModel);
+}
+
 static LogicalResult checkCoreIntrinsics(Operation *op) {
-  if (!isa<AIE2PSTargetModel>(op->getParentOfType<DeviceOp>().getTargetModel()))
+  const auto &targetModel = op->getParentOfType<DeviceOp>().getTargetModel();
+  if (hasCoreIntrinsics(targetModel))
     return success();
-  return op->emitOpError("has no core lowering for AIE2ps");
+  return op->emitOpError("has no core lowering for ")
+         << stringifyAIEArch(targetModel.getTargetArch());
 }
 
 using IntrinsicDecl =
@@ -182,6 +189,7 @@ static void declareAIEIntrinsics(AIEArch arch, OpBuilder &builder) {
     registerIntrinsics(getAIE2pIntrinsics(builder));
     return;
   case AIEArch::AIE2ps:
+  case AIEArch::AIE4:
     // No intrinsic set: checkCoreIntrinsics rejects ops that need one.
     return;
   }
@@ -494,7 +502,7 @@ struct AIEUseLockToStdLowering : OpConversionPattern<UseLockOp> {
       // A lock in a core or in any function needs an intrinsic, whether or
       // not an exported core calls the function. Any other lock (DMA
       // regions, runtime sequences) is erased with its parent.
-      if (isa<AIE2PSTargetModel>(targetModel)) {
+      if (!hasCoreIntrinsics(targetModel)) {
         if (useLock->getParentOfType<CoreOp>() ||
             useLock->getParentOfType<func::FuncOp>())
           return checkCoreIntrinsics(useLock);
@@ -668,9 +676,8 @@ struct AIECoreToStandardFunc : OpConversionPattern<CoreOp> {
     };
     coreFunc.walk(scan);
     auto device = op->getParentOfType<DeviceOp>();
-    // AIE2ps cannot set the modes anywhere, so the functions the core calls
-    // must be free of these ops too.
-    if (device && isa<AIE2PSTargetModel>(device.getTargetModel())) {
+    // These targets cannot set the modes at all, so check callees too.
+    if (device && !hasCoreIntrinsics(device.getTargetModel())) {
       SmallVector<func::FuncOp> worklist;
       DenseSet<Operation *> visited;
       auto addCallees = [&](Operation *root) {
@@ -690,10 +697,11 @@ struct AIECoreToStandardFunc : OpConversionPattern<CoreOp> {
     }
     if (hasSRS || hasBF16Matmul) {
       if (device) {
-        if (isa<AIE2PSTargetModel>(device.getTargetModel()))
+        if (!hasCoreIntrinsics(device.getTargetModel()))
           return op.emitOpError("needs the rounding and saturation modes set "
                                 "for aievec.srs or bf16 matmul, which has no "
-                                "lowering for AIE2ps");
+                                "lowering for ")
+                 << stringifyAIEArch(device.getTargetModel().getTargetArch());
         AIEArch arch = device.getTargetModel().getTargetArch();
         if (arch == AIEArch::AIE2 || arch == AIEArch::AIE2p) {
           std::string ctrlRegFuncName = (arch == AIEArch::AIE2p)
@@ -790,7 +798,9 @@ struct AIEEventOpToStdLowering : OpConversionPattern<EventOp> {
           rewriter.getI32IntegerAttr(op.getVal())));
       break;
     case AIEArch::AIE2ps:
-      return op.emitOpError("has no core lowering for AIE2ps");
+    case AIEArch::AIE4:
+      return op.emitOpError("has no core lowering for ")
+             << stringifyAIEArch(device.getTargetModel().getTargetArch());
     }
     auto eventFunc = module.lookupSymbol<func::FuncOp>(funcName);
     if (!eventFunc)

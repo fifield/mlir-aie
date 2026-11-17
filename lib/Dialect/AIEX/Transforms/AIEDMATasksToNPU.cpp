@@ -293,6 +293,11 @@ struct AIEDMATasksToNPUPass
     auto buf = bd_op.getBuffer();
     auto col = tile.getCol();
     auto row = tile.getRow();
+    // The BD register address and its address field both come from the
+    // tile's BD layout.
+    const AIE::DmaBdLayout *layout = target_model.getDmaBdLayout(col, row);
+    if (!layout)
+      return bd_op->emitOpError("has no buffer descriptor layout on this tile");
     // A foldable SSA bd_id must name the same register as the block write.
     auto constBdId = bdId ? getConstantIntValue(bdId) : std::nullopt;
     uint32_t bd_id = constBdId ? *constBdId : bd_op.getBdId().value_or(0);
@@ -387,10 +392,6 @@ struct AIEDMATasksToNPUPass
           buf_addr += addrOffset.value();
       }
 
-      const AIE::DmaBdLayout *layout = target_model.getDmaBdLayout(col, row);
-      if (!layout)
-        return bd_op->emitOpError(
-            "has no buffer descriptor layout on this tile");
       const AIE::DmaBdField &addrBits = layout->bufferOffset;
       uint64_t divisor = getBdAddressUnit(target_model, col, row);
       uint64_t maxByteAddr = (uint64_t(addrBits.mask()) + 1) * divisor - 1;

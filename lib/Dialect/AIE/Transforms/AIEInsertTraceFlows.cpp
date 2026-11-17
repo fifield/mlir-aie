@@ -107,6 +107,12 @@ struct AIEInsertTraceFlowsPass
     if (traces.empty())
       return;
 
+    // The trace DMA program and register writes below are AIE2-shaped.
+    if (isa<AIE4TargetModel>(targetModel)) {
+      traces.front().emitOpError("trace is not yet supported on AIE4");
+      return signalPassFailure();
+    }
+
     // The trace DMA program below targets one of the two shim S2MM channels
     // and a shim BD; reject options it cannot encode.
     int shimChannel = clShimChannel;

@@ -1879,5 +1879,782 @@ std::optional<uint32_t> AIE2PSTargetModel::getStreamSwitchPortIndex(
                                                    master);
 }
 
+///
+/// AIE4 TargetModel
+///
+
+AIEArch AIE4TargetModel::getTargetArch() const { return AIEArch::AIE4; }
+
+uint32_t AIE4TargetModel::getAddressRow(int col, int row) const {
+  uint32_t addrRow = static_cast<uint32_t>(row);
+  if (isCoreTile(col, row))
+    return addrRow + 4 * getNumMemTileRows();
+  if (isMemTile(col, row))
+    return 5 * addrRow - 4; // memtile row m spans address rows 5m-4 .. 5m
+  return addrRow;
+}
+
+std::optional<TileID> AIE4TargetModel::getMemWest(TileID src) const {
+  std::optional<TileID> ret({src.col - 1, src.row});
+  if (!isValidTile(*ret))
+    ret.reset();
+  return ret;
+}
+
+std::optional<TileID> AIE4TargetModel::getMemEast(TileID src) const {
+  std::optional ret = src;
+  if (!isValidTile(*ret))
+    ret.reset();
+  return ret;
+}
+
+std::optional<TileID> AIE4TargetModel::getMemNorth(TileID src) const {
+  std::optional<TileID> ret({src.col, src.row + 1});
+  if (!isValidTile(*ret))
+    ret.reset();
+  return ret;
+}
+
+std::optional<TileID> AIE4TargetModel::getMemSouth(TileID src) const {
+  std::optional<TileID> ret({src.col, src.row - 1});
+  // The shim row has no tile memory, and memtiles are not adjacent to cores.
+  if (!isValidTile(*ret) || ret->row == 0 || isMemTile(ret->col, ret->row))
+    ret.reset();
+  return ret;
+}
+
+bool AIE4TargetModel::isMemWest(int srcCol, int srcRow, int dstCol,
+                                int dstRow) const {
+  return isWest(srcCol, srcRow, dstCol, dstRow);
+}
+
+bool AIE4TargetModel::isMemEast(int srcCol, int srcRow, int dstCol,
+                                int dstRow) const {
+  return isInternal(srcCol, srcRow, dstCol, dstRow);
+}
+
+bool AIE4TargetModel::isMemNorth(int srcCol, int srcRow, int dstCol,
+                                 int dstRow) const {
+  return isNorth(srcCol, srcRow, dstCol, dstRow);
+}
+
+bool AIE4TargetModel::isMemSouth(int srcCol, int srcRow, int dstCol,
+                                 int dstRow) const {
+  return isSouth(srcCol, srcRow, dstCol, dstRow);
+}
+
+bool AIE4TargetModel::isLegalMemAffinity(int coreCol, int coreRow, int memCol,
+                                         int memRow) const {
+  if (isMemTile(coreCol, coreRow))
+    return isEast(coreCol, coreRow, memCol, memRow) ||
+           isInternal(coreCol, coreRow, memCol, memRow) ||
+           isWest(coreCol, coreRow, memCol, memRow);
+  return isMemEast(coreCol, coreRow, memCol, memRow);
+}
+
+bool AIE4TargetModel::isBdChannelAccessible(int col, int row, uint32_t bd_id,
+                                            int channel) const {
+  if (isCoreTile(col, row))
+    return bd_id < getNumBDs(AIETileType::CoreTile);
+  if (isShimNOCTile(col, row)) {
+    if (channel == 0)
+      return bd_id < 16;
+    if (channel == 2 || channel == 3)
+      return bd_id >= 16 && bd_id < 32;
+    // Channel 1: the bank depends on the direction.
+    return false;
+  }
+  // Memtile: a private pool per channel and direction.
+  return false;
+}
+
+static void aie4ChannelOutOfRange(StringRef what, int col, int row,
+                                  int channel) {
+  report_fatal_error(Twine("AIE4TargetModel::") + what + ": DMA channel " +
+                     Twine(channel) + " is not available on tile (" +
+                     Twine(col) + ", " + Twine(row) + ")");
+}
+
+uint64_t AIE4TargetModel::getDmaBdAddress(int col, int row, uint32_t bd_id,
+                                          int channel,
+                                          AIE::DMAChannelDir direction) const {
+  bool mm2s = direction == AIE::DMAChannelDir::MM2S;
+  uint64_t offset = 0;
+  if (isShimNOCTile(col, row)) {
+    if (channel < 0)
+      report_fatal_error("AIE4TargetModel::getDmaBdAddress: a shim BD's bank "
+                         "depends on its channel and direction");
+    if (channel >= static_cast<int>(getNumDMAChannels(col, row, direction)))
+      aie4ChannelOutOfRange("getDmaBdAddress", col, row, channel);
+    // bd_id is global across the two 16-BD banks; the register is indexed
+    // bank-locally.
+    bool upper = mm2s ? channel >= 2 : channel >= 1;
+    if (upper != (bd_id >= 16))
+      report_fatal_error("AIE4TargetModel::getDmaBdAddress: shim BD " +
+                         Twine(bd_id) + " is not in the bank of channel " +
+                         Twine(channel));
+    offset = (upper ? 0x00058000 : 0x00018000) + (bd_id % 16) * 0x30;
+  } else if (isMemTile(col, row)) {
+    if (channel < 0)
+      report_fatal_error("AIE4TargetModel::getDmaBdAddress: a memtile BD's "
+                         "pool depends on its channel and direction");
+    if (channel >= static_cast<int>(getNumDMAChannels(col, row, direction)))
+      aie4ChannelOutOfRange("getDmaBdAddress", col, row, channel);
+    // Each of the two application banks has five MM2S and four S2MM channels;
+    // every channel owns 16 BDs at a 0x30-byte stride.
+    int channelsPerBank = mm2s ? 5 : 4;
+    offset = mm2s ? 0x00008C00 : 0x00008000;
+    offset += (channel % channelsPerBank) * 16 * 0x30 + bd_id * 0x30;
+    if (channel >= channelsPerBank)
+      offset += 0x40000;
+  } else if (isCoreTile(col, row)) {
+    offset = 0x000AC000 + bd_id * 0x20;
+  } else {
+    llvm_unreachable("AIE4TargetModel::getDmaBdAddress called for non-DMA "
+                     "tile");
+  }
+  return getTileBaseAddress(col, row) | offset;
+}
+
+uint32_t AIE4TargetModel::getDmaBdAddressOffset(int col, int row) const {
+  if (isShimNOCTile(col, row))
+    return 0x4;
+  return 0x0;
+}
+
+uint32_t
+AIE4TargetModel::getDmaControlAddress(int col, int row, int channel,
+                                      AIE::DMAChannelDir direction) const {
+  bool mm2s = direction == AIE::DMAChannelDir::MM2S;
+  if (channel < 0 ||
+      channel >= static_cast<int>(getNumDMAChannels(col, row, direction)))
+    aie4ChannelOutOfRange("getDmaControlAddress", col, row, channel);
+  uint32_t offset = 0;
+  if (isShimNOCTile(col, row)) {
+    static constexpr uint32_t s2mm[] = {0x00018540, 0x00058540};
+    static constexpr uint32_t mm2s4[] = {0x00018550, 0x00018558, 0x00058550,
+                                         0x00058558};
+    offset = mm2s ? mm2s4[channel] : s2mm[channel];
+  } else if (isMemTile(col, row)) {
+    int channelsPerBank = mm2s ? 5 : 4;
+    offset = mm2s ? 0x00009E60 : 0x00009E00;
+    offset += (channel % channelsPerBank) * 0x8;
+    if (channel >= channelsPerBank)
+      offset += 0x40000;
+  } else if (isCoreTile(col, row)) {
+    offset = (mm2s ? 0x000ACE10 : 0x000ACE00) + channel * 0x8;
+  } else {
+    llvm_unreachable("AIE4TargetModel::getDmaControlAddress called for "
+                     "non-DMA tile");
+  }
+  return static_cast<uint32_t>(getTileBaseAddress(col, row)) | offset;
+}
+
+std::optional<uint32_t>
+AIE4TargetModel::getLocalLockAddress(uint32_t lockId, TileID tile) const {
+  constexpr uint32_t lockAddrOffset = 0x10;
+  if (lockId >= getNumLocks(tile.col, tile.row))
+    return std::nullopt;
+  // Compute-tile locks live in the memory module.
+  if (isCoreTile(tile.col, tile.row))
+    return 0x000AE000 + lockAddrOffset * lockId;
+  // Memtile (2 x 32) and shim (2 x 16) locks are split over two banks; the
+  // offsets restart in the upper bank.
+  uint32_t bankSize = getNumLocks(tile.col, tile.row) / 2;
+  if (isMemTile(tile.col, tile.row) || isShimNOCTile(tile.col, tile.row)) {
+    if (lockId < bankSize)
+      return 0x00010000 + lockAddrOffset * lockId;
+    return 0x00050000 + lockAddrOffset * (lockId - bankSize);
+  }
+  return std::nullopt;
+}
+
+std::vector<std::pair<uint32_t, uint32_t>>
+AIE4TargetModel::getShimBurstEncodingsAndLengths() const {
+  return {std::pair(0, 64), std::pair(1, 128), std::pair(2, 256),
+          std::pair(3, 512)};
+}
+
+// Manager ports
+uint32_t
+AIE4TargetModel::getNumDestSwitchboxConnections(int col, int row,
+                                                WireBundle bundle) const {
+  if (isMemTile(col, row))
+    switch (bundle) {
+    case WireBundle::DMA:
+    case WireBundle::North:
+      return 8;
+    case WireBundle::South:
+      return 4;
+    case WireBundle::TileControl:
+      return 1;
+    case WireBundle::NorthControl:
+    case WireBundle::Switch32:
+      return 2;
+    // 32 bit ports
+    case WireBundle::South32:
+    case WireBundle::North32:
+    case WireBundle::Switch512:
+      return 2;
+    case WireBundle::West32:
+    case WireBundle::East32:
+    default:
+      return 0;
+    }
+
+  if (isShimNOCTile(col, row))
+    switch (bundle) {
+    case WireBundle::DMATrace:
+      return 1;
+    case WireBundle::DMA:
+      return 2;
+    case WireBundle::North:
+      return 4;
+    case WireBundle::West: {
+      if (col == 0)
+        return 0;
+      return 2;
+    }
+    case WireBundle::East: {
+      if (col == columns() - 1)
+        return 0;
+      return 2;
+    }
+    case WireBundle::TileControl:
+      return 1;
+    case WireBundle::NorthControl:
+    case WireBundle::Switch32:
+      return 2;
+    // 32 bit ports
+    case WireBundle::North32:
+    case WireBundle::Switch512:
+    case WireBundle::Controller32:
+      return 2;
+    case WireBundle::West32:
+      if (col == 0)
+        return 0;
+      return 1;
+    case WireBundle::East32:
+      if (col == columns() - 1)
+        return 0;
+      return 1;
+    case WireBundle::PLIO32:
+    default:
+      return 0;
+    }
+
+  switch (bundle) {
+  case WireBundle::Core:
+  case WireBundle::DMA:
+  case WireBundle::NorthControl:
+    return 2;
+  case WireBundle::North: {
+    if (row == rows() - 1)
+      return 0;
+    return 8;
+  }
+  case WireBundle::West: {
+    if (col == 0)
+      return 0;
+    return 2;
+  }
+  case WireBundle::South:
+    return 4;
+  case WireBundle::East: {
+    if (col == columns() - 1)
+      return 0;
+    return 2;
+  }
+  case WireBundle::TileControl:
+  case WireBundle::Switch32:
+    return 1;
+  // 32 bit ports
+  case WireBundle::South32:
+  case WireBundle::North32:
+    return 2;
+  case WireBundle::West32:
+  case WireBundle::East32:
+  case WireBundle::Switch512:
+    return 1;
+  default:
+    return 0;
+  }
+}
+
+// Subordinate ports
+uint32_t
+AIE4TargetModel::getNumSourceSwitchboxConnections(int col, int row,
+                                                  WireBundle bundle) const {
+
+  if (isMemTile(col, row))
+    switch (bundle) {
+    case WireBundle::DMA:
+      return 10;
+    case WireBundle::North:
+      return 4;
+    case WireBundle::South:
+      return 4;
+    case WireBundle::SouthControl:
+    case WireBundle::Switch32:
+      return 2;
+    // 32-bit ports
+    case WireBundle::Trace32:
+      return 1;
+    case WireBundle::Control32:
+    case WireBundle::South32:
+    case WireBundle::North32:
+    case WireBundle::Switch512:
+      return 2;
+    case WireBundle::West32:
+    case WireBundle::East32:
+    default:
+      return 0;
+    }
+
+  if (isShimNOCTile(col, row))
+    switch (bundle) {
+    case WireBundle::DMA:
+      return 4;
+    case WireBundle::North:
+      return 4;
+    case WireBundle::West: {
+      if (col == 0)
+        return 0;
+      return 2;
+    }
+    case WireBundle::East: {
+      if (col == columns() - 1)
+        return 0;
+      return 2;
+    }
+    case WireBundle::DMAControl:
+    case WireBundle::Switch32:
+      return 2;
+    // 32-bit ports
+    case WireBundle::Trace32:
+      return 1;
+    case WireBundle::Control32:
+    case WireBundle::North32:
+    case WireBundle::Switch512:
+    case WireBundle::Controller32:
+      return 2;
+    case WireBundle::West32:
+      if (col == 0)
+        return 0;
+      return 1;
+    case WireBundle::East32:
+      if (col == columns() - 1)
+        return 0;
+      return 1;
+    default:
+      return 0;
+    }
+
+  // compute/core tile
+  switch (bundle) {
+  case WireBundle::Core:
+  case WireBundle::DMA:
+    return 1;
+  case WireBundle::North: {
+    if (row == rows() - 1)
+      return 0;
+    return 4;
+  }
+  case WireBundle::West: {
+    if (col == 0)
+      return 0;
+    return 2;
+  }
+  case WireBundle::South:
+    return 8;
+  case WireBundle::East: {
+    if (col == columns() - 1)
+      return 0;
+    return 2;
+  }
+  case WireBundle::SouthControl:
+    return 2;
+  case WireBundle::Switch32:
+    return 1;
+  // 32-bit ports
+  case WireBundle::Trace32:
+  case WireBundle::South32:
+  case WireBundle::North32:
+    return 2;
+  case WireBundle::Control32:
+  case WireBundle::West32:
+  case WireBundle::East32:
+  case WireBundle::Switch512:
+    return 1;
+  default:
+    return 0;
+  }
+}
+
+uint32_t
+AIE4TargetModel::getNumDestShimMuxConnections(int col, int row,
+                                              WireBundle bundle) const {
+  return getNumDestSwitchboxConnections(col, row, bundle);
+}
+
+uint32_t
+AIE4TargetModel::getNumSourceShimMuxConnections(int col, int row,
+                                                WireBundle bundle) const {
+  return getNumSourceSwitchboxConnections(col, row, bundle);
+}
+
+// src == subordinate
+// dst == manager
+bool AIE4TargetModel::isLegalTileConnection(int col, int row,
+                                            WireBundle srcBundle, int srcChan,
+                                            WireBundle dstBundle,
+                                            int dstChan) const {
+  if (srcChan >= int(getNumSourceSwitchboxConnections(col, row, srcBundle)))
+    return false;
+  if (dstChan >= int(getNumDestSwitchboxConnections(col, row, dstBundle)))
+    return false;
+
+  auto isBundleInList = [](WireBundle bundle,
+                           std::initializer_list<WireBundle> bundles) -> bool {
+    return std::find(bundles.begin(), bundles.end(), bundle) != bundles.end();
+  };
+
+  auto isBundle32 = [&](WireBundle bundle) -> bool {
+    return isBundleInList(
+        bundle,
+        {WireBundle::Control32, WireBundle::Controller32, WireBundle::Trace32,
+         WireBundle::South32, WireBundle::West32, WireBundle::North32,
+         WireBundle::East32, WireBundle::Switch512, WireBundle::PLIO32});
+  };
+
+  // 32-bit switch is fully connected
+  if (isBundle32(srcBundle) && isBundle32(dstBundle))
+    return true;
+
+  // Crossing between the 32-bit and 512-bit switches is a bridge wire.
+  if (isBundle32(srcBundle) != isBundle32(dstBundle))
+    return false;
+
+  // Memtile
+  if (isMemTile(col, row)) {
+
+    // DMA Subordinate
+    if (srcBundle == WireBundle::DMA) {
+      // DMA -> DMA
+      if ((dstBundle == WireBundle::DMA) &&
+          ((srcChan <= 3) || (srcChan >= 6 && srcChan <= 9)))
+        return srcChan == dstChan;
+      // DMA -> South
+      if (dstBundle == WireBundle::South) {
+        switch (srcChan) {
+        case 0:
+        case 2:
+          return dstChan == 0;
+        case 1:
+        case 3:
+          return dstChan == 1;
+        case 5:
+        case 7:
+          return dstChan == 2;
+        case 6:
+        case 8:
+          return dstChan == 3;
+        case 4:
+        case 9:
+          return true;
+        default:
+          return false;
+        }
+      }
+      // DMA -> North
+      if (dstBundle == WireBundle::North) {
+        if (srcChan == 4)
+          return dstChan == 0;
+        if (srcChan == 9)
+          return dstChan == 4;
+        return true;
+      }
+      // DMA -> Switch32
+      if (dstBundle == WireBundle::Switch32)
+        return true;
+      // DMA -> NorthControl, Control
+      if (isBundleInList(dstBundle,
+                         {WireBundle::NorthControl, WireBundle::TileControl})) {
+        if (srcChan == 3 || srcChan == 4)
+          return dstChan == 0;
+        if (srcChan == 9 || srcChan == 10)
+          return dstChan == 1;
+      }
+      return false;
+    }
+
+    // South Subordinate
+    if (srcBundle == WireBundle::South) {
+      // South -> DMA
+      if (dstBundle == WireBundle::DMA) {
+        if (srcChan == 0)
+          return dstChan == 0 || dstChan == 2 || dstChan == 3;
+        if (srcChan == 1)
+          return dstChan == 1 || dstChan == 2 || dstChan == 3;
+        if (srcChan == 2)
+          return dstChan == 4 || dstChan == 6 || dstChan == 7;
+        if (srcChan == 3)
+          return dstChan == 5 || dstChan == 6 || dstChan == 7;
+      }
+      // South -> South
+      if (dstBundle == WireBundle::South)
+        return srcChan == dstChan;
+      // South -> North, Switch32
+      if (isBundleInList(dstBundle, {WireBundle::North, WireBundle::Switch32}))
+        return true;
+      return false;
+    }
+
+    // North Subordinate
+    if (srcBundle == WireBundle::North) {
+      // North -> DMA
+      if (dstBundle == WireBundle::DMA) {
+        if (dstChan <= 1)
+          return true;
+        if (srcChan == 0)
+          return dstChan == 2;
+        if (srcChan == 1)
+          return dstChan == 3;
+        if (srcChan == 2)
+          return dstChan == 4 || dstChan == 5 || dstChan == 6;
+        if (srcChan == 3)
+          return dstChan == 4 || dstChan == 5 || dstChan == 7;
+      }
+      // North -> North
+      if (dstBundle == WireBundle::North) {
+        if (srcChan == 0 && dstChan == 0)
+          return true;
+        if (srcChan == 1 && dstChan == 1)
+          return true;
+        if (srcChan == 2 && dstChan == 4)
+          return true;
+        if (srcChan == 3 && dstChan == 5)
+          return true;
+      }
+      // North -> Control
+      if (dstBundle == WireBundle::TileControl) {
+        if (srcChan == 1 && dstChan == 0)
+          return true;
+        if (srcChan == 3)
+          return true;
+      }
+      // North -> South, Switch32
+      if (isBundleInList(dstBundle, {WireBundle::South, WireBundle::Switch32}))
+        return true;
+      return false;
+    }
+
+    // SouthControl Subordinate
+    if (srcBundle == WireBundle::SouthControl) {
+      // SouthControl -> DMA
+      if (dstBundle == WireBundle::DMA) {
+        if (srcChan == 0 && dstChan == 3)
+          return true;
+        if (srcChan == 1 && dstChan == 7)
+          return true;
+      }
+      // SouthControl -> NorthControl
+      if (dstBundle == WireBundle::NorthControl)
+        return srcChan == dstChan;
+      // SouthControl -> Control
+      if (dstBundle == WireBundle::TileControl)
+        return srcChan == 1 || dstChan == 0;
+      // SouthControl -> Switch32
+      if (dstBundle == WireBundle::Switch32)
+        return true;
+      return false;
+    }
+
+    // Switch32 Subordinate
+    if (srcBundle == WireBundle::Switch32) {
+      // Switch32 and Switch512 are joined by the bridge, not a crossbar hop.
+      if (isBundleInList(dstBundle,
+                         {WireBundle::Switch32, WireBundle::Switch512}))
+        return false;
+      if (isBundleInList(dstBundle,
+                         {WireBundle::TileControl, WireBundle::NorthControl}))
+        return srcChan == dstChan;
+      return true;
+    }
+
+    return false;
+  }
+
+  // Shimtile
+  if (isShimNOCorPLTile(col, row)) {
+    // The trace DMA accepts cardinal inputs and the 32b bridge only.
+    if (dstBundle == WireBundle::DMATrace)
+      return isBundleInList(srcBundle,
+                            {WireBundle::North, WireBundle::East,
+                             WireBundle::West, WireBundle::Switch32});
+
+    // DMA subordinate
+    if (srcBundle == WireBundle::DMA) {
+      if (dstBundle == WireBundle::DMA) {
+        if (srcChan == 0 || srcChan == 2)
+          return srcChan == dstChan;
+        return false;
+      }
+      if (isBundleInList(dstBundle,
+                         {WireBundle::NorthControl, WireBundle::TileControl})) {
+        if (srcChan <= 1 && dstChan == 0)
+          return true;
+        if (srcChan >= 2 && dstChan == 1)
+          return true;
+        return false;
+      }
+      if (isBundleInList(dstBundle, {WireBundle::West, WireBundle::North,
+                                     WireBundle::East, WireBundle::Switch32}))
+        return true;
+      return false;
+    }
+    // North, East, West subordinate
+    if (isBundleInList(srcBundle, {WireBundle::West, WireBundle::North,
+                                   WireBundle::East})) {
+      if (srcBundle == dstBundle)
+        return srcChan == dstChan;
+      if (isBundleInList(dstBundle,
+                         {WireBundle::DMA, WireBundle::West, WireBundle::North,
+                          WireBundle::East, WireBundle::Switch32}))
+        return true;
+      if (dstBundle == WireBundle::TileControl) {
+        if (dstChan == 1)
+          return (srcBundle == WireBundle::North) && (srcChan == 3);
+        if (srcBundle == WireBundle::North)
+          return (srcChan == 1) || (srcChan == 3);
+        return true;
+      }
+      if (dstBundle == WireBundle::NorthControl) {
+        if (srcBundle != WireBundle::North)
+          return true;
+        if (srcChan == 3)
+          return true;
+        if (srcChan == 1 && dstChan == 0)
+          return true;
+        return false;
+      }
+      return false;
+    }
+    // Control mm2s subordinate
+    if (srcBundle == WireBundle::DMAControl) {
+      if (isBundleInList(dstBundle, {WireBundle::West, WireBundle::East}))
+        return (srcChan == 0) || (dstChan == 1);
+      if (dstBundle == WireBundle::North) {
+        if (dstChan <= 1)
+          return srcChan == 0;
+        if (dstChan >= 2)
+          return srcChan == 1;
+      }
+      if (isBundleInList(dstBundle,
+                         {WireBundle::NorthControl, WireBundle::TileControl,
+                          WireBundle::Switch32})) {
+        if (srcChan == dstChan)
+          return true;
+        if (dstBundle == WireBundle::TileControl)
+          return dstChan == 0;
+        return false;
+      }
+    }
+    // Switch32 subordinate
+    if (srcBundle == WireBundle::Switch32) {
+      if (isBundleInList(dstBundle,
+                         {WireBundle::DMA, WireBundle::West, WireBundle::North,
+                          WireBundle::East, WireBundle::NorthControl}))
+        return true;
+      if (dstBundle == WireBundle::TileControl)
+        return srcChan == dstChan;
+    }
+    // Switch512 is a 32-bit switch port; handled by the rule above.
+    return false;
+  }
+
+  // Coretile
+  if (isCoreTile(col, row)) {
+    // Core subordinate
+    switch (srcBundle) {
+    default:
+      return false;
+    case WireBundle::Core:
+      if (dstBundle == WireBundle::DMA)
+        return dstChan == 1;
+      if (dstBundle == WireBundle::NorthControl)
+        return dstChan == 0;
+      if (isBundleInList(dstBundle,
+                         {WireBundle::South, WireBundle::East, WireBundle::West,
+                          WireBundle::North, WireBundle::TileControl,
+                          WireBundle::Switch32}))
+        return true;
+      return false;
+    // DMA subordinate
+    case WireBundle::DMA:
+      if (dstBundle == WireBundle::DMA)
+        return dstChan == 0;
+      if (isBundleInList(dstBundle,
+                         {WireBundle::Core, WireBundle::South, WireBundle::East,
+                          WireBundle::West, WireBundle::North,
+                          WireBundle::NorthControl, WireBundle::TileControl,
+                          WireBundle::Switch32}))
+        return true;
+      return false;
+    // North, South subordinate
+    case WireBundle::North:
+    case WireBundle::South:
+      if (srcBundle == dstBundle) {
+        if (srcChan == 0 || srcChan == 1)
+          return srcChan == dstChan;
+        if (srcChan == 4 || srcChan == 5)
+          return (srcChan - 2) == dstChan;
+        return false;
+      }
+      if (isBundleInList(dstBundle,
+                         {WireBundle::Core, WireBundle::DMA, WireBundle::West,
+                          WireBundle::North, WireBundle::South,
+                          WireBundle::East, WireBundle::Switch32}))
+        return true;
+      return false;
+    // East, West subordinate
+    case WireBundle::East:
+    case WireBundle::West:
+      if (dstBundle == srcBundle)
+        return srcChan == dstChan;
+      if (isBundleInList(dstBundle,
+                         {WireBundle::Core, WireBundle::DMA, WireBundle::South,
+                          WireBundle::East, WireBundle::West, WireBundle::North,
+                          WireBundle::NorthControl, WireBundle::TileControl,
+                          WireBundle::Switch32}))
+        return true;
+      return false;
+    // SouthControl subordinate
+    case WireBundle::SouthControl:
+      if (isBundleInList(dstBundle, {WireBundle::Core, WireBundle::DMA}))
+        return srcChan == dstChan;
+      if (isBundleInList(dstBundle, {WireBundle::East, WireBundle::West}))
+        return dstChan == 1 || srcChan == 0;
+      if (dstBundle == WireBundle::NorthControl)
+        return srcChan == 1 || dstChan == 0;
+      if (isBundleInList(dstBundle,
+                         {WireBundle::TileControl, WireBundle::Switch32}))
+        return true;
+      return false;
+    // Switch512 is a 32-bit switch port; handled by the rule above.
+    case (WireBundle::Switch512):
+      return false;
+    // Switch32 subordinate (port on the 512-bit switch fed by the bridge)
+    case (WireBundle::Switch32):
+      return (isBundleInList(
+          dstBundle, {WireBundle::Core, WireBundle::DMA, WireBundle::South,
+                      WireBundle::East, WireBundle::West, WireBundle::North,
+                      WireBundle::NorthControl, WireBundle::TileControl,
+                      WireBundle::Switch512}));
+    }
+  }
+  return false;
+}
+
 } // namespace AIE
 } // namespace xilinx

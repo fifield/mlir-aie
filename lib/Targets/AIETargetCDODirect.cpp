@@ -150,6 +150,8 @@ translateToCDODirect(ModuleOp m, llvm::StringRef workDirPath,
   // shim dma on tile (0,0) are hard-coded assumptions about NPU...
   assert(targetModel.hasProperty(AIETargetModel::IsNPU) &&
          "Only NPU currently supported");
+  if (failed(AIERTControl::isSupported(targetOp, targetModel)))
+    return failure();
 
   AIERTControl ctl(targetModel);
   if (failed(ctl.setIOBackend(aieSim, xaieDebug)))

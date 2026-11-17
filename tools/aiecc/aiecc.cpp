@@ -1128,6 +1128,14 @@ buildMainGraph(mlir::MLIRContext &context, Graph &g,
         if (!out.value->get()) {
           return mlir::failure();
         }
+        // The configuration, ELF and core-compile flows below are AIE2-shaped.
+        for (DeviceOp device : out.value->get().getOps<DeviceOp>()) {
+          if (llvm::isa<xilinx::AIE::AIE4TargetModel>(
+                  device.getTargetModel())) {
+            return device.emitOpError(
+                "aiecc does not yet support the AIE4 architecture");
+          }
+        }
         if (stackSize > 0) {
           populateDefaultStackSize(out.value->get(), stackSize);
         }

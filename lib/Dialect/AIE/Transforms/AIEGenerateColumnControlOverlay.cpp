@@ -70,8 +70,16 @@ struct AIEGenerateColumnControlOverlayPass
   void runOnOperation() override {
     llvm::MapVector<AIEDevice, SmallVector<DeviceOp>> groups;
     for (DeviceOp device : getOperation().getOps<DeviceOp>())
-      if (getsColumnControlOverlay(device, configuration))
+      if (getsColumnControlOverlay(device, configuration)) {
+        // The AIE4 overlay is fed by the shim's control-MM2S DMA, which has no
+        // DMAChannelDir yet; the overlay built here is the AIE2 one.
+        if (isa<AIE4TargetModel>(device.getTargetModel())) {
+          device.emitOpError("the column control overlay is not yet "
+                             "supported on AIE4");
+          return signalPassFailure();
+        }
         groups[device.getDevice()].push_back(device);
+      }
     for (auto &[target, users] : groups)
       if (failed(generate(users)))
         return signalPassFailure();
