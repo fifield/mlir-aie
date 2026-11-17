@@ -50,7 +50,8 @@ struct TransactionBinaryOperation {
     uint32_t action;
     uint32_t addr;
     int32_t argIdx;
-    // Words 10-11 of the op; see txn_append_address_patch.
+    // 64 bits: words 10-11 of a v0.1 op (see txn_append_address_patch), bytes
+    // 16-23 of a v1.0 one.
     uint64_t argPlus;
   };
 

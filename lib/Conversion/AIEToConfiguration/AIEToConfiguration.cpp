@@ -263,7 +263,11 @@ std::optional<int> xilinx::AIE::parseTransactionBinary(
         uint32_t opSize = read32(i + 4);
         if (!requireOpSize(opSize, 48) || !requireBytes(i, opSize))
           return std::nullopt;
-        uint32_t action = read32(i + 20);
+        // The 8-byte custom operation header is followed by aie-codegen's
+        // patch_op_t: op_base (8 bytes), the 32-bit action, then the 64-bit
+        // register address, argument index and argument offset, which natural
+        // alignment places at 24, 32 and 40.
+        uint32_t action = read32(i + 16);
         uint32_t addr = read32(i + 24);
         int32_t argIdx = static_cast<int32_t>(read32(i + 32));
         uint64_t argPlus = static_cast<uint64_t>(read32(i + 40)) |
@@ -391,15 +395,18 @@ std::optional<int> xilinx::AIE::parseTransactionBinary(
         if (!requireBytes(i, 8))
           return std::nullopt;
         uint32_t opSize = read32(i + 4);
-        if (!requireOpSize(opSize, 48) || !requireBytes(i, opSize))
+        if (!requireOpSize(opSize, 24) || !requireBytes(i, opSize))
           return std::nullopt;
-        uint32_t action = read32(i + 20);
-        uint32_t addr = read32(i + 24);
-        int32_t argIdx = static_cast<int32_t>(read32(i + 32));
-        uint64_t argPlus = static_cast<uint64_t>(read32(i + 40)) |
-                           (static_cast<uint64_t>(read32(i + 44)) << 32);
+        // v1.0 packs the patch as aie-codegen's patch_op_opt_t after the 8-byte
+        // custom operation header: a 32-bit register address, an 8-bit
+        // argument index padded to a word, and a 64-bit argument offset. It has
+        // no action.
+        uint32_t addr = read32(i + 8);
+        int32_t argIdx = data[i + 12];
+        uint64_t argPlus = static_cast<uint64_t>(read32(i + 16)) |
+                           (static_cast<uint64_t>(read32(i + 20)) << 32);
         TransactionBinaryOperation::AddressPatchPayload payload{
-            action, addr, argIdx, argPlus};
+            /*action=*/0, addr, argIdx, argPlus};
         op.addressPatch = payload;
         op.cmd.Size = opSize;
         i += opSize;

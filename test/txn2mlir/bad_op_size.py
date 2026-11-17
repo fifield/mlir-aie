@@ -60,9 +60,10 @@ def transaction(op, size):
         config = (2 << 24) | (1 << 16) | (1 << 8)
         body = struct.pack("<B3xIII", 0x80, size, 1, config)
     else:
-        # Opcode 0x81 and the operation size, the action, then the register
-        # address, argument index and 64-bit argument offset.
-        body = struct.pack("<B3xI12xIQQQ", 0x81, size, 0, ADDRESS, 1, 8)
+        # Opcode 0x81 and the operation size, op_base, the action padded to
+        # 8 bytes, then the 64-bit register address, argument index and
+        # argument offset.
+        body = struct.pack("<B3xI8xI4xQQQ", 0x81, size, 0, ADDRESS, 1, 8)
     body = body.ljust(size, b"\0")
     # major, minor, device generation, rows, columns, memtile rows, padding,
     # then the number of operations and the size of the whole transaction.
