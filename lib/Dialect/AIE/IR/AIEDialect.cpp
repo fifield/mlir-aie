@@ -505,6 +505,96 @@ struct HasSomeTerminator {
   }
 };
 
+// AIE4 channels draw from small BD pools that may reuse ids. Check each pool's
+// BDs fit, pinned ids lie in the chain's pool, and no BD is reached from two
+// pools.
+static LogicalResult verifyBdPools(Operation *op, Region &body, TileLike tile,
+                                   const AIETargetModel &targetModel) {
+  std::optional<int> col = tile.tryGetCol();
+  std::optional<int> row = tile.tryGetRow();
+  if (!col || !row)
+    return success();
+
+  DenseMap<Block *, SmallVector<DMAChannel, 1>> blockChannels;
+  for (Block &block : body) {
+    for (auto dmaStart : block.getOps<DMAStartOp>()) {
+      // No channel index until --aie-objectfifo-allocate.
+      if (dmaStart.getEndpoint())
+        continue;
+      DMAChannel chan = {dmaStart.getChannelDir(), dmaStart.getChannelIndex()};
+      if (chan.channel < 0 || !targetModel.isDmaChannelSupported(
+                                  {*col, *row}, chan.direction, chan.channel))
+        continue;
+      SmallPtrSet<Block *, 16> visited;
+      SmallVector<Block *> worklist = {dmaStart.getDest()};
+      while (!worklist.empty()) {
+        Block *bdBlock = worklist.pop_back_val();
+        if (!visited.insert(bdBlock).second)
+          continue;
+        blockChannels[bdBlock].push_back(chan);
+        if (bdBlock->mightHaveTerminator())
+          llvm::append_range(worklist,
+                             bdBlock->getTerminator()->getSuccessors());
+      }
+    }
+  }
+
+  DenseMap<uint32_t, uint32_t> poolBdCount;
+  for (Block &block : body) {
+    auto it = blockChannels.find(&block);
+    if (it == blockChannels.end())
+      continue;
+    auto bdOps = llvm::to_vector_of<DMABDOp>(block.getOps<DMABDOp>());
+    if (bdOps.empty())
+      continue;
+    DMAChannel chan = it->second.front();
+    uint32_t pool =
+        targetModel.getBdPoolId(*col, *row, chan.channel, chan.direction);
+    for (DMAChannel other : llvm::drop_begin(it->second))
+      if (targetModel.getBdPoolId(*col, *row, other.channel, other.direction) !=
+          pool)
+        return (op->emitOpError("BD is reached from channels (")
+                << stringifyDMAChannelDir(chan.direction) << ", "
+                << chan.channel << ") and ("
+                << stringifyDMAChannelDir(other.direction) << ", "
+                << other.channel
+                << "), which draw from different BD pools; one BD cannot "
+                   "serve both")
+            .attachNote(bdOps.front().getLoc())
+            .append("this BD");
+    uint32_t poolSize = targetModel.getNumBDsInPool(*col, *row, pool);
+    if (++poolBdCount[pool] > poolSize)
+      return (op->emitOpError("BD pool for channel (")
+              << stringifyDMAChannelDir(chan.direction) << ", " << chan.channel
+              << ") exceeds limit of " << poolSize << " BDs")
+          .attachNote(bdOps.front().getLoc())
+          .append("no space for this BD");
+
+    uint32_t poolStart = targetModel.getBdPoolStartId(*col, *row, pool);
+    auto checkBdId = [&](DMABDOp bdOp, std::optional<int32_t> id,
+                         StringRef what) -> LogicalResult {
+      if (!id || *id < 0 ||
+          targetModel.isBdChannelAccessible(*col, *row,
+                                            static_cast<uint32_t>(*id),
+                                            chan.channel, chan.direction))
+        return success();
+      return (op->emitOpError(what)
+              << " " << *id << " is not accessible from channel ("
+              << stringifyDMAChannelDir(chan.direction) << ", " << chan.channel
+              << "), whose BD pool spans ids " << poolStart << " to "
+              << (poolStart + poolSize - 1))
+          .attachNote(bdOp.getLoc())
+          .append("this BD");
+    };
+    for (DMABDOp bdOp : bdOps) {
+      if (failed(checkBdId(bdOp, bdOp.getBdId(), "bd_id")) ||
+          failed(checkBdId(bdOp, bdOp.getNextBdId(), "next_bd_id")))
+        return failure();
+    }
+  }
+  return success();
+}
+
 // Check that the given DMA-like op (e.g. MemOp, ShimDMAOp)
 // has valid BDs.
 template <typename ConcreteType>
@@ -515,6 +605,10 @@ LogicalResult HasValidBDs<ConcreteType>::verifyTrait(Operation *op) {
   TileLike tile = element.getTileLike();
   if (!tile)
     return op->emitOpError("tile must implement TileLike interface");
+
+  if (isa<AIE4TargetModel>(targetModel) &&
+      failed(verifyBdPools(op, element.getBody(), tile, targetModel)))
+    return failure();
 
   int bdMax = targetModel.getTotalNumBDs(tile.getTileType());
 
@@ -3599,6 +3693,58 @@ LogicalResult GetCascadeOp::verify() {
 }
 
 //===----------------------------------------------------------------------===//
+// GetStreamOp, PutStreamOp
+//===----------------------------------------------------------------------===//
+
+// AIE4 cores read two input streams in 512/1024-bit units and write one output
+// in 32/256/512-bit units; earlier cores have no vector stream access.
+
+LogicalResult GetStreamOp::verify() {
+  Type type = getStreamValue().getType();
+  auto vectorType = dyn_cast<VectorType>(type);
+  if (!isa<AIE4TargetModel>(getTargetModel(*this))) {
+    if (vectorType)
+      return emitOpError("vector stream reads are only supported on AIE4");
+    return success();
+  }
+  if (!vectorType)
+    return emitOpError("AIE4 cores read streams in 512-bit or 1024-bit units; "
+                       "use a vector<16xi32> or vector<32xi32> result instead "
+                       "of ")
+           << type
+           << " (a 32-bit read has no AIE4 equivalent outside the load-FIFO "
+              "mode)";
+  if (vectorType.getRank() != 1 || vectorType.isScalable())
+    return emitOpError("AIE4 stream reads require a fixed rank-1 "
+                       "vector<16xi32> or vector<32xi32> result; got ")
+           << type;
+  APInt channel;
+  if (matchPattern(getChannel(), m_ConstantInt(&channel)) && channel.ugt(1))
+    return emitOpError("AIE4 cores have input streams 0 and 1 only; got ")
+           << llvm::toString(channel, /*Radix=*/10, /*Signed=*/false);
+  return success();
+}
+
+LogicalResult PutStreamOp::verify() {
+  Type type = getStreamValue().getType();
+  auto vectorType = dyn_cast<VectorType>(type);
+  if (!isa<AIE4TargetModel>(getTargetModel(*this))) {
+    if (vectorType)
+      return emitOpError("vector stream writes are only supported on AIE4");
+    return success();
+  }
+  if (!type.isSignlessInteger(32) &&
+      (!vectorType || vectorType.getRank() != 1 || vectorType.isScalable()))
+    return emitOpError("AIE4 stream writes require i32 or a fixed rank-1 "
+                       "vector<8xi32> or vector<16xi32> value; got ")
+           << type;
+  APInt channel;
+  if (matchPattern(getChannel(), m_ConstantInt(&channel)) && !channel.isZero())
+    return emitOpError("AIE4 cores have output stream 0 only");
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
 // DeviceOp
 //===----------------------------------------------------------------------===//
 
@@ -6240,6 +6386,13 @@ LogicalResult DMABDOp::verify() {
     if (getBufferElementTypeWidthInBytes() > 4 && dims->back().getStride() != 1)
       return emitOpError(
           "For >32b width datatypes, inner-most dim stride must be 1");
+
+    // AIE4 BDs have no d0 step field, so a D0 stride would be dropped.
+    if (const DmaBdLayout *layout =
+            targetModel.getDmaBdLayout(parentTile.getTileType());
+        layout && !layout->d0Stride.exists() && dims->back().getSize() > 1 &&
+        dims->back().getStride() != 1)
+      return emitOpError("AIE4 D0 stride is fixed by hardware and must be 1.");
 
     // The hardware stepsize/wrap registers are denominated in 32-bit words.
     // lib/Targets/AIERT.cpp's static/CDO lowering converts element-

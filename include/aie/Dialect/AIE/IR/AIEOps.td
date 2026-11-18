@@ -2222,15 +2222,23 @@ def AIE_DmaPollForQueueSpaceOp
   let hasVerifier = 1;
 }
 
-def AIE_GetStreamOp : AIE_Op<"get_stream", [HasParent<"CoreOp">]>,
-                      Results<(outs AnyTypeOf<[F32, I32, I<128>]>)> {
+def AIE_GetStreamOp : AIE_Op<"get_stream", [HasParent<"CoreOp">]> {
   let summary = "An op to read from a stream channel/port of a switchbox";
   let description = [{
     An op to read from a stream channel/port of a switchbox.
+
+    `channel` selects the core's input stream, and the result type selects
+    the access width. Before AIE4 the result is i32, f32 or i128. On AIE4 it
+    is a fixed rank-1 vector<16xi32> (512 bits) or vector<32xi32> (1024 bits),
+    read from stream 0 or 1: a read blocks until 16 or 32 words are available
+    or TLAST ends the transfer, and a short transfer is zero-padded. AIE4
+    scalar reads need load-FIFO state, which this op does not model.
   }];
 
   let arguments = (ins AnyInteger:$channel);
-  let results = (outs AnyTypeOf<[F32, I32, I<128>]>:$stream_value);
+  let results = (outs AnyTypeOf<[F32, I32, I<128>,
+                                 VectorOfLengthAndType<[16, 32], [I32]>]>
+                     :$stream_value);
 
   let assemblyFormat = [{
     `(` $channel `:` type($channel) `)` attr-dict `:` type($stream_value)
@@ -2242,16 +2250,25 @@ def AIE_GetStreamOp : AIE_Op<"get_stream", [HasParent<"CoreOp">]>,
       return llvm::isa<mlir::FloatType>(getStreamValue().getType());
     }
   }];
+
+  let hasVerifier = 1;
 }
 
 def AIE_PutStreamOp : AIE_Op<"put_stream", [HasParent<"CoreOp">]> {
   let summary = "An op to write to a stream channel/port of a switchbox";
   let description = [{
     An op to write to a stream channel/port of a switchbox.
+
+    Before AIE4 the value is i32, f32 or i128. On AIE4, channel 0 is the
+    only output stream, and the value is i32, a fixed rank-1 vector<8xi32>
+    (256 bits) or vector<16xi32> (512 bits). An AIE4 write appends to the
+    output buffer without asserting TLAST. Data is sent in 512-bit units; a
+    partial unit stays buffered until later writes complete it.
   }];
 
   let arguments = (ins AnyInteger:$channel,
-      AnyTypeOf<[F32, I32, I<128>]>:$stream_value);
+      AnyTypeOf<[F32, I32, I<128>,
+                 VectorOfLengthAndType<[8, 16], [I32]>]>:$stream_value);
 
   let assemblyFormat = [{
     `(` $channel `:` type($channel) `,` $stream_value `:` type($stream_value) `)` attr-dict
@@ -2263,6 +2280,8 @@ def AIE_PutStreamOp : AIE_Op<"put_stream", [HasParent<"CoreOp">]> {
       return llvm::isa<mlir::FloatType>(getStreamValue().getType());
     }
   }];
+
+  let hasVerifier = 1;
 }
 
 def AIE_CascadeFlowOp : AIE_Op<"cascade_flow", []> {

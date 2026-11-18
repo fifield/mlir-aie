@@ -7,17 +7,18 @@
 
 // RUN: aie-opt --aie-assign-bd-ids --verify-diagnostics --split-input-file %s
 
-// AIE4 BD pools: a pinned id must lie in the pool of its channel and
-// direction, ids collide only within a pool, and a pool holds 16 BDs.
+// AIE4 BD pools: pinned ids must lie in the channel's pool, collide only within
+// a pool, and a pool holds 16 BDs.
 
 // Shim S2MM channel 1 uses the upper bank, BDs 16-31.
 aie.device(npu3) {
   %shim = aie.tile(0, 0)
   %ext = aie.external_buffer : memref<256xi32>
+  // expected-error@+1 {{bd_id 3 is not accessible from channel (S2MM, 1), whose BD pool spans ids 16 to 31}}
   aie.shim_dma(%shim) {
     %0 = aie.dma_start(S2MM, 1, ^bd0, ^end)
   ^bd0:
-    // expected-error@+1 {{assigned bd_id 3 is not accessible from channel 1 on this tile}}
+    // expected-note@+1 {{this BD}}
     aie.dma_bd(%ext : memref<256xi32> offset = 0 len = 256) {bd_id = 3 : i32}
     aie.next_bd ^end
   ^end:
@@ -71,6 +72,7 @@ aie.device(npu3) {
 aie.device(npu3) {
   %mem = aie.tile(0, 1)
   %a = aie.buffer(%mem) : memref<256xi32>
+  // expected-error@+1 {{BD pool for channel (S2MM, 2) exceeds limit of 16 BDs}}
   aie.memtile_dma(%mem) {
     %0 = aie.dma_start(S2MM, 2, ^bd0, ^end)
   ^bd0:
@@ -122,7 +124,7 @@ aie.device(npu3) {
     aie.dma_bd(%a : memref<256xi32> offset = 0 len = 256)
     aie.next_bd ^bd16
   ^bd16:
-    // expected-error@+1 {{Allocator exhausted available BD IDs (maximum 16 available for channel 2)}}
+    // expected-note@+1 {{no space for this BD}}
     aie.dma_bd(%a : memref<256xi32> offset = 0 len = 256)
     aie.next_bd ^bd0
   ^end:
