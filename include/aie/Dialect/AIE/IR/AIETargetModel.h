@@ -1446,8 +1446,11 @@ public:
 /// This model is written against the target-model API as it stands. Where
 /// that API cannot describe AIE4 it reports "unsupported" rather than an
 /// AIE2-shaped answer:
-///  - No register database, BD layout or stream-switch port index map yet.
+///  - No BD layout or stream-switch port index map yet.
 class AIE4TargetModel : public AIETargetModel {
+protected:
+  std::unique_ptr<RegisterDatabase> loadRegisterDatabase() const override;
+
 public:
   AIE4TargetModel(TargetModelKind k) : AIETargetModel(k) {
     addModelProperty(AIETargetModel::UsesSemaphoreLocks);

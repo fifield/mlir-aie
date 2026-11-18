@@ -46,6 +46,7 @@ struct RegisterInfo {
   std::string description;
   std::vector<BitFieldInfo> bit_fields;
 
+  /// Lookup a bit field by name, case-insensitively.
   const BitFieldInfo *getField(llvm::StringRef fieldName) const;
 };
 
@@ -62,6 +63,9 @@ public:
   /// Load database for AIE2 architecture
   static std::unique_ptr<RegisterDatabase> loadAIE2();
 
+  /// Load database for AIE4 architecture
+  static std::unique_ptr<RegisterDatabase> loadAIE4();
+
   /// Lookup register by name and module
   const RegisterInfo *lookupRegister(llvm::StringRef name,
                                      llvm::StringRef module) const;
@@ -69,7 +73,7 @@ public:
   /// Lookup register by tile-relative offset and module name. Used by the
   /// transaction-binary locmap to decorate each transaction word with its
   /// semantic register name. Module names are the JSON keys in
-  /// aie_registers_aie2.json: "core", "memory", "memory_tile", "shim".
+  /// aie_registers_<arch>.json: "core", "memory", "memory_tile", "shim".
   /// Returns nullptr if no register matches.
   const RegisterInfo *lookupRegisterByOffset(uint32_t offset,
                                              llvm::StringRef module) const;
@@ -86,7 +90,13 @@ public:
 private:
   RegisterDatabase() = default;
 
-  bool loadFromJSON(llvm::StringRef registerPath, llvm::StringRef eventPath);
+  /// Load `registerFile` and the `archKey` section of the event database from
+  /// the register database directory.
+  static std::unique_ptr<RegisterDatabase> load(llvm::StringRef registerFile,
+                                                llvm::StringRef archKey);
+
+  bool loadFromJSON(llvm::StringRef registerPath, llvm::StringRef eventPath,
+                    llvm::StringRef archKey);
 
   // Build the offset-keyed reverse index from `registers_`. Called once at
   // load time after `loadFromJSON` finishes populating `registers_`.

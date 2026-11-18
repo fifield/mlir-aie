@@ -37,6 +37,9 @@ std::string getModuleForTileEvents(const AIETargetModel &model, TileID tile,
   if (model.isMemTile(tile.col, tile.row))
     return "mem_tile"; // Events database uses "mem_tile" instead of
                        // "memory_tile"
+  // AIE4 compute tiles number memory and DMA events in the core module.
+  if (isMem && model.getTargetArch() == AIEArch::AIE4)
+    return "core";
   return isMem ? std::string("memory") : std::string("core");
 }
 
@@ -1876,6 +1879,11 @@ std::optional<uint32_t> AIE2PSTargetModel::getStreamSwitchPortIndex(
 ///
 /// AIE4 TargetModel
 ///
+
+std::unique_ptr<RegisterDatabase>
+AIE4TargetModel::loadRegisterDatabase() const {
+  return RegisterDatabase::loadAIE4();
+}
 
 AIEArch AIE4TargetModel::getTargetArch() const { return AIEArch::AIE4; }
 

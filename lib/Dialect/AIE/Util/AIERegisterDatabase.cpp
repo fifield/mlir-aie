@@ -24,7 +24,7 @@ using namespace llvm;
 
 const BitFieldInfo *RegisterInfo::getField(StringRef fieldName) const {
   for (const auto &field : bit_fields) {
-    if (field.name == fieldName) {
+    if (StringRef(field.name).equals_insensitive(fieldName)) {
       return &field;
     }
   }
@@ -65,8 +65,9 @@ std::optional<std::string> findRegDBFile(llvm::StringRef fileName) {
 }
 } // namespace
 
-std::unique_ptr<RegisterDatabase> RegisterDatabase::loadAIE2() {
-  auto registerPath = findRegDBFile("aie_registers_aie2.json");
+std::unique_ptr<RegisterDatabase> RegisterDatabase::load(StringRef registerFile,
+                                                         StringRef archKey) {
+  auto registerPath = findRegDBFile(registerFile);
   auto eventPath = findRegDBFile("events_database.json");
 
   if (!registerPath || !eventPath) {
@@ -77,15 +78,23 @@ std::unique_ptr<RegisterDatabase> RegisterDatabase::loadAIE2() {
   }
 
   auto db = std::unique_ptr<RegisterDatabase>(new RegisterDatabase());
-  if (!db->loadFromJSON(*registerPath, *eventPath))
+  if (!db->loadFromJSON(*registerPath, *eventPath, archKey))
     return nullptr;
   db->buildOffsetIndex();
 
   return db;
 }
 
-bool RegisterDatabase::loadFromJSON(StringRef registerPath,
-                                    StringRef eventPath) {
+std::unique_ptr<RegisterDatabase> RegisterDatabase::loadAIE2() {
+  return load("aie_registers_aie2.json", "aie2");
+}
+
+std::unique_ptr<RegisterDatabase> RegisterDatabase::loadAIE4() {
+  return load("aie_registers_aie4.json", "aie4");
+}
+
+bool RegisterDatabase::loadFromJSON(StringRef registerPath, StringRef eventPath,
+                                    StringRef archKey) {
   // Load register database
   auto registerBuf = MemoryBuffer::getFile(registerPath);
   if (!registerBuf) {
@@ -206,18 +215,19 @@ bool RegisterDatabase::loadFromJSON(StringRef registerPath,
     return false;
   }
 
-  // Parse event database for aie2
+  // Parse the event database section for this architecture
   auto *eventRoot = eventJSON->getAsObject();
   if (!eventRoot)
     return false;
 
-  auto *aie2 = eventRoot->getObject("aie2");
-  if (!aie2) {
-    llvm::errs() << "Failed to find 'aie2' architecture in event database\n";
+  auto *arch = eventRoot->getObject(archKey);
+  if (!arch) {
+    llvm::errs() << "Failed to find '" << archKey
+                 << "' architecture in event database\n";
     return false;
   }
 
-  auto *eventModules = aie2->getObject("modules");
+  auto *eventModules = arch->getObject("modules");
   if (!eventModules)
     return false;
 

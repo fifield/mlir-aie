@@ -312,6 +312,148 @@ void test_encode_field_value_overflow() {
                "field width\n";
 }
 
+// AIE4 values are from aie-codegen's xaie4gbl_params.h.
+static void expectRegister(const RegisterDatabase &db, llvm::StringRef module,
+                           llvm::StringRef name, uint32_t offset) {
+  const RegisterInfo *reg = db.lookupRegister(name, module);
+  if (!reg)
+    throw std::runtime_error("AIE4: missing " + module.str() + " register " +
+                             name.str());
+  if (reg->offset != offset)
+    throw std::runtime_error("AIE4: wrong offset for " + module.str() +
+                             "::" + name.str());
+  if (db.lookupRegisterByOffset(offset, module) == nullptr)
+    throw std::runtime_error("AIE4: no offset lookup for " + module.str() +
+                             "::" + name.str());
+  std::cout << "  ✓ " << module.str() << "::" << name.str() << " at 0x"
+            << std::hex << offset << std::dec << "\n";
+}
+
+static void expectField(const RegisterDatabase &db, llvm::StringRef module,
+                        llvm::StringRef name, llvm::StringRef field,
+                        uint32_t lsb, uint32_t msb) {
+  const RegisterInfo *reg = db.lookupRegister(name, module);
+  const BitFieldInfo *f = reg ? reg->getField(field) : nullptr;
+  if (!f)
+    throw std::runtime_error("AIE4: missing field " + name.str() + "." +
+                             field.str());
+  if (f->bit_start != lsb || f->bit_end != msb)
+    throw std::runtime_error("AIE4: wrong bits for " + name.str() + "." +
+                             field.str());
+  std::cout << "  ✓ " << name.str() << "." << field.str() << " [" << msb << ":"
+            << lsb << "]\n";
+}
+
+void test_aie4_registers() {
+  std::cout << "Test: AIE4 Register Lookup\n";
+  auto db = RegisterDatabase::loadAIE4();
+  if (!db)
+    throw std::runtime_error("Failed to load AIE4 register database");
+
+  expectRegister(*db, "core", "Core_Control", 0x000A3000);
+  expectRegister(*db, "core", "Timer_Control", 0x000A0110);
+  expectRegister(*db, "core", "Trace0_Control0", 0x000A00D0);
+  expectRegister(*db, "core", "Event_Generate", 0x000A0008);
+  expectRegister(*db, "memory", "DMA_BD0_0", 0x000AC000);
+  expectRegister(*db, "memory", "DMA_S2MM_0_Ctrl", 0x000ACE00);
+  expectRegister(*db, "memory", "DMA_MM2S_0_Ctrl", 0x000ACE10);
+  // Memtile: BDs are per channel; registers below the 1MB data memory
+  expectRegister(*db, "memory_tile", "DMA_S2MM_0_BD0_0", 0x00008000);
+  expectRegister(*db, "memory_tile", "DMA_S2MM_0_Ctrl", 0x00009E00);
+  expectRegister(*db, "memory_tile", "Timer_A_Control", 0x00000130);
+  expectRegister(*db, "shim", "DMA_BD0_0", 0x00018000);
+  expectRegister(*db, "shim", "DMA_S2MM_0_Ctrl", 0x00018540);
+  expectRegister(*db, "shim", "DMA_S2MM_0_Task_Queue", 0x00018544);
+  expectRegister(*db, "shim", "Timer_A_Control", 0x00004090);
+
+  expectField(*db, "core", "Core_Control", "Reset", 1, 1);
+  expectField(*db, "core", "Core_Control", "Enable", 0, 0);
+  expectField(*db, "core", "Timer_Control", "Reset_Event", 8, 15);
+  expectField(*db, "memory", "DMA_S2MM_0_Ctrl", "Reset", 1, 1);
+  expectField(*db, "memory", "DMA_S2MM_0_Ctrl", "Controller_ID", 8, 15);
+  expectField(*db, "shim", "DMA_S2MM_0_Task_Queue", "Start_BD_ID", 0, 3);
+  expectField(*db, "shim", "DMA_S2MM_0_Task_Queue", "Enable_Token_Issue", 31,
+              31);
+
+  // Register and field lookups fold case.
+  const RegisterInfo *timerControl =
+      db->lookupRegister("TIMER_CONTROL", "core");
+  if (!timerControl || timerControl->name != "TIMER_CONTROL")
+    throw std::runtime_error("AIE4: Timer_Control is not named TIMER_CONTROL");
+  if (timerControl->getField("RESET_EVENT") !=
+          timerControl->getField("Reset_Event") ||
+      !timerControl->getField("reset_event"))
+    throw std::runtime_error("AIE4: field lookup is case-sensitive");
+  std::cout << "  ✓ Register and field lookups fold case\n";
+
+  const BitFieldInfo *resetEvent =
+      db->lookupRegister("Timer_Control", "core")->getField("Reset_Event");
+  auto encoded = db->encodeFieldValue(*resetEvent, 0x25);
+  if (!encoded || *encoded != 0x2500)
+    throw std::runtime_error("AIE4: wrong Reset_Event encoding");
+  std::cout << "  ✓ Timer_Control.Reset_Event(0x25) = 0x2500\n";
+
+  if (db->lookupRegister("Trace0_Control0", "memory_tile"))
+    throw std::runtime_error("AIE4: Trace0_Control0 found in memory_tile");
+  std::cout << "  ✓ Module separation\n";
+}
+
+void test_aie4_events() {
+  std::cout << "Test: AIE4 Event Lookup\n";
+  auto db = RegisterDatabase::loadAIE4();
+  if (!db)
+    throw std::runtime_error("Failed to load AIE4 register database");
+  // xaie_events_aie4.h
+  auto startBd = db->lookupEvent("DMA_S2MM_0_START_BD", "core");
+  if (!startBd || *startBd != 151)
+    throw std::runtime_error("AIE4: wrong core DMA_S2MM_0_START_BD event");
+  std::cout << "  ✓ core DMA_S2MM_0_START_BD = " << *startBd << "\n";
+  auto user0 = db->lookupEvent("USER_EVENT_0", "pl");
+  if (!user0)
+    throw std::runtime_error("AIE4: missing pl USER_EVENT_0 event");
+  std::cout << "  ✓ pl USER_EVENT_0 = " << *user0 << "\n";
+}
+
+void test_aie4_target_model() {
+  std::cout << "Test: AIE4 Target Model Register Lookup\n";
+  const AIETargetModel &tm = getTargetModel(AIEDevice::npu3);
+  struct Expected {
+    TileID tile;
+    bool isMem;
+    const char *name;
+    uint32_t offset;
+  };
+  for (const Expected &e : {
+           Expected{{0, 2}, false, "Timer_Control", 0x000A0110},
+           Expected{{0, 2}, false, "Core_Control", 0x000A3000},
+           Expected{{0, 2}, true, "DMA_S2MM_0_Ctrl", 0x000ACE00},
+           Expected{{0, 1}, true, "DMA_S2MM_0_Ctrl", 0x00009E00},
+           Expected{{0, 0}, true, "DMA_S2MM_0_Ctrl", 0x00018540},
+       }) {
+    const RegisterInfo *reg = tm.lookupRegister(e.name, e.tile, e.isMem);
+    if (!reg || reg->offset != e.offset)
+      throw std::runtime_error(std::string("npu3 lookup failed: ") + e.name);
+    std::cout << "  ✓ tile(" << e.tile.col << ", " << e.tile.row << ") "
+              << e.name << "\n";
+  }
+  if (tm.lookupRegister("DMA_S2MM_0_Ctrl", {0, 2}, /*isMem=*/false))
+    throw std::runtime_error("npu3: core module has no DMA_S2MM_0_Ctrl");
+
+  // Compute-tile memory events are numbered in the core module's space
+  auto coreEvent = tm.lookupEvent("DMA_S2MM_0_START_BD", {0, 2}, false);
+  auto memEvent = tm.lookupEvent("DMA_S2MM_0_START_BD", {0, 2}, true);
+  if (!coreEvent || !memEvent || *coreEvent != *memEvent)
+    throw std::runtime_error("npu3: memory-module event lookup");
+  std::cout << "  ✓ memory-module events resolve in the core module\n";
+
+  // npu1/npu2 still use the AIE2 database
+  const RegisterInfo *aie2Ctrl =
+      getTargetModel(AIEDevice::npu2).lookupRegister("Core_Control", {0, 2});
+  if (!aie2Ctrl || aie2Ctrl->offset != 0x00032000)
+    throw std::runtime_error("npu2: Core_Control lookup changed");
+  std::cout << "  ✓ npu2 Core_Control unchanged\n";
+}
+
 int main() {
   try {
     std::cout << "==============================================\n";
@@ -329,6 +471,9 @@ int main() {
     test_encode_field_value();
     test_encode_single_bit_field();
     test_encode_field_value_overflow();
+    test_aie4_registers();
+    test_aie4_events();
+    test_aie4_target_model();
 
     std::cout << "\n==============================================\n";
     std::cout << "All tests passed! ✓\n";

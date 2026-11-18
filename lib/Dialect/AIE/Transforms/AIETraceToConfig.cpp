@@ -36,6 +36,12 @@ struct AIETraceToConfigPass
     SmallVector<TraceOp> traces;
     device.walk([&](TraceOp trace) { traces.push_back(trace); });
 
+    // The writes below use the AIE2 trace-unit registers.
+    if (!traces.empty() && isa<AIE4TargetModel>(targetModel)) {
+      traces.front().emitOpError("trace is not yet supported on AIE4");
+      return signalPassFailure();
+    }
+
     for (auto trace : traces) {
       // Create config symbol name
       std::string configName = (trace.getSymName().str() + "_config");

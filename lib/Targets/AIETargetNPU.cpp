@@ -275,13 +275,16 @@ LogicalResult appendUpdateRegFromScratchpad(std::vector<uint32_t> &instructions,
 
 namespace {
 
-// Lazy-loaded regdb for register-name decoration. Loaded once per process,
-// returns nullptr if the JSON files cannot be located (e.g. install dir not
-// set). Decoration is best-effort.
-static const xilinx::AIE::RegisterDatabase *getRegDB() {
-  static std::unique_ptr<xilinx::AIE::RegisterDatabase> db = []() {
-    return xilinx::AIE::RegisterDatabase::loadAIE2();
-  }();
+// Lazy-loaded regdb for register-name decoration, once per process and
+// architecture; nullptr if the JSON files cannot be located.
+static const xilinx::AIE::RegisterDatabase *getRegDB(const AIETargetModel &tm) {
+  if (tm.getTargetArch() == AIEArch::AIE4) {
+    static std::unique_ptr<xilinx::AIE::RegisterDatabase> db =
+        xilinx::AIE::RegisterDatabase::loadAIE4();
+    return db.get();
+  }
+  static std::unique_ptr<xilinx::AIE::RegisterDatabase> db =
+      xilinx::AIE::RegisterDatabase::loadAIE2();
   return db.get();
 }
 
@@ -304,7 +307,7 @@ lookupRegisterByAddress(uint64_t address, const AIETargetModel &tm,
   uint32_t offset = address - tm.getTileAddress(col, row);
 
   // Determine module from tile type. Module names must match the JSON keys in
-  // aie_registers_aie2.json: "core", "memory", "memory_tile", "shim".
+  // aie_registers_<arch>.json: "core", "memory", "memory_tile", "shim".
   StringRef moduleName;
   if (tm.isShimNOCTile(col, row) || tm.isShimPLTile(col, row)) {
     moduleName = "shim";
@@ -345,8 +348,8 @@ static void pushLocEntry(std::vector<TxnLocEntry> *locmap,
   e.address = address;
   e.loc = op->getLoc();
   if (address) {
-    if (auto regName =
-            lookupRegisterByAddress(*address, tm, getRegDB(), e.registerModule);
+    if (auto regName = lookupRegisterByAddress(*address, tm, getRegDB(tm),
+                                               e.registerModule);
         !regName.empty()) {
       e.registerName = regName.str();
     }

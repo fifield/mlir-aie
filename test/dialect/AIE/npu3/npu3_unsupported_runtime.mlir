@@ -17,6 +17,9 @@
 // RUN: not aie-opt --split-input-file --aie-insert-trace-flows %s 2>&1 | FileCheck %s --check-prefix=TRACE
 // TRACE: error: 'aie.trace' op trace is not yet supported on AIE4
 
+// RUN: not aie-opt --split-input-file --aie-trace-to-config %s 2>&1 | FileCheck %s --check-prefix=TRACECFG
+// TRACECFG: error: 'aie.trace' op trace is not yet supported on AIE4
+
 aie.device(npu3) {
   %shim = aie.tile(0, 0)
   aie.runtime_sequence @seq(%arg0 : memref<256xi32>) {

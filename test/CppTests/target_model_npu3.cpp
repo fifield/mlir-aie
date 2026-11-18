@@ -9,10 +9,15 @@
 
 #include "aie/Dialect/AIE/IR/AIEDialect.h"
 #include "aie/Dialect/AIE/IR/AIETargetModel.h"
+#include "aie/Dialect/AIE/Util/AIERegisterDatabase.h"
 
 #include <cstdint>
+#include <map>
+#include <memory>
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 using namespace xilinx;
 using namespace xilinx::AIE;
@@ -195,8 +200,143 @@ static void testStreamSwitch() {
   check(static_cast<int>(WireBundle::DMAControl) == 24, "DMAControl = 24");
 }
 
+// Port count = number of STREAM_SWITCH_[32B_]{MANAGER,SUBORDINATE}_CONFIG_
+// <name>[_<i>] registers.
+static unsigned countPortRegisters(const RegisterDatabase &db,
+                                   llvm::StringRef module, bool manager,
+                                   bool is32b, llvm::StringRef name) {
+  std::string prefix = std::string("STREAM_SWITCH_") + (is32b ? "32B_" : "") +
+                       (manager ? "MANAGER" : "SUBORDINATE") + "_CONFIG_" +
+                       name.str();
+  unsigned n = db.lookupRegister(prefix, module) ? 1 : 0;
+  for (int i = 0; i < 16; ++i)
+    if (db.lookupRegister(prefix + "_" + std::to_string(i), module))
+      ++n;
+  return n;
+}
+
 static void testStreamSwitchPortsMatchRegisterDatabase() {
   const AIETargetModel &tm = getTargetModel(AIEDevice::npu3);
+  std::unique_ptr<RegisterDatabase> db = RegisterDatabase::loadAIE4();
+  check(db != nullptr, "AIE4 register database");
+
+  using Names = std::vector<std::pair<bool, const char *>>;
+  struct Tile {
+    const char *what;
+    int col, row;
+    const char *module;
+    std::map<WireBundle, Names> managers, subordinates;
+  };
+  Tile tiles[] = {
+      {"shim",
+       1,
+       0,
+       "shim",
+       {{WireBundle::DMA, {{false, "DMA"}}},
+        {WireBundle::DMATrace, {{false, "DMA_TRACE"}}},
+        {WireBundle::West, {{false, "WEST"}}},
+        {WireBundle::North, {{false, "NORTH"}}},
+        {WireBundle::East, {{false, "EAST"}}},
+        {WireBundle::NorthControl, {{false, "NORTH_CONTROL"}}},
+        {WireBundle::TileControl, {{false, "TILE_CTRL"}}},
+        {WireBundle::Switch32, {{false, "32B_SWITCH"}}},
+        {WireBundle::Controller32, {{true, "UCONTROLLER"}}},
+        {WireBundle::West32, {{true, "WEST"}}},
+        {WireBundle::North32, {{true, "NORTH"}}},
+        {WireBundle::East32, {{true, "EAST"}}},
+        {WireBundle::Switch512, {{true, "512B_SWITCH"}}}},
+       {{WireBundle::DMA, {{false, "DMA"}}},
+        {WireBundle::DMAControl, {{false, "DMA_CONTROL"}}},
+        {WireBundle::West, {{false, "WEST"}}},
+        {WireBundle::North, {{false, "NORTH"}}},
+        {WireBundle::East, {{false, "EAST"}}},
+        {WireBundle::Switch32, {{false, "32B_SWITCH"}}},
+        {WireBundle::Control32, {{true, "TILE_CONTROL_RSP"}}},
+        {WireBundle::Trace32, {{true, "TRACE"}}},
+        {WireBundle::Controller32, {{true, "UCONTROLLER"}}},
+        {WireBundle::West32, {{true, "WEST"}}},
+        {WireBundle::North32, {{true, "NORTH"}}},
+        {WireBundle::East32, {{true, "EAST"}}},
+        {WireBundle::Switch512, {{true, "512B_SWITCH"}}}}},
+      {"memtile",
+       1,
+       1,
+       "memory_tile",
+       {{WireBundle::DMA, {{false, "DMA"}}},
+        {WireBundle::South, {{false, "SOUTH"}}},
+        {WireBundle::North, {{false, "NORTH"}}},
+        {WireBundle::NorthControl, {{false, "NORTH_CONTROL"}}},
+        {WireBundle::TileControl, {{false, "TILE_CTRL"}}},
+        {WireBundle::Switch32, {{false, "32B_SWITCH"}}},
+        {WireBundle::South32, {{true, "SOUTH"}}},
+        {WireBundle::North32, {{true, "NORTH"}}},
+        {WireBundle::Switch512, {{true, "512B_SWITCH"}}}},
+       {{WireBundle::DMA, {{false, "DMA"}}},
+        {WireBundle::South, {{false, "SOUTH"}}},
+        {WireBundle::North, {{false, "NORTH"}}},
+        {WireBundle::SouthControl, {{false, "SOUTH_CONTROL"}}},
+        {WireBundle::Switch32, {{false, "32B_SWITCH"}}},
+        {WireBundle::Control32, {{true, "TILE_CONTROL_RSP"}}},
+        {WireBundle::Trace32, {{true, "TRACE"}}},
+        {WireBundle::South32, {{true, "SOUTH"}}},
+        {WireBundle::North32, {{true, "NORTH"}}},
+        {WireBundle::Switch512, {{true, "512B_SWITCH"}}}}},
+      {"core",
+       1,
+       2,
+       "core",
+       {{WireBundle::Core, {{false, "AIE_CORE"}}},
+        {WireBundle::DMA, {{false, "DMA"}}},
+        {WireBundle::South, {{false, "SOUTH"}}},
+        {WireBundle::West, {{false, "WEST"}}},
+        {WireBundle::North, {{false, "NORTH"}}},
+        {WireBundle::East, {{false, "EAST"}}},
+        {WireBundle::NorthControl, {{false, "NORTH_CONTROL"}}},
+        {WireBundle::TileControl, {{false, "TILE_CONTROL"}}},
+        {WireBundle::Switch32, {{false, "32B_SWITCH"}}},
+        {WireBundle::South32, {{true, "SOUTH"}}},
+        {WireBundle::West32, {{true, "WEST"}}},
+        {WireBundle::North32, {{true, "NORTH"}}},
+        {WireBundle::East32, {{true, "EAST"}}},
+        {WireBundle::Switch512, {{true, "512B_SWITCH"}}}},
+       {{WireBundle::Core, {{false, "AIE_CORE"}}},
+        {WireBundle::DMA, {{false, "DMA"}}},
+        {WireBundle::South, {{false, "SOUTH"}}},
+        {WireBundle::West, {{false, "WEST"}}},
+        {WireBundle::North, {{false, "NORTH"}}},
+        {WireBundle::East, {{false, "EAST"}}},
+        {WireBundle::SouthControl, {{false, "SOUTH_CONTROL"}}},
+        {WireBundle::Switch32, {{false, "32B_SWITCH"}}},
+        {WireBundle::Control32, {{true, "TILE_CONTROL_RSP"}}},
+        {WireBundle::Trace32, {{true, "AIE_TRACE"}, {true, "MEM_TRACE"}}},
+        {WireBundle::South32, {{true, "SOUTH"}}},
+        {WireBundle::West32, {{true, "WEST"}}},
+        {WireBundle::North32, {{true, "NORTH"}}},
+        {WireBundle::East32, {{true, "EAST"}}},
+        {WireBundle::Switch512, {{true, "512B_SWITCH"}}}}},
+  };
+  for (const Tile &tile : tiles)
+    for (bool manager : {true, false}) {
+      const auto &bundles = manager ? tile.managers : tile.subordinates;
+      for (int b = 0; b <= static_cast<int>(WireBundle::DMAControl); ++b) {
+        auto bundle = static_cast<WireBundle>(b);
+        unsigned expected = 0;
+        if (auto it = bundles.find(bundle); it != bundles.end())
+          for (auto [is32b, name] : it->second)
+            expected +=
+                countPortRegisters(*db, tile.module, manager, is32b, name);
+        unsigned actual =
+            manager
+                ? tm.getNumDestSwitchboxConnections(tile.col, tile.row, bundle)
+                : tm.getNumSourceSwitchboxConnections(tile.col, tile.row,
+                                                      bundle);
+        check(actual == expected, std::string(tile.what) + " " +
+                                      (manager ? "manager " : "subordinate ") +
+                                      stringifyWireBundle(bundle).str() +
+                                      ": model " + std::to_string(actual) +
+                                      ", regdb " + std::to_string(expected));
+      }
+    }
 
   check(tm.getNumDestSwitchboxConnections(1, 1, WireBundle::TileControl) == 1 &&
             tm.getNumDestSwitchboxConnections(1, 0, WireBundle::TileControl) ==
