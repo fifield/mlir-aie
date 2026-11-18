@@ -201,13 +201,14 @@ struct ConvertFlowsToInterconnect : OpConversionPattern<FlowOp> {
       int row = tileId.row;
       SwitchboxOp swOp = analyzer.getSwitchbox(rewriter, col, row);
       int shimCh = srcChannel;
-      bool isShim = analyzer.getTile(rewriter, tileId).isShimNOCorPLTile();
+      TileOp tileOp = analyzer.getTile(rewriter, tileId);
+      bool viaShimMux = getTargetModel(tileOp).hasShimMux(col, row);
 
       // TODO: must reserve N3, N7, S2, S3 for DMA connections
       bool srcUsesShimMux = srcBundle == WireBundle::DMA ||
                             srcBundle == WireBundle::PLIO ||
                             srcBundle == WireBundle::NOC;
-      if (isShim && tileId == srcSbId && srcUsesShimMux) {
+      if (viaShimMux && tileId == srcSbId && srcUsesShimMux) {
 
         shimCh = shimMuxChannelFrom(srcPort);
         ShimMuxOp shimMuxOp = analyzer.getShimMux(rewriter, col);
@@ -220,11 +221,11 @@ struct ConvertFlowsToInterconnect : OpConversionPattern<FlowOp> {
         Port dest = setting.dsts[i];
 
         // A flow can start and end at one shim (see shimMuxChannelFrom).
-        if (isShim && tileId == srcSbId && srcUsesShimMux && src == srcPort)
+        if (viaShimMux && tileId == srcSbId && srcUsesShimMux && src == srcPort)
           src = {WireBundle::South, shimCh};
-        if (isShim && (dest.bundle == WireBundle::DMA ||
-                       dest.bundle == WireBundle::PLIO ||
-                       dest.bundle == WireBundle::NOC)) {
+        if (viaShimMux && (dest.bundle == WireBundle::DMA ||
+                           dest.bundle == WireBundle::PLIO ||
+                           dest.bundle == WireBundle::NOC)) {
           int destCh = shimMuxChannelTo(dest);
 
           ShimMuxOp shimMuxOp = analyzer.getShimMux(rewriter, col);
@@ -1248,9 +1249,11 @@ static PathEndPoint sourceOf(FlowOp flow) {
 // switchbox by (see shimMuxChannelFrom).
 static void lowerShimDMAPorts(DeviceOp device, OpBuilder &builder,
                               DynamicTileAnalysis &analyzer) {
+  const AIETargetModel &targetModel = device.getTargetModel();
   for (auto switchbox : device.getOps<SwitchboxOp>()) {
     TileOp tileOp = switchbox.getTileOp();
-    if (!tileOp.isShimNOCTile())
+    if (!tileOp.isShimNOCTile() ||
+        !targetModel.hasShimMux(tileOp.getCol(), tileOp.getRow()))
       continue;
     auto connectInMux = [&](Location loc, Port src, Port dst) {
       builder.setInsertionPointAfter(tileOp);
@@ -1685,8 +1688,7 @@ void PacketFlowRouting::findCircuitHops() {
           claimedMasters.insert({tileId, p});
       }
   for (auto &[tileId, connects] : switchboxes) {
-    if (!circuitSwitchHops ||
-        targetModel.isShimNOCorPLTile(tileId.col, tileId.row))
+    if (!circuitSwitchHops || targetModel.hasShimMux(tileId.col, tileId.row))
       continue;
     std::set<Port> masters;
     for (const auto &[conn, flowID] : connects)
@@ -1863,7 +1865,8 @@ std::optional<ArbiterPlan> PacketFlowRouting::planTile(
     for (size_t f : priority) {
       Port slave = flows[f].slave;
       if (slave.bundle == WireBundle::DMA &&
-          targetModel.isShimNOCTile(tileId.col, tileId.row))
+          targetModel.isShimNOCTile(tileId.col, tileId.row) &&
+          targetModel.hasShimMux(tileId.col, tileId.row))
         slave = {WireBundle::South, shimMuxChannelFrom(slave)};
       auto rules = pinned.rules.find({tileId, slave});
       const std::tuple<int, int, int> *rule = nullptr;
@@ -3023,7 +3026,7 @@ llvm::Expected<PacketPlan> AIEPathfinderPass::route(
             d, conflicts,
             [&](TileID tile) {
               return !circuitSwitchHops ||
-                     targetModel.isShimNOCorPLTile(tile.col, tile.row);
+                     targetModel.hasShimMux(tile.col, tile.row);
             },
             pinned.trees))
       return std::move(err);
@@ -3117,39 +3120,6 @@ llvm::Expected<PacketPlan> AIEPathfinderPass::route(
           .str());
 }
 
-// The router reaches a shim DMA, NOC or PLIO endpoint through the shim mux.
-// AIE4 shim DMAs attach to the stream switch directly, without a shim mux.
-static LogicalResult checkShimMuxEndpoints(DeviceOp device) {
-  if (!isa<AIE4TargetModel>(device.getTargetModel()))
-    return success();
-  auto check = [&](Operation *flow, Value value, Port port) -> LogicalResult {
-    auto tile = cast<TileOp>(value.getDefiningOp());
-    if (!tile.isShimNOCorPLTile() ||
-        !llvm::is_contained(
-            {WireBundle::DMA, WireBundle::NOC, WireBundle::PLIO}, port.bundle))
-      return success();
-    return flow->emitOpError("cannot route ")
-           << describeTilePort(tile.getTileID(), port)
-           << " on AIE4: the router reaches shim DMA, NOC and PLIO ports "
-              "through a shim mux, which AIE4 does not have";
-  };
-  for (PacketFlowOp flow : device.getOps<PacketFlowOp>()) {
-    for (PacketSourceOp source : flow.getPorts().getOps<PacketSourceOp>())
-      if (failed(check(flow, source.getTile(), source.port())))
-        return failure();
-    for (PacketDestOp dest : flow.getPorts().getOps<PacketDestOp>())
-      if (failed(check(flow, dest.getTile(), dest.port())))
-        return failure();
-  }
-  for (FlowOp flow : device.getOps<FlowOp>())
-    if (failed(check(flow, flow.getSource(),
-                     {flow.getSourceBundle(), flow.getSourceChannel()})) ||
-        failed(check(flow, flow.getDest(),
-                     {flow.getDestBundle(), flow.getDestChannel()})))
-      return failure();
-  return success();
-}
-
 static LogicalResult checkFixedFlowEndpoints(DeviceOp device) {
   DenseMap<PhysPort, Operation *> inputs, outputs;
   for (SwitchboxOp box : device.getOps<SwitchboxOp>()) {
@@ -3169,7 +3139,8 @@ static LogicalResult checkFixedFlowEndpoints(DeviceOp device) {
     auto tile = cast<TileOp>(value.getDefiningOp());
     auto &reservations = source ? inputs : outputs;
     Operation *reserved = reservations.lookup({tile.getTileID(), port});
-    if (!reserved && tile.isShimNOCorPLTile() &&
+    if (!reserved &&
+        getTargetModel(tile).hasShimMux(tile.getCol(), tile.getRow()) &&
         llvm::is_contained({WireBundle::DMA, WireBundle::NOC, WireBundle::PLIO},
                            port.bundle)) {
       Port south{WireBundle::South,
@@ -3250,7 +3221,7 @@ void AIEPathfinderPass::runOnOperation() {
   LLVM_DEBUG(llvm::dbgs() << "---Begin AIEPathfinderPass---\n");
 
   DeviceOp d = getOperation();
-  if (failed(verifyDMAChannelsResolved(d)) || failed(checkShimMuxEndpoints(d)))
+  if (failed(verifyDMAChannelsResolved(d)))
     return signalPassFailure();
   OpBuilder builder = OpBuilder::atBlockTerminator(d.getBody());
   if (clRoutePacket)
@@ -3506,7 +3477,10 @@ void AIEPathfinderPass::runOnOperation() {
         if (SwitchboxOp southsw = analyzer.lookupSwitchbox({col, row - 1}))
           wire(loc, southsw, WireBundle::North, sw, WireBundle::South);
       } else if (tile.isShimNOCTile()) {
-        if (ShimMuxOp shimsw = analyzer.lookupShimMux(col)) {
+        if (!d.getTargetModel().hasShimMux(col, row)) {
+          // Without a shim mux the shim DMA attaches to the switchbox.
+          wire(loc, tile, WireBundle::DMA, sw, WireBundle::DMA);
+        } else if (ShimMuxOp shimsw = analyzer.lookupShimMux(col)) {
           wire(loc, shimsw,
                WireBundle::North, // Changed to connect into the north
                sw, WireBundle::South);

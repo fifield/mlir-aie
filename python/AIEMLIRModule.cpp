@@ -395,6 +395,14 @@ NB_MODULE(_aie, m) {
              return aieTargetModelGetNumSourceShimMuxConnections(
                  self.get(), col, row, bundle);
            })
+      .def(
+          "get_num_dma_channels",
+          [](PyAieTargetModel &self, int col, int row, uint32_t dir) {
+            return aieTargetModelGetNumDMAChannels(self.get(), col, row, dir);
+          },
+          "col"_a, "row"_a, "dir"_a,
+          "Number of DMA channels the tile has in direction `dir` (a "
+          "DMAChannelDir).")
       // .def("is_legal_memtile_connection")
       .def("is_npu",
            [](PyAieTargetModel &self) {

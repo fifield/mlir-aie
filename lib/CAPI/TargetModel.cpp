@@ -292,6 +292,13 @@ uint32_t aieTargetModelGetNumSourceShimMuxConnections(
       .getNumSourceShimMuxConnections(col, row, wireBundle);
 }
 
+uint32_t aieTargetModelGetNumDMAChannels(AieTargetModel targetModel, int col,
+                                         int row, uint32_t dir) {
+  return unwrap(targetModel)
+      .getNumDMAChannels(col, row,
+                         static_cast<xilinx::AIE::DMAChannelDir>(dir));
+}
+
 bool aieTargetModelIsNPU(AieTargetModel targetModel) {
   return unwrap(targetModel).hasProperty(xilinx::AIE::AIETargetModel::IsNPU);
 }

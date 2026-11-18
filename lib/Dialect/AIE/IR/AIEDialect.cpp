@@ -4155,7 +4155,7 @@ size_t LogicalTileOp::getNumSourceConnections(WireBundle bundle) {
 
   if (bundle == WireBundle::Core || bundle == WireBundle::DMA) {
     // Note dest is correct here, since direction is reversed.
-    if (isShimNOCorPLTile())
+    if (targetModel.hasShimMux(tile.col, tile.row))
       return targetModel.getNumDestShimMuxConnections(tile.col, tile.row,
                                                       bundle);
     return targetModel.getNumDestSwitchboxConnections(tile.col, tile.row,
@@ -4170,7 +4170,7 @@ size_t LogicalTileOp::getNumDestConnections(WireBundle bundle) {
 
   if (bundle == WireBundle::Core || bundle == WireBundle::DMA) {
     // Note source is correct here, since direction is reversed.
-    if (isShimNOCorPLTile())
+    if (targetModel.hasShimMux(tile.col, tile.row))
       return targetModel.getNumSourceShimMuxConnections(tile.col, tile.row,
                                                         bundle);
     return targetModel.getNumSourceSwitchboxConnections(tile.col, tile.row,
@@ -4324,7 +4324,7 @@ size_t TileOp::getNumSourceConnections(WireBundle bundle) {
   // Note dest is correct here, since direction is reversed.
   {
     // Note dest is correct here, since direction is reversed.
-    if (isShimNOCorPLTile())
+    if (targetModel.hasShimMux(getCol(), getRow()))
       return targetModel.getNumDestShimMuxConnections(getCol(), getRow(),
                                                       bundle);
     return targetModel.getNumDestSwitchboxConnections(getCol(), getRow(),
@@ -4339,7 +4339,7 @@ size_t TileOp::getNumDestConnections(WireBundle bundle) {
   // Note source is correct here, since direction is reversed.
   {
     // Note source is correct here, since direction is reversed.
-    if (isShimNOCorPLTile())
+    if (targetModel.hasShimMux(getCol(), getRow()))
       return targetModel.getNumSourceShimMuxConnections(getCol(), getRow(),
                                                         bundle);
     return targetModel.getNumSourceSwitchboxConnections(getCol(), getRow(),
@@ -4410,6 +4410,13 @@ LogicalResult ShimMuxOp::verify() {
   // mirroring SwitchboxOp::verify and the UsesAreAccessible trait.
   if (!isa<TileOp>(getTile().getDefiningOp()))
     return success();
+
+  TileOp tile = getTileOp();
+  if (!getTargetModel(*this).hasShimMux(tile.getCol(), tile.getRow()))
+    return emitOpError("tile (")
+           << tile.getCol() << ", " << tile.getRow()
+           << ") has no shim mux: its DMA connects to the switchbox "
+              "directly";
 
   Region &body = getConnections();
   DenseSet<Port> destset;
@@ -4496,19 +4503,37 @@ bool xilinx::AIE::keepsPktHeader(TileID tile, Port master,
 }
 
 // A Core or DMA port a flow starts or ends at on a placed tile must exist
-// there. The placer checks logical tiles' channel budgets.
+// there, as must a NOC or PLIO port on a shim without a shim mux. The placer
+// checks logical tiles' channel budgets.
 static LogicalResult verifyFlowEndpoint(Operation *op, Value tile, Port port,
                                         bool isSource) {
   if (!isa_and_nonnull<TileLike>(tile.getDefiningOp()))
     return op->emitOpError(
         "tile operand is not an aie.tile or aie.logical_tile");
-  if (port.bundle != WireBundle::Core && port.bundle != WireBundle::DMA)
+  bool shimPort =
+      port.bundle == WireBundle::NOC || port.bundle == WireBundle::PLIO;
+  if (port.bundle != WireBundle::Core && port.bundle != WireBundle::DMA &&
+      !shimPort)
     return success();
   auto tileOp = dyn_cast_or_null<TileOp>(tile.getDefiningOp());
   if (!tileOp)
     return success();
-  size_t channels = isSource ? tileOp.getNumDestConnections(port.bundle)
-                             : tileOp.getNumSourceConnections(port.bundle);
+  size_t channels;
+  if (shimPort) {
+    const auto &targetModel = getTargetModel(op);
+    int col = tileOp.getCol(), row = tileOp.getRow();
+    if (!targetModel.isShimNOCorPLTile(col, row) ||
+        targetModel.hasShimMux(col, row))
+      return success();
+    channels =
+        isSource
+            ? targetModel.getNumSourceSwitchboxConnections(col, row,
+                                                           port.bundle)
+            : targetModel.getNumDestSwitchboxConnections(col, row, port.bundle);
+  } else {
+    channels = isSource ? tileOp.getNumDestConnections(port.bundle)
+                        : tileOp.getNumSourceConnections(port.bundle);
+  }
   if (static_cast<size_t>(port.channel) < channels)
     return success();
   return op->emitOpError() << (isSource ? "source " : "destination ")

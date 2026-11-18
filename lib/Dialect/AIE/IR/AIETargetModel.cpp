@@ -1784,7 +1784,7 @@ AIETargetModel::getMemLocalBaseAddress(int localCol, int localRow, int memCol,
 uint32_t AIETargetModel::getNumDMAChannels(int col, int row,
                                            AIE::DMAChannelDir dir) const {
   bool mm2s = dir == AIE::DMAChannelDir::MM2S;
-  if (isShimNOCorPLTile(col, row))
+  if (hasShimMux(col, row))
     return mm2s ? getNumSourceShimMuxConnections(col, row, WireBundle::DMA)
                 : getNumDestShimMuxConnections(col, row, WireBundle::DMA);
   return mm2s ? getNumSourceSwitchboxConnections(col, row, WireBundle::DMA)
@@ -2290,16 +2290,14 @@ AIE4TargetModel::getNumSourceSwitchboxConnections(int col, int row,
   }
 }
 
-uint32_t
-AIE4TargetModel::getNumDestShimMuxConnections(int col, int row,
-                                              WireBundle bundle) const {
-  return getNumDestSwitchboxConnections(col, row, bundle);
+uint32_t AIE4TargetModel::getNumDestShimMuxConnections(int, int,
+                                                       WireBundle) const {
+  return 0;
 }
 
-uint32_t
-AIE4TargetModel::getNumSourceShimMuxConnections(int col, int row,
-                                                WireBundle bundle) const {
-  return getNumSourceSwitchboxConnections(col, row, bundle);
+uint32_t AIE4TargetModel::getNumSourceShimMuxConnections(int, int,
+                                                         WireBundle) const {
+  return 0;
 }
 
 // src == subordinate

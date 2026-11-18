@@ -541,7 +541,7 @@ struct AIEInsertTraceFlowsPass
     auto usedChannels = scanUsedS2MMChannels(device);
     auto s2mmChannels = [&](int col) {
       return static_cast<int>(
-          targetModel.getNumDestShimMuxConnections(col, 0, WireBundle::DMA));
+          targetModel.getNumDMAChannels(col, 0, DMAChannelDir::S2MM));
     };
 
     for (auto &[col, shimInfo] : shimInfos) {

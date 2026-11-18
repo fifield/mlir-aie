@@ -197,6 +197,10 @@ MLIR_CAPI_EXPORTED uint32_t aieTargetModelGetNumDestShimMuxConnections(
 MLIR_CAPI_EXPORTED uint32_t aieTargetModelGetNumSourceShimMuxConnections(
     AieTargetModel targetModel, int col, int row, uint32_t bundle);
 
+/// Number of DMA channels of tile (col, row) in DMAChannelDir `dir`.
+MLIR_CAPI_EXPORTED uint32_t aieTargetModelGetNumDMAChannels(
+    AieTargetModel targetModel, int col, int row, uint32_t dir);
+
 MLIR_CAPI_EXPORTED uint32_t
 aieTargetModelGetColumnShift(AieTargetModel targetModel);
 

@@ -14,11 +14,11 @@ from ... import ir  # pyright: ignore[reportMissingImports, reportAttributeAcces
 from ...dialects._aie_enum_gen import (  # pyright: ignore[reportMissingImports]
     AIEArch,
     AIETileType,
+    DMAChannelDir,
 )
 from ...dialects.aie import (
     AIEDevice,  # pyright: ignore[reportAttributeAccessIssue]
     LogicalTileOp,
-    WireBundle,  # pyright: ignore[reportAttributeAccessIssue]
     dma_bd_fits,  # pyright: ignore[reportAttributeAccessIssue]
     get_target_model,
     logical_tile,
@@ -132,16 +132,12 @@ class Device(Resolvable):
     @property
     def core_dma_channels_in(self) -> int:
         """Input DMA channels a compute tile has, and so the most fifos one can be fed."""
-        return self._tm.get_num_dest_switchbox_connections(
-            0, self.core_rows[0], WireBundle.DMA
-        )
+        return self._tm.get_num_dma_channels(0, self.core_rows[0], DMAChannelDir.S2MM)
 
     @property
     def core_dma_channels_out(self) -> int:
         """Output DMA channels available on a compute tile."""
-        return self._tm.get_num_source_switchbox_connections(
-            0, self.core_rows[0], WireBundle.DMA
-        )
+        return self._tm.get_num_dma_channels(0, self.core_rows[0], DMAChannelDir.MM2S)
 
     @property
     def shim_dma_channels_in(self) -> int:
@@ -149,16 +145,16 @@ class Device(Resolvable):
 
         How many streams from the host the device carries at once.
         """
-        return self._shim_dma(self._tm.get_num_source_shim_mux_connections)
+        return self._shim_dma(DMAChannelDir.MM2S)
 
     @property
     def shim_dma_channels_out(self) -> int:
         """DMA channels the shim tiles drain the array through, summed over them."""
-        return self._shim_dma(self._tm.get_num_dest_shim_mux_connections)
+        return self._shim_dma(DMAChannelDir.S2MM)
 
-    def _shim_dma(self, connections) -> int:
+    def _shim_dma(self, direction) -> int:
         return sum(
-            connections(col, row, WireBundle.DMA)
+            self._tm.get_num_dma_channels(col, row, direction)
             for col in range(self.cols)
             for row in range(self.rows)
             if self._tm.is_shim_noc_or_pl_tile(col, row)

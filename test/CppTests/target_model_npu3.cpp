@@ -213,11 +213,57 @@ static void testStreamSwitchPortsMatchRegisterDatabase() {
         "core has West32 and East32 subordinates");
 }
 
+static void testShimMux() {
+  // AIE4 has no shim mux; shim DMAs attach to the stream switch directly.
+  const AIETargetModel &tm = getTargetModel(AIEDevice::npu3);
+  for (int c = 0; c < tm.columns(); ++c)
+    for (int r = 0; r < tm.rows(); ++r)
+      check(!tm.hasShimMux(c, r), "npu3 has no shim mux");
+  check(tm.getNumSourceShimMuxConnections(0, 0, WireBundle::DMA) == 0 &&
+            tm.getNumDestShimMuxConnections(0, 0, WireBundle::DMA) == 0,
+        "npu3 shim mux has no ports");
+  check(tm.getNumSourceSwitchboxConnections(0, 0, WireBundle::DMA) == 4 &&
+            tm.getNumDestSwitchboxConnections(0, 0, WireBundle::DMA) == 2,
+        "npu3 shim switchbox DMA ports");
+  for (int c = 0; c < tm.columns(); ++c)
+    check(tm.getNumDMAChannels(c, 0, DMAChannelDir::MM2S) == 4 &&
+              tm.getNumDMAChannels(c, 0, DMAChannelDir::S2MM) == 2,
+          "npu3 shim DMA channels without a shim mux");
+  check(tm.isLegalTileConnection(0, 0, WireBundle::DMA, 0, WireBundle::North,
+                                 0) &&
+            tm.isLegalTileConnection(0, 0, WireBundle::North, 0,
+                                     WireBundle::DMA, 0),
+        "npu3 shim DMA to and from North");
+
+  // Every shim tile of the other targets has a shim mux, and no other tile.
+  for (AIEDevice device :
+       {AIEDevice::xcvc1902, AIEDevice::xcve2302, AIEDevice::xcve2802,
+        AIEDevice::npu1, AIEDevice::npu1_1col, AIEDevice::npu2,
+        AIEDevice::npu2_1col, AIEDevice::xcve3858}) {
+    const AIETargetModel &other = getTargetModel(device);
+    std::string name = stringifyAIEDevice(device).str();
+    for (int c = 0; c < other.columns(); ++c)
+      for (int r = 0; r < other.rows(); ++r) {
+        check(other.hasShimMux(c, r) == other.isShimNOCorPLTile(c, r),
+              name + " shim mux on shim tiles");
+        if (other.hasShimMux(c, r))
+          check(
+              other.getNumDMAChannels(c, r, DMAChannelDir::MM2S) ==
+                      other.getNumSourceShimMuxConnections(c, r,
+                                                           WireBundle::DMA) &&
+                  other.getNumDMAChannels(c, r, DMAChannelDir::S2MM) ==
+                      other.getNumDestShimMuxConnections(c, r, WireBundle::DMA),
+              name + " shim DMA channels are the shim mux DMA ports");
+      }
+  }
+}
+
 int main() {
   testDevices();
   testMemoryAndLocks();
   testDma();
   testStreamSwitch();
   testStreamSwitchPortsMatchRegisterDatabase();
+  testShimMux();
   return 0;
 }

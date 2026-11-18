@@ -24,9 +24,6 @@
 // RUN: not aie-opt --aie-standard-lowering %s 2>&1 | FileCheck %s --check-prefix=CORE
 // CORE: error: 'aie.use_lock' op has no core lowering for AIE4
 
-// RUN: not aie-opt --aie-create-pathfinder-flows %s 2>&1 | FileCheck %s --check-prefix=ROUTE
-// ROUTE: error: 'aie.flow' op cannot route (0, 0) DMA:0 on AIE4: the router reaches shim DMA, NOC and PLIO ports through a shim mux, which AIE4 does not have
-
 // RUN: not aie-translate --aie-npu-to-binary --aie-sequence-name=seq %s 2>&1 | FileCheck %s --check-prefix=ADDR
 // ADDR: error: 'aiex.npu.write32' op cannot encode the address of tile (0, 2) on AIE4
 

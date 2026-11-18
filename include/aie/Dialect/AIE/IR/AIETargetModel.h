@@ -683,9 +683,14 @@ public:
   /// the origins of connect operations in the switchbox.
   virtual uint32_t getNumSourceShimMuxConnections(int col, int row,
                                                   WireBundle bundle) const = 0;
+  /// True if the tile's DMA/NOC/PLIO ports sit behind an `aie.shim_mux`;
+  /// otherwise its DMA is routed in the switchbox like any other tile's.
+  virtual bool hasShimMux(int col, int row) const {
+    return isShimNOCorPLTile(col, row);
+  }
   /// Return the number of DMA channels a tile has in one direction. An MM2S
-  /// channel feeds the stream switch, or the shim mux on a shim tile, so it is
-  /// counted by that switch's DMA sources; an S2MM channel by its DMA
+  /// channel feeds the stream switch, or the shim mux if the tile has one, so
+  /// it is counted by that switch's DMA sources; an S2MM channel by its DMA
   /// destinations. Prefer this to the TileOp connection accessors, which are
   /// named from the switch's side and so read the other way round.
   uint32_t getNumDMAChannels(int col, int row, AIE::DMAChannelDir dir) const;
@@ -1568,6 +1573,7 @@ public:
                                         WireBundle bundle) const override;
   uint32_t getNumSourceShimMuxConnections(int col, int row,
                                           WireBundle bundle) const override;
+  bool hasShimMux(int col, int row) const override { return false; }
   bool isLegalTileConnection(int col, int row, WireBundle srcBundle,
                              int srcChan, WireBundle dstBundle,
                              int dstChan) const override;

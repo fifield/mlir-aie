@@ -312,7 +312,7 @@ ShimMuxOp DynamicTileAnalysis::getShimMux(OpBuilder &builder, int col) {
   if (ShimMuxOp shimMuxOp = lookupShimMux(col))
     return shimMuxOp;
   auto tileOp = getTile(builder, col, 0);
-  assert(tileOp.isShimNOCorPLTile());
+  assert(getTargetModel(tileOp).hasShimMux(col, 0));
   auto shimMuxOp = ShimMuxOp::create(builder, tileOp.getLoc(), tileOp);
   ShimMuxOp::ensureTerminator(shimMuxOp.getConnections(), builder,
                               tileOp.getLoc());
@@ -356,7 +356,7 @@ void Pathfinder::initialize(int maxCol, int maxRow,
       // get all ports into current switchbox
       int channels =
           targetModel.getNumSourceSwitchboxConnections(col, row, bundle);
-      if (channels == 0 && targetModel.isShimNOCorPLTile(col, row)) {
+      if (channels == 0 && targetModel.hasShimMux(col, row)) {
         // wordaround for shimMux
         channels = targetModel.getNumSourceShimMuxConnections(col, row, bundle);
       }
@@ -365,7 +365,7 @@ void Pathfinder::initialize(int maxCol, int maxRow,
       }
       // get all ports out of current switchbox
       channels = targetModel.getNumDestSwitchboxConnections(col, row, bundle);
-      if (channels == 0 && targetModel.isShimNOCorPLTile(col, row)) {
+      if (channels == 0 && targetModel.hasShimMux(col, row)) {
         // wordaround for shimMux
         channels = targetModel.getNumDestShimMuxConnections(col, row, bundle);
       }
@@ -377,7 +377,7 @@ void Pathfinder::initialize(int maxCol, int maxRow,
     sb.resize();
     // A shim's mux reaches its DMA, NOC and PLIO ports from any port.
     auto isMuxed = [&](Port p) {
-      return targetModel.isShimNOCorPLTile(col, row) &&
+      return targetModel.hasShimMux(col, row) &&
              llvm::is_contained(
                  {WireBundle::DMA, WireBundle::NOC, WireBundle::PLIO},
                  p.bundle);
@@ -797,7 +797,7 @@ LogicalResult Pathfinder::addFixedConnection(SwitchboxOp switchboxOp) {
       sb.at(i, dstIdx).available = false;
   // A fixed op on a shim's South channel claims the port the shim mux carries
   // on it (see shimMuxChannelFrom).
-  if (switchboxOp.getTileOp().isShimNOCorPLTile()) {
+  if (getTargetModel(switchboxOp).hasShimMux(col, row)) {
     auto isMuxed = [](Port p) {
       return llvm::is_contained(
           {WireBundle::DMA, WireBundle::NOC, WireBundle::PLIO}, p.bundle);

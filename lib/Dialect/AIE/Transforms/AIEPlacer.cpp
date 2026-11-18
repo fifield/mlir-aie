@@ -2190,9 +2190,10 @@ Placer::OverlayFit Placer::overlayAt(TileID at, const PinnedChannelUse &pins,
   for (const PinnedChannels::End &end : extra)
     if (end.sends)
       onChannel[end.channel].push_back(end);
-  int count = adaptiveOverlay ? targetModel->getNumSourceShimMuxConnections(
-                                    at.col, at.row, WireBundle::DMA)
-                              : 1;
+  int count =
+      adaptiveOverlay
+          ? targetModel->getNumDMAChannels(at.col, at.row, DMAChannelDir::MM2S)
+          : 1;
   std::optional<int> chosen;
   size_t fewest = std::numeric_limits<size_t>::max();
   for (int channel = 0; channel < count; ++channel) {

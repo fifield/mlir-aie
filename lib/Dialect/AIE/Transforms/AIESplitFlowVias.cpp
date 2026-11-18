@@ -65,7 +65,8 @@ static bool isDirectShimMux(Value srcTile, WireBundle srcBundle, int srcChannel,
                             Value dstTile, WireBundle dstBundle,
                             int dstChannel) {
   auto tile = srcTile.getDefiningOp<TileOp>();
-  if (srcTile != dstTile || !tile || !tile.isShimNOCorPLTile())
+  if (srcTile != dstTile || !tile ||
+      !getTargetModel(tile).hasShimMux(tile.getCol(), tile.getRow()))
     return false;
   if (dstBundle == WireBundle::South)
     return dstChannel == shimMuxChannelFrom({srcBundle, srcChannel});
