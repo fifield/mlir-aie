@@ -375,15 +375,19 @@ public:
   /// Return the lock base index (or offset) in the local tile when accessing a
   /// neighbor's lock or an empty optional if an invalid neighbor is given
   /// Takes into account differences between Memory and Core tiles
-  std::optional<uint32_t> getLockLocalBaseIndex(int localCol, int localRow,
-                                                int lockCol, int lockRow) const;
+  virtual std::optional<uint32_t> getLockLocalBaseIndex(int localCol,
+                                                        int localRow,
+                                                        int lockCol,
+                                                        int lockRow) const;
 
   /// Return the memory base address (or offset) in the local tile when
   /// accessing a neighbor's memory or an empty optional if an invalid neighbor
   /// is given
   /// Takes into account differences between Memory and Core tiles
-  std::optional<uint32_t> getMemLocalBaseAddress(int localCol, int localRow,
-                                                 int memCol, int memRow) const;
+  virtual std::optional<uint32_t> getMemLocalBaseAddress(int localCol,
+                                                         int localRow,
+                                                         int memCol,
+                                                         int memRow) const;
 
   /// Return the size (in bytes) of the local data memory of a core.
   virtual uint32_t getLocalMemorySize() const = 0;
@@ -1442,9 +1446,6 @@ public:
 /// This model is written against the target-model API as it stands. Where
 /// that API cannot describe AIE4 it reports "unsupported" rather than an
 /// AIE2-shaped answer:
-///  - The memtile's lock and memory windows reach seven columns either side;
-///    getLockLocalBaseIndex()/getMemLocalBaseAddress() are not virtual, so the
-///    memtile cases are refused by their callers.
 ///  - No register database, BD layout or stream-switch port index map yet.
 class AIE4TargetModel : public AIETargetModel {
 public:
@@ -1457,6 +1458,11 @@ public:
   }
 
   AIEArch getTargetArch() const override;
+
+  llvm::ArrayRef<std::pair<int, int>> getCascadeSteps() const override {
+    static constexpr std::pair<int, int> steps[] = {{0, -1}, {1, 0}};
+    return steps;
+  }
 
   uint32_t getAddressGenGranularity() const override { return 32; }
 
@@ -1472,10 +1478,17 @@ public:
 
   uint32_t getNumControllersPerColumn() const override { return 2; }
 
-  std::optional<TileID> getMemWest(TileID src) const override;
+  /// A core reaches only its own data memory, through the east window.
+  std::optional<TileID> getMemWest(TileID) const override {
+    return std::nullopt;
+  }
   std::optional<TileID> getMemEast(TileID src) const override;
-  std::optional<TileID> getMemNorth(TileID src) const override;
-  std::optional<TileID> getMemSouth(TileID src) const override;
+  std::optional<TileID> getMemNorth(TileID) const override {
+    return std::nullopt;
+  }
+  std::optional<TileID> getMemSouth(TileID) const override {
+    return std::nullopt;
+  }
 
   bool isMemWest(int srcCol, int srcRow, int dstCol, int dstRow) const override;
   bool isMemEast(int srcCol, int srcRow, int dstCol, int dstRow) const override;
@@ -1512,8 +1525,16 @@ public:
   std::optional<uint32_t> getLocalLockAddress(uint32_t lockId,
                                               TileID tile) const override;
 
-  /// The BD ids a dma_bd can name: 16 on core tiles and in every memtile
-  /// channel's private pool, 32 across the two shim banks.
+  /// A memtile DMA reaches the locks and memory of the 15 memtiles within
+  /// seven columns, westmost first; data windows start at 0xB00000.
+  std::optional<uint32_t> getLockLocalBaseIndex(int localCol, int localRow,
+                                                int lockCol,
+                                                int lockRow) const override;
+  std::optional<uint32_t> getMemLocalBaseAddress(int localCol, int localRow,
+                                                 int memCol,
+                                                 int memRow) const override;
+
+  /// 16 ids per core tile or memtile channel pool; 32 across two shim banks.
   uint32_t getNumBDs(AIETileType tileType) const override {
     return tileType == AIETileType::ShimNOCTile ? 32 : 16;
   }
@@ -1638,7 +1659,7 @@ public:
   AIETileType getTileType(int col, int row) const override {
     if (row == 0)
       return AIETileType::ShimNOCTile;
-    if (row == 1)
+    if (row <= static_cast<int>(getNumMemTileRows()))
       return AIETileType::MemTile;
     return AIETileType::CoreTile;
   }

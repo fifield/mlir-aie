@@ -1903,31 +1903,9 @@ uint32_t AIE4TargetModel::getDataMemoryOffset(int col, int row) const {
   return isMemTile(col, row) ? 0x00100000 : 0;
 }
 
-std::optional<TileID> AIE4TargetModel::getMemWest(TileID src) const {
-  std::optional<TileID> ret({src.col - 1, src.row});
-  if (!isValidTile(*ret))
-    ret.reset();
-  return ret;
-}
-
 std::optional<TileID> AIE4TargetModel::getMemEast(TileID src) const {
   std::optional ret = src;
   if (!isValidTile(*ret))
-    ret.reset();
-  return ret;
-}
-
-std::optional<TileID> AIE4TargetModel::getMemNorth(TileID src) const {
-  std::optional<TileID> ret({src.col, src.row + 1});
-  if (!isValidTile(*ret))
-    ret.reset();
-  return ret;
-}
-
-std::optional<TileID> AIE4TargetModel::getMemSouth(TileID src) const {
-  std::optional<TileID> ret({src.col, src.row - 1});
-  // The shim row has no tile memory, and memtiles are not adjacent to cores.
-  if (!isValidTile(*ret) || ret->row == 0 || isMemTile(ret->col, ret->row))
     ret.reset();
   return ret;
 }
@@ -2108,6 +2086,46 @@ AIE4TargetModel::getLocalLockAddress(uint32_t lockId, TileID tile) const {
       return 0x00010000 + lockAddrOffset * lockId;
     return 0x00050000 + lockAddrOffset * (lockId - bankSize);
   }
+  return std::nullopt;
+}
+
+// Window index of memtile (memCol, memRow) seen from (localCol, localRow):
+// 0 = seven columns west, 7 = local, 14 = seven columns east.
+static std::optional<uint32_t> aie4MemTileWindow(const AIETargetModel &tm,
+                                                 int localCol, int localRow,
+                                                 int memCol, int memRow) {
+  constexpr int reach = 7;
+  if (!tm.isValidTile({memCol, memRow}) || !tm.isMemTile(memCol, memRow) ||
+      localRow != memRow)
+    return std::nullopt;
+  int delta = memCol - localCol;
+  if (delta < -reach || delta > reach)
+    return std::nullopt;
+  return delta + reach;
+}
+
+std::optional<uint32_t>
+AIE4TargetModel::getLockLocalBaseIndex(int localCol, int localRow, int lockCol,
+                                       int lockRow) const {
+  if (!isMemTile(localCol, localRow))
+    return AIETargetModel::getLockLocalBaseIndex(localCol, localRow, lockCol,
+                                                 lockRow);
+  if (auto window =
+          aie4MemTileWindow(*this, localCol, localRow, lockCol, lockRow))
+    return *window * getNumLocks(lockCol, lockRow);
+  return std::nullopt;
+}
+
+std::optional<uint32_t>
+AIE4TargetModel::getMemLocalBaseAddress(int localCol, int localRow, int memCol,
+                                        int memRow) const {
+  if (!isMemTile(localCol, localRow))
+    return AIETargetModel::getMemLocalBaseAddress(localCol, localRow, memCol,
+                                                  memRow);
+  constexpr uint32_t memTileWindowBase = 0x00B00000;
+  if (auto window =
+          aie4MemTileWindow(*this, localCol, localRow, memCol, memRow))
+    return memTileWindowBase + *window * getMemTileSize();
   return std::nullopt;
 }
 

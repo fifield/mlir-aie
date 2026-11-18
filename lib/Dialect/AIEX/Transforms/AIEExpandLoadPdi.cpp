@@ -278,6 +278,24 @@ static LogicalResult transformLoadPdi(
   return success();
 }
 
+// Both expansions rely on a PDI load to reset the array, which AIE4 does
+// not do.
+static LogicalResult
+verifyPdiLoadResets(ModuleOp module, ArrayRef<NpuLoadPdiOp> loadPdiOps,
+                    function_ref<AIEX::ExpandMode(NpuLoadPdiOp)> expandMode) {
+  for (NpuLoadPdiOp loadPdiOp : loadPdiOps) {
+    if (expandMode(loadPdiOp) == AIEX::ExpandMode::none)
+      continue;
+    auto dev = module.lookupSymbol<AIE::DeviceOp>(loadPdiOp.getDeviceRefAttr());
+    if (dev && isa<AIE::AIE4TargetModel>(dev.getTargetModel()))
+      return loadPdiOp.emitOpError()
+             << "cannot be expanded on "
+             << AIE::stringifyAIEArch(dev.getTargetModel().getTargetArch())
+             << ": a PDI load does not reset the array";
+  }
+  return success();
+}
+
 // The checks that need no expansion, so the pass fails before it changes the
 // IR.
 static LogicalResult
@@ -362,6 +380,9 @@ struct AIEExpandLoadPdiPass
                  ? loadPdiOp.getExpandMode().value_or(defaultMode)
                  : AIEX::ExpandMode::none;
     };
+    if (failed(verifyPdiLoadResets(module, loadPdiOps, expandMode)))
+      return signalPassFailure();
+
     // Per enclosing runtime sequence, the parity of the FIRST and LAST of its
     // empty-device resets and of its overlay loads, plus the device type, and
     // the kind of its last load, which leaves the array as the next dispatch

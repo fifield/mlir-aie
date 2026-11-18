@@ -3592,15 +3592,9 @@ LogicalResult GetCascadeOp::verify() {
   Type type = getCascadeValue().getType();
   DataLayout dataLayout = DataLayout::closest(*this);
   auto bits = dataLayout.getTypeSizeInBits(type);
-  if (isa<AIE1TargetModel>(targetModel)) {
-    if (bits != 384)
-      return emitOpError("must be a 384-bit type");
-  } else if (isa<AIE2TargetModel>(targetModel)) {
-    if (bits != 512)
-      return emitOpError("must be a 512-bit type");
-  } else
-    return emitOpError("cascade not supported in ")
-           << stringifyAIEArch(targetModel.getTargetArch());
+  auto archbits = targetModel.getAccumulatorCascadeSize();
+  if (bits != archbits)
+    return emitOpError("must be a ") << archbits << "-bit type";
   return success();
 }
 
