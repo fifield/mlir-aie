@@ -167,6 +167,15 @@ struct RtpToWrite32Pattern : OpConversionPattern<NpuWriteRTPOp> {
     }
     AIE::TileOp tile = buffer.getTileOp();
 
+    // On AIE4 a tile-relative offset reaches only the first 1 MiB of the
+    // tile, below memtile data memory, so keep the buffer reference.
+    if (isa<AIE::AIE4TargetModel>(AIE::getTargetModel(op))) {
+      rewriter.replaceOpWithNewOp<NpuWrite32Op>(
+          op, createConstantI32(rewriter, op->getLoc(), op.getIndex()),
+          adaptor.getValue(), op.getBufferAttr(), nullptr, nullptr);
+      return success();
+    }
+
     uint32_t idx = op.getIndex() * sizeof(uint32_t);
     uint32_t address = *bufferAddress + idx;
 

@@ -86,9 +86,7 @@ pushWrites(DmaPushQueueOp op, int col, int row,
   // store is. Anything else means aie-codegen pushes a task in a way this
   // lowering does not carry, and silently dropping it would leave the channel
   // without the task.
-  uint64_t tileBase =
-      (static_cast<uint64_t>(col) << targetModel.getColumnShift()) |
-      (static_cast<uint64_t>(row) << targetModel.getRowShift());
+  uint64_t tileBase = targetModel.getTileAddress(col, row);
   uint64_t tileSpan = 1ull << targetModel.getRowShift();
   for (const TransactionBinaryOperation &txnOp : ops) {
     if (txnOp.cmd.Opcode != XAie_TxnOpcode::XAIE_IO_WRITE)
@@ -186,7 +184,8 @@ struct AIELowerCoreIssuedConfigurationPass
     OpBuilder builder(op);
     Location loc = op.getLoc();
     Type i32 = builder.getI32Type();
-    uint32_t localAddr = *statusAddr & ((1u << targetModel.getRowShift()) - 1);
+    uint32_t localAddr =
+        *statusAddr - targetModel.getTileAddress(tile.getCol(), tile.getRow());
     Value addrPtr = tilePointer(builder, loc, localAddr);
     Value maskOp = arith::ConstantOp::create(
         builder, loc, i32,

@@ -620,9 +620,9 @@ def parse_mlir_trace_events(mlir_module_str, colshift=None, device_name=None):
                     "compile-time constant (trace config requires constant "
                     "operands)"
                 )
-            row = (address >> target_model.get_row_shift()) & 0x1F
-            col = (address >> target_model.get_column_shift()) & 0x1F
-            address = address & 0xFFFFF  # 20 bits address
+            row = target_model.get_row_from_address(address)
+            col = target_model.get_column_from_address(address)
+            address = address - target_model.get_tile_address(col, row)
 
         logger.debug(
             "write32: address=%s, row=%s, col=%s, value=%s",

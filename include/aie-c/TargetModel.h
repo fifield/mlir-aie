@@ -207,6 +207,22 @@ aieTargetModelGetColumnShift(AieTargetModel targetModel);
 MLIR_CAPI_EXPORTED uint32_t
 aieTargetModelGetRowShift(AieTargetModel targetModel);
 
+/// Absolute address of offset 0 of tile (col, row).
+MLIR_CAPI_EXPORTED uint32_t
+aieTargetModelGetTileAddress(AieTargetModel targetModel, int col, int row);
+
+/// Column of the tile whose window contains `address`.
+MLIR_CAPI_EXPORTED uint32_t aieTargetModelGetColumnFromAddress(
+    AieTargetModel targetModel, uint32_t address);
+
+/// Row of the tile whose window contains `address`.
+MLIR_CAPI_EXPORTED uint32_t
+aieTargetModelGetRowFromAddress(AieTargetModel targetModel, uint32_t address);
+
+/// Offset of tile (col, row)'s data memory within its window.
+MLIR_CAPI_EXPORTED uint32_t
+aieTargetModelGetDataMemoryOffset(AieTargetModel targetModel, int col, int row);
+
 #ifdef __cplusplus
 }
 #endif

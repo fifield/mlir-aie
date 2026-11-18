@@ -1030,8 +1030,7 @@ insertCoreLockDrain(OpBuilder &builder, DeviceOp device,
     cores.push_back(core);
   }
   auto tileAddress = [&](int32_t column, int32_t row) {
-    return (static_cast<uint32_t>(column) << model.getColumnShift()) |
-           (static_cast<uint32_t>(row) << model.getRowShift());
+    return model.getTileAddress(column, row);
   };
   auto pollCoreStatus = [&](CoreOp core, uint32_t maskValue) {
     auto tile = core.getTileOp();

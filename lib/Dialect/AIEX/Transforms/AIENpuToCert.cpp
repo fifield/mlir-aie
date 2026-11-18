@@ -154,8 +154,7 @@ struct RuntimeSequenceToCertJob : OpConversionPattern<AIE::RuntimeSequenceOp> {
 static void warnOnMismatchedTileBits(Operation *op, uint32_t address,
                                      uint32_t col, uint32_t row) {
   const auto &tm = AIE::getTargetModel(op);
-  uint32_t expectedUpperBits = ((col & 0xff) << tm.getColumnShift()) |
-                               ((row & 0xff) << tm.getRowShift());
+  uint32_t expectedUpperBits = tm.getTileAddress(col, row);
   uint32_t upperBits = address & ~0xfffff;
   if (upperBits != 0 && upperBits != expectedUpperBits)
     op->emitWarning() << "address upper bits (0x" << llvm::utohexstr(upperBits)
@@ -647,8 +646,8 @@ static AIEX::NpuBlockWriteOp
 findPatchedBlockWrite(AIEX::NpuAddressPatchOp patch) {
   const auto &tm = AIE::getTargetModel(patch);
   uint32_t addr = patch.getAddr();
-  int col = (addr >> tm.getColumnShift()) & 0x1f;
-  int row = (addr >> tm.getRowShift()) & 0x1f;
+  int col = tm.getColumnFromAddress(addr);
+  int row = tm.getRowFromAddress(addr);
   if (!tm.isValidTile({col, row}))
     return {};
   for (Block::iterator it(patch); it != patch->getBlock()->begin();) {

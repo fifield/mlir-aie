@@ -314,3 +314,23 @@ uint32_t aieTargetModelGetColumnShift(AieTargetModel targetModel) {
 uint32_t aieTargetModelGetRowShift(AieTargetModel targetModel) {
   return unwrap(targetModel).getRowShift();
 }
+
+uint32_t aieTargetModelGetTileAddress(AieTargetModel targetModel, int col,
+                                      int row) {
+  return unwrap(targetModel).getTileAddress(col, row);
+}
+
+uint32_t aieTargetModelGetColumnFromAddress(AieTargetModel targetModel,
+                                            uint32_t address) {
+  return unwrap(targetModel).getColumnFromAddress(address);
+}
+
+uint32_t aieTargetModelGetRowFromAddress(AieTargetModel targetModel,
+                                         uint32_t address) {
+  return unwrap(targetModel).getRowFromAddress(address);
+}
+
+uint32_t aieTargetModelGetDataMemoryOffset(AieTargetModel targetModel, int col,
+                                           int row) {
+  return unwrap(targetModel).getDataMemoryOffset(col, row);
+}

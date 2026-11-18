@@ -320,8 +320,7 @@ uint64_t AIE1TargetModel::getDmaBdAddress(int col, int row, uint32_t bd_id,
     llvm_unreachable(
         "AIE1TargetModel::getDmaBdAddress called for non-DMA tile");
   }
-  return ((col & 0xff) << getColumnShift()) | ((row & 0xff) << getRowShift()) |
-         offset;
+  return getTileAddress(col, row) | offset;
 }
 
 uint32_t AIE1TargetModel::getDmaBdAddressOffset(int col, int row) const {
@@ -347,8 +346,7 @@ AIE1TargetModel::getDmaControlAddress(int col, int row, int channel,
   if (direction == AIE::DMAChannelDir::MM2S)
     offset += 010;
 
-  return ((col & 0xff) << getColumnShift()) | ((row & 0xff) << getRowShift()) |
-         offset;
+  return getTileAddress(col, row) | offset;
 }
 
 uint32_t
@@ -885,8 +883,7 @@ uint64_t AIE2TargetModel::getDmaBdAddress(int col, int row, uint32_t bd_id,
         "AIE2TargetModel::getDmaBdAddress called for non-DMA tile");
   }
   // NOLINTEND(bugprone-branch-clone)
-  return ((col & 0xff) << getColumnShift()) | ((row & 0xff) << getRowShift()) |
-         offset;
+  return getTileAddress(col, row) | offset;
 }
 
 static DmaBdLayout makeAIE2ShimBdLayout() {
@@ -1027,8 +1024,7 @@ AIE2TargetModel::getDmaControlAddress(int col, int row, int channel,
         "AIE2TargetModel::getDmaControlAddress called for non-DMA tile");
   }
 
-  return ((col & 0xff) << getColumnShift()) | ((row & 0xff) << getRowShift()) |
-         offset;
+  return getTileAddress(col, row) | offset;
 }
 
 std::optional<uint32_t>
@@ -1053,8 +1049,7 @@ AIE2TargetModel::getDmaStatusAddress(int col, int row, int channel,
     return std::nullopt;
   }
 
-  return ((col & 0xff) << getColumnShift()) | ((row & 0xff) << getRowShift()) |
-         offset;
+  return getTileAddress(col, row) | offset;
 }
 
 uint32_t
@@ -1818,8 +1813,7 @@ AIE2PSTargetModel::getDmaBdAddress(int col, int row, uint32_t bd_id,
                                    AIE::DMAChannelDir direction) const {
   if (isShimNOCTile(col, row)) {
     uint64_t offset = 0x00009000 + bd_id * 0x30;
-    return ((col & 0xff) << getColumnShift()) |
-           ((row & 0xff) << getRowShift()) | offset;
+    return getTileAddress(col, row) | offset;
   }
   // Memtile and core tile use same addresses as AIE2.
   return AIE2TargetModel::getDmaBdAddress(col, row, bd_id, channel, direction);
@@ -1832,8 +1826,7 @@ AIE2PSTargetModel::getDmaControlAddress(int col, int row, int channel,
     uint32_t offset = 0x00009300 + (channel * 0x8);
     if (direction == AIE::DMAChannelDir::MM2S)
       offset += 0x10;
-    return ((col & 0xff) << getColumnShift()) |
-           ((row & 0xff) << getRowShift()) | offset;
+    return getTileAddress(col, row) | offset;
   }
   // Memtile and core tile use same addresses as AIE2.
   return AIE2TargetModel::getDmaControlAddress(col, row, channel, direction);
@@ -1886,13 +1879,28 @@ std::optional<uint32_t> AIE2PSTargetModel::getStreamSwitchPortIndex(
 
 AIEArch AIE4TargetModel::getTargetArch() const { return AIEArch::AIE4; }
 
-uint32_t AIE4TargetModel::getAddressRow(int col, int row) const {
-  uint32_t addrRow = static_cast<uint32_t>(row);
+uint32_t AIE4TargetModel::getTileAddress(int col, int row) const {
+  uint32_t addressRow = static_cast<uint32_t>(row);
   if (isCoreTile(col, row))
-    return addrRow + 4 * getNumMemTileRows();
-  if (isMemTile(col, row))
-    return 5 * addrRow - 4; // memtile row m spans address rows 5m-4 .. 5m
-  return addrRow;
+    addressRow += 4 * getNumMemTileRows();
+  else if (isMemTile(col, row))
+    addressRow = 5 * addressRow - 4; // memtile row m: address rows 5m-4 .. 5m
+  return (static_cast<uint32_t>(col & 0xff) << getColumnShift()) |
+         ((addressRow & 0xff) << getRowShift());
+}
+
+uint32_t AIE4TargetModel::getRowFromAddress(uint32_t address) const {
+  uint32_t addressRow = (address >> getRowShift()) & getRowFieldMask();
+  uint32_t memTileRows = getNumMemTileRows();
+  if (addressRow == 0)
+    return 0;
+  if (addressRow <= 5 * memTileRows)
+    return 1 + (addressRow - 1) / 5;
+  return addressRow - 4 * memTileRows;
+}
+
+uint32_t AIE4TargetModel::getDataMemoryOffset(int col, int row) const {
+  return isMemTile(col, row) ? 0x00100000 : 0;
 }
 
 std::optional<TileID> AIE4TargetModel::getMemWest(TileID src) const {
@@ -2041,7 +2049,7 @@ uint64_t AIE4TargetModel::getDmaBdAddress(int col, int row, uint32_t bd_id,
     llvm_unreachable("AIE4TargetModel::getDmaBdAddress called for non-DMA "
                      "tile");
   }
-  return getTileBaseAddress(col, row) | offset;
+  return getTileAddress(col, row) | offset;
 }
 
 uint32_t AIE4TargetModel::getDmaBdAddressOffset(int col, int row) const {
@@ -2081,7 +2089,7 @@ AIE4TargetModel::getDmaControlAddress(int col, int row, int channel,
     llvm_unreachable("AIE4TargetModel::getDmaControlAddress called for "
                      "non-DMA tile");
   }
-  return static_cast<uint32_t>(getTileBaseAddress(col, row)) | offset;
+  return getTileAddress(col, row) | offset;
 }
 
 std::optional<uint32_t>

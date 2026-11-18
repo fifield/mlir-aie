@@ -286,7 +286,7 @@ static const xilinx::AIE::RegisterDatabase *getRegDB() {
 }
 
 // Decompose an absolute device address into (col, row, offset) using the
-// target model's column/row shifts, then derive the regdb module name from
+// target model's tile address map, then derive the regdb module name from
 // the row's tile type. Looks the (module, offset) up in regdb. Returns the
 // register name on success and writes the module name to *outModule. On any
 // failure returns empty StringRef.
@@ -297,12 +297,11 @@ lookupRegisterByAddress(uint64_t address, const AIETargetModel &tm,
   outModule.clear();
   if (!regdb)
     return {};
-  uint32_t colShift = tm.getColumnShift();
-  uint32_t rowShift = tm.getRowShift();
-  uint8_t col = static_cast<uint8_t>((address >> colShift) & 0xFF);
-  uint8_t row = static_cast<uint8_t>((address >> rowShift) & 0xFF);
-  uint64_t baseMask = (uint64_t{1} << rowShift) - 1;
-  uint32_t offset = static_cast<uint32_t>(address & baseMask);
+  if (address > UINT32_MAX)
+    return {};
+  int col = tm.getColumnFromAddress(address);
+  int row = tm.getRowFromAddress(address);
+  uint32_t offset = address - tm.getTileAddress(col, row);
 
   // Determine module from tile type. Module names must match the JSON keys in
   // aie_registers_aie2.json: "core", "memory", "memory_tile", "shim".

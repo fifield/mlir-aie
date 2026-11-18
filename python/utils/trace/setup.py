@@ -131,7 +131,7 @@ def configure_shimtile_dma_aie2(
         use_next_bd=0,
         valid_bd=1,
     )
-    addr = (int(shim.col) << tm.get_column_shift()) | (0x1D004 + bd_id * 0x20)
+    addr = tm.get_tile_address(int(shim.col), int(shim.row)) | (0x1D004 + bd_id * 0x20)
     npu_address_patch(addr=addr, arg_idx=ddr_id, arg_plus=offset)
 
     ctrl_addr = 0x0

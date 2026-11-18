@@ -416,9 +416,35 @@ NB_MODULE(_aie, m) {
            [](PyAieTargetModel &self) {
              return aieTargetModelGetColumnShift(self.get());
            })
-      .def("get_row_shift", [](PyAieTargetModel &self) {
-        return aieTargetModelGetRowShift(self.get());
-      });
+      .def("get_row_shift",
+           [](PyAieTargetModel &self) {
+             return aieTargetModelGetRowShift(self.get());
+           })
+      .def(
+          "get_tile_address",
+          [](PyAieTargetModel &self, int col, int row) {
+            return aieTargetModelGetTileAddress(self.get(), col, row);
+          },
+          "col"_a, "row"_a, "Absolute address of offset 0 of tile (col, row).")
+      .def(
+          "get_column_from_address",
+          [](PyAieTargetModel &self, uint32_t address) {
+            return aieTargetModelGetColumnFromAddress(self.get(), address);
+          },
+          "address"_a, "Column of the tile whose window contains the address.")
+      .def(
+          "get_row_from_address",
+          [](PyAieTargetModel &self, uint32_t address) {
+            return aieTargetModelGetRowFromAddress(self.get(), address);
+          },
+          "address"_a, "Row of the tile whose window contains the address.")
+      .def(
+          "get_data_memory_offset",
+          [](PyAieTargetModel &self, int col, int row) {
+            return aieTargetModelGetDataMemoryOffset(self.get(), col, row);
+          },
+          "col"_a, "row"_a,
+          "Offset of tile (col, row)'s data memory within its window.");
 
   // TileLike interface bindings
   m.def(

@@ -24,9 +24,6 @@
 // RUN: not aie-opt --aie-standard-lowering %s 2>&1 | FileCheck %s --check-prefix=CORE
 // CORE: error: 'aie.use_lock' op has no core lowering for AIE4
 
-// RUN: not aie-translate --aie-npu-to-binary --aie-sequence-name=seq %s 2>&1 | FileCheck %s --check-prefix=ADDR
-// ADDR: error: 'aiex.npu.write32' op cannot encode the address of tile (0, 2) on AIE4
-
 // RUN: not aie-opt --aie-generate-column-control-overlay="configuration=true" %s 2>&1 | FileCheck %s --check-prefix=OVERLAY
 // OVERLAY: error: 'aie.device' op the column control overlay is not yet supported on AIE4
 
@@ -41,11 +38,6 @@ module {
       aie.use_lock(%lock, AcquireGreaterEqual, %c1)
       aie.use_lock(%lock, Release, %c1)
       aie.end
-    }
-    aie.runtime_sequence @seq() {
-      %addr = arith.constant 0x1D000 : i32
-      %value = arith.constant 1 : i32
-      aiex.npu.write32(%addr, %value) {column = 0 : i32, row = 2 : i32} : i32, i32
     }
   }
 }

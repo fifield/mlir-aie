@@ -199,9 +199,8 @@ static std::optional<int64_t> tripCount(scf::ForOp forOp, DeviceOp device) {
     if (!col || !row) {
       if (!address)
         return true;
-      col = *address >> tm.getColumnShift();
-      row = (*address >> tm.getRowShift()) &
-            ((1 << (tm.getColumnShift() - tm.getRowShift())) - 1);
+      col = tm.getColumnFromAddress(static_cast<uint32_t>(*address));
+      row = tm.getRowFromAddress(static_cast<uint32_t>(*address));
     }
     return *col == tile.getCol() && *row == tile.getRow();
   };

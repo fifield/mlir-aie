@@ -653,8 +653,8 @@ public:
   /// Return the DMA task-queue register address relative to its tile.
   uint32_t getLocalDmaControlAddress(int col, int row, int channel,
                                      AIE::DMAChannelDir direction) const {
-    return getDmaControlAddress(col, row, channel, direction) &
-           ((1u << getRowShift()) - 1);
+    return getDmaControlAddress(col, row, channel, direction) -
+           getTileAddress(col, row);
   }
 
   virtual uint32_t getNumMemTileRows() const = 0;
@@ -762,6 +762,32 @@ public:
   // This is used to compute the control address of a tile from it's row
   // location.
   virtual uint32_t getRowShift() const = 0;
+
+  /// Return the base address of the tile's window. Override together with
+  /// getRowFromAddress() if tiles span more than one address row.
+  virtual uint32_t getTileAddress(int col, int row) const {
+    return (static_cast<uint32_t>(col & 0xff) << getColumnShift()) |
+           (static_cast<uint32_t>(row & 0xff) << getRowShift());
+  }
+
+  uint32_t getRowFieldMask() const {
+    return (1u << (getColumnShift() - getRowShift())) - 1;
+  }
+
+  uint32_t getColumnFromAddress(uint32_t address) const {
+    return (address >> getColumnShift()) & 0xff;
+  }
+
+  /// Inverse of getTileAddress() for any address in the tile's window.
+  virtual uint32_t getRowFromAddress(uint32_t address) const {
+    return (address >> getRowShift()) & getRowFieldMask();
+  }
+
+  /// Offset of data memory in the tile's window; buffer addresses are
+  /// relative to it.
+  virtual uint32_t getDataMemoryOffset(int /*col*/, int /*row*/) const {
+    return 0;
+  }
 
   // Returns the list of possible burst encodings (first) and
   // their corresponding lengths in bytes (second).
@@ -1416,11 +1442,6 @@ public:
 /// This model is written against the target-model API as it stands. Where
 /// that API cannot describe AIE4 it reports "unsupported" rather than an
 /// AIE2-shaped answer:
-///  - Tile addresses: a memtile spans five 1 MiB address rows, so core row r
-///    sits at address row r + 4 * getNumMemTileRows(). The model's own address
-///    queries (getDmaBdAddress(), getDmaControlAddress()) encode this; code
-///    that open-codes (col << colShift) | (row << rowShift) does not, and
-///    refuses AIE4 memtile and core tiles.
 ///  - The memtile's lock and memory windows reach seven columns either side;
 ///    getLockLocalBaseIndex()/getMemLocalBaseAddress() are not virtual, so the
 ///    memtile cases are refused by their callers.
@@ -1591,16 +1612,13 @@ public:
   std::vector<std::pair<uint32_t, uint32_t>>
   getShimBurstEncodingsAndLengths() const override;
 
-  /// The address row of a tile. A memtile spans five address rows; this is
-  /// the first.
-  uint32_t getAddressRow(int col, int row) const;
-
-  /// Absolute address of offset 0 of tile (col, row).
-  uint64_t getTileBaseAddress(int col, int row) const {
-    return (static_cast<uint64_t>(col & 0xff) << getColumnShift()) |
-           (static_cast<uint64_t>(getAddressRow(col, row) & 0xff)
-            << getRowShift());
-  }
+  /// A memtile spans five address rows (registers, then 4 MiB of data), so
+  /// memtile row m starts at address row 5m-4 and core row r at r + 4 * the
+  /// number of memtile rows.
+  uint32_t getTileAddress(int col, int row) const override;
+  uint32_t getRowFromAddress(uint32_t address) const override;
+  /// A memtile's data memory starts 1 MiB into its window.
+  uint32_t getDataMemoryOffset(int col, int row) const override;
 
   static bool classof(const AIETargetModel *model) {
     return model->getKind() >= TK_AIE4_NPU3 && model->getKind() < TK_AIE4_Last;

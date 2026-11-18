@@ -81,7 +81,7 @@ class AIEAddressDecoder:
         Args:
             address: Address to decode (hex or decimal)
 
-        Address format: ((col << column_shift) | (row << row_shift)) + offset
+        Address format: target_model.get_tile_address(col, row) + offset
 
         Where:
         - col: column number
@@ -97,9 +97,9 @@ class AIEAddressDecoder:
         target_model = aiedialect.get_target_model(device)
 
         # Extract col, row, and offset using target model
-        col = (address >> target_model.get_column_shift()) & 0x7F
-        row = (address >> target_model.get_row_shift()) & 0x1F
-        register_offset = address & 0xFFFFF  # bits 0-19 (offset within tile)
+        col = target_model.get_column_from_address(address)
+        row = target_model.get_row_from_address(address)
+        register_offset = address - target_model.get_tile_address(col, row)
 
         # Determine tile type and candidate modules
         if target_model.is_mem_tile(col, row):
@@ -225,7 +225,7 @@ class AIEAddressDecoder:
     ) -> Optional[int]:
         """Encode col, row, and register name into an address (reverse lookup).
 
-        Address format: ((col << column_shift) | (row << row_shift)) + offset
+        Address format: target_model.get_tile_address(col, row) + offset
 
         Args:
             col: Column number
@@ -281,10 +281,7 @@ class AIEAddressDecoder:
             return None
 
         # Calculate address using target model
-        address = (
-            (col << target_model.get_column_shift())
-            | (row << target_model.get_row_shift())
-        ) + register_offset
+        address = target_model.get_tile_address(col, row) + register_offset
 
         return address
 
@@ -574,9 +571,9 @@ class MLIRModuleAnnotator:
 
         # If row/col not present, extract from address
         if address is not None and row is None and col is None:
-            row = (address >> target_model.get_row_shift()) & 0x1F
-            col = (address >> target_model.get_column_shift()) & 0x1F
-            address = address & 0xFFFFF  # 20 bits register offset
+            row = target_model.get_row_from_address(address)
+            col = target_model.get_column_from_address(address)
+            address = address - target_model.get_tile_address(col, row)
 
         return address, row, col, value, mask
 
@@ -604,10 +601,7 @@ class MLIRModuleAnnotator:
         # a full address for the decoder (which expects col/row encoded in address)
         if row is not None and col is not None:
             # Construct full address using target model
-            full_address = (
-                (col << target_model.get_column_shift())
-                | (row << target_model.get_row_shift())
-            ) + (address & 0xFFFFF)
+            full_address = target_model.get_tile_address(col, row) + (address & 0xFFFFF)
         else:
             # Address already contains col/row encoded
             full_address = address
