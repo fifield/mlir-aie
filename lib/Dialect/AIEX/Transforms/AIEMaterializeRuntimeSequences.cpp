@@ -7,6 +7,7 @@
 
 #include "aie/Conversion/AIEToConfiguration/AIEToConfiguration.h"
 #include "aie/Dialect/AIE/IR/AIEDialect.h"
+#include "aie/Dialect/AIE/Transforms/AIEAssignBufferDescriptorIDs.h"
 #include "aie/Dialect/AIEX/AIEUtils.h"
 #include "aie/Dialect/AIEX/IR/AIEXDialect.h"
 #include "aie/Dialect/AIEX/Transforms/AIEXPasses.h"
@@ -21,8 +22,6 @@
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/WalkPatternRewriteDriver.h"
 #include "llvm/ADT/STLExtras.h"
-
-#include <set>
 
 namespace xilinx::AIEX {
 #define GEN_PASS_DEF_AIEMATERIALIZERUNTIMESEQUENCES
@@ -322,7 +321,7 @@ static LogicalResult copyReferencedSSAValues(
             for (auto namedAttr : dict) {
               StringRef name = namedAttr.getName().getValue();
               if (name != "col" && name != "row" &&
-                  name != "aiex.reserved_bd_ids") {
+                  !AIE::isReservedBdIdsAttr(name)) {
                 filteredAttrs.push_back(namedAttr);
               }
             }
@@ -341,18 +340,13 @@ static LogicalResult copyReferencedSSAValues(
           }
         }
         // The callee's sequence ops move here, so the ids they pin do too.
-        if (auto calleeIds = tileOp->getAttrOfType<DenseI32ArrayAttr>(
-                "aiex.reserved_bd_ids")) {
-          std::set<int32_t> ids(calleeIds.asArrayRef().begin(),
-                                calleeIds.asArrayRef().end());
-          if (auto callerIds = existingTile->getAttrOfType<DenseI32ArrayAttr>(
-                  "aiex.reserved_bd_ids"))
-            ids.insert(callerIds.asArrayRef().begin(),
-                       callerIds.asArrayRef().end());
-          SmallVector<int32_t> sorted(ids.begin(), ids.end());
-          existingTile->setAttr(
-              "aiex.reserved_bd_ids",
-              DenseI32ArrayAttr::get(existingTile->getContext(), sorted));
+        SmallVector<AIE::ReservedBdId> calleeIds =
+            AIE::getReservedBdIds(tileOp);
+        if (!calleeIds.empty()) {
+          SmallVector<AIE::ReservedBdId> ids =
+              AIE::getReservedBdIds(existingTile);
+          ids.append(calleeIds);
+          AIE::setReservedBdIds(existingTile, ids);
         }
         // Clones go in at the insertion point; the caller's tile moves ahead
         // of it, so the locks and buffers cloned onto it follow it.

@@ -5,23 +5,21 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// A tile's buffer-descriptor ids are one shared pool, but the static tile
-// program and the runtime sequence get their ids from two separate passes that
-// do not see each other. This prepass records those compile-time-pinned runtime
-// ids per tile as an aiex.reserved_bd_ids attribute on each aie.tile.
+// Records compile-time-pinned runtime-sequence BD ids on each aie.tile so the
+// static BD assignment avoids them: aiex.reserved_bd_ids for ids held in every
+// pool of the tile, aiex.reserved_channel_bd_ids for one channel's pool only.
 //
 //===----------------------------------------------------------------------===//
 
 #include "aie/Dialect/AIE/IR/AIEDialect.h"
+#include "aie/Dialect/AIE/Transforms/AIEAssignBufferDescriptorIDs.h"
 #include "aie/Dialect/AIEX/AIEUtils.h"
 #include "aie/Dialect/AIEX/IR/AIEXDialect.h"
 #include "aie/Dialect/AIEX/Transforms/AIEXPasses.h"
 
 #include "mlir/Pass/Pass.h"
-#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallVector.h"
-
-#include <set>
 
 namespace xilinx::AIEX {
 #define GEN_PASS_DEF_AIERESERVERUNTIMEBDIDS
@@ -42,18 +40,25 @@ struct AIEReserveRuntimeBDIDsPass
   void runOnOperation() override {
     DeviceOp device = getOperation();
 
-    llvm::DenseMap<TileOp, std::set<int32_t>> reserved;
-    forEachRuntimePinnedBdId(device, [&](Operation *, Operation *tile,
-                                         std::optional<int>, int32_t id) {
-      if (auto placed = dyn_cast<TileOp>(tile))
-        reserved[placed].insert(id);
-    });
+    const AIETargetModel &targetModel = device.getTargetModel();
+    llvm::MapVector<TileOp, SmallVector<ReservedBdId>> reserved;
+    forEachRuntimePinnedBdId(
+        device, [&](Operation *, Operation *tile, std::optional<int> channel,
+                    std::optional<DMAChannelDir> dir, int32_t id) {
+          auto placed = dyn_cast<TileOp>(tile);
+          if (!placed)
+            return;
+          // Reserve tile-wide unless that takes the id from other pools.
+          ReservedBdId r{std::nullopt, id};
+          BdIdGenerator gen(placed.getCol(), placed.getRow(), targetModel);
+          if (channel && dir && id >= 0 &&
+              !gen.holdsTileWide(*channel, *dir, static_cast<uint32_t>(id)))
+            r.channel = std::make_pair(*channel, *dir);
+          reserved[placed].push_back(r);
+        });
 
-    for (auto &[tile, ids] : reserved) {
-      SmallVector<int32_t> sorted(ids.begin(), ids.end());
-      tile->setAttr("aiex.reserved_bd_ids",
-                    DenseI32ArrayAttr::get(&getContext(), sorted));
-    }
+    for (auto &[tile, ids] : reserved)
+      setReservedBdIds(tile, ids);
   }
 };
 

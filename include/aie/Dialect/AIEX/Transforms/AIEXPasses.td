@@ -490,12 +490,18 @@ def AIEReserveRuntimeBDIDs
   let summary =
       "Reserve runtime-sequence pinned BD ids for the static allocator";
   let description = [{
-    Records the compile-time BD ids the runtime sequence pins, per tile, as an
-    `aiex.reserved_bd_ids` attribute on each `aie.tile`: the `bd_id`s of
-    `aiex.dma_configure_task` and `aiex.dma_configure_task_for` BDs, and the
-    `id` of each `aiex.npu.dma_memcpy_nd`. The static allocator (`aie-assign-bd-ids`) runs in the AIE
-    dialect and cannot walk AIEX ops, so it reads this attribute to keep its
-    auto-assignment off ids the runtime sequence already claimed.
+    Records the compile-time BD ids the runtime sequence pins, per tile, on
+    each `aie.tile`: the `bd_id`s of `aiex.dma_configure_task` and
+    `aiex.dma_configure_task_for` BDs, and the `id` of each
+    `aiex.npu.dma_memcpy_nd`. An id goes in `aiex.reserved_bd_ids` when it is
+    reserved in every BD pool of the tile that holds it, which is the case on
+    tiles with a single pool, for ids only one pool holds (an AIE4 shim bank),
+    and for ids whose channel is unknown. An id only
+    the pinning channel's private pool should give up goes in
+    `aiex.reserved_channel_bd_ids`, a dictionary from `<direction>_<channel>`
+    (e.g. `MM2S_0`) to ids. The static allocator (`aie-assign-bd-ids`) runs in
+    the AIE dialect and cannot walk AIEX ops, so it reads these attributes to
+    keep its auto-assignment off ids the runtime sequence already claimed.
   }];
 
   let constructor = "xilinx::AIEX::createAIEReserveRuntimeBDIDsPass()";

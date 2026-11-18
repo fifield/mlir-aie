@@ -83,12 +83,18 @@ struct AIEObjectFifoAllocatePass
   /// alone, so an image built for one runtime sequence serves another's
   /// instruction stream.
   DMAChannelAnalysis::TakenBDs takenBDs;
+  /// BDs by placed (col, row, direction, channel).
+  using BDDemand = DenseMap<std::tuple<int, int, int, int>, int64_t>;
+  static std::tuple<int, int, int, int>
+  demandKey(int col, int row, DMAChannelDir dir, int channel) {
+    return {col, row, static_cast<int>(dir), channel};
+  }
   /// The most unpinned BDs one task the runtime sequence configures on each
-  /// channel by index holds, by (col, row, channel).
-  DenseMap<std::tuple<int, int, int>, int64_t> taskBDs;
+  /// channel by index holds.
+  BDDemand taskBDs;
   /// The BDs every channel the last assignment handed out needs at once,
   /// runtime tasks included.
-  DenseMap<std::tuple<int, int, int>, int64_t> channelDemand;
+  BDDemand channelDemand;
   /// Where each tile, pool, endpoint and route falls in an order taken from
   /// the design's structure alone, which settles the choices op order would.
   DenseMap<Operation *, unsigned> structuralRank;
@@ -758,13 +764,20 @@ struct AIEObjectFifoAllocatePass
     endpointTasks.clear();
     taskBDs.clear();
     takenBDs = DMAChannelAnalysis::TakenBDs(device);
-    auto key = [](Value tile,
-                  int channel) -> std::optional<std::tuple<int, int, int>> {
+    const AIETargetModel &target = device.getTargetModel();
+    // Channels whose directions share a BD pool (pre-AIE4) use one key.
+    auto key =
+        [&](Value tile, DMAChannelDir dir,
+            int channel) -> std::optional<std::tuple<int, int, int, int>> {
       auto placed = cast<TileLike>(tile.getDefiningOp());
       auto col = placed.tryGetCol(), row = placed.tryGetRow();
       if (!col || !row)
         return std::nullopt;
-      return std::make_tuple(*col, *row, channel);
+      if ((dir == DMAChannelDir::MM2S || dir == DMAChannelDir::S2MM) &&
+          target.getBdPoolId(*col, *row, channel, DMAChannelDir::MM2S) ==
+              target.getBdPoolId(*col, *row, channel, DMAChannelDir::S2MM))
+        dir = DMAChannelDir::S2MM;
+      return demandKey(*col, *row, dir, channel);
     };
     for (auto program : device.getOps<DmaBody>())
       for (Block &block : program.getDmaBody())
@@ -778,7 +791,8 @@ struct AIEObjectFifoAllocatePass
                     device, task.getAlloc().getRootReference())))
           endpointTasks[endpoint].push_back(task);
       } else if (auto task = dyn_cast<AIEX::DMAConfigureTaskOp>(op)) {
-        if (auto at = key(task.getTile(), task.getChannel())) {
+        if (auto at =
+                key(task.getTile(), task.getDirection(), task.getChannel())) {
           int64_t unpinned = 0;
           task.getBody().walk([&](DMABDOp bd) { unpinned += !bd.getBdId(); });
           int64_t &largest = taskBDs[*at];
@@ -872,23 +886,26 @@ struct AIEObjectFifoAllocatePass
     structuralRank = std::move(rank);
   }
 
-  /// BDs `channel` of the tile at (`col`, `row`) can use that `demand` leaves
-  /// over, counting every channel whose BD ids overlap its own. Negative when
-  /// overcommitted.
-  int64_t bdRoom(TileLike tile, int col, int row, int channel,
-                 const DenseMap<std::tuple<int, int, int>, int64_t> &demand) {
+  /// BDs left for `channel` in `dir` after `demand`, over its whole BD pool.
+  /// Negative when overcommitted; 0 for a channel the tile lacks.
+  int64_t bdRoom(TileLike tile, int col, int row, DMAChannelDir dir,
+                 int channel, const BDDemand &demand) {
     const AIETargetModel &target = device.getTargetModel();
     int numChannels = std::max(tile.getNumSourceConnections(WireBundle::DMA),
                                tile.getNumDestConnections(WireBundle::DMA));
     SmallVector<DMAChannelAnalysis::BDGroup> groups =
         DMAChannelAnalysis::bdGroups(target, col, row, numChannels);
+    DMAChannelAnalysis::BDUser user{dir, channel};
     auto *group =
         llvm::find_if(groups, [&](const DMAChannelAnalysis::BDGroup &g) {
-          return llvm::is_contained(g.channels, channel);
+          return llvm::is_contained(g.users, user);
         });
-    int64_t room = group->ids.count();
-    for (int other : group->channels)
-      if (auto it = demand.find({col, row, other}); it != demand.end())
+    if (group == groups.end())
+      return 0;
+    int64_t room = group->size;
+    for (auto [otherDir, other] : group->users)
+      if (auto it = demand.find(demandKey(col, row, otherDir, other));
+          it != demand.end())
         room -= it->second;
     return room;
   }
@@ -910,8 +927,7 @@ struct AIEObjectFifoAllocatePass
   /// demand; ties, and tiles without such a split, go to the lowest index.
   /// Falls back to first-free where coordinates are unknown.
   int chooseChannel(DMAChannelAnalysis &channels, RouteEndpoint endpoint,
-                    const DenseMap<std::tuple<int, int, int>, int64_t> &demand,
-                    bool adjacent) {
+                    const BDDemand &demand, bool adjacent) {
     TileLike tile = tileOf(endpoint);
     DMAChannelDir dir = endpoint.getRouteDirection();
     std::optional<int> col = tile.tryGetCol(), row = tile.tryGetRow();
@@ -924,7 +940,7 @@ struct AIEObjectFifoAllocatePass
     for (int channel = 0; channel < limit; ++channel) {
       if (!channels.isChannelFree(tile, dir, channel))
         continue;
-      int64_t room = bdRoom(tile, *col, *row, channel, demand);
+      int64_t room = bdRoom(tile, *col, *row, dir, channel, demand);
       if (best < 0 || room > bestRoom) {
         best = channel;
         bestRoom = room;
@@ -1029,15 +1045,16 @@ struct AIEObjectFifoAllocatePass
     SmallVector<RouteEndpoint> pending;
     // BDs per placed (col, row, channel) as channels are handed out, for
     // choosing among a tile's channels by the BD ids they can use.
-    DenseMap<std::tuple<int, int, int>, int64_t> demand;
+    BDDemand demand;
     for (auto [col, row] : takenBDs.positions())
-      for (auto [channel, bds] : takenBDs.at(device.getTargetModel(), col, row))
-        demand[{col, row, channel}] += bds;
+      for (auto [user, bds] : takenBDs.at(device.getTargetModel(), col, row))
+        demand[demandKey(col, row, user.first, user.second)] += bds;
     auto noteDemand = [&](RouteEndpoint endpoint, int channel) {
       TileLike tile = tileOf(endpoint);
       auto col = tile.tryGetCol(), row = tile.tryGetRow();
       if (col && row)
-        demand[{*col, *row, channel}] += bdsOf(endpoint);
+        demand[demandKey(*col, *row, endpoint.getRouteDirection(), channel)] +=
+            bdsOf(endpoint);
     };
     for (auto endpoint : device.getOps<RouteEndpoint>()) {
       DMAChannelDir dir = endpoint.getRouteDirection();
@@ -1090,17 +1107,21 @@ struct AIEObjectFifoAllocatePass
       SmallVector<DMAChannelAnalysis::BDPlanEnd> ends;
       for (RouteEndpoint endpoint : onTile)
         ends.push_back(planEnd(endpoint, /*adjacent=*/false, /*keepPin=*/true));
-      DenseMap<int, int64_t> taken =
+      std::map<DMAChannelAnalysis::BDUser, int64_t> taken =
           takenBDs.at(device.getTargetModel(), col, row);
       if (DMAChannelAnalysis::planBDChannels(
               device.getTargetModel(), col, row, ends,
               [](DMAChannelDir, int) { return true; },
-              [&](int channel) { return taken.lookup(channel); }))
+              [&](DMAChannelDir dir, int channel) {
+                auto it = taken.find({dir, channel});
+                return it == taken.end() ? 0 : it->second;
+              }))
         continue;
       int pinnedCol = col, pinnedRow = row;
       auto roomOf = [&](RouteEndpoint endpoint) {
         return bdRoom(tileOf(endpoint), pinnedCol, pinnedRow,
-                      *endpoint.getRouteChannel(), demand);
+                      endpoint.getRouteDirection(), *endpoint.getRouteChannel(),
+                      demand);
       };
       // The ends short of BD ids, the most demanding first.
       SmallVector<RouteEndpoint> starved;
@@ -1185,16 +1206,18 @@ struct AIEObjectFifoAllocatePass
       };
       const AIETargetModel &target = device.getTargetModel();
       std::optional<SmallVector<int>> plan = DMAChannelAnalysis::planBDChannels(
-          target, *col, *row, ends, free,
-          [&](int channel) { return demand.lookup({*col, *row, channel}); });
+          target, *col, *row, ends, free, [&](DMAChannelDir dir, int channel) {
+            return demand.lookup(demandKey(*col, *row, dir, channel));
+          });
       if (plan) {
         for (auto [endpoint, channel] : llvm::zip_equal(onTile, *plan))
           planned[endpoint.getOperation()] = channel;
         continue;
       }
       // Fails even with zero BDs: a channel shortage, handled below.
-      if (!DMAChannelAnalysis::planBDChannels(target, *col, *row, unweighted,
-                                              free, [](int) { return 0; }))
+      if (!DMAChannelAnalysis::planBDChannels(
+              target, *col, *row, unweighted, free,
+              [](DMAChannelDir, int) -> int64_t { return 0; }))
         continue;
       RouteEndpoint deepest =
           *llvm::max_element(onTile, [&](RouteEndpoint a, RouteEndpoint b) {
@@ -1235,7 +1258,8 @@ struct AIEObjectFifoAllocatePass
         for (int free = 0; free < limit; ++free) {
           if (!channels.isChannelFree(tile, dir, free))
             continue;
-          roomy = bdRoom(tile, *col, *row, free, demand) >= dma.getNumBDs();
+          roomy =
+              bdRoom(tile, *col, *row, dir, free, demand) >= dma.getNumBDs();
           break;
         }
       }
@@ -1244,7 +1268,7 @@ struct AIEObjectFifoAllocatePass
                         : channels.getDMAChannelIndex(tile, dir, adjacent,
                                                       endpoint.getOperation());
       if (channel >= 0 && dma && col && row && tile.isMemTile() &&
-          bdRoom(tile, *col, *row, channel, demand) < dma.getNumBDs()) {
+          bdRoom(tile, *col, *row, dir, channel, demand) < dma.getNumBDs()) {
         channelFailure = endpoint;
         bdShortfall = true;
         if (!diagnose)
@@ -1252,7 +1276,7 @@ struct AIEObjectFifoAllocatePass
         return endpoint->emitOpError("needs ")
                << dma.getNumBDs() << " buffer descriptors, but channel "
                << channel << " of its tile has "
-               << bdRoom(tile, *col, *row, channel, demand)
+               << bdRoom(tile, *col, *row, dir, channel, demand)
                << " left beside the channels sharing its BD ids";
       }
       if (channel < 0) {
@@ -1316,7 +1340,7 @@ struct AIEObjectFifoAllocatePass
           it != channelAssignments.end())
         channel = it->second;
       if (isProgramOwned(endpoint) && channel && col && row)
-        demand[{*col, *row, *channel}] +=
+        demand[demandKey(*col, *row, endpoint.getRouteDirection(), *channel)] +=
             endpointTaskBDs(endpoint.getOperation());
     }
     channelDemand = std::move(demand);
@@ -1478,7 +1502,7 @@ struct AIEObjectFifoAllocatePass
     for (auto &[at, dmas] : ends) {
       HomeBDPlan home = homeBDPlan(dmas);
       TileLike tile = tileOf(cast<RouteEndpoint>(dmas.front().getOperation()));
-      DenseMap<int, int64_t> taken =
+      std::map<DMAChannelAnalysis::BDUser, int64_t> taken =
           takenBDs.at(device.getTargetModel(), at.first, at.second);
       DMAChannelAnalysis::BDWalkSets found =
           DMAChannelAnalysis::walkSetsThatFit(
@@ -1487,7 +1511,10 @@ struct AIEObjectFifoAllocatePass
               [&](DMAChannelDir dir, int channel) {
                 return channels.isChannelFree(tile, dir, channel);
               },
-              [&](int channel) { return taken.lookup(channel); });
+              [&](DMAChannelDir dir, int channel) {
+                auto it = taken.find({dir, channel});
+                return it == taken.end() ? 0 : it->second;
+              });
       if (found.sets.empty() && !found.fits && !found.channelShort) {
         found.sets.emplace_back();
         found.bytes.push_back(0);
@@ -2091,10 +2118,11 @@ struct AIEObjectFifoAllocatePass
           !row)
         continue;
       int channel = it->second;
-      int64_t room = bdRoom(tile, *col, *row, channel, channelDemand);
+      DMAChannelDir dir = endpoint.getRouteDirection();
+      int64_t room = bdRoom(tile, *col, *row, dir, channel, channelDemand);
       if (room >= 0)
         continue;
-      int64_t numBDs = target.getNumBDsForChannel(*col, *row, channel);
+      int64_t numBDs = target.getNumBDsForChannel(*col, *row, channel, dir);
       endpoint->emitWarning("")
           << stringifyDMAChannelDir(endpoint.getRouteDirection())
           << " DMA channel " << channel << " can use " << numBDs

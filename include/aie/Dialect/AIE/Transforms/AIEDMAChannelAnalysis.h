@@ -18,7 +18,9 @@
 #include "llvm/ADT/SmallVector.h"
 
 #include <limits>
+#include <map>
 #include <optional>
+#include <utility>
 
 namespace xilinx::AIE {
 
@@ -119,31 +121,31 @@ public:
     std::optional<int> pinned;
   };
 
-  /// Channels among `0..numChannels-1` at (`col`, `row`), grouped by whichever
-  /// BD ids any two in a group share, transitively.
+  using BDUser = std::pair<DMAChannelDir, int>;
+  /// The channels among `0..numChannels-1` at (`col`, `row`), per direction,
+  /// grouped by BD pool; `size` is the pool's number of BDs.
   struct BDGroup {
-    llvm::BitVector ids;
-    llvm::SmallVector<int> channels;
+    int64_t size = 0;
+    llvm::SmallVector<BDUser> users;
   };
   static llvm::SmallVector<BDGroup> bdGroups(const AIETargetModel &target,
                                              int col, int row, int numChannels);
 
   /// A channel of the tile at (`col`, `row`) for each of `ends`: its pinned
   /// one, else one `free` leaves that no other end of its direction takes;
-  /// and, for every set of channels sharing BD ids, the ends on them plus the
-  /// ids `spent` on each channel within those ids fit those ids. Nothing when
-  /// no assignment fits.
+  /// and, for every BD pool, the ends on its channels plus the ids `spent` on
+  /// each of them fit the pool. Nothing when no assignment fits.
   static std::optional<llvm::SmallVector<int>>
   planBDChannels(const AIETargetModel &target, int col, int row,
                  llvm::ArrayRef<BDPlanEnd> ends,
                  llvm::function_ref<bool(DMAChannelDir, int)> free,
-                 llvm::function_ref<int64_t(int)> spent);
+                 llvm::function_ref<int64_t(DMAChannelDir, int)> spent);
   /// The same, given the tile's bdGroups.
   static std::optional<llvm::SmallVector<int>>
   planBDChannels(llvm::ArrayRef<BDGroup> tileGroups,
                  llvm::ArrayRef<BDPlanEnd> ends,
                  llvm::function_ref<bool(DMAChannelDir, int)> free,
-                 llvm::function_ref<int64_t(int)> spent);
+                 llvm::function_ref<int64_t(DMAChannelDir, int)> spent);
 
   /// A pool whose ends a BD plan weighs: how many objects it holds, the bytes
   /// of one, and whether it can be walked whole, its ends then taking one BD
@@ -186,7 +188,7 @@ public:
                   llvm::ArrayRef<unsigned> poolOf,
                   llvm::ArrayRef<BDWalkPool> pools,
                   llvm::function_ref<bool(DMAChannelDir, int)> free,
-                  llvm::function_ref<int64_t(int)> spent,
+                  llvm::function_ref<int64_t(DMAChannelDir, int)> spent,
                   unsigned maxSets = std::numeric_limits<unsigned>::max());
 
   /// One walkSetsThatFit set per mem tile of a spill component
@@ -213,16 +215,16 @@ public:
 
   /// The BD ids tiles' own programs hold before objectFIFOs take theirs: the
   /// chains DMA programs start by index, on their channels, and each id a
-  /// runtime sequence pins (AIEX::forEachRuntimePinnedBdId), once per tile, on
-  /// the lowest channel up to its own reaching it (aie-reserve-runtime-bd-ids
-  /// keeps static BDs off those).
+  /// runtime sequence pins (AIEX::forEachRuntimePinnedBdId), once per tile and
+  /// BD pool, on the lowest channel up to its own whose pool holds it
+  /// (aie-reserve-runtime-bd-ids keeps static BDs off those).
   class TakenBDs {
   public:
     TakenBDs() = default;
     explicit TakenBDs(DeviceOp device);
-    /// By channel, the ids held at (`col`, `row`) by `tiles` and by every
-    /// tile with those coordinates.
-    llvm::DenseMap<int, int64_t>
+    /// By channel and direction, the ids held at (`col`, `row`) by `tiles`
+    /// and by every tile with those coordinates.
+    std::map<BDUser, int64_t>
     at(const AIETargetModel &target, int col, int row,
        llvm::ArrayRef<mlir::Operation *> tiles = {}) const;
     /// Coordinates of the placed tiles that hold BD ids.
@@ -231,10 +233,12 @@ public:
   private:
     struct Pin {
       unsigned order;
+      int32_t id;
       std::optional<int> channel;
+      std::optional<DMAChannelDir> dir;
     };
-    llvm::MapVector<mlir::Operation *, llvm::DenseMap<int, int64_t>> fixed;
-    llvm::MapVector<mlir::Operation *, llvm::DenseMap<int32_t, Pin>> pinned;
+    llvm::MapVector<mlir::Operation *, std::map<BDUser, int64_t>> fixed;
+    llvm::MapVector<mlir::Operation *, llvm::SmallVector<Pin>> pinned;
   };
 
   /// Claim a raw stream port for `user`, reporting on it when the port is

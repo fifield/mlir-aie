@@ -461,7 +461,7 @@ public:
   virtual std::optional<uint32_t> getLocalLockAddress(uint32_t lockId,
                                                       TileID tile) const = 0;
 
-  /// Return the number of buffer descriptors for a given tile type.
+  /// Return the size of the BD id space of a tile type (see getTotalNumBDs()).
   virtual uint32_t getNumBDs(AIETileType tileType) const = 0;
 
   /// Return the maximum number of addressing dimensions (wraps/strides) a
@@ -526,9 +526,67 @@ public:
     return getDmaBdIterBits(getTileType(col, row));
   }
 
-  /// Return the number of buffer descriptors accessible on channel `channel`
-  /// for the tile at (`col`, `row`). For tiles with no per-channel BD
-  /// partitioning this equals getNumBDs(col, row).
+  // BD pools: each channel and direction draws from one pool of ids
+  // [start, start + size) within [0, getNumBDs()). BDs in different pools are
+  // distinct even if their ids coincide. Default: one pool holding every BD.
+
+  /// Return the pool `channel` in direction `dir` draws its BDs from.
+  virtual uint32_t getBdPoolId(int col, int row, int channel,
+                               DMAChannelDir dir) const {
+    return 0;
+  }
+
+  virtual uint32_t getBdPoolStartId(int col, int row, uint32_t poolId) const {
+    return 0;
+  }
+
+  virtual uint32_t getNumBDsInPool(int col, int row, uint32_t poolId) const {
+    return getNumBDs(col, row);
+  }
+
+  /// Physical BDs over all pools; exceeds getNumBDs() where pools reuse ids.
+  virtual uint32_t getTotalNumBDs(AIETileType tileType) const {
+    return getNumBDs(tileType);
+  }
+
+  uint32_t getTotalNumBDs(int col, int row) const {
+    return getTotalNumBDs(getTileType(col, row));
+  }
+
+  /// Return the half-open range of BD ids `channel` in `dir` can submit.
+  std::pair<uint32_t, uint32_t>
+  getBdIdRangeForChannel(int col, int row, int channel,
+                         DMAChannelDir dir) const {
+    uint32_t pool = getBdPoolId(col, row, channel, dir);
+    uint32_t first = getBdPoolStartId(col, row, pool);
+    return {first, first + getNumBDsInPool(col, row, pool)};
+  }
+
+  uint32_t getNumBDsForChannel(int col, int row, int channel,
+                               DMAChannelDir dir) const {
+    return getNumBDsInPool(col, row, getBdPoolId(col, row, channel, dir));
+  }
+
+  /// Return true iff BD `bd_id` on the tile at (`col`, `row`) can be submitted
+  /// on `channel` in direction `dir`.
+  bool isBdChannelAccessible(int col, int row, uint32_t bd_id, int channel,
+                             DMAChannelDir dir) const {
+    auto [first, last] = getBdIdRangeForChannel(col, row, channel, dir);
+    return bd_id >= first && bd_id < last;
+  }
+
+  /// Direction-agnostic forms: a BD id counts only if `channel` can submit it
+  /// in both directions. Where the pool does not depend on the direction
+  /// (every target before AIE4) this is the same as the directed form. On
+  /// AIE4 it is conservative, and it cannot tell apart private pools that
+  /// reuse ids; use the directed form and getBdPoolId() there.
+  bool isBdChannelAccessible(int col, int row, uint32_t bd_id,
+                             int channel) const {
+    return isBdChannelAccessible(col, row, bd_id, channel,
+                                 DMAChannelDir::MM2S) &&
+           isBdChannelAccessible(col, row, bd_id, channel, DMAChannelDir::S2MM);
+  }
+
   uint32_t getNumBDsForChannel(int col, int row, int channel) const {
     uint32_t count = 0;
     for (uint32_t bd = 0; bd < getNumBDs(col, row); ++bd)
@@ -536,25 +594,6 @@ public:
         ++count;
     return count;
   }
-
-  /// Return the half-open range [first, last) of buffer descriptor ids that
-  /// channel `channel` of the tile at (`col`, `row`) can submit.
-  std::pair<uint32_t, uint32_t> getBdIdRangeForChannel(int col, int row,
-                                                       int channel) const {
-    uint32_t numBds = getNumBDs(col, row);
-    uint32_t first = 0;
-    while (first < numBds && !isBdChannelAccessible(col, row, first, channel))
-      ++first;
-    uint32_t last = first;
-    while (last < numBds && isBdChannelAccessible(col, row, last, channel))
-      ++last;
-    return {first, last};
-  }
-
-  /// Return true iff buffer descriptor `bd_id` on tile (`col`, `row`) can be
-  /// submitted on channel `channel`.
-  virtual bool isBdChannelAccessible(int col, int row, uint32_t bd_id,
-                                     int channel) const = 0;
 
   /// Return the register layout of a buffer descriptor on the given tile
   /// type, or null if the target has none modeled for it.
@@ -851,11 +890,6 @@ public:
     // AIE1 core and shim tiles both have a 6-bit Iteration_Wrap field.
     return 6;
   }
-  bool isBdChannelAccessible(int col, int row, uint32_t bd_id,
-                             int channel) const override {
-    return true;
-  }
-
   uint64_t getDmaBdAddress(int col, int row, uint32_t bd_id, int channel,
                            AIE::DMAChannelDir direction) const override;
 
@@ -999,17 +1033,16 @@ public:
     return getDmaBdLimits(tileType).iterationSize.width;
   }
 
-  bool isBdChannelAccessible(int col, int row, uint32_t bd_id,
-                             int channel) const override {
-    if (getTileType(col, row) != AIETileType::MemTile) {
-      return true;
-    } else {
-      if ((channel & 1) == 0) { // even channel number
-        return bd_id < 24;
-      } else {
-        return bd_id >= 24;
-      }
-    }
+  /// Memtile: even channels use BDs 0-23, odd channels 24-47.
+  uint32_t getBdPoolId(int col, int row, int channel,
+                       DMAChannelDir dir) const override {
+    return isMemTile(col, row) ? channel & 1 : 0;
+  }
+  uint32_t getBdPoolStartId(int col, int row, uint32_t poolId) const override {
+    return isMemTile(col, row) && poolId == 1 ? 24 : 0;
+  }
+  uint32_t getNumBDsInPool(int col, int row, uint32_t poolId) const override {
+    return isMemTile(col, row) ? 24 : getNumBDs(getTileType(col, row));
   }
 
   using AIETargetModel::getDmaBdLayout;
@@ -1371,11 +1404,6 @@ public:
 /// This model is written against the target-model API as it stands. Where
 /// that API cannot describe AIE4 it reports "unsupported" rather than an
 /// AIE2-shaped answer:
-///  - BD pools: shim BDs are split into two 16-BD banks by channel *and*
-///    direction (MM2S 0-1 and S2MM 0 use BDs 0-15; MM2S 2-3 and S2MM 1 use
-///    16-31), and every memtile channel has a private 16-BD pool per
-///    direction. isBdChannelAccessible() has no direction, so it answers only
-///    where the direction does not matter and returns false otherwise.
 ///  - Tile addresses: a memtile spans five 1 MiB address rows, so core row r
 ///    sits at address row r + 4 * getNumMemTileRows(). The model's own address
 ///    queries (getDmaBdAddress(), getDmaControlAddress()) encode this; code
@@ -1458,6 +1486,29 @@ public:
   uint32_t getNumBDs(AIETileType tileType) const override {
     return tileType == AIETileType::ShimNOCTile ? 32 : 16;
   }
+  /// Physical BDs: a memtile has a private 16-BD pool for each of its 10 MM2S
+  /// and 8 S2MM channels. A shim has, besides the 32 data BDs, 8 BDs for each
+  /// of its two control-MM2S channels and 4 for its trace-S2MM channel.
+  uint32_t getTotalNumBDs(AIETileType tileType) const override {
+    if (tileType == AIETileType::MemTile)
+      return 16 * (10 + 8);
+    if (tileType == AIETileType::ShimNOCTile)
+      return 32 + 2 * 8 + 4;
+    return getNumBDs(tileType);
+  }
+
+  /// BD pools, each of 16 BDs:
+  ///  - core tile: one pool;
+  ///  - shim: two banks chosen by channel and direction. MM2S 0-1 and S2MM 0
+  ///    use BDs 0-15; MM2S 2-3 and S2MM 1 use BDs 16-31;
+  ///  - memtile: a private pool per channel and direction, with channel-local
+  ///    ids 0-15.
+  uint32_t getBdPoolId(int col, int row, int channel,
+                       DMAChannelDir dir) const override;
+  uint32_t getBdPoolStartId(int col, int row, uint32_t poolId) const override;
+  uint32_t getNumBDsInPool(int col, int row, uint32_t poolId) const override {
+    return 16;
+  }
   /// Memtile and shim BDs have four addressing dimensions; core BDs three.
   uint32_t getBDMaxDims(AIETileType tileType) const override {
     return tileType == AIETileType::CoreTile ? 3 : 4;
@@ -1492,13 +1543,6 @@ public:
   uint32_t getDmaBdIterBits(AIETileType tileType) const override {
     return tileType == AIETileType::MemTile ? 8 : 6;
   }
-
-  /// Answers only where the BD pool does not depend on the direction: any
-  /// core-tile BD, shim channel 0 (BDs 0-15) and shim channels 2-3, which are
-  /// MM2S only (BDs 16-31). Shim channel 1 (MM2S: BDs 0-15, S2MM: BDs 16-31)
-  /// and every memtile channel (private pool per direction) return false.
-  bool isBdChannelAccessible(int col, int row, uint32_t bd_id,
-                             int channel) const override;
 
   /// Refuses (fatal error) a shim or memtile BD without a channel: the BD's
   /// bank depends on the channel and direction there.

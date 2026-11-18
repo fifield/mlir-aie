@@ -1952,20 +1952,19 @@ bool AIE4TargetModel::isLegalMemAffinity(int coreCol, int coreRow, int memCol,
   return isMemEast(coreCol, coreRow, memCol, memRow);
 }
 
-bool AIE4TargetModel::isBdChannelAccessible(int col, int row, uint32_t bd_id,
-                                            int channel) const {
-  if (isCoreTile(col, row))
-    return bd_id < getNumBDs(AIETileType::CoreTile);
-  if (isShimNOCTile(col, row)) {
-    if (channel == 0)
-      return bd_id < 16;
-    if (channel == 2 || channel == 3)
-      return bd_id >= 16 && bd_id < 32;
-    // Channel 1: the bank depends on the direction.
-    return false;
-  }
-  // Memtile: a private pool per channel and direction.
-  return false;
+uint32_t AIE4TargetModel::getBdPoolId(int col, int row, int channel,
+                                      DMAChannelDir dir) const {
+  bool mm2s = dir == DMAChannelDir::MM2S;
+  if (isMemTile(col, row))
+    return 2 * channel + (mm2s ? 0 : 1);
+  if (isShimNOCTile(col, row))
+    return channel >= (mm2s ? 2 : 1) ? 1 : 0;
+  return 0;
+}
+
+uint32_t AIE4TargetModel::getBdPoolStartId(int col, int row,
+                                           uint32_t poolId) const {
+  return isShimNOCTile(col, row) && poolId == 1 ? 16 : 0;
 }
 
 static void aie4ChannelOutOfRange(StringRef what, int col, int row,
@@ -1988,8 +1987,8 @@ uint64_t AIE4TargetModel::getDmaBdAddress(int col, int row, uint32_t bd_id,
       aie4ChannelOutOfRange("getDmaBdAddress", col, row, channel);
     // bd_id is global across the two 16-BD banks; the register is indexed
     // bank-locally.
-    bool upper = mm2s ? channel >= 2 : channel >= 1;
-    if (upper != (bd_id >= 16))
+    bool upper = getBdPoolId(col, row, channel, direction) == 1;
+    if (!isBdChannelAccessible(col, row, bd_id, channel, direction))
       report_fatal_error("AIE4TargetModel::getDmaBdAddress: shim BD " +
                          Twine(bd_id) + " is not in the bank of channel " +
                          Twine(channel));

@@ -176,9 +176,9 @@ static bool isUnderRuntimeControlFlow(AIE::DMABDOp op) {
   return false;
 }
 
-// The task a runtime descriptor belongs to, with the tile and channel it runs
-// on.
-static std::optional<std::tuple<AIE::TileOp, DMAConfigureTaskLike, int>>
+// The task, tile, channel and direction a runtime descriptor runs on.
+static std::optional<
+    std::tuple<AIE::TileOp, DMAConfigureTaskLike, int, AIE::DMAChannelDir>>
 resolveTaskAndTile(AIE::DMABDOp op) {
   if (auto cfg = op->getParentOfType<DMAConfigureTaskOp>()) {
     // Decomposition is a shape rewrite, so an unplaced tile is not an error
@@ -187,7 +187,8 @@ resolveTaskAndTile(AIE::DMABDOp op) {
     if (!tile)
       return std::nullopt;
     return std::make_tuple(tile, cast<DMAConfigureTaskLike>(*cfg),
-                           static_cast<int>(cfg.getChannel()));
+                           static_cast<int>(cfg.getChannel()),
+                           cfg.getDirection());
   }
   if (auto cfgFor = op->getParentOfType<DMAConfigureTaskForOp>()) {
     AIE::DeviceOp dev = op->getParentOfType<AIE::DeviceOp>();
@@ -201,7 +202,8 @@ resolveTaskAndTile(AIE::DMABDOp op) {
     if (!tile)
       return std::nullopt;
     return std::make_tuple(tile, cast<DMAConfigureTaskLike>(*cfgFor),
-                           static_cast<int>(allocOp.getChannelIndex()));
+                           static_cast<int>(allocOp.getChannelIndex()),
+                           allocOp.getChannelDir());
   }
   return std::nullopt;
 }
@@ -580,6 +582,7 @@ static LogicalResult decomposeTaskBd(RewriterBase &rewriter, AIE::DMABDOp op,
   AIE::TileOp tile = std::get<0>(*taskAndTile);
   DMAConfigureTaskLike taskOp = std::get<1>(*taskAndTile);
   int channel = std::get<2>(*taskAndTile);
+  AIE::DMAChannelDir dir = std::get<3>(*taskAndTile);
 
   // A descriptor with more dimensions than a BD has cannot be lowered as it
   // is, so where this pass cannot reduce it, it says why.
@@ -748,7 +751,7 @@ static LogicalResult decomposeTaskBd(RewriterBase &rewriter, AIE::DMABDOp op,
   });
   bool chainFits =
       sharedRepeat &&
-      bds.size() <= targetModel.getNumBDsForChannel(col, row, channel);
+      bds.size() <= targetModel.getNumBDsForChannel(col, row, channel, dir);
   uint32_t depth = targetModel.getDmaTaskQueueDepth();
   if (!chainFits || (depth > 0 && bds.size() > depth)) {
     // The dynamic BD pool allocates a chain under runtime control flow, but
@@ -779,7 +782,7 @@ static LogicalResult decomposeTaskBd(RewriterBase &rewriter, AIE::DMABDOp op,
       return op.emitOpError()
              << "cannot split this buffer descriptor: its " << bds.size()
              << " slices outnumber the "
-             << targetModel.getNumBDsForChannel(col, row, channel)
+             << targetModel.getNumBDsForChannel(col, row, channel, dir)
              << " buffer descriptors its channel reaches, and they cannot be "
                 "separate tasks "
                 "because "

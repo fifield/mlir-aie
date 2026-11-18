@@ -120,31 +120,17 @@ static void testDma() {
   check(tm.getDmaTaskQueueDepth() == 0, "task queue depth unsupported");
   check(tm.getDmaBdLayout(0, 0) == nullptr, "no BD layout");
 
-  // BD-to-channel access: answered only where it does not depend on the
-  // direction.
-  check(tm.isBdChannelAccessible(0, 2, 15, 0) &&
-            !tm.isBdChannelAccessible(0, 2, 16, 0),
+  // BD pools are covered by target_model_bd_pools.
+  check(tm.isBdChannelAccessible(0, 2, 15, 0, DMAChannelDir::S2MM) &&
+            !tm.isBdChannelAccessible(0, 2, 16, 0, DMAChannelDir::S2MM),
         "core BD access");
-  check(tm.isBdChannelAccessible(0, 0, 0, 0) &&
-            !tm.isBdChannelAccessible(0, 0, 16, 0),
-        "shim channel 0 BD access");
-  check(tm.isBdChannelAccessible(0, 0, 16, 2) &&
-            tm.isBdChannelAccessible(0, 0, 31, 3) &&
-            !tm.isBdChannelAccessible(0, 0, 0, 2),
-        "shim channel 2/3 BD access");
-  for (uint32_t bd = 0; bd < 32; ++bd)
-    check(!tm.isBdChannelAccessible(0, 0, bd, 1),
-          "shim channel 1 is unsupported");
-  for (int ch = 0; ch < 10; ++ch)
-    for (uint32_t bd = 0; bd < 16; ++bd)
-      check(!tm.isBdChannelAccessible(0, 1, bd, ch),
-            "memtile pools are unsupported");
-  check(tm.getNumBDsForChannel(0, 0, 1) == 0 &&
-            tm.getNumBDsForChannel(0, 1, 0) == 0,
-        "unsupported channels have no BDs");
-  check(tm.getNumBDsForChannel(0, 0, 0) == 16 &&
-            tm.getNumBDsForChannel(0, 2, 0) == 16,
-        "supported channels have 16 BDs");
+  check(tm.isBdChannelAccessible(0, 0, 3, 1, DMAChannelDir::MM2S) &&
+            tm.isBdChannelAccessible(0, 0, 19, 1, DMAChannelDir::S2MM) &&
+            !tm.isBdChannelAccessible(0, 0, 3, 1, DMAChannelDir::S2MM),
+        "shim channel 1 BD access");
+  check(tm.getNumBDsForChannel(0, 1, 9, DMAChannelDir::MM2S) == 16 &&
+            tm.getNumBDsForChannel(0, 1, 7, DMAChannelDir::S2MM) == 16,
+        "memtile channels have 16 BDs");
 
   // Core row r sits at address row r + 4 (memtiles span five rows).
   check(tm.getDmaBdAddress(1, 2, 3, 0, DMAChannelDir::S2MM) ==

@@ -282,15 +282,17 @@ DMAChannelAnalysis::TakenBDs::TakenBDs(DeviceOp device) {
       for (auto start : block.getOps<DMAStartOp>())
         if (!start.getEndpointOp())
           if (Operation *tile = program.getTile().getDefiningOp())
-            fixed[tile][start.getChannelIndex()] += countBDs(start);
+            fixed[tile][{start.getChannelDir(), start.getChannelIndex()}] +=
+                countBDs(start);
   unsigned order = 0;
   AIEX::forEachRuntimePinnedBdId(
-      device,
-      [&](Operation *, Operation *tile, std::optional<int> channel,
-          int32_t id) { pinned[tile].try_emplace(id, Pin{order++, channel}); });
+      device, [&](Operation *, Operation *tile, std::optional<int> channel,
+                  std::optional<DMAChannelDir> dir, int32_t id) {
+        pinned[tile].push_back(Pin{order++, id, channel, dir});
+      });
 }
 
-DenseMap<int, int64_t>
+std::map<DMAChannelAnalysis::BDUser, int64_t>
 DMAChannelAnalysis::TakenBDs::at(const AIETargetModel &target, int col, int row,
                                  ArrayRef<Operation *> tiles) const {
   auto here = [&](Operation *tile) {
@@ -298,28 +300,51 @@ DMAChannelAnalysis::TakenBDs::at(const AIETargetModel &target, int col, int row,
     return llvm::is_contained(tiles, tile) ||
            (like && like.tryGetCol() == col && like.tryGetRow() == row);
   };
-  DenseMap<int, int64_t> taken;
-  for (auto &[tile, channels] : fixed)
+  std::map<BDUser, int64_t> taken;
+  for (auto &[tile, users] : fixed)
     if (here(tile))
-      for (auto [channel, bds] : channels)
-        taken[channel] += bds;
-  std::map<int32_t, Pin> ids;
-  for (auto &[tile, pins] : pinned)
-    if (here(tile))
-      for (auto [id, pin] : pins)
-        if (auto [it, added] = ids.try_emplace(id, pin);
-            !added && pin.order < it->second.order)
-          it->second = pin;
+      for (auto [user, bds] : users)
+        taken[user] += bds;
   int numChannels = std::max(
       target.getNumSourceSwitchboxConnections(col, row, WireBundle::DMA),
       target.getNumDestSwitchboxConnections(col, row, WireBundle::DMA));
-  for (auto [id, pin] : ids)
-    for (int channel = 0, last = pin.channel.value_or(numChannels - 1);
-         channel <= last; ++channel)
-      if (target.isBdChannelAccessible(col, row, id, channel)) {
-        ++taken[channel];
-        break;
-      }
+  // (pool, id) -> charged channel and earliest pin; the private pools of an
+  // AIE4 mem tile reuse ids.
+  std::map<std::pair<uint32_t, int32_t>, std::pair<unsigned, BDUser>> charged;
+  for (auto &[tile, pins] : pinned) {
+    if (!here(tile))
+      continue;
+    for (const Pin &pin : pins) {
+      SmallVector<DMAChannelDir, 2> dirs;
+      if (pin.dir)
+        dirs.push_back(*pin.dir);
+      else
+        dirs.append({DMAChannelDir::S2MM, DMAChannelDir::MM2S});
+      std::optional<uint32_t> own;
+      if (pin.channel && pin.dir &&
+          target.isBdChannelAccessible(col, row, pin.id, *pin.channel,
+                                       *pin.dir))
+        own = target.getBdPoolId(col, row, *pin.channel, *pin.dir);
+      std::optional<BDUser> user;
+      for (int channel = 0, last = pin.channel.value_or(numChannels - 1);
+           channel <= last && !user; ++channel)
+        for (DMAChannelDir dir : dirs)
+          if (target.isBdChannelAccessible(col, row, pin.id, channel, dir) &&
+              (!own || target.getBdPoolId(col, row, channel, dir) == *own)) {
+            user = BDUser{dir, channel};
+            break;
+          }
+      if (!user)
+        continue;
+      uint32_t pool = target.getBdPoolId(col, row, user->second, user->first);
+      if (auto [it, added] =
+              charged.try_emplace({pool, pin.id}, pin.order, *user);
+          !added && pin.order < it->second.first)
+        it->second = {pin.order, *user};
+    }
+  }
+  for (auto &[key, entry] : charged)
+    ++taken[entry.second];
   return taken;
 }
 
@@ -343,27 +368,37 @@ DMAChannelAnalysis::TakenBDs::positions() const {
 llvm::SmallVector<DMAChannelAnalysis::BDGroup>
 DMAChannelAnalysis::bdGroups(const AIETargetModel &target, int col, int row,
                              int numChannels) {
-  uint32_t numBDs = target.getNumBDs(col, row);
-  SmallVector<BDGroup> groups;
-  for (int channel = 0; channel < numChannels; ++channel) {
-    llvm::BitVector ids(numBDs);
-    for (uint32_t bd = 0; bd < numBDs; ++bd)
-      if (target.isBdChannelAccessible(col, row, bd, channel))
-        ids.set(bd);
-    BDGroup merged{ids, {channel}};
-    for (auto *it = groups.begin(); it != groups.end();) {
-      if (!it->ids.anyCommon(merged.ids)) {
-        ++it;
+  // Group channels by BD pool; a group moves to the back as it grows.
+  struct Pool {
+    uint32_t id;
+    BDGroup group;
+  };
+  SmallVector<Pool> pools;
+  for (int channel = 0; channel < numChannels; ++channel)
+    for (DMAChannelDir dir : {DMAChannelDir::S2MM, DMAChannelDir::MM2S}) {
+      if (channel >= static_cast<int>(target.getNumDMAChannels(col, row, dir)))
         continue;
+      uint32_t poolId = target.getBdPoolId(col, row, channel, dir);
+      Pool merged{
+          poolId,
+          {static_cast<int64_t>(target.getNumBDsInPool(col, row, poolId)),
+           {{dir, channel}}}};
+      auto *it = llvm::find_if(
+          pools, [&](const Pool &pool) { return pool.id == poolId; });
+      if (it != pools.end()) {
+        llvm::append_range(merged.group.users, it->group.users);
+        pools.erase(it);
       }
-      merged.ids |= it->ids;
-      llvm::append_range(merged.channels, it->channels);
-      it = groups.erase(it);
+      pools.push_back(std::move(merged));
     }
-    groups.push_back(std::move(merged));
+  SmallVector<BDGroup> groups;
+  for (Pool &pool : pools) {
+    llvm::sort(pool.group.users, [](const BDUser &a, const BDUser &b) {
+      return std::make_pair(a.second, a.first) <
+             std::make_pair(b.second, b.first);
+    });
+    groups.push_back(std::move(pool.group));
   }
-  for (BDGroup &group : groups)
-    llvm::sort(group.channels);
   return groups;
 }
 
@@ -375,33 +410,28 @@ tileBDGroups(const AIETargetModel &target, int col, int row) {
   return DMAChannelAnalysis::bdGroups(target, col, row, numChannels);
 }
 
-std::optional<SmallVector<int>>
-DMAChannelAnalysis::planBDChannels(const AIETargetModel &target, int col,
-                                   int row, ArrayRef<BDPlanEnd> allEnds,
-                                   function_ref<bool(DMAChannelDir, int)> free,
-                                   function_ref<int64_t(int)> spent) {
+std::optional<SmallVector<int>> DMAChannelAnalysis::planBDChannels(
+    const AIETargetModel &target, int col, int row, ArrayRef<BDPlanEnd> allEnds,
+    function_ref<bool(DMAChannelDir, int)> free,
+    function_ref<int64_t(DMAChannelDir, int)> spent) {
   return planBDChannels(tileBDGroups(target, col, row), allEnds, free, spent);
 }
 
-std::optional<SmallVector<int>>
-DMAChannelAnalysis::planBDChannels(ArrayRef<BDGroup> tileGroups,
-                                   ArrayRef<BDPlanEnd> allEnds,
-                                   function_ref<bool(DMAChannelDir, int)> free,
-                                   function_ref<int64_t(int)> spent) {
-  // Channels whose BD ids overlap at all share one pool of ids, as bdRoom in
+std::optional<SmallVector<int>> DMAChannelAnalysis::planBDChannels(
+    ArrayRef<BDGroup> tileGroups, ArrayRef<BDPlanEnd> allEnds,
+    function_ref<bool(DMAChannelDir, int)> free,
+    function_ref<int64_t(DMAChannelDir, int)> spent) {
+  // The channels drawing from one BD pool share its ids, as bdRoom in
   // aie-objectfifo-allocate counts them.
   struct Group {
-    llvm::BitVector ids;
-    SmallVector<int> channels;
+    SmallVector<BDUser> users;
     int64_t room = 0;
   };
   SmallVector<Group> groups;
-  for (const BDGroup &group : tileGroups)
-    groups.push_back({group.ids, group.channels, 0});
-  for (Group &group : groups) {
-    group.room = group.ids.count();
-    for (int channel : group.channels)
-      group.room -= spent(channel);
+  for (const BDGroup &group : tileGroups) {
+    Group &added = groups.emplace_back(Group{group.users, group.size});
+    for (auto [dir, channel] : group.users)
+      added.room -= spent(dir, channel);
   }
 
   // An end pinning a channel takes it, whatever `free` says, and shares it
@@ -415,9 +445,9 @@ DMAChannelAnalysis::planBDChannels(ArrayRef<BDGroup> tileGroups,
       looseOf.push_back(index);
       continue;
     }
-    int channel = *end.pinned;
+    BDUser user{end.dir, *end.pinned};
     auto *group = llvm::find_if(groups, [&](const Group &group) {
-      return llvm::is_contained(group.channels, channel);
+      return llvm::is_contained(group.users, user);
     });
     if (group == groups.end())
       return std::nullopt;
@@ -455,9 +485,10 @@ DMAChannelAnalysis::planBDChannels(ArrayRef<BDGroup> tileGroups,
     llvm::DenseSet<std::pair<int, int>> taken;
     for (unsigned end : byBound) {
       channelOf[end] = -1;
-      for (int channel : groups[groupOf[end]].channels) {
+      for (auto [userDir, channel] : groups[groupOf[end]].users) {
         int dir = static_cast<int>(ends[end].dir);
-        if (channel < ends[end].limit && open(ends[end].dir, channel) &&
+        if (userDir == ends[end].dir && channel < ends[end].limit &&
+            open(ends[end].dir, channel) &&
             taken.insert({dir, channel}).second) {
           channelOf[end] = channel;
           break;
@@ -483,9 +514,9 @@ DMAChannelAnalysis::planBDChannels(ArrayRef<BDGroup> tileGroups,
   for (auto [g, group] : llvm::enumerate(groups))
     for (DMAChannelDir dir : {DMAChannelDir::S2MM, DMAChannelDir::MM2S})
       for (auto [i, bound] : llvm::enumerate(bounds))
-        for (int channel : group.channels)
+        for (auto [userDir, channel] : group.users)
           below[g * slots + static_cast<int>(dir) * bounds.size() + i] +=
-              channel < bound && open(dir, channel);
+              userDir == dir && channel < bound && open(dir, channel);
   SmallVector<int64_t> held(groups.size() * slots, 0);
   auto fits = [&](unsigned g, DMAChannelDir dir) {
     size_t base = g * slots + static_cast<int>(dir) * bounds.size();
@@ -573,10 +604,10 @@ DMAChannelAnalysis::BDWalkSets DMAChannelAnalysis::walkSetsThatFit(
     const AIETargetModel &target, int col, int row, ArrayRef<BDPlanEnd> ends,
     ArrayRef<unsigned> poolOf, ArrayRef<BDWalkPool> pools,
     function_ref<bool(DMAChannelDir, int)> free,
-    function_ref<int64_t(int)> spent, unsigned maxSets) {
+    function_ref<int64_t(DMAChannelDir, int)> spent, unsigned maxSets) {
   BDWalkSets result;
   SmallVector<BDGroup> tileGroups = tileBDGroups(target, col, row);
-  auto none = [](int) -> int64_t { return 0; };
+  auto none = [](DMAChannelDir, int) -> int64_t { return 0; };
   auto fitsWalking = [&](ArrayRef<bool> whole, bool weighted) {
     SmallVector<BDPlanEnd> planned;
     for (auto [end, pool] : llvm::zip_equal(ends, poolOf))
@@ -586,7 +617,9 @@ DMAChannelAnalysis::BDWalkSets DMAChannelAnalysis::walkSetsThatFit(
                                        : end.bds,
                          end.limit, end.pinned});
     return planBDChannels(tileGroups, planned, free,
-                          weighted ? spent : function_ref<int64_t(int)>(none))
+                          weighted
+                              ? spent
+                              : function_ref<int64_t(DMAChannelDir, int)>(none))
         .has_value();
   };
   SmallVector<bool> whole(pools.size(), false);

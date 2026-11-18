@@ -3344,8 +3344,9 @@ int Placer::RuntimeBdIds::shortfall(ArrayRef<Operation *> onTile,
   if (Operation *shim = placed.lookup(tile))
     add(shim);
   // Lowest-free ids never fragment, so peaks that fit together always do.
-  if (!constrained &&
-      live <= static_cast<int>(targetModel->getNumBDs(tile.col, tile.row)))
+  // Count one channel's pool: an AIE4 shim banks its BDs by channel.
+  if (!constrained && live <= static_cast<int>(targetModel->getNumBDsForChannel(
+                                  tile.col, tile.row, 0, DMAChannelDir::MM2S)))
     return 0;
   auto [cached, added] = shortfallOf.try_emplace(key, 0);
   if (!added)
@@ -3353,7 +3354,8 @@ int Placer::RuntimeBdIds::shortfall(ArrayRef<Operation *> onTile,
   int &missing = cached->second;
 
   // aie-assign-bd-ids: runtime-pinned ids are reserved, then static BDs take
-  // theirs.
+  // theirs. Unpinned ids count against MM2S channel 0's pool, so on an AIE4
+  // shim (two banks) the count errs towards a shortfall.
   BdIdGenerator assigned(tile.col, tile.row, *targetModel);
   for (unsigned shim : key.set_bits())
     for (unsigned task : shims[shim].tasks)
@@ -3374,7 +3376,8 @@ int Placer::RuntimeBdIds::shortfall(ArrayRef<Operation *> onTile,
   }
   for (unsigned shim : key.set_bits())
     for (int i = 0, e = statics.lookup(shims[shim].op).unpinned; i < e; ++i) {
-      if (std::optional<uint32_t> id = assigned.nextBdId(0))
+      if (std::optional<uint32_t> id =
+              assigned.nextBdId(0, DMAChannelDir::MM2S))
         staticIds.push_back(*id);
       else
         ++missing;
@@ -3414,7 +3417,7 @@ int Placer::RuntimeBdIds::shortfall(ArrayRef<Operation *> onTile,
       }
       if (!configured) {
         for (uint32_t id : held.lookup(index))
-          ids.freeBdId(id);
+          ids.freeBdId(0, DMAChannelDir::MM2S, id);
         held.erase(index);
         continue;
       }
@@ -3432,8 +3435,8 @@ int Placer::RuntimeBdIds::shortfall(ArrayRef<Operation *> onTile,
       for (auto [i, pinned] : llvm::enumerate(task.bdIds)) {
         if (pinned)
           continue;
-        if (std::optional<uint32_t> id =
-                ids.nextBdId(0, i == 0 ? task.headAlignment : 1))
+        if (std::optional<uint32_t> id = ids.nextBdId(
+                0, DMAChannelDir::MM2S, i == 0 ? task.headAlignment : 1))
           taken.push_back(*id);
         else
           ++missing;

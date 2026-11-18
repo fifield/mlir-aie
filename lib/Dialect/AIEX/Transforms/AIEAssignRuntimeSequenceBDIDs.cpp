@@ -173,7 +173,9 @@ struct AIEAssignRuntimeSequenceBDIDsPass
     for (AIE::DeviceOp device : {loadedDevice, configuredDevice})
       if (device)
         devices.push_back(device);
-    gen.reserved = AIEX::staticBdIds(devices, tile);
+    gen.reserved.clear();
+    for (uint32_t id : AIEX::staticBdIds(devices, tile))
+      gen.reserveBdId(id);
   }
 
   // Keyed by (col, row), not the aie.tile op's own identity: two tile ops
@@ -221,14 +223,15 @@ struct AIEAssignRuntimeSequenceBDIDsPass
     configuredDevice = device;
     for (auto &[tile, gen] : gens) {
       reserveStaticBds(tile, gen);
-      const std::set<uint32_t> &reserved = gen.reserved;
       for (DMAConfigureTaskOp task : liveByTile.lookup(tile)) {
         if (releasedTasks.contains(task) || knownComplete.contains(task) ||
             provenFinished.contains(task))
           continue;
         std::optional<uint32_t> held;
         task.walk([&](AIE::DMABDOp bd) {
-          if (!held && bd.getBdId() && reserved.count(*bd.getBdId()))
+          if (!held && bd.getBdId() &&
+              gen.isReserved(task.getChannel(), task.getDirection(),
+                             *bd.getBdId()))
             held = *bd.getBdId();
         });
         if (!held)
@@ -442,24 +445,44 @@ struct AIEAssignRuntimeSequenceBDIDsPass
 
     const AIETargetModel &targetModel =
         tile->getParentOfType<AIE::DeviceOp>().getTargetModel();
+    uint32_t pool = targetModel.getBdPoolId(tile.getCol(), tile.getRow(),
+                                            op.getChannel(), op.getDirection());
 
     // First, honor all the user-specified BD IDs.
     WalkResult result = op.walk<WalkOrder::PreOrder>([&](AIE::DMABDOp bd_op) {
       if (bd_op.getBdId().has_value()) {
-        if (!targetModel.isBdChannelAccessible(tile.getCol(), tile.getRow(),
-                                               bd_op.getBdId().value(),
-                                               op.getChannel())) {
-          bd_op.emitOpError("Buffer descriptor ID ")
-              << bd_op.getBdId().value() << " cannot be submitted on channel "
-              << op.getChannel() << " of tile (" << tile.getCol() << ","
-              << tile.getRow()
-              << "), which partitions its buffer descriptors by channel "
-                 "parity: an even channel reaches only the low half of the "
-                 "ids and an odd channel only the high half.";
+        if (!targetModel.isBdChannelAccessible(
+                tile.getCol(), tile.getRow(), bd_op.getBdId().value(),
+                op.getChannel(), op.getDirection())) {
+          InFlightDiagnostic diag = bd_op.emitOpError("Buffer descriptor ID ")
+                                    << bd_op.getBdId().value()
+                                    << " cannot be submitted on channel "
+                                    << op.getChannel();
+          // Before AIE4, only a memtile splits its BDs (by parity).
+          bool dataDir = op.getDirection() == DMAChannelDir::MM2S ||
+                         op.getDirection() == DMAChannelDir::S2MM;
+          if (dataDir &&
+              targetModel.getBdPoolId(tile.getCol(), tile.getRow(),
+                                      op.getChannel(), DMAChannelDir::MM2S) ==
+                  targetModel.getBdPoolId(tile.getCol(), tile.getRow(),
+                                          op.getChannel(),
+                                          DMAChannelDir::S2MM)) {
+            diag << " of tile (" << tile.getCol() << "," << tile.getRow()
+                 << "), which partitions its buffer descriptors by channel "
+                    "parity: an even channel reaches only the low half of the "
+                    "ids and an odd channel only the high half.";
+            return WalkResult::interrupt();
+          }
+          auto [first, last] = targetModel.getBdIdRangeForChannel(
+              tile.getCol(), tile.getRow(), op.getChannel(), op.getDirection());
+          diag << " (" << stringifyDMAChannelDir(op.getDirection())
+               << ") of tile (" << tile.getCol() << "," << tile.getRow()
+               << "), whose BD pool holds ids " << first << " to " << last - 1
+               << ".";
           return WalkResult::interrupt();
         }
         if (const HeldBy *held =
-                copyHolding(tile.getTileID(), bd_op.getBdId().value())) {
+                copyHolding(tile.getTileID(), pool, bd_op.getBdId().value())) {
           InFlightDiagnostic diag =
               op.emitOpError("Specified buffer descriptor ID ")
               << bd_op.getBdId().value()
@@ -470,8 +493,10 @@ struct AIEAssignRuntimeSequenceBDIDsPass
           diag.attachNote(held->copy->getLoc()) << "the copy is here";
           return WalkResult::interrupt();
         }
-        if (gen.bdIdAlreadyAssigned(bd_op.getBdId().value()) ||
-            gen.reserved.count(bd_op.getBdId().value())) {
+        if (gen.bdIdAlreadyAssigned(op.getChannel(), op.getDirection(),
+                                    bd_op.getBdId().value()) ||
+            gen.isReserved(op.getChannel(), op.getDirection(),
+                           bd_op.getBdId().value())) {
           op.emitOpError("Specified buffer descriptor ID ")
               << bd_op.getBdId().value()
               << " is already in use. Release the earlier task first: "
@@ -482,8 +507,10 @@ struct AIEAssignRuntimeSequenceBDIDsPass
                  "(see programming_guide/section-2/section-2d/DMATasks.md).";
           return WalkResult::interrupt();
         }
-        checkReallocation(tile, bd_op.getBdId().value(), bd_op.getLoc());
-        gen.assignBdId(bd_op.getBdId().value());
+        checkReallocation(tile, op.getChannel(), op.getDirection(),
+                          bd_op.getBdId().value(), bd_op.getLoc());
+        gen.assignBdId(op.getChannel(), op.getDirection(),
+                       bd_op.getBdId().value());
       }
       return WalkResult::advance();
     });
@@ -501,8 +528,8 @@ struct AIEAssignRuntimeSequenceBDIDsPass
       if (it == forbidden.end())
         return;
       for (auto [id, copy] : it->second)
-        if (!gen.bdIdAlreadyAssigned(id)) {
-          gen.assignBdId(id);
+        if (!gen.bdIdAlreadyAssigned(op.getChannel(), op.getDirection(), id)) {
+          gen.assignBdId(op.getChannel(), op.getDirection(), id);
           blocked.push_back(id);
         }
     };
@@ -525,15 +552,13 @@ struct AIEAssignRuntimeSequenceBDIDsPass
             << "the PDI is loaded here";
         return WalkResult::interrupt();
       }
-      // channelIndex matters on a MemTile, where the AIE2 model partitions
-      // BDs by channel parity (isBdChannelAccessible: an even channel can
-      // only submit ids below 24, an odd channel only 24 and above).
       uint32_t alignment = bd_op == head ? headAlignment : 1;
-      std::optional<int32_t> next_id = gen.nextBdId(op.getChannel(), alignment);
+      std::optional<int32_t> next_id =
+          gen.nextBdId(op.getChannel(), op.getDirection(), alignment);
       while (!next_id && reclaimBds && succeeded(reclaimFor(op))) {
         ++tookBack;
         block();
-        next_id = gen.nextBdId(op.getChannel(), alignment);
+        next_id = gen.nextBdId(op.getChannel(), op.getDirection(), alignment);
       }
       if (!next_id) {
         auto diag =
@@ -542,19 +567,18 @@ struct AIEAssignRuntimeSequenceBDIDsPass
             << tile.getCol() << "," << tile.getRow()
             << "), which supports up to "
             << targetModel.getNumBDsForChannel(tile.getCol(), tile.getRow(),
-                                               op.getChannel())
+                                               op.getChannel(),
+                                               op.getDirection())
             << ".";
         SmallVector<std::tuple<int32_t, Operation *, bool>> copied;
         if (auto it = forbidden.find(op); it != forbidden.end())
           for (auto [id, copy] : it->second)
             if (llvm::is_contained(blocked, id))
               copied.push_back({id, copy, true});
-        for (auto [owner, id] : loadState.copyOwned)
-          if (owner == tile.getTileID() &&
-              targetModel.isBdChannelAccessible(tile.getCol(), tile.getRow(),
-                                                id, op.getChannel()))
+        for (auto [owner, heldPool, id] : loadState.copyOwned)
+          if (owner == tile.getTileID() && heldPool == pool)
             copied.push_back(
-                {id, copyHolding(tile.getTileID(), id)->copy, false});
+                {id, copyHolding(tile.getTileID(), pool, id)->copy, false});
         llvm::sort(copied);
         if (!copied.empty()) {
           diag << " Of those, aiex.npu.dma_memcpy_nd ops program "
@@ -611,13 +635,14 @@ struct AIEAssignRuntimeSequenceBDIDsPass
         }
         return WalkResult::interrupt();
       }
-      checkReallocation(tile, *next_id, bd_op.getLoc());
+      checkReallocation(tile, op.getChannel(), op.getDirection(), *next_id,
+                        bd_op.getLoc());
       bd_op.setBdId(next_id);
       roundState.assignedHere.push_back(bd_op);
       return WalkResult::advance();
     });
     for (int32_t id : blocked)
-      gen.freeBdId(id);
+      gen.freeBdId(op.getChannel(), op.getDirection(), id);
     if (result.wasInterrupted())
       return failure();
 
@@ -681,9 +706,10 @@ struct AIEAssignRuntimeSequenceBDIDsPass
       return false;
     BdIdGenerator available = getGeneratorForTile(configure.getTileOp());
     for (auto [id, copy] : forbidden.lookup(configure))
-      available.reserved.insert(id);
+      available.reserveBdId(configure.getChannel(), configure.getDirection(),
+                            id);
     return available
-        .nextBdId(configure.getChannel(),
+        .nextBdId(configure.getChannel(), configure.getDirection(),
                   DMAStartTaskOp::headBdIdAlignment(configure.getResult()))
         .has_value();
   }
@@ -873,14 +899,15 @@ struct AIEAssignRuntimeSequenceBDIDsPass
 
   // An aiex.npu.dma_memcpy_nd's BD id is held on its tile from its push until
   // the queue model counts that push finished. Holds are kept per channel in
-  // push order, so they retire as a prefix; per tile and id, the copies
+  // push order, so they retire as a prefix; per (tile, pool, id), the copies
   // holding it by push order, and whether they took it in the generator.
   struct CopyHold {
     uint64_t order;
     AIE::TileID tile;
+    uint32_t pool;
     int32_t id;
   };
-  using TileBdId = std::pair<AIE::TileID, int32_t>;
+  using TileBdId = std::tuple<AIE::TileID, uint32_t, int32_t>;
   struct HeldBy {
     NpuDmaMemcpyNdOp copy;
     bool issuesToken;
@@ -890,20 +917,23 @@ struct AIEAssignRuntimeSequenceBDIDsPass
   llvm::DenseMap<Operation *, SmallVector<std::pair<int32_t, Operation *>>>
       forbidden;
 
-  // The oldest copy still holding `id` on `tile`, if copies hold it.
-  const HeldBy *copyHolding(AIE::TileID tile, int32_t id) const {
-    if (!loadState.copyOwned.contains({tile, id}))
+  // The oldest copy still holding (`tile`, `pool`, `id`), if any.
+  const HeldBy *copyHolding(AIE::TileID tile, uint32_t pool, int32_t id) const {
+    if (!loadState.copyOwned.contains({tile, pool, id}))
       return nullptr;
-    return &loadState.holdsOn.find({tile, id})->second.begin()->second;
+    return &loadState.holdsOn.find({tile, pool, id})->second.begin()->second;
   }
 
-  // Return a task's id to the pool; a copy waiting for it takes it at once.
-  void releaseTaskBdId(AIE::TileID tile, BdIdGenerator &gen, int32_t id) {
-    gen.freeBdId(id);
-    if (!loadState.holdsOn.contains({tile, id}))
+  // Return `task`'s id to its pool; a copy waiting for it takes it at once.
+  void releaseTaskBdId(AIE::TileID tile, BdIdGenerator &gen,
+                       DMAConfigureTaskOp task, int32_t id) {
+    gen.freeBdId(task.getChannel(), task.getDirection(), id);
+    uint32_t pool = gen.targetModel.getBdPoolId(
+        gen.col, gen.row, task.getChannel(), task.getDirection());
+    if (!loadState.holdsOn.contains({tile, pool, id}))
       return;
-    gen.assignBdId(id);
-    loadState.copyOwned.insert({tile, id});
+    gen.assignBdId(task.getChannel(), task.getDirection(), id);
+    loadState.copyOwned.insert({tile, pool, id});
   }
 
   static DMAStartTaskOp startAfter(DMAConfigureTaskOp task, Operation *op) {
@@ -922,7 +952,8 @@ struct AIEAssignRuntimeSequenceBDIDsPass
   LogicalResult holdCopy(NpuDmaMemcpyNdOp copy,
                          const DmaQueueModel::ChannelKey &key, uint64_t order,
                          bool issuesToken) {
-    AIE::TileOp tile = allocationOf(copy).getTileOp();
+    AIE::ShimDMAAllocationOp allocation = allocationOf(copy);
+    AIE::TileOp tile = allocation.getTileOp();
     AIE::TileID tileId = tile.getTileID();
     auto id = static_cast<int32_t>(copy.getId());
     auto staticConflict = [&]() -> LogicalResult {
@@ -944,10 +975,13 @@ struct AIEAssignRuntimeSequenceBDIDsPass
             });
       return diag;
     };
+    int channel = allocation.getChannelIndex();
+    AIE::DMAChannelDir dir = allocation.getChannelDir();
     BdIdGenerator &gen = getGeneratorForTile(tile);
-    if (gen.reserved.count(id))
+    if (gen.isReserved(channel, dir, id))
       return staticConflict();
-    if (auto held = loadState.holdsOn.find({tileId, id});
+    uint32_t pool = gen.targetModel.getBdPoolId(gen.col, gen.row, channel, dir);
+    if (auto held = loadState.holdsOn.find({tileId, pool, id});
         held != loadState.holdsOn.end() && warnUnsafeBdReuse) {
       const HeldBy &earlier = held->second.begin()->second;
       auto [entry, inserted] = copiesOverCopies.try_emplace(
@@ -957,18 +991,22 @@ struct AIEAssignRuntimeSequenceBDIDsPass
       entry->second.tiles.insert({tile.getCol(), tile.getRow()});
       entry->second.count++;
     }
-    loadState.holdsByChannel[key].push_back({order, tileId, id});
-    loadState.holdsOn[{tileId, id}][order] = {copy, issuesToken};
-    if (!gen.bdIdAlreadyAssigned(id)) {
-      checkReallocation(tile, id, copy.getLoc());
-      gen.assignBdId(id);
-      loadState.copyOwned.insert({tileId, id});
+    loadState.holdsByChannel[key].push_back({order, tileId, pool, id});
+    loadState.holdsOn[{tileId, pool, id}][order] = {copy, issuesToken};
+    if (!gen.bdIdAlreadyAssigned(channel, dir, id)) {
+      checkReallocation(tile, channel, dir, id, copy.getLoc());
+      gen.assignBdId(channel, dir, id);
+      loadState.copyOwned.insert({tileId, pool, id});
       return success();
     }
-    if (loadState.copyOwned.contains({tileId, id}))
+    if (loadState.copyOwned.contains({tileId, pool, id}))
       return success();
     for (DMAConfigureTaskOp task : liveByTile[tileId]) {
       if (releasedTasks.contains(task) || unloaded.contains(task))
+        continue;
+      // A task drawing from another pool holds a different BD of this id.
+      if (gen.targetModel.getBdPoolId(gen.col, gen.row, task.getChannel(),
+                                      task.getDirection()) != pool)
         continue;
       AIE::DMABDOp held;
       task.walk([&](AIE::DMABDOp bd) {
@@ -1033,23 +1071,26 @@ struct AIEAssignRuntimeSequenceBDIDsPass
            (!oldest || holds->second.front().order < *oldest)) {
       CopyHold hold = holds->second.front();
       holds->second.pop_front();
-      auto on = loadState.holdsOn.find({hold.tile, hold.id});
+      auto on = loadState.holdsOn.find({hold.tile, hold.pool, hold.id});
       on->second.erase(hold.order);
       if (!on->second.empty())
         continue;
       loadState.holdsOn.erase(on);
-      if (loadState.copyOwned.erase({hold.tile, hold.id}))
-        gens.find(hold.tile)->second.freeBdId(hold.id);
+      if (loadState.copyOwned.erase({hold.tile, hold.pool, hold.id}))
+        gens.find(hold.tile)->second.freeBdId(
+            key[3], static_cast<AIE::DMAChannelDir>(key[2]), hold.id);
     }
   }
 
   // BD ids released by aiex.dma_free_task while the task could still have been
-  // in flight, keyed by tile, with the task and the free that released them.
+  // in flight, by tile and (pool, id), with the releasing task and free.
   struct ReleasedTask {
     DMAConfigureTaskOp configure;
     Operation *freeOp;
   };
-  std::map<std::pair<int, int>, std::map<uint32_t, ReleasedTask>> freedInFlight;
+  std::map<std::pair<int, int>,
+           std::map<std::pair<uint32_t, uint32_t>, ReleasedTask>>
+      freedInFlight;
 
   // An await consumes the oldest outstanding token on the channel, regardless
   // of the configure named by its SSA operand. Only that token-issuing task and
@@ -1576,9 +1617,11 @@ struct AIEAssignRuntimeSequenceBDIDsPass
       return;
     AIE::TileOp tile = cfg.getTileOp();
     auto &ids = freedInFlight[{tile.getCol(), tile.getRow()}];
+    uint32_t pool = AIE::getTargetModel(tile).getBdPoolId(
+        tile.getCol(), tile.getRow(), cfg.getChannel(), cfg.getDirection());
     cfg.walk([&](AIE::DMABDOp bd) {
       if (bd.getBdId().has_value())
-        ids[bd.getBdId().value()] = {cfg, freeOp};
+        ids[{pool, bd.getBdId().value()}] = {cfg, freeOp};
     });
   }
 
@@ -1820,13 +1863,17 @@ struct AIEAssignRuntimeSequenceBDIDsPass
   }
 
   // Warn where the hazard actually bites: reusing the id, not releasing it.
-  void checkReallocation(AIE::TileOp tile, uint32_t id, Location at) {
+  // Only a reuse in the BD pool of the channel that freed the id aliases it.
+  void checkReallocation(AIE::TileOp tile, int channel, AIE::DMAChannelDir dir,
+                         uint32_t id, Location at) {
     if (!warnUnsafeBdReuse)
       return;
     auto tileIt = freedInFlight.find({tile.getCol(), tile.getRow()});
     if (tileIt == freedInFlight.end())
       return;
-    auto idIt = tileIt->second.find(id);
+    uint32_t pool = AIE::getTargetModel(tile).getBdPoolId(
+        tile.getCol(), tile.getRow(), channel, dir);
+    auto idIt = tileIt->second.find({pool, id});
     if (idIt == tileIt->second.end())
       return;
     ReleasedTask released = idIt->second;
@@ -1953,10 +2000,15 @@ struct AIEAssignRuntimeSequenceBDIDsPass
         bd.emitOpError("Free called on BD chain with unassigned IDs.");
         return WalkResult::interrupt();
       }
-      if (gen.bdIdAlreadyAssigned(bd.getBdId().value()) &&
+      if (gen.bdIdAlreadyAssigned(task_op.getChannel(), task_op.getDirection(),
+                                  bd.getBdId().value()) &&
           !loadState.copyOwned.contains(
-              {task_op.getTileOp().getTileID(), bd.getBdId().value()})) {
-        releaseTaskBdId(task_op.getTileOp().getTileID(), gen,
+              {task_op.getTileOp().getTileID(),
+               gen.targetModel.getBdPoolId(gen.col, gen.row,
+                                           task_op.getChannel(),
+                                           task_op.getDirection()),
+               bd.getBdId().value()})) {
+        releaseTaskBdId(task_op.getTileOp().getTileID(), gen, task_op,
                         bd.getBdId().value());
       } else {
         freeOp->emitOpError("frees buffer descriptor ID ")
@@ -2027,7 +2079,7 @@ struct AIEAssignRuntimeSequenceBDIDsPass
   }
 
   // Take back the ids of a started task that is not started again after `op`
-  // and holds an id `op`'s channel can use (on a mem tile, its parity's half).
+  // and holds an id in the BD pool of `op`'s channel.
   // One a poll already proved finished is taken as is. Otherwise a poll before
   // `op` proves one finished: the oldest with j >= 1 pushes queued behind it,
   // for which Task_Queue_Size <= j - 1 is proof (as a masked equality, the
@@ -2044,18 +2096,24 @@ struct AIEAssignRuntimeSequenceBDIDsPass
     auto isCandidate = [&](DMAConfigureTaskOp task) {
       if (releasedTasks.contains(task) || startAfter(task, op))
         return false;
+      if (tm.getBdPoolId(tile.getCol(), tile.getRow(), task.getChannel(),
+                         task.getDirection()) !=
+          tm.getBdPoolId(tile.getCol(), tile.getRow(), op.getChannel(),
+                         op.getDirection()))
+        return false;
       bool usable = false;
       task.walk([&](AIE::DMABDOp bd) {
         usable |= bd.getBdId() &&
                   tm.isBdChannelAccessible(tile.getCol(), tile.getRow(),
-                                           *bd.getBdId(), op.getChannel());
+                                           *bd.getBdId(), op.getChannel(),
+                                           op.getDirection());
       });
       return usable;
     };
     auto take = [&](DMAConfigureTaskOp task) {
       BdIdGenerator &gen = getGeneratorForTile(tile);
       task.walk([&](AIE::DMABDOp bd) {
-        releaseTaskBdId(tile.getTileID(), gen, *bd.getBdId());
+        releaseTaskBdId(tile.getTileID(), gen, task, *bd.getBdId());
       });
       reclaimed.insert(task);
       releasedTasks.insert(task);

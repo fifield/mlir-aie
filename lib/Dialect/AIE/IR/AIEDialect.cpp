@@ -516,7 +516,7 @@ LogicalResult HasValidBDs<ConcreteType>::verifyTrait(Operation *op) {
   if (!tile)
     return op->emitOpError("tile must implement TileLike interface");
 
-  int bdMax = targetModel.getNumBDs(tile.getTileType());
+  int bdMax = targetModel.getTotalNumBDs(tile.getTileType());
 
   int bdNum = 0;
   for (auto &block : element.getBody()) {
@@ -2897,7 +2897,25 @@ LogicalResult ObjectFifoLinkOp::verify() {
                            << " objects needs a lock counting that many, "
                               "but locks count to "
                            << target.getMaxLockValue();
-    int64_t bds = target.getNumBDs(AIETileType::MemTile) / 2;
+    // The output channel is unallocated: use the smallest MemTile MM2S pool
+    // (all memtiles alike, so an unplaced tile uses column 0's).
+    std::optional<int> col = tile.tryGetCol(), row = tile.tryGetRow();
+    for (int r = 0; (!col || !row) && r < target.rows(); ++r) {
+      if (target.isMemTile(0, r)) {
+        col = 0;
+        row = r;
+      }
+    }
+    std::optional<int64_t> poolBds;
+    if (col && row)
+      for (uint32_t channel = 0, channels = target.getNumDMAChannels(
+                                     *col, *row, DMAChannelDir::MM2S);
+           channel < channels; ++channel)
+        poolBds =
+            std::min<int64_t>(poolBds.value_or(INT64_MAX),
+                              target.getNumBDsForChannel(*col, *row, channel,
+                                                         DMAChannelDir::MM2S));
+    int64_t bds = poolBds.value_or(target.getNumBDs(AIETileType::MemTile) / 2);
     if (window.outputs > bds)
       return emitOpError() << "a walk over a stream lowers to one descriptor "
                               "per output, "
@@ -5463,14 +5481,6 @@ LogicalResult DMAOp::verify() {
           getOperation(), cast<TileLike>(program.getTile().getDefiningOp()),
           getChannelDir(), getChannelIndex())))
     return failure();
-  if (auto parent = dyn_cast<TileElement>(parentOp);
-      parent && isa<AIE4TargetModel>(getTargetModel(getOperation()))) {
-    if (TileLike tile = parent.getTileLike();
-        tile && failed(verifyBdPoolIsModelled(getOperation(), tile.tryGetCol(),
-                                              tile.tryGetRow(), getChannelDir(),
-                                              getChannelIndex())))
-      return failure();
-  }
   auto bdRegions = getBds();
   for (auto &bdRegion : bdRegions) {
     if (!bdRegion.hasOneBlock())
@@ -6654,37 +6664,7 @@ LogicalResult DMAStartOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
   return success();
 }
 
-LogicalResult xilinx::AIE::verifyBdPoolIsModelled(Operation *op,
-                                                  std::optional<int> col,
-                                                  std::optional<int> row,
-                                                  DMAChannelDir dir,
-                                                  int64_t channel) {
-  const AIETargetModel &tm = getTargetModel(op);
-  if (!col || !row || !isa<AIE4TargetModel>(tm))
-    return success();
-  if (tm.isMemTile(*col, *row))
-    return op->emitOpError("AIE4 memtile DMA channels have a private BD pool "
-                           "per channel and direction, which the target model "
-                           "cannot describe yet");
-  if (tm.isShimNOCTile(*col, *row) && channel == 1)
-    return op->emitOpError("AIE4 shim DMA channel 1 uses BDs 0-15 as MM2S and "
-                           "16-31 as S2MM; the target model cannot describe a "
-                           "direction-dependent BD pool yet");
-  return success();
-}
-
 LogicalResult DMAStartOp::verify() {
-  // A start naming a route endpoint has no channel until
-  // --aie-objectfifo-allocate resolves it; it is checked again then.
-  if (auto parent = dyn_cast<TileElement>(getOperation()->getParentOp());
-      parent && !getEndpoint() &&
-      isa<AIE4TargetModel>(getTargetModel(getOperation()))) {
-    if (TileLike tile = parent.getTileLike();
-        tile && failed(verifyBdPoolIsModelled(getOperation(), tile.tryGetCol(),
-                                              tile.tryGetRow(), getChannelDir(),
-                                              getChannelIndex())))
-      return failure();
-  }
   if (getPadValue() != 0) {
     if (!isa<MemTileDMAOp>(getOperation()->getParentOp()))
       return emitOpError("pad_value is only supported on memtile DMA channels");

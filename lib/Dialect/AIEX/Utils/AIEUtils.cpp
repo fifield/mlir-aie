@@ -599,7 +599,8 @@ Operation *AIEX::getRuntimeDmaTile(Operation *op, SymbolTable &symbols) {
 void AIEX::forEachRuntimePinnedBdId(
     AIE::DeviceOp device,
     llvm::function_ref<void(Operation *op, Operation *tile,
-                            std::optional<int> channel, int32_t id)>
+                            std::optional<int> channel,
+                            std::optional<AIE::DMAChannelDir> dir, int32_t id)>
         pinned) {
   SymbolTable symbols(device);
   device.walk([&](Operation *op) {
@@ -607,18 +608,22 @@ void AIEX::forEachRuntimePinnedBdId(
     if (!tile)
       return;
     std::optional<int> channel;
-    if (auto task = dyn_cast<AIEX::DMAConfigureTaskOp>(op))
+    std::optional<AIE::DMAChannelDir> dir;
+    if (auto task = dyn_cast<AIEX::DMAConfigureTaskOp>(op)) {
       channel = task.getChannel();
-    else if (auto alloc =
-                 symbols.lookup<AIE::ShimDMAAllocationOp>(runtimeDmaSymbol(op)))
+      dir = task.getDirection();
+    } else if (auto alloc = symbols.lookup<AIE::ShimDMAAllocationOp>(
+                   runtimeDmaSymbol(op))) {
       channel = alloc.getChannelIndex();
+      dir = alloc.getChannelDir();
+    }
     if (auto copy = dyn_cast<AIEX::NpuDmaMemcpyNdOp>(op)) {
-      pinned(op, tile, channel, static_cast<int32_t>(copy.getId()));
+      pinned(op, tile, channel, dir, static_cast<int32_t>(copy.getId()));
       return;
     }
     cast<AIEX::DMAConfigureTaskLike>(op).getBody().walk([&](AIE::DMABDOp bd) {
       if (std::optional<int32_t> id = bd.getBdId())
-        pinned(op, tile, channel, *id);
+        pinned(op, tile, channel, dir, *id);
     });
   });
 }

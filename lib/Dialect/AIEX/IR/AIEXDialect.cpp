@@ -772,6 +772,20 @@ AIEX::NpuDmaMemcpyNdOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
       return emitOpError("programs buffer descriptor ID ")
              << getId() << ", but tile (" << tile.getCol() << ", "
              << tile.getRow() << ") has " << numBds << " buffer descriptors";
+    // The id must be in the BD pool of the allocation's channel; on every
+    // target before AIE4 a shim has one pool, which the check above covers.
+    int channel = allocOp.getChannelIndex();
+    AIE::DMAChannelDir dir = allocOp.getChannelDir();
+    if (!targetModel.isBdChannelAccessible(tile.getCol(), tile.getRow(),
+                                           getId(), channel, dir)) {
+      auto [first, last] = targetModel.getBdIdRangeForChannel(
+          tile.getCol(), tile.getRow(), channel, dir);
+      return emitOpError("programs buffer descriptor ID ")
+             << getId() << ", which is not in the BD pool of "
+             << AIE::stringifyDMAChannelDir(dir) << " channel " << channel
+             << " of tile (" << tile.getCol() << ", " << tile.getRow()
+             << "): ids " << first << " to " << last - 1;
+    }
   }
   if (isDynamic)
     return verifyDynamicSizesStrides(targetModel, buffer, allocOp);
@@ -1636,9 +1650,6 @@ LogicalResult AIEX::DMAConfigureTaskOp::verify() {
   // The verifier runs again on the concrete tile once placement resolves it.
   std::optional<int> col = getTileLike().tryGetCol();
   std::optional<int> row = getTileLike().tryGetRow();
-  if (failed(AIE::verifyBdPoolIsModelled(getOperation(), col, row,
-                                         getDirection(), getChannel())))
-    return failure();
   if (col && row &&
       failed(verifyTaskBDDimensions(targetModel, *col, *row, getBody())))
     return failure();

@@ -1869,8 +1869,12 @@ int64_t SAPlacer::bdShortfall(TileID position, ArrayRef<Operation *> tiles,
       });
     return *known;
   };
-  DenseMap<int, int64_t> taken = takenBDs.at(*targetModel, col, row, holders);
-  auto spent = [&](int channel) { return taken.lookup(channel); };
+  std::map<DMAChannelAnalysis::BDUser, int64_t> taken =
+      takenBDs.at(*targetModel, col, row, holders);
+  auto spent = [&](DMAChannelDir dir, int channel) -> int64_t {
+    auto it = taken.find({dir, channel});
+    return it == taken.end() ? 0 : it->second;
+  };
   SmallVector<DMAChannelAnalysis::BDPlanEnd> planned;
   SmallVector<unsigned> poolOf;
   SmallVector<DMAChannelAnalysis::BDWalkPool> pools;
@@ -1918,9 +1922,9 @@ int64_t SAPlacer::bdShortfall(TileID position, ArrayRef<Operation *> tiles,
     int64_t total = 0;
     for (auto [end, pool] : llvm::zip_equal(planned, poolOf))
       total += whole.contains(poolKeys[pool]) ? 1 : end.bds;
-    for (auto [channel, held] : taken)
+    for (auto [user, held] : taken)
       total += held;
-    int64_t ids = targetModel->getNumBDs(col, row);
+    int64_t ids = targetModel->getTotalNumBDs(col, row);
     shortfall = found.channelShort ? std::max<int64_t>(0, total - ids)
                                    : std::max<int64_t>(1, total - ids);
   }

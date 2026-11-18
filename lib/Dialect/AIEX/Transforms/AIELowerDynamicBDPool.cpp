@@ -92,11 +92,12 @@ struct AIELowerDynamicBDPoolPass
   SmallVector<Fixup> fixups;
 
   // The BD ids a configure's channel can submit. Pools are keyed by this range,
-  // so channels that share a partition share a pool.
+  // so channels that share a partition share a pool. Private BD pools that
+  // reuse the same ids also share one, which is conservative.
   static std::pair<uint32_t, uint32_t> bdPartition(DMAConfigureTaskOp cfg) {
     AIE::TileOp tile = cfg.getTileOp();
     return AIE::getTargetModel(cfg).getBdIdRangeForChannel(
-        tile.getCol(), tile.getRow(), cfg.getChannel());
+        tile.getCol(), tile.getRow(), cfg.getChannel(), cfg.getDirection());
   }
 
   // The BDs of a configure's body, in block order: the order their ids are

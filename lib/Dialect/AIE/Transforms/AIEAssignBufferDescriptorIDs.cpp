@@ -21,13 +21,16 @@
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/MathExtras.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <map>
 #include <memory>
 #include <optional>
 #include <set>
+#include <string>
 #include <utility>
 
 namespace xilinx::AIE {
@@ -45,33 +48,183 @@ BdIdGenerator::BdIdGenerator(int col, int row,
                              const AIETargetModel &targetModel)
     : col(col), row(row), targetModel(targetModel) {}
 
-std::optional<uint32_t> BdIdGenerator::nextBdId(int channelIndex,
-                                                uint32_t alignment) {
-  uint32_t bdId = 0;
-  uint32_t maxBdId = targetModel.getNumBDs(col, row) - 1;
-  // Find the next free BD ID. This is not an efficient algorithm, but doesn't
-  for (; (bdIdAlreadyAssigned(bdId) || reserved.count(bdId) ||
-          !targetModel.isBdChannelAccessible(col, row, bdId, channelIndex)) &&
-         bdId <= maxBdId;
-       bdId += alignment)
-    ;
-  if (bdId > maxBdId) {
-    return std::nullopt;
+// The pool key of a BD id that no pool of the tile holds.
+static constexpr uint32_t noPool = ~0u;
+
+SmallVector<uint32_t, 2> BdIdGenerator::poolsHolding(uint32_t bdId) const {
+  SmallVector<uint32_t, 2> pools;
+  for (DMAChannelDir dir : {DMAChannelDir::MM2S, DMAChannelDir::S2MM}) {
+    int numChannels = std::max<int>(
+        1, static_cast<int>(targetModel.getNumDMAChannels(col, row, dir)));
+    for (int channel = 0; channel < numChannels; ++channel) {
+      uint32_t pool = targetModel.getBdPoolId(col, row, channel, dir);
+      if (targetModel.isBdChannelAccessible(col, row, bdId, channel, dir) &&
+          !llvm::is_contained(pools, pool))
+        pools.push_back(pool);
+    }
   }
-  assignBdId(bdId);
-  return std::optional<uint32_t>(bdId);
+  if (pools.empty())
+    pools.push_back(noPool);
+  return pools;
+}
+
+std::optional<uint32_t> BdIdGenerator::poolOf(int channelIndex,
+                                              DMAChannelDir dir,
+                                              uint32_t bdId) const {
+  if (!targetModel.isBdChannelAccessible(col, row, bdId, channelIndex, dir))
+    return std::nullopt;
+  return targetModel.getBdPoolId(col, row, channelIndex, dir);
+}
+
+std::optional<uint32_t> BdIdGenerator::nextBdId(int channelIndex,
+                                                DMAChannelDir dir,
+                                                uint32_t alignment) {
+  uint32_t pool = targetModel.getBdPoolId(col, row, channelIndex, dir);
+  auto [first, last] =
+      targetModel.getBdIdRangeForChannel(col, row, channelIndex, dir);
+  // Find the next free BD ID. This is not an efficient algorithm, but doesn't
+  // need to be.
+  for (uint32_t bdId = llvm::alignTo(first, alignment); bdId < last;
+       bdId += alignment) {
+    if (alreadyAssigned.count({pool, bdId}) || reserved.count({pool, bdId}))
+      continue;
+    alreadyAssigned.insert({pool, bdId});
+    return bdId;
+  }
+  return std::nullopt;
+}
+
+void BdIdGenerator::assignBdId(int channelIndex, DMAChannelDir dir,
+                               uint32_t bdId) {
+  std::optional<uint32_t> pool = poolOf(channelIndex, dir, bdId);
+  if (!pool)
+    return assignBdId(bdId);
+  assert(!alreadyAssigned.count({*pool, bdId}) &&
+         "bdId has already been assigned");
+  alreadyAssigned.insert({*pool, bdId});
+}
+
+bool BdIdGenerator::bdIdAlreadyAssigned(int channelIndex, DMAChannelDir dir,
+                                        uint32_t bdId) {
+  std::optional<uint32_t> pool = poolOf(channelIndex, dir, bdId);
+  if (!pool)
+    return bdIdAlreadyAssigned(bdId);
+  return alreadyAssigned.count({*pool, bdId});
+}
+
+void BdIdGenerator::freeBdId(int channelIndex, DMAChannelDir dir,
+                             uint32_t bdId) {
+  // Ids outside this channel's pool belong to another channel.
+  if (std::optional<uint32_t> pool = poolOf(channelIndex, dir, bdId))
+    alreadyAssigned.erase({*pool, bdId});
+}
+
+void BdIdGenerator::reserveBdId(int channelIndex, DMAChannelDir dir,
+                                uint32_t bdId) {
+  if (std::optional<uint32_t> pool = poolOf(channelIndex, dir, bdId))
+    reserved.insert({*pool, bdId});
+  else
+    reserveBdId(bdId);
+}
+
+void BdIdGenerator::reserveBdId(uint32_t bdId) {
+  for (uint32_t pool : poolsHolding(bdId))
+    reserved.insert({pool, bdId});
+}
+
+bool BdIdGenerator::isReserved(int channelIndex, DMAChannelDir dir,
+                               uint32_t bdId) const {
+  if (std::optional<uint32_t> pool = poolOf(channelIndex, dir, bdId))
+    return reserved.count({*pool, bdId});
+  return isReserved(bdId);
+}
+
+bool BdIdGenerator::isReserved(uint32_t bdId) const {
+  return llvm::any_of(poolsHolding(bdId), [&](uint32_t pool) {
+    return reserved.count({pool, bdId});
+  });
 }
 
 void BdIdGenerator::assignBdId(uint32_t bdId) {
-  assert(!alreadyAssigned.count(bdId) && "bdId has already been assigned");
-  alreadyAssigned.insert(bdId);
+  for (uint32_t pool : poolsHolding(bdId))
+    alreadyAssigned.insert({pool, bdId});
 }
 
 bool BdIdGenerator::bdIdAlreadyAssigned(uint32_t bdId) {
-  return alreadyAssigned.count(bdId);
+  return llvm::any_of(poolsHolding(bdId), [&](uint32_t pool) {
+    return alreadyAssigned.count({pool, bdId});
+  });
 }
 
-void BdIdGenerator::freeBdId(uint32_t bdId) { alreadyAssigned.erase(bdId); }
+bool BdIdGenerator::holdsTileWide(int channelIndex, DMAChannelDir dir,
+                                  uint32_t bdId) const {
+  if (channelIndex < 0 ||
+      channelIndex >=
+          static_cast<int>(targetModel.getNumDMAChannels(col, row, dir)))
+    return true;
+  std::optional<uint32_t> pool = poolOf(channelIndex, dir, bdId);
+  if (!pool)
+    return true;
+  return poolsHolding(bdId) == SmallVector<uint32_t, 2>{*pool};
+}
+
+static constexpr StringLiteral reservedBdIdsAttr = "aiex.reserved_bd_ids";
+static constexpr StringLiteral reservedChannelBdIdsAttr =
+    "aiex.reserved_channel_bd_ids";
+
+bool xilinx::AIE::isReservedBdIdsAttr(StringRef name) {
+  return name == reservedBdIdsAttr || name == reservedChannelBdIdsAttr;
+}
+
+SmallVector<ReservedBdId> xilinx::AIE::getReservedBdIds(TileOp tile) {
+  SmallVector<ReservedBdId> ids;
+  if (auto flat = tile->getAttrOfType<DenseI32ArrayAttr>(reservedBdIdsAttr))
+    for (int32_t id : flat.asArrayRef())
+      ids.push_back({std::nullopt, id});
+  if (auto perChannel =
+          tile->getAttrOfType<DictionaryAttr>(reservedChannelBdIdsAttr))
+    for (NamedAttribute entry : perChannel) {
+      auto [dirName, channelName] = entry.getName().getValue().rsplit('_');
+      std::optional<DMAChannelDir> dir = symbolizeDMAChannelDir(dirName);
+      int channel;
+      auto list = dyn_cast<DenseI32ArrayAttr>(entry.getValue());
+      if (!dir || channelName.getAsInteger(10, channel) || !list)
+        continue;
+      for (int32_t id : list.asArrayRef())
+        ids.push_back({std::make_pair(channel, *dir), id});
+    }
+  return ids;
+}
+
+void xilinx::AIE::setReservedBdIds(TileOp tile, ArrayRef<ReservedBdId> ids) {
+  MLIRContext *ctx = tile->getContext();
+  std::set<int32_t> flat;
+  std::map<std::string, std::set<int32_t>> perChannel;
+  for (const ReservedBdId &r : ids) {
+    if (!r.channel) {
+      flat.insert(r.id);
+      continue;
+    }
+    auto [channel, dir] = *r.channel;
+    perChannel[(stringifyDMAChannelDir(dir) + "_" + Twine(channel)).str()]
+        .insert(r.id);
+  }
+  tile->removeAttr(reservedBdIdsAttr);
+  tile->removeAttr(reservedChannelBdIdsAttr);
+  if (!flat.empty())
+    tile->setAttr(reservedBdIdsAttr,
+                  DenseI32ArrayAttr::get(
+                      ctx, SmallVector<int32_t>(flat.begin(), flat.end())));
+  if (!perChannel.empty()) {
+    SmallVector<NamedAttribute> entries;
+    for (auto &[key, channelIds] : perChannel)
+      entries.emplace_back(
+          StringAttr::get(ctx, key),
+          DenseI32ArrayAttr::get(
+              ctx, SmallVector<int32_t>(channelIds.begin(), channelIds.end())));
+    tile->setAttr(reservedChannelBdIdsAttr, DictionaryAttr::get(ctx, entries));
+  }
+}
 
 // Read the head buffer-descriptor id and (biased) START_QUEUE repeat count of
 // the resident DMA channel (dir, channel) on `tile`, off the placed
@@ -178,58 +331,65 @@ struct AIEAssignBufferDescriptorIDsPass
         for (TileOp tile : targetOp.getOps<TileOp>()) {
           if (tile.getCol() != col || tile.getRow() != row)
             continue;
-          if (auto reserved = tile->getAttrOfType<DenseI32ArrayAttr>(
-                  "aiex.reserved_bd_ids"))
-            for (int32_t bdId : reserved.asArrayRef()) {
-              auto id = static_cast<uint32_t>(bdId);
-              if (!gen.bdIdAlreadyAssigned(id))
-                gen.assignBdId(id);
+          for (const ReservedBdId &reserved : getReservedBdIds(tile)) {
+            auto id = static_cast<uint32_t>(reserved.id);
+            if (reserved.channel) {
+              auto [channel, dir] = *reserved.channel;
+              if (!gen.holdsTileWide(channel, dir, id)) {
+                if (!gen.bdIdAlreadyAssigned(channel, dir, id))
+                  gen.assignBdId(channel, dir, id);
+                continue;
+              }
             }
+            if (!gen.bdIdAlreadyAssigned(id))
+              gen.assignBdId(id);
+          }
         }
       }
-      bool bdIdCollision = false;
-      memOp->walk<WalkOrder::PreOrder>([&](DMABDOp bd) {
-        if (!bd.getBdId().has_value())
-          return;
-        uint32_t bdId = bd.getBdId().value();
-        if (gen.bdIdAlreadyAssigned(bdId)) {
-          bd.emitOpError() << "assigned bd_id " << bdId
-                           << " is already used by another BD on this tile";
-          bdIdCollision = true;
-          return;
-        }
-        gen.assignBdId(bdId);
-      });
-      if (bdIdCollision)
-        return signalPassFailure();
     }
 
     struct Assignment {
       DMABDOp bd;
       int col, row, channel;
+      DMAChannelDir dir;
     };
     SmallVector<Assignment> assignments;
     std::map<int32_t, SmallVector<size_t>> receiversOfTag;
     for (TileElement memOp : memOps) {
-      DenseMap<Block *, int> channels;
+      DenseMap<Block *, std::pair<int, DMAChannelDir>> channels;
       Region &region = memOp->getRegion(0);
       for (Block &block : region)
         for (auto start : block.getOps<DMAStartOp>()) {
           Block *dest = start.getDest();
           while (dest && !channels.contains(dest)) {
-            channels[dest] = start.getChannelIndex();
+            channels[dest] = {start.getChannelIndex(), start.getChannelDir()};
             dest = dest->hasNoSuccessors() ? nullptr : dest->getSuccessor(0);
           }
         }
       memOp->walk([&](DMABDOp bd) {
-        auto dma = bd->getParentOfType<DMAOp>();
-        int channel =
-            dma ? dma.getChannelIndex() : channels.lookup(bd->getBlock());
+        std::pair<int, DMAChannelDir> channel = {0, DMAChannelDir::MM2S};
+        if (auto dma = bd->getParentOfType<DMAOp>())
+          channel = {dma.getChannelIndex(), dma.getChannelDir()};
+        else if (auto it = channels.find(bd->getBlock()); it != channels.end())
+          channel = it->second;
         if (auto tag = bd.getBdTag())
           receiversOfTag[*tag].push_back(assignments.size());
-        assignments.push_back(
-            {bd, memOp.getTileID().col, memOp.getTileID().row, channel});
+        assignments.push_back({bd, memOp.getTileID().col, memOp.getTileID().row,
+                               channel.first, channel.second});
       });
+    }
+
+    for (auto &a : assignments) {
+      std::optional<int32_t> id = a.bd.getBdId();
+      if (!id)
+        continue;
+      auto &gen = gens.at({a.col, a.row});
+      if (gen.bdIdAlreadyAssigned(a.channel, a.dir, *id)) {
+        a.bd.emitOpError() << "assigned bd_id " << *id
+                           << " is already used by another BD on this tile";
+        return signalPassFailure();
+      }
+      gen.assignBdId(a.channel, a.dir, *id);
     }
 
     // Broadcast destinations must agree on a hardware ID. Reserve their
@@ -257,8 +417,10 @@ struct AIEAssignBufferDescriptorIDsPass
           auto tile = std::make_pair(a.col, a.row);
           if (!tiles.insert(tile).second ||
               id >= targetModel.getNumBDs(a.col, a.row) ||
-              !targetModel.isBdChannelAccessible(a.col, a.row, id, a.channel) ||
-              (!a.bd.getBdId() && gens.at(tile).bdIdAlreadyAssigned(id)))
+              !targetModel.isBdChannelAccessible(a.col, a.row, id, a.channel,
+                                                 a.dir) ||
+              (!a.bd.getBdId() &&
+               gens.at(tile).bdIdAlreadyAssigned(a.channel, a.dir, id)))
             return false;
         }
         return true;
@@ -278,7 +440,7 @@ struct AIEAssignBufferDescriptorIDsPass
       for (size_t i : indices) {
         auto &a = assignments[i];
         if (!a.bd.getBdId()) {
-          gens.at({a.col, a.row}).assignBdId(id);
+          gens.at({a.col, a.row}).assignBdId(a.channel, a.dir, id);
           a.bd.setBdId(id);
         }
       }
@@ -286,18 +448,19 @@ struct AIEAssignBufferDescriptorIDsPass
     for (auto &a : assignments) {
       auto &gen = gens.at({a.col, a.row});
       if (auto id = a.bd.getBdId()) {
-        if (!targetModel.isBdChannelAccessible(a.col, a.row, *id, a.channel)) {
+        if (!targetModel.isBdChannelAccessible(a.col, a.row, *id, a.channel,
+                                               a.dir)) {
           a.bd.emitOpError()
               << "assigned bd_id " << *id << " is not accessible from channel "
               << a.channel << " on this tile";
           return signalPassFailure();
         }
       } else {
-        auto nextId = gen.nextBdId(a.channel);
+        auto nextId = gen.nextBdId(a.channel, a.dir);
         if (!nextId) {
           a.bd.emitOpError()
               << "Allocator exhausted available BD IDs (maximum "
-              << targetModel.getNumBDsForChannel(a.col, a.row, a.channel)
+              << targetModel.getNumBDsForChannel(a.col, a.row, a.channel, a.dir)
               << " available for channel " << a.channel << ").";
           return signalPassFailure();
         }
