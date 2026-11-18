@@ -650,8 +650,9 @@ public:
     const auto &targetModel = AIE::getTargetModel(op);
     int channel = infoOp.getChannelIndex();
     AIE::DMAChannelDir dir = infoOp.getChannelDir();
-    if (!targetModel.isBdChannelAccessible(tileCol, tileRow, op.getId(),
-                                           channel, dir))
+    // Only the pool is checked; the allocation verifies the channel exists.
+    if (!targetModel.isBdInChannelPool(tileCol, tileRow, op.getId(), channel,
+                                       dir))
       return op->emitOpError("BD ID ")
              << op.getId() << " is not in the BD pool of "
              << AIE::stringifyDMAChannelDir(dir) << " channel " << channel;

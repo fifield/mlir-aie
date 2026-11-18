@@ -1781,6 +1781,10 @@ AIETargetModel::getMemLocalBaseAddress(int localCol, int localRow, int memCol,
 
 uint32_t AIETargetModel::getNumDMAChannels(int col, int row,
                                            AIE::DMAChannelDir dir) const {
+  // The C API may pass an invalid tile or direction.
+  if (!isValidTile({col, row}) ||
+      !symbolizeDMAChannelDir(static_cast<uint32_t>(dir)))
+    return 0;
   bool mm2s = isMM2S(dir);
   WireBundle bundle = getDMAChannelBundle(dir);
   if (hasShimMux(col, row))

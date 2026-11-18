@@ -173,9 +173,14 @@ struct AIEAssignRuntimeSequenceBDIDsPass
     for (AIE::DeviceOp device : {loadedDevice, configuredDevice})
       if (device)
         devices.push_back(device);
+    // Reserve in the submitting channel's pool, or every pool without one.
     gen.reserved.clear();
-    for (uint32_t id : AIEX::staticBdIds(devices, tile))
-      gen.reserveBdId(id);
+    for (const AIEX::StaticBd &bd : AIEX::staticBdIds(devices, tile)) {
+      if (bd.channel)
+        gen.reserveBdId(bd.channel->first, bd.channel->second, bd.id);
+      else
+        gen.reserveBdId(bd.id);
+    }
   }
 
   // Keyed by (col, row), not the aie.tile op's own identity: two tile ops

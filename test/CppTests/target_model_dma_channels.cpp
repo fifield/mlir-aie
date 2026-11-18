@@ -11,6 +11,7 @@
 #include "aie/Dialect/AIE/IR/AIETargetModel.h"
 #include "aie/Dialect/AIE/Transforms/AIEAssignBufferDescriptorIDs.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <set>
 #include <stdexcept>
@@ -92,6 +93,156 @@ static void testExistingTargets() {
         }
       }
   }
+}
+
+// Off-device tiles and out-of-range directions (C API/Python pass integers)
+// have no DMA channels.
+static void testInvalidQueries() {
+  const AIEDevice devices[] = {AIEDevice::xcvc1902, AIEDevice::xcve2802,
+                               AIEDevice::npu1,     AIEDevice::npu2,
+                               AIEDevice::xcve3858, AIEDevice::npu3};
+  for (AIEDevice device : devices) {
+    const AIETargetModel &tm = getTargetModel(device);
+    std::string name = stringifyAIEDevice(device).str();
+    const std::pair<int, int> outside[] = {{-1, 0},
+                                           {0, -1},
+                                           {tm.columns(), 0},
+                                           {0, tm.rows()},
+                                           {tm.columns(), tm.rows()}};
+    for (auto [col, row] : outside)
+      for (DMAChannelDir dir : allDirections) {
+        std::string what = name + " (" + std::to_string(col) + ", " +
+                           std::to_string(row) + ") " +
+                           stringifyDMAChannelDir(dir).str();
+        check(tm.getNumDMAChannels(col, row, dir) == 0, what + " no channels");
+        check(!tm.isDmaChannelSupported({col, row}, dir, 0),
+              what + " channel 0 unsupported");
+      }
+    for (uint32_t raw : {4u, 7u, 0xffffffffu}) {
+      auto dir = static_cast<DMAChannelDir>(raw);
+      check(!symbolizeDMAChannelDir(raw), "not an enumerator");
+      for (int col = 0; col < tm.columns(); ++col)
+        for (int row = 0; row < tm.rows(); ++row) {
+          std::string what = name + " (" + std::to_string(col) + ", " +
+                             std::to_string(row) + ") direction " +
+                             std::to_string(raw);
+          check(tm.getNumDMAChannels(col, row, dir) == 0,
+                what + " no channels");
+          check(!tm.isDmaChannelSupported({col, row}, dir, 0),
+                what + " channel 0 unsupported");
+        }
+    }
+  }
+}
+
+// A PL-only shim has no shim DMA, but the count still reads its shim-mux DMA
+// ports; this documents the value, not the hardware.
+static void testPLShimDMAChannels() {
+  const AIEDevice devices[] = {AIEDevice::xcvc1902, AIEDevice::xcve2302,
+                               AIEDevice::xcve2802};
+  for (AIEDevice device : devices) {
+    const AIETargetModel &tm = getTargetModel(device);
+    std::string name = stringifyAIEDevice(device).str();
+    int plShims = 0;
+    for (int col = 0; col < tm.columns(); ++col) {
+      if (!tm.isShimPLTile(col, 0))
+        continue;
+      ++plShims;
+      std::string at = name + " PL shim (" + std::to_string(col) + ", 0)";
+      check(tm.getNumDMAChannels(col, 0, DMAChannelDir::MM2S) == 2 &&
+                tm.getNumDMAChannels(col, 0, DMAChannelDir::S2MM) == 2,
+            at + " reports its shim mux's 2 DMA ports per direction");
+      check(tm.getNumDMAChannels(col, 0, DMAChannelDir::ControlMM2S) == 0 &&
+                tm.getNumDMAChannels(col, 0, DMAChannelDir::TraceS2MM) == 0,
+            at + " has no control or trace DMA");
+    }
+    check(plShims > 0, name + " has PL-only shim tiles");
+  }
+  const AIEDevice npus[] = {AIEDevice::npu1,     AIEDevice::npu1_1col,
+                            AIEDevice::npu2,     AIEDevice::npu2_1col,
+                            AIEDevice::xcve3858, AIEDevice::npu3};
+  for (AIEDevice device : npus) {
+    const AIETargetModel &tm = getTargetModel(device);
+    for (int col = 0; col < tm.columns(); ++col)
+      for (int row = 0; row < tm.rows(); ++row)
+        check(!tm.isShimPLTile(col, row),
+              stringifyAIEDevice(device).str() + " has no PL-only shim");
+  }
+}
+
+// A BD is accessible only from a channel the tile has.
+static void testBdAccessibilityNeedsChannel() {
+  const AIEDevice devices[] = {AIEDevice::xcvc1902, AIEDevice::xcve2802,
+                               AIEDevice::npu1,     AIEDevice::npu2,
+                               AIEDevice::xcve3858, AIEDevice::npu3};
+  for (AIEDevice device : devices) {
+    const AIETargetModel &tm = getTargetModel(device);
+    std::string name = stringifyAIEDevice(device).str();
+    for (int col = 0; col < tm.columns(); ++col)
+      for (int row = 0; row < tm.rows(); ++row) {
+        uint32_t numBDs = tm.getNumBDs(col, row);
+        for (DMAChannelDir dir : allDirections) {
+          int channels = static_cast<int>(tm.getNumDMAChannels(col, row, dir));
+          for (int ch = -1; ch <= channels; ++ch) {
+            std::string what = name + " (" + std::to_string(col) + ", " +
+                               std::to_string(row) + ") " +
+                               stringifyDMAChannelDir(dir).str() + " " +
+                               std::to_string(ch);
+            bool exists = ch >= 0 && ch < channels;
+            std::pair<uint32_t, uint32_t> range{0, 0};
+            if (exists)
+              range = tm.getBdIdRangeForChannel(col, row, ch, dir);
+            auto pool = tm.getBdIdRangeForChannel(col, row, ch, dir);
+            for (uint32_t bd = 0; bd < numBDs; ++bd) {
+              check(tm.isBdChannelAccessible(col, row, bd, ch, dir) ==
+                        (exists && bd >= range.first && bd < range.second),
+                    what + " BD " + std::to_string(bd));
+              check(tm.isBdInChannelPool(col, row, bd, ch, dir) ==
+                        (bd >= pool.first && bd < pool.second),
+                    what + " BD " + std::to_string(bd) + " in pool");
+            }
+          }
+        }
+        // Undirected: the channel in any data direction, every such pool.
+        int maxChannels = static_cast<int>(
+            std::max(tm.getNumDMAChannels(col, row, DMAChannelDir::MM2S),
+                     tm.getNumDMAChannels(col, row, DMAChannelDir::S2MM)));
+        for (int ch = -1; ch <= maxChannels; ++ch)
+          for (uint32_t bd = 0; bd < numBDs; ++bd) {
+            bool exists = false, inAll = true;
+            for (DMAChannelDir dir : {DMAChannelDir::MM2S, DMAChannelDir::S2MM})
+              if (tm.isDmaChannelSupported({col, row}, dir, ch)) {
+                exists = true;
+                auto [first, last] =
+                    tm.getBdIdRangeForChannel(col, row, ch, dir);
+                inAll &= bd >= first && bd < last;
+              }
+            check(tm.isBdChannelAccessible(col, row, bd, ch) ==
+                      (exists && inAll),
+                  name + " (" + std::to_string(col) + ", " +
+                      std::to_string(row) + ") channel " + std::to_string(ch) +
+                      " BD " + std::to_string(bd) + " undirected");
+          }
+      }
+  }
+  const AIETargetModel &npu3 = getTargetModel(AIEDevice::npu3);
+  check(npu3.isBdChannelAccessible(0, 1, 0, 9, DMAChannelDir::MM2S) &&
+            !npu3.isBdChannelAccessible(0, 1, 0, 10, DMAChannelDir::MM2S),
+        "npu3 memtile MM2S 10 does not exist");
+  check(npu3.isBdChannelAccessible(0, 0, 0, 1, DMAChannelDir::ControlMM2S) &&
+            !npu3.isBdChannelAccessible(0, 0, 0, 2, DMAChannelDir::ControlMM2S),
+        "npu3 shim ControlMM2S 2 does not exist");
+  check(!npu3.isBdChannelAccessible(0, 2, 0, 0, DMAChannelDir::TraceS2MM),
+        "npu3 core has no TraceS2MM");
+  // MM2S-only channels: memtile MM2S 8-9, shim MM2S 2-3.
+  check(npu3.getNumBDsForChannel(0, 1, 8) == 16 &&
+            npu3.getNumBDsForChannel(0, 1, 9) == 16 &&
+            npu3.getNumBDsForChannel(0, 1, 10) == 0,
+        "npu3 memtile MM2S-only channels, undirected");
+  check(npu3.getNumBDsForChannel(0, 0, 2) == 16 &&
+            npu3.getNumBDsForChannel(0, 0, 3) == 16 &&
+            npu3.getNumBDsForChannel(0, 0, 4) == 0,
+        "npu3 shim MM2S-only channels, undirected");
 }
 
 // AIE4: each shim NOC tile has two ControlMM2S channels and one TraceS2MM
@@ -205,7 +356,18 @@ static void testBdIdGenerator() {
             shim.bdIdAlreadyAssigned(0, trace, 2),
         "npu3 free is per pool");
 
-  // A tile-wide id, whose channel is unknown, is taken in every pool.
+  // A per-channel id is taken only in that channel's pool.
+  BdIdGenerator memtile(0, 1, npu3);
+  memtile.assignBdId(0, DMAChannelDir::S2MM, 0);
+  check(memtile.bdIdAlreadyAssigned(0, DMAChannelDir::S2MM, 0) &&
+            !memtile.bdIdAlreadyAssigned(0, mm2s, 0) &&
+            !memtile.bdIdAlreadyAssigned(1, DMAChannelDir::S2MM, 0),
+        "npu3 memtile per-channel reservation");
+  check(memtile.nextBdId(0, mm2s) == 0u &&
+            memtile.nextBdId(0, DMAChannelDir::S2MM) == 1u,
+        "npu3 memtile per-channel allocation");
+
+  // A tile-wide id is taken in every pool.
   BdIdGenerator fresh(1, 0, npu3);
   fresh.assignBdId(2);
   check(fresh.bdIdAlreadyAssigned(0, control, 2) &&
@@ -219,6 +381,9 @@ static void testBdIdGenerator() {
 int main() {
   testDirections();
   testExistingTargets();
+  testInvalidQueries();
+  testPLShimDMAChannels();
+  testBdAccessibilityNeedsChannel();
   testNPU3();
   testBdIdGenerator();
   return 0;

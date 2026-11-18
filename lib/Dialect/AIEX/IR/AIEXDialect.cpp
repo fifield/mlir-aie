@@ -785,12 +785,11 @@ AIEX::NpuDmaMemcpyNdOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
       return emitOpError("programs buffer descriptor ID ")
              << getId() << ", but tile (" << tile.getCol() << ", "
              << tile.getRow() << ") has " << numBds << " buffer descriptors";
-    // The id must be in the BD pool of the allocation's channel; on every
-    // target before AIE4 a shim has one pool, which the check above covers.
+    // The id must also be in the channel's BD pool (AIE4 shims have two).
     int channel = allocOp.getChannelIndex();
     AIE::DMAChannelDir dir = allocOp.getChannelDir();
-    if (!targetModel.isBdChannelAccessible(tile.getCol(), tile.getRow(),
-                                           getId(), channel, dir)) {
+    if (!targetModel.isBdInChannelPool(tile.getCol(), tile.getRow(), getId(),
+                                       channel, dir)) {
       auto [first, last] = targetModel.getBdIdRangeForChannel(
           tile.getCol(), tile.getRow(), channel, dir);
       return emitOpError("programs buffer descriptor ID ")
@@ -904,13 +903,12 @@ LogicalResult AIEX::NpuPushQueueOp::verify() {
   if (std::optional<uint32_t> bdId = getConstantIntOperand(getBdId());
       bdId && *bdId >= numBds)
     return emitOpError("BD ID exceeds the maximum ID.");
-  // A stream DMA channel can only queue BDs from its own pool. Pools can
-  // depend on the direction (AIE4), so use the directed query.
+  // Stream DMA channels queue only BDs from their own (directed) pool.
   if (std::optional<uint32_t> bdId = getConstantIntOperand(getBdId());
       bdId &&
       AIE::getDMAChannelBundle(getDirection()) == AIE::WireBundle::DMA &&
-      !targetModel.isBdChannelAccessible(getColumn(), getRow(), *bdId,
-                                         getChannel(), getDirection()))
+      !targetModel.isBdInChannelPool(getColumn(), getRow(), *bdId, getChannel(),
+                                     getDirection()))
     return emitOpError("BD ID ") << *bdId << " is not accessible from channel ("
                                  << AIE::stringifyDMAChannelDir(getDirection())
                                  << ", " << getChannel() << ")";
@@ -2845,15 +2843,57 @@ AIEX::controllerIdsOf(AIE::DeviceOp device) {
   return ids;
 }
 
-std::set<uint32_t> AIEX::staticBdIds(ArrayRef<AIE::DeviceOp> devices,
-                                     AIE::TileID tile) {
-  std::set<uint32_t> ids;
+// Append the BD ids `program` takes, each with the channel that submits it.
+static void collectStaticBds(AIE::DmaBody program,
+                             SmallVectorImpl<AIEX::StaticBd> &bds) {
+  using Channel = std::optional<std::pair<int, AIE::DMAChannelDir>>;
+  llvm::SmallPtrSet<Operation *, 16> reached;
+  auto add = [&](AIE::DMABDOp bd, Channel channel) {
+    reached.insert(bd);
+    if (std::optional<uint32_t> id = bd.getBdId())
+      bds.push_back({channel, *id});
+  };
+  Region &body = program.getDmaBody();
+  // A block-form program's channel submits every BD its chain reaches.
+  for (Block &block : body)
+    for (AIE::DMAStartOp start : block.getOps<AIE::DMAStartOp>()) {
+      Channel channel;
+      if (!start.getEndpoint())
+        channel = {start.getChannelIndex(), start.getChannelDir()};
+      llvm::SmallPtrSet<Block *, 16> visited;
+      SmallVector<Block *, 16> worklist;
+      if (Block *dest = start.getDest(); dest && visited.insert(dest).second)
+        worklist.push_back(dest);
+      while (!worklist.empty()) {
+        Block *bdBlock = worklist.pop_back_val();
+        for (AIE::DMABDOp bd : bdBlock->getOps<AIE::DMABDOp>())
+          add(bd, channel);
+        for (Block *successor : bdBlock->getSuccessors())
+          if (visited.insert(successor).second)
+            worklist.push_back(successor);
+      }
+    }
+  // A region-form program names its channel on the aie.dma.
+  for (Block &block : body)
+    for (AIE::DMAOp dma : block.getOps<AIE::DMAOp>())
+      for (Region &bdRegion : dma.getBds())
+        bdRegion.walk([&](AIE::DMABDOp bd) {
+          add(bd, std::make_pair(dma.getChannelIndex(), dma.getChannelDir()));
+        });
+  body.walk([&](AIE::DMABDOp bd) {
+    if (std::optional<uint32_t> id = bd.getBdId(); id && !reached.contains(bd))
+      bds.push_back({std::nullopt, *id});
+  });
+}
+
+SmallVector<AIEX::StaticBd> AIEX::staticBdIds(ArrayRef<AIE::DeviceOp> devices,
+                                              AIE::TileID tile) {
+  SmallVector<StaticBd> bds;
   for (AIE::DeviceOp device : devices)
     for (AIE::DmaBody program : device.getOps<AIE::DmaBody>())
       if (program.getTileID() == tile)
-        for (uint32_t id : AIE::getAssignedBdIds(program))
-          ids.insert(id);
-  return ids;
+        collectStaticBds(program, bds);
+  return bds;
 }
 
 FailureOr<SmallVector<AIEX::ControlPacketMulticast>>

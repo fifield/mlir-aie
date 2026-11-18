@@ -576,24 +576,32 @@ public:
     return getNumBDsInPool(col, row, getBdPoolId(col, row, channel, dir));
   }
 
-  /// Return true iff BD `bd_id` on the tile at (`col`, `row`) can be submitted
-  /// on `channel` in direction `dir`.
-  bool isBdChannelAccessible(int col, int row, uint32_t bd_id, int channel,
-                             DMAChannelDir dir) const {
+  /// True iff `bd_id` is in the channel's pool, whether or not it exists.
+  bool isBdInChannelPool(int col, int row, uint32_t bd_id, int channel,
+                         DMAChannelDir dir) const {
     auto [first, last] = getBdIdRangeForChannel(col, row, channel, dir);
     return bd_id >= first && bd_id < last;
   }
 
-  /// Direction-agnostic forms: a BD id counts only if `channel` can submit it
-  /// in both directions. Where the pool does not depend on the direction
-  /// (every target before AIE4) this is the same as the directed form. On
-  /// AIE4 it is conservative, and it cannot tell apart private pools that
-  /// reuse ids; use the directed form and getBdPoolId() there.
+  bool isBdChannelAccessible(int col, int row, uint32_t bd_id, int channel,
+                             DMAChannelDir dir) const {
+    return isDmaChannelSupported({col, row}, dir, channel) &&
+           isBdInChannelPool(col, row, bd_id, channel, dir);
+  }
+
+  /// True iff the channel exists and can submit `bd_id` in every direction it
+  /// has. Conservative on AIE4, where pools depend on direction.
   bool isBdChannelAccessible(int col, int row, uint32_t bd_id,
                              int channel) const {
-    return isBdChannelAccessible(col, row, bd_id, channel,
-                                 DMAChannelDir::MM2S) &&
-           isBdChannelAccessible(col, row, bd_id, channel, DMAChannelDir::S2MM);
+    bool exists = false;
+    for (DMAChannelDir dir : {DMAChannelDir::MM2S, DMAChannelDir::S2MM}) {
+      if (!isDmaChannelSupported({col, row}, dir, channel))
+        continue;
+      if (!isBdChannelAccessible(col, row, bd_id, channel, dir))
+        return false;
+      exists = true;
+    }
+    return exists;
   }
 
   uint32_t getNumBDsForChannel(int col, int row, int channel) const {

@@ -174,9 +174,7 @@ struct AIEGenerateColumnControlOverlayPass
       int channel = -1;
       unsigned best = std::numeric_limits<unsigned>::max();
       int count =
-          adaptive
-              ? model.getNumSourceShimMuxConnections(col, 0, WireBundle::DMA)
-              : 1;
+          adaptive ? model.getNumDMAChannels(col, 0, DMAChannelDir::MM2S) : 1;
       for (int ch = 0; ch < count; ++ch)
         if (!fixedCircuits.lookup(col).contains(ch) &&
             packetDemand.lookup({col, ch}) < best) {

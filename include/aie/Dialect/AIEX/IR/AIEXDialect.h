@@ -112,9 +112,15 @@ mlir::FailureOr<llvm::SmallVector<ControlPacketMulticast>>
 controlPacketMulticasts(mlir::ModuleOp module,
                         mlir::FlatSymbolRefAttr reference);
 
+// A BD id a static DMA takes, with its channel if already known.
+struct StaticBd {
+  std::optional<std::pair<int, AIE::DMAChannelDir>> channel;
+  uint32_t id;
+};
+
 // The buffer descriptor ids the static DMAs of `devices` take on `tile`.
-std::set<uint32_t> staticBdIds(llvm::ArrayRef<AIE::DeviceOp> devices,
-                               AIE::TileID tile);
+llvm::SmallVector<StaticBd> staticBdIds(llvm::ArrayRef<AIE::DeviceOp> devices,
+                                        AIE::TileID tile);
 
 } // namespace AIEX
 } // namespace xilinx

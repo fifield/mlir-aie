@@ -63,7 +63,7 @@ SmallVector<uint32_t, 2> BdIdGenerator::poolsHolding(uint32_t bdId) const {
       numChannels = std::max(1, numChannels);
     for (int channel = 0; channel < numChannels; ++channel) {
       uint32_t pool = targetModel.getBdPoolId(col, row, channel, dir);
-      if (targetModel.isBdChannelAccessible(col, row, bdId, channel, dir) &&
+      if (targetModel.isBdInChannelPool(col, row, bdId, channel, dir) &&
           !llvm::is_contained(pools, pool))
         pools.push_back(pool);
     }

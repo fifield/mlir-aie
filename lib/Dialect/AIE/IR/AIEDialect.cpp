@@ -7454,9 +7454,14 @@ LogicalResult ShimDMAAllocationOp::verify() {
     return emitOpError("tile must be a shim tile");
   }
 
-  if (failed(verifyControlOrTraceDMAChannel(*this, tileLike, getChannelDir(),
-                                            getChannelIndex())))
-    return failure();
+  if (!getPlio()) {
+    // Refuse a missing channel here; AIE4 lowering cannot look up its regs.
+    if (failed(verifyDMAChannel(getOperation(), tileLike, getChannelDir(),
+                                getChannelIndex())))
+      return failure();
+  } else if (getDMAChannelBundle(getChannelDir()) != WireBundle::DMA) {
+    return emitOpError("a PLIO allocation must be MM2S or S2MM");
+  }
 
   if (ArrayAttr proofs = getConsumedByAttr()) {
     auto device = (*this)->getParentOfType<DeviceOp>();
@@ -7471,11 +7476,30 @@ LogicalResult ShimDMAAllocationOp::verify() {
 
   if (failed(verifyAssignedPacket(*this, getPacketAttr())))
     return failure();
-  // A PLIO allocation names a stream port, not a DMA channel.
-  if (getPlio())
+  if (!getPlio())
     return success();
-  return verifyDMAChannel(getOperation(), tileLike, getChannelDir(),
-                          getChannelIndex());
+  std::optional<int> col = tileLike.tryGetCol();
+  std::optional<int> row = tileLike.tryGetRow();
+  if (!col || !row)
+    return success();
+  const AIETargetModel &targetModel = getTargetModel(getOperation());
+  // MM2S is a PLIO source of the shim mux, or the switchbox without one.
+  bool mm2s = getChannelDir() == DMAChannelDir::MM2S;
+  uint32_t ports = targetModel.hasShimMux(*col, *row)
+                       ? (mm2s ? targetModel.getNumSourceShimMuxConnections(
+                                     *col, *row, WireBundle::PLIO)
+                               : targetModel.getNumDestShimMuxConnections(
+                                     *col, *row, WireBundle::PLIO))
+                       : (mm2s ? targetModel.getNumSourceSwitchboxConnections(
+                                     *col, *row, WireBundle::PLIO)
+                               : targetModel.getNumDestSwitchboxConnections(
+                                     *col, *row, WireBundle::PLIO));
+  int64_t channel = getChannelIndex();
+  if (channel < 0 || channel >= static_cast<int64_t>(ports))
+    return emitOpError("PLIO channel ")
+           << channel << " is out of range: the tile has " << ports << " "
+           << stringifyDMAChannelDir(getChannelDir()) << " PLIO ports";
+  return success();
 }
 
 TileOp ShimDMAAllocationOp::getTileOp() {
