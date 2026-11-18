@@ -53,16 +53,15 @@ int64_t maxLegalInputSizeForDim(const AIE::AIETargetModel &tm, int col, int row,
 }
 
 /// Whether dimension `d`'s stride fits the BD's step field. The hardware
-/// stride is in address granules, biased by one as the field encodes it
-/// (getHardwareStridesWraps); the iteration slot (d == 3) shares the field
-/// width and additionally admits a zero stride, a re-read.
+/// stride is in granules less the step bias (getHardwareStridesWraps); the
+/// iteration slot (d == 3) also admits a zero stride (a re-read).
 bool strideFitsStepField(const AIE::AIETargetModel &tm, Operation *forOp,
                          BaseMemRefType bufType, int col, int row,
                          const NdDmaPattern &pattern, unsigned d) {
   SmallVector<int64_t, kNdDmaDims> hwSizes(kNdDmaDims);
   SmallVector<int64_t, kNdDmaDims> hwStrides(kNdDmaDims);
-  getHardwareStridesWraps(tm, forOp, bufType, pattern.sizes, pattern.strides,
-                          hwSizes, hwStrides);
+  getHardwareStridesWraps(tm, forOp, col, row, bufType, pattern.sizes,
+                          pattern.strides, hwSizes, hwStrides);
   uint32_t stepBits = tm.getDmaBdStepBits(col, row);
   return hwStrides[d] <= (1LL << stepBits) - 1;
 }
@@ -428,8 +427,8 @@ bool AIEX::patternPassesVerification(Operation *forOp,
     return false;
   SmallVector<int64_t, kNdDmaDims> hwSizes(kNdDmaDims);
   SmallVector<int64_t, kNdDmaDims> hwStrides(kNdDmaDims);
-  getHardwareStridesWraps(tm, forOp, referencedBufType, pattern.sizes,
-                          pattern.strides, hwSizes, hwStrides);
+  getHardwareStridesWraps(tm, forOp, tileCol, tileRow, referencedBufType,
+                          pattern.sizes, pattern.strides, hwSizes, hwStrides);
 
   // Location-only: an op diagnostic prints the whole enclosing sequence.
   ScopedDiagnosticHandler handler(forOp->getContext(),

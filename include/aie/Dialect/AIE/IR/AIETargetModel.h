@@ -75,9 +75,14 @@ struct DmaBdField {
 /// and runtime BD lowerings both pack through it, so the two cannot disagree.
 struct DmaBdLayout {
   uint8_t numWords = 0;
+  /// Step fields hold (step in granules - stepBias).
+  uint8_t stepBias = 1;
   DmaBdField bufferLength, bufferOffset;
   DmaBdField enablePacket, packetType, packetId, outOfOrderId;
+  /// Without a d0Stride field the innermost dimension is contiguous.
   DmaBdField d0Size, d0Stride, d1Size, d1Stride, d2Stride;
+  /// Fourth-dimension fields; not programmed yet (buffer_length carries d2).
+  DmaBdField d2Size, d3Stride;
   DmaBdField iterationCurrent, iterationSize, iterationStride;
   DmaBdField d0ZeroBefore, d1ZeroBefore, d2ZeroBefore;
   DmaBdField d0ZeroAfter, d1ZeroAfter, d2ZeroAfter;
@@ -609,6 +614,38 @@ public:
     return getDmaBdLayout(getTileType(col, row));
   }
 
+  /// Return the BD layout for `direction`; control and trace BDs may differ.
+  virtual const DmaBdLayout *getDmaBdLayout(AIETileType tileType,
+                                            DMAChannelDir direction) const {
+    return getDMAChannelBundle(direction) == WireBundle::DMA
+               ? getDmaBdLayout(tileType)
+               : nullptr;
+  }
+
+  const DmaBdLayout *getDmaBdLayout(int col, int row,
+                                    DMAChannelDir direction) const {
+    return getDmaBdLayout(getTileType(col, row), direction);
+  }
+
+  /// DmaBdLayout::stepBias, or 1 without a layout.
+  uint32_t getDmaBdStepBias(AIETileType tileType) const {
+    const DmaBdLayout *layout = getDmaBdLayout(tileType);
+    return layout ? layout->stepBias : 1;
+  }
+  uint32_t getDmaBdStepBias(int col, int row) const {
+    return getDmaBdStepBias(getTileType(col, row));
+  }
+
+  /// True if data BD ids are channel-local, so a BD's address depends on its
+  /// channel and direction.
+  virtual bool hasChannelLocalBdIds(int col, int row) const { return false; }
+
+  /// Control and trace channels always have private, channel-local pools.
+  bool usesChannelLocalBdIds(int col, int row, DMAChannelDir direction) const {
+    return hasChannelLocalBdIds(col, row) ||
+           getDMAChannelBundle(direction) != WireBundle::DMA;
+  }
+
   /// Return the array address of the dma buffer descriptor for the given
   /// col, row, buffer descriptor id, channel and direction. Not all
   /// architecture variants will use channel and direction so these have default
@@ -800,9 +837,7 @@ public:
 
   // Returns the default 4-bit AxCACHE value used for shim NOC DMA AXI-MM
   // transfers when a `dma_bd`/`npu.writebd`'s `axcache` attribute is unset.
-  // Tuned to 2 to enable upsizing in the NoC. No target currently needs
-  // a different value, so this is a single non-pure-virtual default rather
-  // than a per-architecture override.
+  // Tuned to 2 to enable upsizing in the NoC; a target may override it.
   virtual uint32_t getDefaultAxCache() const { return 2; }
 
   // Returns true if the target model supports the given block format.
@@ -1441,12 +1476,8 @@ public:
   }
 };
 
-/// AIE4 (npu3) base model.
-///
-/// This model is written against the target-model API as it stands. Where
-/// that API cannot describe AIE4 it reports "unsupported" rather than an
-/// AIE2-shaped answer:
-///  - No BD layout or stream-switch port index map yet.
+/// AIE4 (npu3) base model. Reports "unsupported" where the API cannot yet
+/// describe AIE4 rather than an AIE2-shaped answer.
 class AIE4TargetModel : public AIETargetModel {
 protected:
   std::unique_ptr<RegisterDatabase> loadRegisterDatabase() const override;
@@ -1558,43 +1589,38 @@ public:
                        DMAChannelDir dir) const override;
   uint32_t getBdPoolStartId(int col, int row, uint32_t poolId) const override;
   uint32_t getNumBDsInPool(int col, int row, uint32_t poolId) const override;
-  /// Memtile and shim BDs have four addressing dimensions; core BDs three.
+  bool hasChannelLocalBdIds(int col, int row) const override {
+    return isMemTile(col, row);
+  }
   uint32_t getBDMaxDims(AIETileType tileType) const override {
     return tileType == AIETileType::CoreTile ? 3 : 4;
   }
-  /// Buffer_Length: core 15 bits, memtile 23 bits, shim a full register.
+  /// Core BDs are 6 words, memtile 11, shim 9. Steps are unbiased and there is
+  /// no d0 step. Control/trace BDs are shim BDs without dimensions or locks.
+  using AIETargetModel::getDmaBdLayout;
+  const DmaBdLayout *getDmaBdLayout(AIETileType tileType) const override;
+  const DmaBdLayout *getDmaBdLayout(AIETileType tileType,
+                                    DMAChannelDir direction) const override;
+  /// Field limits from the BD layout; the shim's for tiles without one.
+  const DmaBdLayout &getDmaBdLimits(AIETileType tileType) const {
+    const DmaBdLayout *layout = getDmaBdLayout(tileType);
+    return layout ? *layout : *getDmaBdLayout(AIETileType::ShimNOCTile);
+  }
   uint64_t getDmaBdMaxLen(AIETileType tileType) const override {
-    switch (tileType) {
-    case AIETileType::MemTile:
-      return (1ull << 23) - 1;
-    case AIETileType::CoreTile:
-      return (1ull << 15) - 1;
-    default:
-      return 0xFFFFFFFFull;
-    }
+    return getDmaBdLimits(tileType).bufferLength.mask();
   }
-  /// Wrap fields: core 9 bits, memtile and shim 12 bits.
   uint32_t getDmaBdWrapBits(AIETileType tileType) const override {
-    return tileType == AIETileType::CoreTile ? 9 : 12;
+    return getDmaBdLimits(tileType).d0Size.width;
   }
-  /// Step size fields: core 15 bits, memtile 23 bits, shim 22 bits.
   uint32_t getDmaBdStepBits(AIETileType tileType) const override {
-    switch (tileType) {
-    case AIETileType::MemTile:
-      return 23;
-    case AIETileType::CoreTile:
-      return 15;
-    default:
-      return 22;
-    }
+    return getDmaBdLimits(tileType).d1Stride.width;
   }
-  /// Iteration fields: memtile 8 bits, core and shim 6 bits.
   uint32_t getDmaBdIterBits(AIETileType tileType) const override {
-    return tileType == AIETileType::MemTile ? 8 : 6;
+    return getDmaBdLimits(tileType).iterationSize.width;
   }
 
-  /// Refuses (fatal error) a shim or memtile BD without a channel: the BD's
-  /// bank depends on the channel and direction there.
+  /// Shim data BDs need no channel; control, trace and memtile BDs do (fatal
+  /// error without one).
   uint64_t getDmaBdAddress(int col, int row, uint32_t bd_id, int channel,
                            AIE::DMAChannelDir direction) const override;
   uint32_t getDmaBdAddressOffset(int col, int row) const override;
@@ -1635,6 +1661,8 @@ public:
 
   std::vector<std::pair<uint32_t, uint32_t>>
   getShimBurstEncodingsAndLengths() const override;
+  /// AxCACHE 0 is the hardware-proven value on AIE4.
+  uint32_t getDefaultAxCache() const override { return 0; }
 
   /// A memtile spans five address rows (registers, then 4 MiB of data), so
   /// memtile row m starts at address row 5m-4 and core row r at r + 4 * the

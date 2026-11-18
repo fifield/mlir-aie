@@ -110,7 +110,8 @@ using xilinx::AIE::printTypedDynamicIndexList;
   hardware does not support a 0 stride (repeat).
   */
 void AIEX::getHardwareStridesWraps(const AIE::AIETargetModel &targetModel,
-                                   mlir::Operation *op,
+                                   mlir::Operation *op, int tileCol,
+                                   int tileRow,
                                    mlir::BaseMemRefType referencedBufType,
                                    llvm::SmallVector<int64_t, 4> inputSizes,
                                    llvm::SmallVector<int64_t, 4> inputStrides,
@@ -140,8 +141,9 @@ void AIEX::getHardwareStridesWraps(const AIE::AIETargetModel &targetModel,
   int64_t inT[4] = {inputStrides[0], inputStrides[1], inputStrides[2],
                     inputStrides[3]};
   int64_t outS[4], outT[4];
-  encodeHardwareStridesWraps(policy, elemWidth, addressGranularity, inS, inT,
-                             outS, outT);
+  encodeHardwareStridesWraps(policy, elemWidth, addressGranularity,
+                             targetModel.getDmaBdStepBias(tileCol, tileRow),
+                             inS, inT, outS, outT);
   for (int i = 0; i < 4; i++) {
     sizes[i] = outS[i];
     strides[i] = outT[i];
@@ -226,6 +228,14 @@ mlir::LogicalResult AIEX::verifyStridesWraps(
                        << " elements, but must be 1 for " << (elemWidth / 8)
                        << "-byte elements: the DMA moves whole "
                        << (addressGranularity / 8) << "-byte words.";
+  // BDs without a d0 step field always step d0 by one granule.
+  const AIE::DmaBdLayout *layout = targetModel.getDmaBdLayout(tileCol, tileRow);
+  if (layout && !layout->d0Stride.exists() && inputSizes[0] > 1 &&
+      inputStrides[0] != 1)
+    return emitError() << "Stride 0 is " << inputStrides[0]
+                       << ", but must be 1: this tile's buffer descriptors "
+                          "have no d0 stride, the innermost dimension is "
+                          "always contiguous.";
 
   auto outOfRange = [&](const char *what, int dim, int64_t written,
                         int64_t encoded, int64_t lo, int64_t hi) {
@@ -236,6 +246,9 @@ mlir::LogicalResult AIEX::verifyStridesWraps(
 
   int64_t maxWrap = (1 << wrap_bits) - 1;
   int64_t maxStep = 1 << step_bits;
+  // The largest stride, in granules, a step field holds.
+  int64_t maxStride =
+      maxStep - 1 + targetModel.getDmaBdStepBias(tileCol, tileRow);
 
   for (int dim : {0, 1}) {
     if (!skipTransformationChecks && hardwareSizes[dim] > maxWrap)
@@ -255,13 +268,13 @@ mlir::LogicalResult AIEX::verifyStridesWraps(
   for (int dim : {0, 1, 2}) {
     if (hardwareStrides[dim] > maxStep - 1)
       return outOfRange("Stride", dim, inputStrides[dim], hardwareStrides[dim],
-                        1, maxStep);
+                        1, maxStride);
   }
   // strides[3] exceeding the range is ok iff the sizes[3] is one, which is
   // checked below
   if (hardwareStrides[3] > maxStep - 1 && hardwareSizes[3] > 0)
     return outOfRange("Stride", 3, inputStrides[3], hardwareStrides[3], 1,
-                      maxStep);
+                      maxStride);
 
   return success();
 }
@@ -818,8 +831,9 @@ AIEX::NpuDmaMemcpyNdOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
       });
   llvm::SmallVector<int64_t, 4> hardwareSizes(4);
   llvm::SmallVector<int64_t, 4> hardwareStrides(4);
-  getHardwareStridesWraps(targetModel, getOperation(), buffer, inputSizes,
-                          inputStrides, hardwareSizes, hardwareStrides);
+  getHardwareStridesWraps(targetModel, getOperation(), col, row, buffer,
+                          inputSizes, inputStrides, hardwareSizes,
+                          hardwareStrides);
 
   // dma_memcpy_nd transfers of the form [1, 1, 1, len][0, 0, 0, 1] do not
   // specify any data layout transformation, but simply express a contiguous
@@ -962,6 +976,24 @@ LogicalResult AIEX::NpuWriteBdOp::verify() {
       (getD0Size() >= 1) && (getD1Size() == 1) && (getIterationSize() == 0);
   if (getBdId() >= numBds)
     return emitOpError("BD ID exceeds the maximum ID.");
+  if (getChannel().has_value() != getDirection().has_value())
+    return emitOpError("channel and direction must be given together");
+  if (getChannel()) {
+    if (*getChannel() >=
+        targetModel.getNumDMAChannels(getColumn(), getRow(), *getDirection()))
+      return emitOpError() << stringifyDMAChannelDir(*getDirection())
+                           << " channel " << *getChannel()
+                           << " does not exist on this tile";
+    if (!targetModel.isBdChannelAccessible(getColumn(), getRow(), getBdId(),
+                                           *getChannel(), *getDirection()))
+      return emitOpError() << "BD ID " << getBdId()
+                           << " is not in the BD pool of "
+                           << stringifyDMAChannelDir(*getDirection())
+                           << " channel " << *getChannel();
+  } else if (targetModel.hasChannelLocalBdIds(getColumn(), getRow())) {
+    return emitOpError("needs a channel and direction: a BD id on this tile "
+                       "names a slot of its channel's BD pool");
+  }
   if (getPacketId() > 31)
     return emitOpError("Packet ID exceeds the maximum supported by 5 bits.");
   if (getPacketType() > 7)
@@ -975,8 +1007,8 @@ LogicalResult AIEX::NpuWriteBdOp::verify() {
     return emitOpError("out_of_order_id requires a packet-enabled BD");
 
   // Every value on this op is already the hardware-encoded field value (wrap
-  // fields unbiased, stepsize/iteration fields biased actual-1), so the
-  // legal encoded range for a B-bit field is simply [0, 2^B - 1].
+  // fields unbiased, stepsize fields less the step bias, iteration fields
+  // biased actual-1), so a B-bit field's legal range is [0, 2^B - 1].
   AIE::AIETileType tileType = targetModel.getTileType(getColumn(), getRow());
   uint32_t wrapBits = targetModel.getDmaBdWrapBits(tileType);
   uint32_t stepBits = targetModel.getDmaBdStepBits(tileType);
@@ -990,6 +1022,13 @@ LogicalResult AIEX::NpuWriteBdOp::verify() {
   if (getD0Stride() > maxStep)
     return emitOpError() << "D0 Stride exceeds the [0:" << maxStep
                          << "] range.";
+  // BDs without a d0 step field (all AIE4 BDs) always step d0 by one
+  // granule, encoded as 0 or as one granule less the bias.
+  const AIE::DmaBdLayout *layout = targetModel.getDmaBdLayout(tileType);
+  if (layout && !layout->d0Stride.exists() && getD0Size() > 1 &&
+      getD0Stride() > 1u - layout->stepBias)
+    return emitOpError("D0 Stride must encode a unit step: the BDs of this "
+                       "tile have no d0 stride field.");
   if (getD1Size() > maxWrap)
     return emitOpError() << "D1 Size exceeds the [0:" << maxWrap << "] range.";
   if (getD1Stride() > maxStep)
@@ -1014,7 +1053,6 @@ LogicalResult AIEX::NpuWriteBdOp::verify() {
     return emitOpError("ShimTile only supports 3 dimensions of sizes.");
   // DMABDOp::verify() skips BDs inside aiex.dma_configure_task, so their pads
   // are first checked here.
-  const AIE::DmaBdLayout *layout = targetModel.getDmaBdLayout(tileType);
   llvm::SmallVector<std::pair<AIE::DmaBdField, AIE::DmaBdField>, 3> padFields;
   if (layout)
     padFields = layout->padFields();
@@ -1591,6 +1629,9 @@ verifyTaskBDDimensions(const AIE::AIETargetModel &targetModel, int col, int row,
   size_t maxNDims = targetModel.getBDMaxDims(col, row);
   if (!targetModel.isMemTile(col, row))
     ++maxNDims; // leading dim is hoisted into the iteration/repeat register
+  // A d3 step adds a fourth dimension, which no lowering programs yet.
+  const AIE::DmaBdLayout *layout = targetModel.getDmaBdLayout(col, row);
+  bool d3Unsupported = layout && layout->d3Stride.exists();
   LogicalResult result = success();
   body.walk([&](AIE::DMABDOp bd) {
     // The BD's own verifier skips it here, so nothing has yet established that
@@ -1612,6 +1653,14 @@ verifyTaskBDDimensions(const AIE::AIETargetModel &targetModel, int col, int row,
                          << " dimensions for step sizes and wraps alongside "
                             "the iteration attribute on this tile (got "
                          << std::to_string(numDims) << " dimensions).";
+        result = failure();
+      } else if (d3Unsupported && numDims > 3) {
+        bd.emitOpError() << "Cannot give more than 3 dimensions for step sizes "
+                            "and wraps alongside the iteration attribute on "
+                            "this tile (got "
+                         << std::to_string(numDims)
+                         << " dimensions): its fourth addressing dimension "
+                            "(d3) is not supported yet.";
         result = failure();
       }
       return;

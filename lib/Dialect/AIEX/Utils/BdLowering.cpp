@@ -328,22 +328,58 @@ Value buildBdWord(OpBuilder &builder, Location loc,
 
 Value getBdRegisterBase(OpBuilder &builder, Location loc,
                         const AIE::AIETargetModel &targetModel, int tileCol,
-                        int tileRow, OpFoldResult bdId) {
+                        int tileRow, OpFoldResult bdId, int channel,
+                        AIE::DMAChannelDir direction) {
   auto i32ty = builder.getIntegerType(32);
   if (auto c = getConstantIntValue(bdId))
-    return createConstantI32(builder, loc,
-                             static_cast<uint32_t>(targetModel.getDmaBdAddress(
-                                 tileCol, tileRow, *c)));
-  // Runtime bd_id: base + bd_id * bdStride, with base/stride from the (linear)
-  // target-model address function.
-  uint64_t addrForId0 = targetModel.getDmaBdAddress(tileCol, tileRow, 0);
-  uint64_t bdStride =
-      targetModel.getDmaBdAddress(tileCol, tileRow, 1) - addrForId0;
+    return createConstantI32(
+        builder, loc,
+        static_cast<uint32_t>(
+            channel >= 0 && targetModel.usesChannelLocalBdIds(tileCol, tileRow,
+                                                              direction)
+                ? targetModel.getDmaBdAddress(tileCol, tileRow, *c, channel,
+                                              direction)
+                : targetModel.getDmaBdAddress(tileCol, tileRow, *c)));
+  // Runtime bd_id: base + bd_id * bdStride (linear over the channel's pool).
+  uint32_t first = channel < 0 ? 0
+                               : targetModel
+                                     .getBdIdRangeForChannel(tileCol, tileRow,
+                                                             channel, direction)
+                                     .first;
+  uint64_t addrForFirst =
+      targetModel.getDmaBdAddress(tileCol, tileRow, first, channel, direction);
+  uint64_t bdStride = targetModel.getDmaBdAddress(tileCol, tileRow, first + 1,
+                                                  channel, direction) -
+                      addrForFirst;
+  uint64_t addrForId0 = addrForFirst - first * bdStride;
   Value bdIdVal = getAsValue(builder, loc, bdId, i32ty);
   return arith::AddIOp::create(
       builder, loc, createConstantI32(builder, loc, addrForId0),
       arith::MulIOp::create(builder, loc, bdIdVal,
                             createConstantI32(builder, loc, bdStride)));
+}
+
+LogicalResult verifyRuntimeBdTarget(Operation *op,
+                                    const AIE::AIETargetModel &targetModel,
+                                    int tileCol, int tileRow,
+                                    AIE::DMAChannelDir direction) {
+  if (AIE::getDMAChannelBundle(direction) != AIE::WireBundle::DMA)
+    return op->emitOpError("cannot write a buffer descriptor for a ")
+           << AIE::stringifyDMAChannelDir(direction)
+           << " channel from the runtime sequence yet";
+  return success();
+}
+
+LogicalResult verifyBdPacketType(Operation *op,
+                                 const AIE::AIETargetModel &targetModel,
+                                 int tileCol, int tileRow,
+                                 uint32_t packetType) {
+  const AIE::DmaBdLayout *layout = targetModel.getDmaBdLayout(tileCol, tileRow);
+  if (!packetType || !layout || layout->packetType.exists())
+    return success();
+  return op->emitOpError("the buffer descriptors of tile (")
+         << tileCol << ", " << tileRow
+         << ") have no packet type field: it is a DMA channel setting";
 }
 
 namespace {
@@ -359,7 +395,8 @@ struct EncodedBd {
 };
 
 LogicalResult encodeBdCommon(OpBuilder &builder, Location loc,
-                             const AIE::AIETargetModel &tm, int tileCol,
+                             const AIE::AIETargetModel &tm,
+                             const AIE::DmaBdLayout &layout, int tileCol,
                              int tileRow, ArrayRef<OpFoldResult> mixedSizes,
                              ArrayRef<OpFoldResult> mixedStrides,
                              uint64_t elemWidth, OpFoldResult lenElems,
@@ -427,7 +464,8 @@ LogicalResult encodeBdCommon(OpBuilder &builder, Location loc,
   uint64_t wrapMax = (1ULL << tm.getDmaBdWrapBits(tileCol, tileRow)) - 1;
   uint64_t maxLen = tm.getDmaBdMaxLen(tileCol, tileRow);
   uint64_t maxStride =
-      (1ULL << tm.getDmaBdStepBits(tileCol, tileRow)) * gran / ew;
+      ((1ULL << tm.getDmaBdStepBits(tileCol, tileRow)) - 1 + layout.stepBias) *
+      gran / ew;
   uint64_t maxIterations = 1ULL << tm.getDmaBdIterBits(tileCol, tileRow);
   uint64_t maxRepeats = tm.getMaxRepeatCount() + 1;
   GuardBuilder g{builder, loc};
@@ -449,8 +487,9 @@ LogicalResult encodeBdCommon(OpBuilder &builder, Location loc,
           "a runtime DMA iteration count must be in [1:" +
               Twine(maxIterations) + "]")))
     return failure();
+  bool hasD0Stride = layout.d0Stride.exists();
   for (int i = 0; i < 4; i++) {
-    if (i < 3 && (isLinear || (i == 0 && ew > gran)))
+    if (i < 3 && (isLinear || (i == 0 && (ew > gran || !hasD0Stride))))
       continue;
     Value inRange =
         i == 3 ? g.ule(inT[3], maxStride) : g.inRange1(inT[i], maxStride);
@@ -462,8 +501,15 @@ LogicalResult encodeBdCommon(OpBuilder &builder, Location loc,
       return failure();
   }
 
-  // A non-word element's innermost stride must be 1 (see verifyStridesWraps).
-  if (ew != gran) {
+  // A non-word element's innermost stride must be 1 (see verifyStridesWraps),
+  // and so must any stride on a BD without a d0 step field.
+  if (!hasD0Stride) {
+    Value d0Unit = g.eq(inT[0], 1);
+    if (failed(g.check(g.either(g.ule(inS[0], 1), d0Unit),
+                       "a runtime DMA d0 stride must be 1: this tile's BDs "
+                       "have no d0 stride")))
+      return failure();
+  } else if (ew != gran) {
     Value d0Unit = g.eq(inT[0], 1);
     if (failed(g.check(g.either(g.ule(inS[0], 1), d0Unit),
                        "a runtime DMA d0 stride must be 1 for " +
@@ -494,7 +540,8 @@ LogicalResult encodeBdCommon(OpBuilder &builder, Location loc,
   // Compute the hardware sizes/strides via the shared encoder.
   Value hwS[4], hwT[4];
   SsaStridePolicy policy(builder, loc);
-  encodeHardwareStridesWraps(policy, elemWidth, gran, inS, inT, hwS, hwT);
+  encodeHardwareStridesWraps(policy, elemWidth, gran, layout.stepBias, inS, inT,
+                             hwS, hwT);
 
   // buffer_length (word[0]) is the d0*d1*d2 extent in granules. Every size is
   // already bounded by 2^32, so the d0*d1 product cannot wrap, and the final
@@ -653,8 +700,9 @@ buildBdWords(OpBuilder &builder, Location loc,
     return emitError(loc, "no buffer descriptor layout on tile (")
            << tileCol << ", " << tileRow << ")";
   EncodedBd e;
-  if (failed(encodeBdCommon(builder, loc, targetModel, tileCol, tileRow,
-                            mixedSizes, mixedStrides, elemWidth, lenElems, e)))
+  if (failed(encodeBdCommon(builder, loc, targetModel, *layout, tileCol,
+                            tileRow, mixedSizes, mixedStrides, elemWidth,
+                            lenElems, e)))
     return failure();
   repeatCountOut = e.repeatCount;
 

@@ -871,7 +871,8 @@ struct AIEInsertTraceFlowsPass
             clTraceBurstLength, // burst_length
             // axcache left unset: the blockwrite lowering resolves the
             // target default, so baking it here would only duplicate it.
-            mlir::IntegerAttr());
+            mlir::IntegerAttr(), /*channel=*/mlir::IntegerAttr(),
+            /*direction=*/DMAChannelDirAttr());
 
         // 4d. Address patch -- the channels split the buffer between them, so
         // channel i starts bufferSizeBytes past channel i-1.

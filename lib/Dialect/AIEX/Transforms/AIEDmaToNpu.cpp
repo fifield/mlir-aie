@@ -372,6 +372,9 @@ public:
     bool isMM2S = AIE::isMM2S(channelDir);
     int tileCol = shimTile.getCol();
     int tileRow = shimTile.getRow();
+    if (failed(verifyRuntimeBdTarget(op, targetModel, tileCol, tileRow,
+                                     channelDir)))
+      return failure();
 
     // initialize fields to zero
     auto column = zero;
@@ -427,8 +430,8 @@ public:
       AIE::placeRuntimeLengthDimension(inputSizes, inputStrides);
     llvm::SmallVector<int64_t, 4> sizes(4);
     llvm::SmallVector<int64_t, 4> strides(4);
-    getHardwareStridesWraps(targetModel, op, bufferType, inputSizes,
-                            inputStrides, sizes, strides);
+    getHardwareStridesWraps(targetModel, op, tileCol, tileRow, bufferType,
+                            inputSizes, inputStrides, sizes, strides);
 
     // column
     column = IntegerAttr::get(i32ty, tileCol);
@@ -461,6 +464,9 @@ public:
     // enable_packet
     if (auto packetInfo =
             op.getPacket() ? op.getPacket() : infoOp.getPacket()) {
+      if (failed(verifyBdPacketType(op, targetModel, tileCol, tileRow,
+                                    packetInfo->getPktType())))
+        return failure();
       enable_packet = IntegerAttr::get(i32ty, 1);
       packet_type = IntegerAttr::get(i32ty, packetInfo->getPktType());
       packet_id = IntegerAttr::get(i32ty, packetInfo->assignedId());
@@ -564,6 +570,8 @@ public:
     }
 
     // write the buffer descriptor to the array
+    bool channelLocalIds =
+        targetModel.usesChannelLocalBdIds(tileCol, tileRow, channelDir);
     NpuWriteBdOp::create(
         rewriter, op->getLoc(), column, bd_id, buffer_length, buffer_offset,
         enable_packet, out_of_order_id, packet_id, packet_type, d0_size,
@@ -571,13 +579,18 @@ public:
         iteration_size, iteration_stride, next_bd, row, use_next_bd, valid_bd,
         lock_rel_val, lock_rel_id, lock_acq_enable, lock_acq_val, lock_acq_id,
         d0_zero_before, d1_zero_before, d2_zero_before, d0_zero_after,
-        d1_zero_after, d2_zero_after, burst_length, axcache);
+        d1_zero_after, d2_zero_after, burst_length, axcache,
+        // Channel-local BD ids need the channel to name a register.
+        channelLocalIds ? IntegerAttr::get(i32ty, infoOp.getChannelIndex())
+                        : IntegerAttr(),
+        channelLocalIds ? infoOp.getChannelDirAttr()
+                        : AIE::DMAChannelDirAttr());
 
     // Resolve the buffer's runtime-sequence arg and emit the address patch
     // (plus any offset-state update).
     int arg_idx = -1;
-    if (failed(emitBufferAddressPatch(op, adaptor, rewriter, tileCol, tileRow,
-                                      arg_idx)))
+    if (failed(emitBufferAddressPatch(op, adaptor, rewriter, infoOp, tileCol,
+                                      tileRow, arg_idx)))
       return failure();
 
     // A length_state_table_idx adds the runtime length to the BD's
@@ -615,6 +628,7 @@ public:
   // resolved index.
   LogicalResult emitBufferAddressPatch(NpuDmaMemcpyNdOp op, OpAdaptor adaptor,
                                        ConversionPatternRewriter &rewriter,
+                                       AIE::ShimDMAAllocationOp infoOp,
                                        int tileCol, int tileRow,
                                        int &argIdx) const {
     AIE::RuntimeSequenceOp seqOp =
@@ -634,11 +648,16 @@ public:
     argIdx = static_cast<int>(*hostIdx);
 
     const auto &targetModel = AIE::getTargetModel(op);
-    if (!targetModel.getDmaBdLayout(tileCol, tileRow))
-      return op->emitOpError("has no buffer descriptor layout on this tile");
-    uint64_t patchAddr =
-        targetModel.getDmaBdAddress(tileCol, tileRow, op.getId()) +
-        targetModel.getDmaBdAddressOffset(tileCol, tileRow);
+    int channel = infoOp.getChannelIndex();
+    AIE::DMAChannelDir dir = infoOp.getChannelDir();
+    if (!targetModel.isBdChannelAccessible(tileCol, tileRow, op.getId(),
+                                           channel, dir))
+      return op->emitOpError("BD ID ")
+             << op.getId() << " is not in the BD pool of "
+             << AIE::stringifyDMAChannelDir(dir) << " channel " << channel;
+    uint64_t patchAddr = targetModel.getDmaBdAddress(tileCol, tileRow,
+                                                     op.getId(), channel, dir) +
+                         targetModel.getDmaBdAddressOffset(tileCol, tileRow);
 
     // arg_plus is the buffer byte offset. Constant offsets fold to a constant
     // (byte-identical to the static path); a runtime offset operand is built
@@ -703,6 +722,9 @@ public:
     bool isMM2S = AIE::isMM2S(channelDir);
     int tileCol = shimTile.getCol();
     int tileRow = shimTile.getRow();
+    if (failed(verifyRuntimeBdTarget(op, targetModel, tileCol, tileRow,
+                                     channelDir)))
+      return failure();
 
     // Packet / token setup (identical to the static path).
     auto column = IntegerAttr::get(i32ty, tileCol);
@@ -710,6 +732,9 @@ public:
     BdTemplateFields fields;
     if (auto packetInfo =
             op.getPacket() ? op.getPacket() : infoOp.getPacket()) {
+      if (failed(verifyBdPacketType(op, targetModel, tileCol, tileRow,
+                                    packetInfo->getPktType())))
+        return failure();
       fields.enable_packet = 1;
       fields.packet_type = packetInfo->getPktType();
       fields.packet_id = packetInfo->assignedId();
@@ -736,8 +761,8 @@ public:
     // Address patch for the buffer pointer; emitBufferAddressPatch folds a
     // constant offset or builds a runtime arg_plus with arith as needed.
     int arg_idx = -1;
-    if (failed(emitBufferAddressPatch(op, adaptor, rewriter, tileCol, tileRow,
-                                      arg_idx)))
+    if (failed(emitBufferAddressPatch(op, adaptor, rewriter, infoOp, tileCol,
+                                      tileRow, arg_idx)))
       return failure();
 
     NpuPushQueueOp::create(
@@ -818,9 +843,16 @@ public:
     int col = op.getColumn();
     int row = op.getRow();
 
+    std::optional<AIE::DMAChannelDir> dir = op.getDirection();
+    if (failed(verifyRuntimeBdTarget(op, tm, col, row,
+                                     dir.value_or(AIE::DMAChannelDir::MM2S))))
+      return failure();
     const AIE::DmaBdLayout *layout = tm.getDmaBdLayout(col, row);
     if (!layout)
       return op->emitOpError("has no buffer descriptor layout on this tile");
+    if (op.getPacketType() && !layout->packetType.exists())
+      return op->emitOpError("the buffer descriptors of this tile have no "
+                             "packet type field: it is a DMA channel setting");
     if (!tm.isMemTile(col, row) &&
         (op.getD0ZeroBefore() || op.getD1ZeroBefore() || op.getD2ZeroBefore() ||
          op.getD0ZeroAfter() || op.getD1ZeroAfter() || op.getD2ZeroAfter()))
@@ -867,8 +899,12 @@ public:
     set(layout->lockAcqValue, op.getLockAcqVal());
     set(layout->lockAcqId, op.getLockAcqId());
 
+    // The verifier has required a channel where the BD id is channel-local.
     uint32_t bd_id = op.getBdId();
-    uint64_t bd_addr = tm.getDmaBdAddress(col, row, bd_id);
+    uint64_t bd_addr =
+        op.getChannel()
+            ? tm.getDmaBdAddress(col, row, bd_id, *op.getChannel(), *dir)
+            : tm.getDmaBdAddress(col, row, bd_id);
 
     memref::GlobalOp global = nullptr;
     {

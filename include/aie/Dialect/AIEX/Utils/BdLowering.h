@@ -24,6 +24,8 @@
 #ifndef AIE_DIALECT_AIEX_UTILS_BDLOWERING_H
 #define AIE_DIALECT_AIEX_UTILS_BDLOWERING_H
 
+#include "aie/Dialect/AIE/IR/AIEEnums.h"
+
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -135,24 +137,25 @@ verifyConstBdRealizability(mlir::Operation *op,
 }
 
 // Shared hardware size/stride encoder. The BD encodes each dimension's wrap
-// ("size") scaled to address-gen granules and step ("stride") biased by -1 (a
-// stored 0 means one granule). One algorithm drives both lowerings via a
+// ("size") scaled to address-gen granules and step ("stride") in granules less
+// DmaBdLayout::stepBias. One algorithm drives both lowerings via a
 // Policy: ConstStridePolicy (int64 math) for the static path, SsaStridePolicy
 // (arith ops) for runtime operands -- keeping them bit-identical. The Policy
 // supplies cst/mul/div/sub and selectGT1/selectGT0/selectLt. Inputs/outputs are
 // 4-element arrays in innermost-first order [d0, d1, d2, d3/iter].
 template <typename Policy>
 void encodeHardwareStridesWraps(Policy &p, uint64_t elemWidth,
-                                uint32_t addressGranularity,
+                                uint32_t addressGranularity, int64_t stepBias,
                                 typename Policy::V inputSizes[4],
                                 typename Policy::V inputStrides[4],
                                 typename Policy::V sizes[4],
                                 typename Policy::V strides[4]) {
   using V = typename Policy::V;
-  // Scale an element-count stride into hardware granules and apply the -1 bias:
-  //   stride * elemWidth / addressGranularity - 1
+  // Scale an element-count stride into hardware granules and apply the bias:
+  //   stride * elemWidth / addressGranularity - stepBias
   auto biasedStride = [&](V inStride) -> V {
-    return p.sub(p.div(p.mul(inStride, elemWidth), addressGranularity), 1);
+    V granules = p.div(p.mul(inStride, elemWidth), addressGranularity);
+    return stepBias ? p.sub(granules, stepBias) : granules;
   };
 
   // d0_size, d0_stride
@@ -279,15 +282,31 @@ buildBdWord(mlir::OpBuilder &builder, mlir::Location loc,
             llvm::ArrayRef<std::tuple<mlir::Value, uint32_t, uint32_t>> fields);
 
 // The base register address of a BD block, `getDmaBdAddress(col,row,bd_id)`, as
-// an i32 Value. The address is linear in bd_id (base + bd_id*bdStride), so a
-// constant bdId folds to the exact literal the static path uses, while a
-// runtime bdId (dynamic free-list pool) is emitted as arith. Shared by the
-// BD-word encoder and the descriptor / address-patch lowering so every register
-// touched for one BD is computed from the same base.
-mlir::Value getBdRegisterBase(mlir::OpBuilder &builder, mlir::Location loc,
-                              const xilinx::AIE::AIETargetModel &targetModel,
-                              int tileCol, int tileRow,
-                              mlir::OpFoldResult bdId);
+// an i32 Value. The address is linear in bd_id over the BD pool of `channel` in
+// `direction` (base + bd_id*bdStride), so a constant bdId folds to the exact
+// literal the static path uses, while a runtime bdId (dynamic free-list pool)
+// is emitted as arith. Without a channel the pool is taken to start at id 0.
+// Shared by the BD-word encoder and the descriptor / address-patch lowering so
+// every register touched for one BD is computed from the same base.
+mlir::Value getBdRegisterBase(
+    mlir::OpBuilder &builder, mlir::Location loc,
+    const xilinx::AIE::AIETargetModel &targetModel, int tileCol, int tileRow,
+    mlir::OpFoldResult bdId, int channel = -1,
+    xilinx::AIE::DMAChannelDir direction = xilinx::AIE::DMAChannelDir::MM2S);
+
+// Fails with a diagnostic for BDs runtime lowerings cannot write yet
+// (tiles without a DmaBdLayout, ControlMM2S/TraceS2MM channels).
+mlir::LogicalResult verifyRuntimeBdTarget(
+    mlir::Operation *op, const xilinx::AIE::AIETargetModel &targetModel,
+    int tileCol, int tileRow,
+    xilinx::AIE::DMAChannelDir direction = xilinx::AIE::DMAChannelDir::MM2S);
+
+// Fails with a diagnostic for a nonzero packet type on a BD without that
+// field (the packet type is then a channel setting).
+mlir::LogicalResult
+verifyBdPacketType(mlir::Operation *op,
+                   const xilinx::AIE::AIETargetModel &targetModel, int tileCol,
+                   int tileRow, uint32_t packetType);
 
 // Lock, packet and next_bd fields, gathered by the caller from the DMA
 // structure and baked into the template words. Only next_bd and the lock values
@@ -306,8 +325,8 @@ struct BdTemplateFields {
 };
 
 // Build a BD's full register block as i32 SSA values, for the dynamic lowering
-// shared by dma_memcpy_nd and dma_task. The block is 8 words on a shim NOC or
-// mem tile and 6 on a core tile. Every word is written (unset slots are zero),
+// shared by dma_memcpy_nd and dma_task. The block is DmaBdLayout::numWords
+// words. Every word is written (unset slots are zero),
 // so a BD slot reused from the runtime pool cannot inherit a stale field.
 //
 // `mixedSizes`/`mixedStrides` are outermost-first (d3..d0), matching

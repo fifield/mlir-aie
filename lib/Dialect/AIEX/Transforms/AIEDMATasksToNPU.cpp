@@ -287,22 +287,36 @@ struct AIEDMATasksToNPUPass
 
   /// `lengthField` is the value the BD write gave its length field.
   LogicalResult setAddressForSingleBD(OpBuilder &builder, AIE::DMABDOp &bd_op,
-                                      AIE::TileOp &tile, OpFoldResult bdId,
+                                      AIE::TileOp &tile, int channel,
+                                      AIE::DMAChannelDir channelDir,
+                                      OpFoldResult bdId,
                                       OpFoldResult lengthField) {
     const AIE::AIETargetModel &target_model = AIE::getTargetModel(bd_op);
     auto buf = bd_op.getBuffer();
     auto col = tile.getCol();
     auto row = tile.getRow();
-    // The BD register address and its address field both come from the
-    // tile's BD layout.
-    const AIE::DmaBdLayout *layout = target_model.getDmaBdLayout(col, row);
+    const AIE::DmaBdLayout *layout =
+        target_model.getDmaBdLayout(col, row, channelDir);
     if (!layout)
       return bd_op->emitOpError("has no buffer descriptor layout on this tile");
+    bool channelLocalIds =
+        target_model.usesChannelLocalBdIds(col, row, channelDir);
     // A foldable SSA bd_id must name the same register as the block write.
+    // A runtime one is patched via runtimeRegisterAddr; its placeholder id
+    // only has to name a register in the channel's pool.
     auto constBdId = bdId ? getConstantIntValue(bdId) : std::nullopt;
-    uint32_t bd_id = constBdId ? *constBdId : bd_op.getBdId().value_or(0);
-    uint64_t register_addr = target_model.getDmaBdAddress(col, row, bd_id) +
-                             target_model.getDmaBdAddressOffset(col, row);
+    uint32_t placeholderId =
+        channelLocalIds
+            ? target_model.getBdIdRangeForChannel(col, row, channel, channelDir)
+                  .first
+            : 0;
+    uint32_t bd_id =
+        constBdId ? *constBdId : bd_op.getBdId().value_or(placeholderId);
+    uint64_t register_addr =
+        (channelLocalIds ? target_model.getDmaBdAddress(col, row, bd_id,
+                                                        channel, channelDir)
+                         : target_model.getDmaBdAddress(col, row, bd_id)) +
+        target_model.getDmaBdAddressOffset(col, row);
     std::optional<uint64_t> staticByteAddress;
     // On the runtime-bd_id path the patched register (BD buffer-address word)
     // is itself runtime: getBdRegisterBase(bd_id) + getDmaBdAddressOffset.
@@ -311,7 +325,7 @@ struct AIEDMATasksToNPUPass
     Value runtimeRegisterAddr;
     if (bdId && !getConstantIntValue(bdId)) {
       Value base = getBdRegisterBase(builder, bd_op.getLoc(), target_model, col,
-                                     row, bdId);
+                                     row, bdId, channel, channelDir);
       runtimeRegisterAddr = arith::AddIOp::create(
           builder, bd_op.getLoc(), base,
           createConstantI32(builder, bd_op.getLoc(),
@@ -382,14 +396,18 @@ struct AIEDMATasksToNPUPass
             "address.");
       }
       uint64_t buf_addr = *bufferAddr;
-      // A memtile DMA addresses its west neighbour, itself and its east
-      // neighbour as three windows (west=0, own=getMemTileSize, east=2x), as
-      // the static lowering in AIERT.cpp does.
+      // A memtile DMA sees neighbour memories via getMemLocalBaseAddress().
       if (target_model.isMemTile(col, row)) {
-        auto addrOffset = target_model.getMemLocalBaseAddress(
-            col, row, buffer.getTileOp().getCol(), buffer.getTileOp().getRow());
-        if (addrOffset)
-          buf_addr += addrOffset.value();
+        int memCol = buffer.getTileOp().getCol();
+        int memRow = buffer.getTileOp().getRow();
+        std::optional<uint32_t> addrOffset =
+            target_model.getMemLocalBaseAddress(col, row, memCol, memRow);
+        if (!addrOffset)
+          return bd_op->emitOpError("the memory of tile (")
+                 << memCol << ", " << memRow
+                 << ") is not reachable from the DMA of memtile (" << col
+                 << ", " << row << ")";
+        buf_addr += *addrOffset;
       }
 
       const AIE::DmaBdField &addrBits = layout->bufferOffset;
@@ -511,6 +529,9 @@ struct AIEDMATasksToNPUPass
                           "header at this level must carry it");
         return failure();
       }
+      if (failed(verifyBdPacketType(bd_op, target_model, tile.getCol(),
+                                    tile.getRow(), info.getPktType())))
+        return failure();
       f.enable_packet = 1;
       f.packet_type = info.getPktType();
       f.packet_id = info.assignedId();
@@ -557,12 +578,19 @@ struct AIEDMATasksToNPUPass
       return failure();
     // A memtile BD may use locks of its neighbours, so each lock ID is offset
     // by the base index of the tile that owns that lock, as in AIERT.cpp.
-    auto lockIdFor = [&](AIE::LockOp lock, int32_t id) {
-      if (target_model.isMemTile(tile.getCol(), tile.getRow()))
-        if (auto offset = target_model.getLockLocalBaseIndex(
-                tile.getCol(), tile.getRow(), lock.colIndex(), lock.rowIndex()))
-          id += *offset;
-      return id;
+    auto lockIdFor = [&](AIE::LockOp lock, int32_t id) -> FailureOr<int32_t> {
+      if (!target_model.isMemTile(tile.getCol(), tile.getRow()))
+        return id;
+      std::optional<uint32_t> offset = target_model.getLockLocalBaseIndex(
+          tile.getCol(), tile.getRow(), lock.colIndex(), lock.rowIndex());
+      if (!offset) {
+        bd_op.emitOpError("the locks of tile (")
+            << lock.colIndex() << ", " << lock.rowIndex()
+            << ") are not reachable from the DMA of memtile (" << tile.getCol()
+            << ", " << tile.getRow() << ")";
+        return failure();
+      }
+      return id + static_cast<int32_t>(*offset);
     };
     if (release_op) {
       AIE::LockOp rel_lock = release_op.getLockOp();
@@ -571,7 +599,10 @@ struct AIEDMATasksToNPUPass
       if (acquire_op) {
         AIE::LockOp acq_lock = acquire_op.getLockOp();
         if (std::optional<int32_t> acqLockId = acq_lock.getLockID()) {
-          f.lock_acq_id = lockIdFor(acq_lock, *acqLockId);
+          FailureOr<int32_t> id = lockIdFor(acq_lock, *acqLockId);
+          if (failed(id))
+            return failure();
+          f.lock_acq_id = *id;
           if (failed(lockValue(acquire_op, f.lock_acq_val, f.lock_acq_val_val)))
             return failure();
           f.lock_acq_enable = 1;
@@ -579,7 +610,10 @@ struct AIEDMATasksToNPUPass
       }
 
       if (std::optional<int32_t> relLockId = rel_lock.getLockID()) {
-        f.lock_rel_id = lockIdFor(rel_lock, *relLockId);
+        FailureOr<int32_t> id = lockIdFor(rel_lock, *relLockId);
+        if (failed(id))
+          return failure();
+        f.lock_rel_id = *id;
         if (failed(lockValue(release_op, f.lock_rel_val, f.lock_rel_val_val)))
           return failure();
       }
@@ -596,7 +630,8 @@ struct AIEDMATasksToNPUPass
   // buildBdWords picks the layout from the tile.
   LogicalResult
   rewriteSingleBDDynamic(OpBuilder &builder, Block &block, AIE::DMABDOp bd_op,
-                         AIE::TileOp &tile,
+                         AIE::TileOp &tile, int channel,
+                         AIE::DMAChannelDir channelDir,
                          std::optional<xilinx::AIE::PacketInfoAttr> packet,
                          Value runtimeBdId = nullptr, bool outOfOrder = false) {
     const auto &target_model = AIE::getTargetModel(bd_op);
@@ -742,24 +777,37 @@ struct AIEDMATasksToNPUPass
     }
 
     // One blockwrite carries the whole register block for BD configuration.
-    Value bdBase =
-        getBdRegisterBase(builder, loc, target_model, col, row, bdIdOfr);
+    Value bdBase = getBdRegisterBase(builder, loc, target_model, col, row,
+                                     bdIdOfr, channel, channelDir);
     NpuBlockWriteValuesOp::create(builder, loc, bdBase, bdWords);
-    const AIE::DmaBdLayout *layout = target_model.getDmaBdLayout(col, row);
+    const AIE::DmaBdLayout *layout =
+        target_model.getDmaBdLayout(col, row, channelDir);
     return setAddressForSingleBD(
-        builder, bd_op, tile, bdIdOfr,
+        builder, bd_op, tile, channel, channelDir, bdIdOfr,
         layout ? OpFoldResult(bdWords[layout->bufferLength.word])
                : OpFoldResult());
   }
 
   LogicalResult
   rewriteSingleBD(OpBuilder &builder, Block &block, AIE::TileOp &tile,
-                  AIE::DMAChannelDir channelDir,
+                  int channel, AIE::DMAChannelDir channelDir,
                   std::optional<xilinx::AIE::PacketInfoAttr> packet,
                   bool outOfOrder = false) {
     AIE::DMABDOp bd_op = getBdForBlock(block);
     Value runtimeBdId = bd_op.getBdIdVal();
     const auto &target_model = AIE::getTargetModel(bd_op);
+    if (failed(verifyRuntimeBdTarget(bd_op, target_model, tile.getCol(),
+                                     tile.getRow(), channelDir)))
+      return failure();
+    // A channel-local BD id names a register only within its channel's pool.
+    if (std::optional<uint32_t> id = bd_op.getBdId();
+        id && target_model.hasChannelLocalBdIds(tile.getCol(), tile.getRow()) &&
+        !target_model.isBdChannelAccessible(tile.getCol(), tile.getRow(), *id,
+                                            channel, channelDir))
+      return bd_op->emitOpError("BD ID ")
+             << *id << " is not in the BD pool of "
+             << AIE::stringifyDMAChannelDir(channelDir) << " channel "
+             << channel;
     auto buffer_type = llvm::cast<BaseMemRefType>(bd_op.getBuffer().getType());
     uint32_t addr_granularity = target_model.getAddressGenGranularity();
 
@@ -816,8 +864,9 @@ struct AIEDMATasksToNPUPass
               bd_op, sizesRev, stridesRev, elemWidth,
               target_model.getAddressGenGranularity())))
         return failure();
-      return rewriteSingleBDDynamic(builder, block, bd_op, tile, packet,
-                                    runtimeBdId, outOfOrder);
+      return rewriteSingleBDDynamic(builder, block, bd_op, tile, channel,
+                                    channelDir, packet, runtimeBdId,
+                                    outOfOrder);
     }
 
     // Static path: bd_id is a pinned attribute (the dynamic/runtime-bd_id path
@@ -957,8 +1006,9 @@ struct AIEDMATasksToNPUPass
           return bd_op->emitOpError()
                  << "supports padding only for MM2S direction on MemTiles.";
       }
-      getHardwareStridesWraps(target_model, bd_op, buffer_type, input_sizes,
-                              input_strides, sizes, strides);
+      getHardwareStridesWraps(target_model, bd_op, tile.getCol(), tile.getRow(),
+                              buffer_type, input_sizes, input_strides, sizes,
+                              strides);
 
       if (failed(verifyStridesWraps(
               bd_op, [&] { return bd_op->emitOpError(); }, buffer_type,
@@ -1041,6 +1091,8 @@ struct AIEDMATasksToNPUPass
                                            target_model, packet, outOfOrder);
     if (failed(fieldsOr))
       return failure();
+    bool channelLocalIds = target_model.usesChannelLocalBdIds(
+        tile.getCol(), tile.getRow(), channelDir);
     // failed() above guards the deref; see note in rewriteSingleBDDynamic.
     BdTemplateFields f = *fieldsOr; // NOLINT
 
@@ -1072,9 +1124,14 @@ struct AIEDMATasksToNPUPass
         /*axcache=*/
         target_model.isShimNOCTile(tile.getCol(), tile.getRow())
             ? builder.getI32IntegerAttr(bd_op.getAxcacheOrDefault())
-            : IntegerAttr());
+            : IntegerAttr(),
+        // A channel-local BD id needs its channel to name a register.
+        channelLocalIds ? builder.getI32IntegerAttr(channel) : IntegerAttr(),
+        channelLocalIds
+            ? AIE::DMAChannelDirAttr::get(builder.getContext(), channelDir)
+            : AIE::DMAChannelDirAttr());
     if (failed(setAddressForSingleBD(
-            builder, bd_op, tile, {},
+            builder, bd_op, tile, channel, channelDir, {},
             builder.getI64IntegerAttr(len_addr_granularity))))
       return failure();
 
@@ -1244,8 +1301,8 @@ struct AIEDMATasksToNPUPass
       if (shouldSkipBlock(block)) {
         continue;
       }
-      if (failed(rewriteSingleBD(builder, block, tile, channelDir, packet,
-                                 op.getOutOfOrder()))) {
+      if (failed(rewriteSingleBD(builder, block, tile, op.getChannel(),
+                                 channelDir, packet, op.getOutOfOrder()))) {
         return failure();
       }
     }

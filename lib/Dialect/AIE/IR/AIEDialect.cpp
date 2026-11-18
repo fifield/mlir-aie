@@ -5398,7 +5398,8 @@ LogicalResult xilinx::AIE::verifyDMABDIteration(DMABDOp bd,
       return bd.emitOpError(
           "BD iteration stride must be aligned to 32-bit words");
     int64_t stepInWords = strideInBytes / 4;
-    int64_t maxStep = 1LL << targetModel.getDmaBdStepBits(tileType);
+    int64_t maxStep = (1LL << targetModel.getDmaBdStepBits(tileType)) - 1 +
+                      targetModel.getDmaBdStepBias(tileType);
     if (stepInWords < 1 || stepInWords > maxStep)
       return bd.emitOpError() << "BD iteration stride must be in [1, "
                               << maxStep << "] 32-bit words";
@@ -6204,11 +6205,16 @@ LogicalResult DMABDOp::verify() {
     // 2^S. Deriving the limits from the target model (instead of a single
     // hardcoded shim-sized constant) keeps this check correct for all tile
     // types, and computing the message from the same value it checks
-    // against means the two can never disagree again.
+    // against means the two can never disagree again. Unbiased (AIE4) steps
+    // admit up to 2^S - 1.
     uint32_t wrapBits = targetModel.getDmaBdWrapBits(parentTile.getTileType());
     uint32_t stepBits = targetModel.getDmaBdStepBits(parentTile.getTileType());
     uint64_t maxSize = wrapBits > 0 ? (1ULL << wrapBits) - 1 : 0;
-    uint64_t maxStride = stepBits > 0 ? (1ULL << stepBits) : 0;
+    uint64_t maxStride =
+        stepBits > 0
+            ? (1ULL << stepBits) - 1 +
+                  targetModel.getDmaBdStepBias(parentTile.getTileType())
+            : 0;
 
     for (BDDimLayoutAttr dim : *dims) {
       if (0 == dim.getStride() && dim.getSize() != 1)

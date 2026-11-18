@@ -1445,7 +1445,8 @@ def AIE_NpuWriteBdOp : AIEX_Op<"npu.writebd", []> {
       I32Attr:$d1_zero_after, I32Attr:$d2_zero_after,
       DefaultValuedOptionalAttr<I32Attr, "0">:$burst_length,
       OptionalAttr<ConfinedAttr<I32Attr, [IntMinValue<0>,
-                                          IntMaxValue<15>]>>:$axcache);
+                                          IntMaxValue<15>]>>:$axcache,
+      OptionalAttr<I32Attr>:$channel, OptionalAttr<DMAChannelDir>:$direction);
   let results = (outs);
   let assemblyFormat = [{ attr-dict }];
   let hasVerifier = 1;
@@ -1455,6 +1456,10 @@ def AIE_NpuWriteBdOp : AIEX_Op<"npu.writebd", []> {
   }];
   let description = [{
     Write a complete buffer descriptor (all fields explicit) to a BD slot.
+
+    `channel` and `direction` name the DMA channel the BD is written for. They
+    are required where a BD id names a slot of the channel's own BD pool rather
+    than of the tile (an AIE4 memtile), and optional elsewhere.
 
     ###  Iteration convention: raw register values
 

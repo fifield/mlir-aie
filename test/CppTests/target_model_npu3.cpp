@@ -123,7 +123,10 @@ static void testDma() {
   check(tm.getMaxRepeatCount() == 4095, "repeat count");
   check(tm.getMaxOutOfOrderId() == 15, "out-of-order id");
   check(tm.getDmaTaskQueueDepth() == 0, "task queue depth unsupported");
-  check(tm.getDmaBdLayout(0, 0) == nullptr, "no BD layout");
+  // BD layouts are covered by target_model_bd_layout_npu3.
+  check(tm.getDmaBdLayout(0, 0) && tm.getDmaBdLayout(0, 1) &&
+            tm.getDmaBdLayout(0, 2),
+        "BD layouts");
 
   // BD pools are covered by target_model_bd_pools.
   check(tm.isBdChannelAccessible(0, 2, 15, 0, DMAChannelDir::S2MM) &&

@@ -39,7 +39,7 @@ namespace xilinx {
 namespace AIEX {
 
 void getHardwareStridesWraps(const AIE::AIETargetModel &targetModel,
-                             mlir::Operation *op,
+                             mlir::Operation *op, int tileCol, int tileRow,
                              mlir::BaseMemRefType referencedBufType,
                              llvm::SmallVector<int64_t, 4> inputSizes,
                              llvm::SmallVector<int64_t, 4> inputStrides,

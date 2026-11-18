@@ -10,6 +10,9 @@ add_executable(target_model  target_model.cpp)
 add_executable(target_model_rtti  target_model_rtti.cpp)
 add_executable(target_model_npu3  target_model_npu3.cpp)
 add_executable(target_model_bd_pools  target_model_bd_pools.cpp)
+add_executable(target_model_bd_layout_npu3  target_model_bd_layout_npu3.cpp)
+target_include_directories(target_model_bd_layout_npu3 PRIVATE
+  ${CMAKE_SOURCE_DIR}/third_party/aie-codegen/aie-regdb/globalparams)
 target_link_libraries(target_model_bd_pools PRIVATE AIETransforms)
 add_executable(target_model_dma_channels  target_model_dma_channels.cpp)
 target_link_libraries(target_model_dma_channels PRIVATE AIETransforms)
@@ -22,6 +25,10 @@ add_executable(taken_bds_pools  taken_bds_pools.cpp)
 llvm_update_compile_flags(taken_bds_pools)
 target_link_libraries(taken_bds_pools PRIVATE AIETransforms AIEXUtils AIEX MLIRParser)
 add_executable(register_database  register_database.cpp)
+add_executable(bd_register_base  bd_register_base.cpp)
+llvm_update_compile_flags(bd_register_base)
+# BdLowering (AIEXUtils) uses helpers of the AIEX dialect library.
+target_link_libraries(bd_register_base PRIVATE AIEXUtils AIEX)
 add_executable(device_cache device_cache.cpp)
 add_executable(stream_wait_graph stream_wait_graph.cpp)
 llvm_update_compile_flags(stream_wait_graph)
@@ -37,6 +44,7 @@ add_test(NAME TargetModel COMMAND target_model)
 add_test(NAME TargetModelRtti COMMAND target_model_rtti)
 add_test(NAME TargetModelNPU3 COMMAND target_model_npu3)
 add_test(NAME TargetModelBdPools COMMAND target_model_bd_pools)
+add_test(NAME TargetModelBdLayoutNPU3 COMMAND target_model_bd_layout_npu3)
 add_test(NAME TargetModelDmaChannels COMMAND target_model_dma_channels)
 add_test(NAME TargetModelUnknownDevice COMMAND target_model_unknown_device)
 add_test(NAME TargetModelTileAddress COMMAND target_model_tile_address)
@@ -44,6 +52,7 @@ add_test(NAME TargetModelLocalBases COMMAND target_model_local_bases)
 add_test(NAME DMAChannelCapacity COMMAND dma_channel_capacity)
 add_test(NAME TakenBdsPools COMMAND taken_bds_pools)
 add_test(NAME RegisterDatabase COMMAND register_database WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+add_test(NAME BdRegisterBase COMMAND bd_register_base)
 
 # Exercises the uint16 fallback path of test_utils::bfloat16_t on every
 # platform by force-undefining __STDCPP_BFLOAT16_T__ for this TU only.
@@ -75,10 +84,11 @@ target_link_libraries(stack_size_analysis PRIVATE ${stack_size_analysis_libs})
 get_property(dialect_libs GLOBAL PROPERTY MLIR_DIALECT_LIBS)
 
 set(EXECUTABLES target_model target_model_rtti target_model_npu3
-    target_model_bd_pools target_model_dma_channels
+    target_model_bd_pools target_model_bd_layout_npu3 target_model_dma_channels
     target_model_unknown_device target_model_tile_address
     target_model_local_bases
-    dma_channel_capacity taken_bds_pools register_database device_cache)
+    dma_channel_capacity taken_bds_pools register_database device_cache
+    bd_register_base)
 
 set(CPP_TEST_DEPENDS ${EXECUTABLES} bfloat16_fallback_test stack_size_analysis
     aievec_shuffle_modes stream_wait_graph)

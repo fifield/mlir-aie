@@ -1990,15 +1990,169 @@ static void aie4ChannelOutOfRange(StringRef what, int col, int row,
                      Twine(col) + ", " + Twine(row) + ")");
 }
 
+// AIE4 BD layouts, from aie-codegen's xaie4gbl_params.h. Fields no lowering
+// programs (TLAST suppression; on the shim high address bits, AXI
+// user/key/QoS, compression, data reuse, IO coherence) are left out.
+static DmaBdLayout makeAIE4CoreTileBdLayout() {
+  DmaBdLayout l;
+  l.numWords = 6;
+  l.stepBias = 0;
+  l.bufferOffset = {0, 16, 15};
+  l.bufferLength = {0, 0, 15};
+  l.enablePacket = {1, 30, 1};
+  l.outOfOrderId = {1, 24, 4};
+  l.packetId = {1, 19, 5};
+  l.packetType = {1, 16, 3};
+  l.d1Stride = {2, 16, 15};
+  l.iterationCurrent = {3, 26, 6};
+  l.d0Size = {3, 17, 9};
+  l.d2Stride = {3, 0, 15};
+  l.d1Size = {4, 23, 9};
+  l.iterationSize = {4, 17, 6};
+  l.iterationStride = {4, 0, 15};
+  l.nextBd = {5, 27, 4};
+  l.useNextBd = {5, 26, 1};
+  l.lockRelValue = {5, 18, 7};
+  l.lockRelId = {5, 13, 4};
+  l.lockAcqEnable = {5, 12, 1};
+  l.lockAcqValue = {5, 5, 7};
+  l.lockAcqId = {5, 0, 4};
+  return l;
+}
+
+// The packet type is a channel setting on a memtile. The pads are MM2S-only.
+static DmaBdLayout makeAIE4MemTileBdLayout() {
+  DmaBdLayout l;
+  l.numWords = 11;
+  l.stepBias = 0;
+  l.bufferOffset = {0, 0, 24};
+  l.lockAcqValue = {1, 25, 7};
+  l.bufferLength = {1, 0, 23};
+  l.lockAcqId = {2, 20, 10};
+  l.lockRelValue = {2, 11, 7};
+  l.lockRelId = {2, 1, 10};
+  l.lockAcqEnable = {2, 0, 1};
+  l.d1Stride = {3, 0, 23};
+  l.d2Stride = {4, 0, 23};
+  l.d3Stride = {5, 0, 23};
+  l.iterationStride = {6, 0, 23};
+  l.iterationCurrent = {7, 22, 8};
+  l.enablePacket = {7, 21, 1};
+  l.packetId = {7, 16, 5};
+  l.d0ZeroAfter = {7, 8, 8};
+  l.d0ZeroBefore = {7, 0, 8};
+  l.d2ZeroAfter = {8, 24, 8};
+  l.d2ZeroBefore = {8, 16, 8};
+  l.d1ZeroAfter = {8, 8, 8};
+  l.d1ZeroBefore = {8, 0, 8};
+  l.d1Size = {9, 19, 12};
+  l.d0Size = {9, 5, 12};
+  l.outOfOrderId = {9, 0, 4};
+  l.nextBd = {10, 27, 4};
+  l.useNextBd = {10, 26, 1};
+  l.d2Size = {10, 14, 12};
+  l.iterationSize = {10, 0, 8};
+  return l;
+}
+
+// Word 1 holds address bits [31:2] in place, so the byte offset goes there
+// as on AIE2. The packet type is a channel setting on a shim.
+static DmaBdLayout makeAIE4ShimBdLayout() {
+  DmaBdLayout l;
+  l.numWords = 9;
+  l.stepBias = 0;
+  l.bufferOffset = {1, 0, 32};
+  l.bufferLength = {2, 0, 32};
+  l.lockAcqId = {3, 27, 5};
+  l.lockAcqEnable = {3, 26, 1};
+  l.burstLength = {3, 24, 2};
+  l.d1Size = {3, 12, 12};
+  l.d2Size = {3, 0, 12};
+  l.d0Size = {4, 19, 12};
+  l.lockRelValue = {4, 12, 7};
+  l.lockRelId = {4, 7, 5};
+  l.lockAcqValue = {4, 0, 7};
+  l.enablePacket = {5, 31, 1};
+  l.nextBd = {5, 27, 4};
+  l.useNextBd = {5, 26, 1};
+  l.d1Stride = {5, 0, 22};
+  l.iterationCurrent = {6, 24, 6};
+  l.d2Stride = {6, 0, 22};
+  l.axcache = {7, 28, 4};
+  l.iterationSize = {7, 22, 6};
+  l.iterationStride = {7, 0, 22};
+  l.d3Stride = {8, 10, 22};
+  l.outOfOrderId = {8, 5, 4};
+  l.packetId = {8, 0, 5};
+  return l;
+}
+
+// Control/trace BDs: data BD word positions, no dimensions or locks; control
+// length is 24 bits, trace has no packet fields.
+static DmaBdLayout makeAIE4ShimLinearBdLayout(bool control) {
+  DmaBdLayout l;
+  l.numWords = 9;
+  l.stepBias = 0;
+  l.bufferOffset = {1, 0, 32};
+  l.bufferLength = {2, 0, uint8_t(control ? 24 : 32)};
+  l.burstLength = {3, 24, 2};
+  l.nextBd = {5, 27, 4};
+  l.useNextBd = {5, 26, 1};
+  l.iterationCurrent = {6, 24, 6};
+  l.axcache = {7, 28, 4};
+  l.iterationSize = {7, 22, 6};
+  l.iterationStride = {7, 0, 22};
+  if (control) {
+    l.enablePacket = {5, 31, 1};
+    l.outOfOrderId = {8, 5, 4};
+    l.packetId = {8, 0, 5};
+  }
+  return l;
+}
+
+const DmaBdLayout *AIE4TargetModel::getDmaBdLayout(AIETileType tileType) const {
+  static const DmaBdLayout shim = makeAIE4ShimBdLayout();
+  static const DmaBdLayout mem = makeAIE4MemTileBdLayout();
+  static const DmaBdLayout core = makeAIE4CoreTileBdLayout();
+  switch (tileType) {
+  case AIETileType::ShimNOCTile:
+    return &shim;
+  case AIETileType::MemTile:
+    return &mem;
+  case AIETileType::CoreTile:
+    return &core;
+  default:
+    return nullptr;
+  }
+}
+
+const DmaBdLayout *
+AIE4TargetModel::getDmaBdLayout(AIETileType tileType,
+                                DMAChannelDir direction) const {
+  static const DmaBdLayout control = makeAIE4ShimLinearBdLayout(true);
+  static const DmaBdLayout trace = makeAIE4ShimLinearBdLayout(false);
+  if (direction == DMAChannelDir::ControlMM2S)
+    return tileType == AIETileType::ShimNOCTile ? &control : nullptr;
+  if (direction == DMAChannelDir::TraceS2MM)
+    return tileType == AIETileType::ShimNOCTile ? &trace : nullptr;
+  return getDmaBdLayout(tileType);
+}
+
 uint64_t AIE4TargetModel::getDmaBdAddress(int col, int row, uint32_t bd_id,
                                           int channel,
                                           AIE::DMAChannelDir direction) const {
   bool mm2s = isMM2S(direction);
   uint64_t offset = 0;
-  if (isShimNOCTile(col, row)) {
-    if (channel < 0)
-      report_fatal_error("AIE4TargetModel::getDmaBdAddress: a shim BD's bank "
-                         "depends on its channel and direction");
+  if (isShimNOCTile(col, row) && channel < 0) {
+    // A data BD id is global across the two 16-BD banks.
+    if (getDMAChannelBundle(direction) != WireBundle::DMA)
+      report_fatal_error("AIE4TargetModel::getDmaBdAddress: a shim control "
+                         "or trace BD's address depends on its channel");
+    if (bd_id >= getNumBDs(AIETileType::ShimNOCTile))
+      report_fatal_error("AIE4TargetModel::getDmaBdAddress: shim BD " +
+                         Twine(bd_id) + " does not exist");
+    offset = (bd_id < 16 ? 0x00018000 : 0x00058000) + (bd_id % 16) * 0x30;
+  } else if (isShimNOCTile(col, row)) {
     if (channel >= static_cast<int>(getNumDMAChannels(col, row, direction)))
       aie4ChannelOutOfRange("getDmaBdAddress", col, row, channel);
     if (!isBdChannelAccessible(col, row, bd_id, channel, direction))
