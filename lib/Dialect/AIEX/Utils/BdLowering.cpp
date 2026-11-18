@@ -648,15 +648,19 @@ buildBdWords(OpBuilder &builder, Location loc,
              ArrayRef<OpFoldResult> mixedStrides, uint64_t elemWidth,
              uint32_t burstLength, uint32_t axcache, OpFoldResult lenElems,
              Value &repeatCountOut, SmallVectorImpl<Value> &wordsOut) {
+  // The callers reject such a tile with their own diagnostic; this is a
+  // backstop for one that does not.
+  const AIE::DmaBdLayout *layout = targetModel.getDmaBdLayout(tileCol, tileRow);
+  if (!layout)
+    return emitError(loc) << "no buffer descriptor layout for tile (" << tileCol
+                          << ", " << tileRow << ")";
+
   EncodedBd e;
   if (failed(encodeBdCommon(builder, loc, targetModel, tileCol, tileRow,
                             mixedSizes, mixedStrides, elemWidth, lenElems, e)))
     return failure();
   repeatCountOut = e.repeatCount;
 
-  const AIE::DmaBdLayout *layout = targetModel.getDmaBdLayout(tileCol, tileRow);
-  assert(layout && "buildBdWords called for a tile with no DMA BD layout "
-                   "(rejected by the caller)");
   packBdWords(builder, loc, targetModel, *layout, f, e, burstLength, axcache,
               wordsOut);
   return success();

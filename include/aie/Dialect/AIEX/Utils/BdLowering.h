@@ -325,9 +325,9 @@ struct BdTemplateFields {
 // that is the caller's `getBdRegisterBase` + `npu.blockwrite_values` -- so one
 // routine serves both a pinned bd_id and one drawn from the runtime pool.
 //
-// The tile at (`tileCol`, `tileRow`) must have a target-model DmaBdLayout; the
-// caller is responsible for rejecting anything else with a user-facing
-// diagnostic before calling.
+// The tile at (`tileCol`, `tileRow`) should have a target-model DmaBdLayout;
+// the caller rejects anything else with its own diagnostic before calling.
+// Without one this emits a generic error and fails.
 mlir::LogicalResult
 buildBdWords(mlir::OpBuilder &builder, mlir::Location loc,
              const xilinx::AIE::AIETargetModel &targetModel, int tileCol,

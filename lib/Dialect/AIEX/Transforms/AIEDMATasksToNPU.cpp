@@ -791,14 +791,11 @@ struct AIEDMATasksToNPUPass
         return bd_op->emitOpError("length_parameter requires a constant "
                                   "offset, bd_id, next_bd and lock value");
       int col = tile.getCol(), row = tile.getRow();
-      if (!target_model.isShimNOCTile(col, row) &&
-          !target_model.isMemTile(col, row) &&
-          !target_model.isCoreTile(col, row))
+      if (!target_model.getDmaBdLayout(col, row))
         return bd_op->emitOpError(
             "runtime-valued BD size/stride/len/bd_id/next_bd/lock value is "
-            "only supported on tiles with a DMA buffer descriptor layout (shim "
-            "NOC, mem and "
-            "core tiles); use compile-time constants here.");
+            "only supported on tiles with a DMA buffer descriptor layout; use "
+            "compile-time constants here.");
       if (bd_op.getPadDimensions().has_value())
         return bd_op->emitOpError(
             "zero padding is not supported with runtime sizes/strides/len.");

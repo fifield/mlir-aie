@@ -686,6 +686,8 @@ public:
     bool isMM2S = channelDir == AIE::DMAChannelDir::MM2S;
     int tileCol = shimTile.getCol();
     int tileRow = shimTile.getRow();
+    if (!targetModel.getDmaBdLayout(tileCol, tileRow))
+      return op->emitOpError("has no buffer descriptor layout on this tile");
 
     // Packet / token setup (identical to the static path).
     auto column = IntegerAttr::get(i32ty, tileCol);
