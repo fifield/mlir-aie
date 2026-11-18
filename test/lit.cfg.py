@@ -194,6 +194,7 @@ xrt_config = LitConfigHelper.detect_xrt(
     llvm_config,
     config.vitis_components,
     can_use_peano_feature_gate=can_use_peano_feature_gate,
+    can_use_peano_aie4="peano_aie4" in early_peano_config.features,
 )
 
 # Detect aiesimulator

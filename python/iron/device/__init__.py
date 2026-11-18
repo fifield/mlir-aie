@@ -33,6 +33,7 @@ _NAME_TO_BASE: dict[str, str] = {
     "npu": "NPU1",
     "npu1": "NPU1",
     "npu2": "NPU2",
+    "npu3": "NPU3",
     "xcvc1902": "XCVC1902",
     "xcve2302": "XCVE2302",
     "xcve2802": "XCVE2802",
@@ -40,7 +41,7 @@ _NAME_TO_BASE: dict[str, str] = {
 
 # Max-column count per NPU family.  Versal AIE1 devices (xcvc1902 etc.)
 # have no per-column variants and are not listed here.
-_MAX_COLS: dict[str, int] = {"NPU1": 4, "NPU2": 8}
+_MAX_COLS: dict[str, int] = {"NPU1": 4, "NPU2": 8, "NPU3": 3}
 
 
 def from_name(name: str, *, n_cols: int | None = 1) -> Device:
@@ -55,16 +56,17 @@ def from_name(name: str, *, n_cols: int | None = 1) -> Device:
 
           - ``"npu"`` / ``"npu1"`` — Phoenix/Hawk Point (AIE2)
           - ``"npu2"`` — Strix/Krackan (AIE2P)
+          - ``"npu3"`` — AIE4
           - ``"xcvc1902"`` / ``"xcve2302"`` / ``"xcve2802"`` — Versal AIE1
 
           Case-insensitive.
         n_cols: Number of columns to use for NPU devices.  ``1`` (the
           default) selects the single-column variant
-          (``NPU1Col1`` / ``NPU2Col1``).  ``2..N-1`` selects
-          ``NPU{1,2}Col{n_cols}``.  Passing the device's max
-          (``4`` for NPU1, ``8`` for NPU2) — or ``None`` as a
-          family-agnostic "max" sentinel — selects the unrestricted
-          multi-column device (``NPU1`` / ``NPU2``).  Ignored for
+          (``NPU1Col1`` / ``NPU2Col1`` / ``NPU3Col1``).  ``2..N-1``
+          selects ``NPU{1,2,3}Col{n_cols}``.  Passing the device's max
+          (``4`` for NPU1, ``8`` for NPU2, ``3`` for NPU3) — or ``None``
+          as a family-agnostic "max" sentinel — selects the unrestricted
+          multi-column device (``NPU1`` / ``NPU2`` / ``NPU3``).  Ignored for
           Versal devices.
 
     Returns:

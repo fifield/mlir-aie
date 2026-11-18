@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import argparse
 
-DEFAULT_DEV_CHOICES: tuple[str, ...] = ("npu", "npu2")
+DEFAULT_DEV_CHOICES: tuple[str, ...] = ("npu", "npu2", "npu3")
 
 
 def add_compile_args(
@@ -41,7 +41,7 @@ def add_compile_args(
         with_dev: If True (default), add ``-d/--dev`` (or just ``--dev``
             when ``short_dev=None``).
         dev_choices: Allowed device-name strings (default
-            ``("npu", "npu2")``).  Pass e.g. ``("npu", "npu2", "xcvc1902")``
+            ``("npu", "npu2", "npu3")``).  Pass e.g. ``("npu", "npu2", "xcvc1902")``
             for designs that also accept the VCK5000 target.
         default_dev: Fixed target used when ``--dev`` is omitted. ``None``
             (the default) selects the attached runtime device for run and

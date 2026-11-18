@@ -641,8 +641,8 @@ def provenance(**extra: str | None) -> str:
 class Preflight:
     """What the runtime says about the device a run is about to use."""
 
-    npu: str  # "npu1" / "npu2"
-    arch: str  # "aie2" / "aie2p"
+    npu: str  # "npu1" / "npu2" / "npu3"
+    arch: str  # "aie2" / "aie2p" / "aie4"
     device: str  # the device as the runtime describes it
     pmode: str | None  # power mode, or None if it could not be read
 
@@ -658,7 +658,7 @@ def preflight() -> Preflight:
     device = runtime.device()
     arch = resolve_target_arch(device)
     return Preflight(
-        npu="npu2" if arch == "aie2p" else "npu1",
+        npu={"aie2p": "npu2", "aie4": "npu3"}.get(arch, "npu1"),
         arch=arch,
         device=runtime.device_name() or type(device).__name__,
         pmode=runtime.power_mode(),

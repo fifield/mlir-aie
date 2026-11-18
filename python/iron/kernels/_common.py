@@ -489,7 +489,12 @@ def _bound_arch() -> str | None:
         RuntimeError: When the bound device's architecture has no kernels.
     """
     device = get_current_device(probe_runtime=False)
-    return None if device is None else resolve_target_arch(device)
+    if device is None:
+        return None
+    arch = resolve_target_arch(device)
+    if arch not in ARCH_TRAITS:
+        raise RuntimeError(f"aie.iron.kernels has no kernels for {arch} ({device})")
+    return arch
 
 
 def _detect_arch() -> str:

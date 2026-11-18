@@ -20,14 +20,17 @@ from aie.dialects._aie_enum_gen import (  # pyright: ignore[reportMissingImports
     CoreEventAIE,
     CoreEventAIE2,
     CoreEventAIE2P,
+    CoreEventAIE4,
     MemEventAIE,
     MemEventAIE2,
     MemEventAIE2P,
     MemTileEventAIE2,
     MemTileEventAIE2P,
+    MemTileEventAIE4,
     ShimTileEventAIE,
     ShimTileEventAIE2,
     ShimTileEventAIE2P,
+    ShimTileEventAIE4,
 )
 from aie.dialects.aie import (
     DMAChannelDir,  # pyright: ignore[reportAttributeAccessIssue]
@@ -57,7 +60,14 @@ NUM_TRACE_TYPES = len(PacketType)
 
 def get_events_for_device(device: str):
     if "npu3" in device:
-        raise NotImplementedError("trace events are not available for AIE4 (npu3)")
+        # An AIE4 compute tile has no memory module, so no memory-module
+        # events: its DMA and lock events are numbered in the core module.
+        return SimpleNamespace(
+            CoreEvent=CoreEventAIE4,
+            MemEvent=None,
+            ShimTileEvent=ShimTileEventAIE4,
+            MemTileEvent=MemTileEventAIE4,
+        )
     if "xcvc1902" in device:
         return SimpleNamespace(
             CoreEvent=CoreEventAIE,

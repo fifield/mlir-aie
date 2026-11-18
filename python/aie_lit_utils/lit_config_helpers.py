@@ -104,6 +104,8 @@ class LitConfigHelper:
             "Krackan",
             "Gorgon Point",
         ],
+        # AIE4 sets only ryzen_ai_npu3; generic hardware tests target AIE2/AIE2P.
+        "npu3": ["npu3", "npu9"],
     }
 
     PATH_ENV_VARS = {"PATH", "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"}
@@ -265,6 +267,7 @@ class LitConfigHelper:
         llvm_config,
         vitis_components: Optional[List[str]] = None,
         can_use_peano_feature_gate: bool = False,
+        can_use_peano_aie4: bool = False,
     ) -> HardwareConfig:
         """
         Detect XRT installation and Ryzen AI NPU hardware.
@@ -277,6 +280,8 @@ class LitConfigHelper:
             vitis_components: List of available Vitis components for feature filtering
             can_use_peano_feature_gate: Whether Peano may be used for Ryzen AI
                 feature gating when Vitis AIETOOLS support is absent
+            can_use_peano_aie4: Whether the configured Peano targets AIE4 (the
+                ``peano_aie4`` feature); gates ``ryzen_ai_npu3``
 
         Returns:
             HardwareConfig with XRT detection results
@@ -285,11 +290,13 @@ class LitConfigHelper:
                 - found: True if XRT is detected and valid
                 - flags: Compiler/linker flags for XRT (includes -I, -L, and libraries)
                 - substitutions: Dictionary with "%xrt_flags", "%run_on_npu1%",
-                                 "%run_on_npu2%", and "%aie_cmake_device%"
+                                 "%run_on_npu2%", "%run_on_npu3%", and
+                                 "%aie_cmake_device%"
                                  ("npu2" when a Strix NPU is detected, else "npu";
                                  what the run_cmake lits pass as -DAIE_DEVICE)
-                - features: List of features including "ryzen_ai", "ryzen_ai_npu1", or "ryzen_ai_npu2"
-                           based on detected NPU hardware and available Vitis components
+                - features: List of features including "ryzen_ai", "ryzen_ai_npu1",
+                           "ryzen_ai_npu2", or "ryzen_ai_npu3" based on detected NPU
+                           hardware and available compiler backends
         """
         if vitis_components is None:
             vitis_components = []
@@ -297,12 +304,14 @@ class LitConfigHelper:
         expected_npu = os.environ.get("AIE_EXPECTED_NPU")
         if expected_npu and expected_npu not in LitConfigHelper.NPU_MODELS:
             llvm_config.lit_config.fatal(
-                "AIE_EXPECTED_NPU must be 'npu1' or 'npu2', " f"got {expected_npu!r}"
+                "AIE_EXPECTED_NPU must be 'npu1', 'npu2' or 'npu3', "
+                f"got {expected_npu!r}"
             )
 
         config = HardwareConfig()
         run_on_npu1 = "echo"
         run_on_npu2 = "echo"
+        run_on_npu3 = "echo"
         # Whichever generation is actually detected, so device-agnostic tests
         # (single lit file, no npu1/npu2 duplication) can target it directly.
         # Consumed by %aie_cmake_device% below.
@@ -320,6 +329,7 @@ class LitConfigHelper:
 
             config.substitutions["%run_on_npu1%"] = run_on_npu1
             config.substitutions["%run_on_npu2%"] = run_on_npu2
+            config.substitutions["%run_on_npu3%"] = run_on_npu3
             config.substitutions["%aie_cmake_device%"] = "npu"
             return config
 
@@ -463,6 +473,20 @@ class LitConfigHelper:
                         logger.warning(
                             "NPU2 detected but no AIE2P backend is available"
                         )
+                elif any(
+                    known in model for known in LitConfigHelper.NPU_MODELS["npu3"]
+                ):
+                    if "AIE4" in vitis_components or can_use_peano_aie4:
+                        run_on_npu3 = LitConfigHelper._run_on_npu_wrap(
+                            aie_src_root, "npu3"
+                        )
+                        config.features.append("ryzen_ai_npu3")
+                        config.substitutions["%run_on_npu3%"] = run_on_npu3
+                        logger.info(
+                            "Running tests on NPU3 with command line: %s", run_on_npu3
+                        )
+                    else:
+                        logger.warning("NPU3 detected but no AIE4 backend is available")
                 else:
                     logger.warning("xrt-smi reported unknown NPU model '%s'.", model)
                 break
@@ -482,6 +506,7 @@ class LitConfigHelper:
 
         config.substitutions["%run_on_npu1%"] = run_on_npu1
         config.substitutions["%run_on_npu2%"] = run_on_npu2
+        config.substitutions["%run_on_npu3%"] = run_on_npu3
         # add_aie_design/add_aie_run_test's -DAIE_DEVICE takes "npu" (not
         # "npu1") for the first-gen device -- map the detected generation.
         config.substitutions["%aie_cmake_device%"] = (
@@ -549,6 +574,55 @@ class LitConfigHelper:
         return config
 
     @staticmethod
+    def peano_supports_aie4(peano_tools_dir: str) -> bool:
+        """
+        Probe whether the configured Peano can target AIE4.
+
+        Compiles a trivial module with llc and a trivial C file with clang for
+        the AIE4 triple. C, not C++: in C++ mode clang implicitly includes the
+        AIE4 intrinsics header, which takes tens of seconds to parse. A Peano
+        without the AIE4 target rejects the triple, so the result does not
+        depend on the Peano version string.
+        """
+        exe = ".exe" if os.name == "nt" else ""
+        llc = os.path.join(peano_tools_dir, f"llc{exe}")
+        clang = os.path.join(peano_tools_dir, f"clang{exe}")
+        probes = [
+            (
+                [llc, "-mtriple=aie4", "-O0", "-filetype=null", "-"],
+                "define void @peano_aie4_probe() { ret void }\n",
+            ),
+            (
+                [
+                    clang,
+                    "--target=aie4-none-unknown-elf",
+                    "-O0",
+                    "-x",
+                    "c",
+                    "-c",
+                    "-",
+                    "-o",
+                    os.devnull,
+                ],
+                "void peano_aie4_probe(void) {}\n",
+            ),
+        ]
+        for cmd, source in probes:
+            try:
+                result = subprocess.run(
+                    cmd,
+                    input=source.encode(),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=30,
+                )
+            except (OSError, subprocess.SubprocessError):
+                return False
+            if result.returncode != 0:
+                return False
+        return True
+
+    @staticmethod
     def detect_peano(
         peano_tools_dir: str, peano_install_dir: str, llvm_config
     ) -> HardwareConfig:
@@ -580,6 +654,8 @@ class LitConfigHelper:
             ):
                 config.found = True
                 config.features.append("peano")
+                if LitConfigHelper.peano_supports_aie4(peano_tools_dir):
+                    config.features.append("peano_aie4")
 
                 peano_executable_suffix = ".exe" if os.name == "nt" else ""
                 for tool_name in ["clang++", "clang"]:

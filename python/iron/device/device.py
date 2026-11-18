@@ -87,7 +87,7 @@ class Device(Resolvable):
 
     @property
     def arch(self) -> AIEArch:
-        """AIE architecture of the device (AIE1, AIE2, or AIE2p)."""
+        """AIE architecture of the device (AIE1, AIE2, AIE2p, or AIE4)."""
         return AIEArch(self._tm.get_target_arch())
 
     @property
