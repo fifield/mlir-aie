@@ -592,6 +592,9 @@ LogicalResult HasValidDMAChannels<ConcreteType>::verifyTrait(Operation *op) {
       }
       DMAChannel dmaChan = {dmaStart.getChannelDir(),
                             dmaStart.getChannelIndex()};
+      // Control/trace channels are verified by aie.dma_start.
+      if (getDMAChannelBundle(dmaChan.direction) != WireBundle::DMA)
+        continue;
       // check if number of input and output channels is more than available
       // hardware
       if (dmaChan.direction == DMAChannelDir::S2MM)
@@ -4681,11 +4684,7 @@ LogicalResult PacketFlowOp::verify() {
 /// The channels a core's own tile has in `direction`.
 static uint32_t channelsOfOwnTile(TileOp tile, DMAChannelDir direction,
                                   const AIETargetModel &targetModel) {
-  int col = tile.getCol(), row = tile.getRow();
-  if (direction == DMAChannelDir::MM2S)
-    return targetModel.getNumSourceSwitchboxConnections(col, row,
-                                                        WireBundle::DMA);
-  return targetModel.getNumDestSwitchboxConnections(col, row, WireBundle::DMA);
+  return targetModel.getNumDMAChannels(tile.getCol(), tile.getRow(), direction);
 }
 
 LogicalResult DmaPushQueueOp::verify() {
@@ -5313,6 +5312,8 @@ static LogicalResult verifyDMAChannelInRange(Operation *op, DMAChannelDir dir,
 LogicalResult xilinx::AIE::verifyDMAChannelIndex(Operation *op, TileLike tile,
                                                  DMAChannelDir dir,
                                                  int64_t channel) {
+  if (getDMAChannelBundle(dir) != WireBundle::DMA)
+    return verifyControlOrTraceDMAChannel(op, tile, dir, channel);
   int64_t channels = dir == DMAChannelDir::MM2S
                          ? tile.getNumDestConnections(WireBundle::DMA)
                          : tile.getNumSourceConnections(WireBundle::DMA);
@@ -5344,6 +5345,9 @@ LogicalResult xilinx::AIE::verifyDMAChannel(Operation *op,
                                             int64_t channel) {
   if (targetModel.isShimPLTile(col, row))
     return emitShimPLTileHasNoDMA(op, col, row);
+  if (getDMAChannelBundle(dir) != WireBundle::DMA)
+    return verifyControlOrTraceDMAChannel(op, targetModel, col, row, dir,
+                                          channel);
   return verifyDMAChannelInRange(op, dir, channel,
                                  targetModel.getNumDMAChannels(col, row, dir));
 }
@@ -5422,6 +5426,32 @@ static LogicalResult verifyDMARepeatCount(Operation *op, int32_t repeatCount) {
            << repeatCount << " is out of range [0, " << maxRepeat
            << "] for this target";
   return success();
+}
+
+LogicalResult xilinx::AIE::verifyControlOrTraceDMAChannel(
+    Operation *op, const AIETargetModel &targetModel, int col, int row,
+    DMAChannelDir dir, int64_t channel) {
+  if (getDMAChannelBundle(dir) == WireBundle::DMA)
+    return success();
+  int64_t channels = targetModel.getNumDMAChannels(col, row, dir);
+  if (channel >= 0 && channel < channels)
+    return success();
+  return op->emitOpError() << stringifyDMAChannelDir(dir) << " channel "
+                           << channel << " is out of range: the tile has "
+                           << channels << " " << stringifyDMAChannelDir(dir)
+                           << " channels";
+}
+
+LogicalResult xilinx::AIE::verifyControlOrTraceDMAChannel(Operation *op,
+                                                          TileLike tile,
+                                                          DMAChannelDir dir,
+                                                          int64_t channel) {
+  std::optional<int> col = tile.tryGetCol();
+  std::optional<int> row = tile.tryGetRow();
+  if (!col || !row)
+    return success();
+  return verifyControlOrTraceDMAChannel(op, getTargetModel(op), *col, *row, dir,
+                                        channel);
 }
 
 LogicalResult
@@ -5528,6 +5558,11 @@ LogicalResult DMAOp::verify() {
       return emitOpError("pad_value requires the CONSTANT_PAD_VALUE register, "
                          "unavailable on this target");
   }
+  if (auto program = dyn_cast<TileElement>(parentOp))
+    if (failed(verifyControlOrTraceDMAChannel(
+            getOperation(), program.getTileLike(), getChannelDir(),
+            getChannelIndex())))
+      return failure();
   if (failed(verifyDMARepeatCount(getOperation(), getRepeatCount())))
     return failure();
   SmallVector<DMABDOp> bds;
@@ -6699,6 +6734,12 @@ LogicalResult DMAStartOp::verify() {
       return emitOpError("pad_value requires the CONSTANT_PAD_VALUE register, "
                          "unavailable on this target");
   }
+  if (auto program = dyn_cast<TileElement>((*this)->getParentOp());
+      program && !getEndpoint())
+    if (failed(verifyControlOrTraceDMAChannel(
+            getOperation(), program.getTileLike(), getChannelDir(),
+            getChannelIndex())))
+      return failure();
   if (failed(verifyDMARepeatCount(getOperation(), getRepeatCount())))
     return failure();
   if (auto program = dyn_cast<DmaBody>((*this)->getParentOp());
@@ -7259,6 +7300,10 @@ LogicalResult ShimDMAAllocationOp::verify() {
     }
     return emitOpError("tile must be a shim tile");
   }
+
+  if (failed(verifyControlOrTraceDMAChannel(*this, tileLike, getChannelDir(),
+                                            getChannelIndex())))
+    return failure();
 
   if (ArrayAttr proofs = getConsumedByAttr()) {
     auto device = (*this)->getParentOfType<DeviceOp>();

@@ -419,7 +419,10 @@ LogicalResult TracePortOp::verify() {
   auto device = trace->getParentOfType<DeviceOp>();
   const auto &targetModel = device.getTargetModel();
 
-  // Convert DMAChannelDir to master flag: S2MM=master, MM2S=slave
+  // The direction selects the port's side, not a DMA engine: S2MM=master,
+  // MM2S=slave.
+  if (getDMAChannelBundle(getDirection()) != WireBundle::DMA)
+    return emitOpError("direction must be S2MM (master) or MM2S (slave)");
   bool isMaster = (getDirection() == DMAChannelDir::S2MM);
 
   // Verify port is valid for this tile (only when placed with known col/row)

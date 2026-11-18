@@ -82,6 +82,20 @@ static const std::map<xilinx::AIE::WireBundle, StrmSwPortType>
         {xilinx::AIE::WireBundle::PLIO32, StrmSwPortType::_32B_PL},
 };
 
+static XAie_DmaDirection toXAieDmaDirection(xilinx::AIE::DMAChannelDir dir) {
+  switch (dir) {
+  case xilinx::AIE::DMAChannelDir::S2MM:
+    return DMA_S2MM;
+  case xilinx::AIE::DMAChannelDir::MM2S:
+    return DMA_MM2S;
+  case xilinx::AIE::DMAChannelDir::ControlMM2S:
+    return DMA_MM2S_CTRL;
+  case xilinx::AIE::DMAChannelDir::TraceS2MM:
+    return DMA_S2MM_TRACE;
+  }
+  llvm_unreachable("unknown DMAChannelDir");
+}
+
 #ifndef NDEBUG
 
 // https://stackoverflow.com/a/32230306
@@ -620,8 +634,7 @@ LogicalResult xilinx::AIE::AIERTControl::pushToBdQueueAndEnable(
     int bdId, int repeatCount, uint32_t padValue, bool outOfOrder,
     bool configureChannel, bool pushTask) {
   TxnLocBracket bracket(*this, op.getLoc());
-  XAie_DmaDirection direction =
-      channelDir == DMAChannelDir::S2MM ? DMA_S2MM : DMA_MM2S;
+  XAie_DmaDirection direction = toXAieDmaDirection(channelDir);
   auto tileLoc = XAie_TileLoc(col, row);
   if (configureChannel && padValue != 0 && direction == DMA_MM2S &&
       targetModel.isMemTile(col, row)) {
@@ -959,8 +972,7 @@ LogicalResult xilinx::AIE::AIERTControl::resetDmaChannels(DeviceOp &targetOp) {
       if (!reset.insert({dir, channel}).second)
         return success();
       TxnLocBracket bracket(*this, op->getLoc());
-      XAie_DmaDirection direction =
-          dir == DMAChannelDir::S2MM ? DMA_S2MM : DMA_MM2S;
+      XAie_DmaDirection direction = toXAieDmaDirection(dir);
       TRY_XAIE_API_EMIT_ERROR((*op), XAie_DmaChannelReset, &aiert->devInst,
                               tileLoc, channel, direction,
                               XAie_DmaChReset::DMA_CHANNEL_RESET);

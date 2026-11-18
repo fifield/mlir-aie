@@ -268,7 +268,7 @@ void ShimTransferSpans::analyze(
       return;
     bool sends = endpoint->sends;
     if (auto alloc = dyn_cast<ShimDMAAllocationOp>(op)) {
-      sends = alloc.getChannelDir() == DMAChannelDir::MM2S;
+      sends = isMM2S(alloc.getChannelDir());
       used.insert(endpoint->fifo);
     } else if (auto allowed =
                    AIEDialect::ShareableWithAttrHelper(op->getContext())

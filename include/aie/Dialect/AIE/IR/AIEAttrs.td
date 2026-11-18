@@ -183,9 +183,13 @@ def ObjectFifoPort : I32EnumAttr<"ObjectFifoPort", "Ports of an object FIFO",
   let cppNamespace = "xilinx::AIE";
 }
 
+// The direction also selects the DMA engine: ControlMM2S and TraceS2MM are
+// the shim control/trace DMAs. Values are stable; append new engines.
 def DMAChannelDir
     : I32EnumAttr<"DMAChannelDir", "DMA Channel direction",
-                  [I32EnumAttrCase<"S2MM", 0>, I32EnumAttrCase<"MM2S", 1>]> {
+                  [I32EnumAttrCase<"S2MM", 0>, I32EnumAttrCase<"MM2S", 1>,
+                   I32EnumAttrCase<"ControlMM2S", 2>,
+                   I32EnumAttrCase<"TraceS2MM", 3>]> {
   let cppNamespace = "xilinx::AIE";
 }
 

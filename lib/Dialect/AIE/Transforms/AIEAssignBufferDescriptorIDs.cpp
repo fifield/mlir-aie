@@ -53,9 +53,14 @@ static constexpr uint32_t noPool = ~0u;
 
 SmallVector<uint32_t, 2> BdIdGenerator::poolsHolding(uint32_t bdId) const {
   SmallVector<uint32_t, 2> pools;
-  for (DMAChannelDir dir : {DMAChannelDir::MM2S, DMAChannelDir::S2MM}) {
-    int numChannels = std::max<int>(
-        1, static_cast<int>(targetModel.getNumDMAChannels(col, row, dir)));
+  for (DMAChannelDir dir :
+       {DMAChannelDir::MM2S, DMAChannelDir::S2MM, DMAChannelDir::ControlMM2S,
+        DMAChannelDir::TraceS2MM}) {
+    int numChannels =
+        static_cast<int>(targetModel.getNumDMAChannels(col, row, dir));
+    // A tile without a data DMA still answers for channel 0.
+    if (getDMAChannelBundle(dir) == WireBundle::DMA)
+      numChannels = std::max(1, numChannels);
     for (int channel = 0; channel < numChannels; ++channel) {
       uint32_t pool = targetModel.getBdPoolId(col, row, channel, dir);
       if (targetModel.isBdChannelAccessible(col, row, bdId, channel, dir) &&

@@ -890,12 +890,25 @@ LogicalResult AIEX::NpuPushQueueOp::verify() {
   if (std::optional<uint32_t> bdId = getConstantIntOperand(getBdId());
       bdId && *bdId >= numBds)
     return emitOpError("BD ID exceeds the maximum ID.");
+  // A stream DMA channel can only queue BDs from its own pool. Pools can
+  // depend on the direction (AIE4), so use the directed query.
   if (std::optional<uint32_t> bdId = getConstantIntOperand(getBdId());
-      bdId && !targetModel.isBdChannelAccessible(getColumn(), getRow(), *bdId,
-                                                 getChannel()))
+      bdId &&
+      AIE::getDMAChannelBundle(getDirection()) == AIE::WireBundle::DMA &&
+      !targetModel.isBdChannelAccessible(getColumn(), getRow(), *bdId,
+                                         getChannel(), getDirection()))
     return emitOpError("BD ID ") << *bdId << " is not accessible from channel ("
                                  << AIE::stringifyDMAChannelDir(getDirection())
                                  << ", " << getChannel() << ")";
+  // Control and trace DMA channels have a smaller private pool.
+  if (std::optional<uint32_t> bdId = getConstantIntOperand(getBdId());
+      bdId &&
+      AIE::getDMAChannelBundle(getDirection()) != AIE::WireBundle::DMA &&
+      !targetModel.isBdChannelAccessible(getColumn(), getRow(), *bdId,
+                                         getChannel(), getDirection()))
+    return emitOpError() << "bd_id " << *bdId << " is not in the BD pool of "
+                         << AIE::stringifyDMAChannelDir(getDirection())
+                         << " channel " << getChannel();
   uint32_t maxRepeat = targetModel.getMaxRepeatCount();
   if (std::optional<uint64_t> repeatCount =
           getConstantInt64Operand(getRepeatCount());
@@ -2387,14 +2400,8 @@ LogicalResult AIEX::DmaChannelResetOp::verify() {
                          << ") has no DMA channel reset (only core and mem "
                             "tiles do; shim NOC DMA has no reset bit)";
 
-  // Number of DMA channels on this tile in this direction. Mirrors
-  // TileOp::getNumSource/DestConnections(WireBundle::DMA): the switchbox
-  // direction is reversed relative to the DMA direction.
-  uint32_t numChannels = getDirection() == AIE::DMAChannelDir::S2MM
-                             ? targetModel.getNumDestSwitchboxConnections(
-                                   col, row, AIE::WireBundle::DMA)
-                             : targetModel.getNumSourceSwitchboxConnections(
-                                   col, row, AIE::WireBundle::DMA);
+  uint32_t numChannels =
+      targetModel.getNumDMAChannels(col, row, getDirection());
   if (getChannel() >= numChannels)
     return emitOpError() << "channel " << getChannel()
                          << " out of range for this tile and direction (tile "
@@ -2866,7 +2873,7 @@ AIEX::controlPacketMulticasts(ModuleOp module, FlatSymbolRefAttr reference) {
       }
     auto alloc =
         symbols.lookup<AIE::ShimDMAAllocationOp>(allocation.getValue());
-    if (!alloc || alloc.getChannelDir() != AIE::DMAChannelDir::MM2S) {
+    if (!alloc || !AIE::isMM2S(alloc.getChannelDir())) {
       overlay.emitOpError("aie.ctrl_pkt_multicast entry ")
           << index << " allocation " << allocation
           << " must reference an MM2S shim DMA allocation in this overlay";

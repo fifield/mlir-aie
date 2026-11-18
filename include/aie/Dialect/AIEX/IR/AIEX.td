@@ -1057,7 +1057,7 @@ def AIE_NpuSyncOp : AIEX_Op<"npu.sync", []> {
     `(` $column `,` $row `,` $direction `,` $channel `,` $column_num `,` $row_num `)` attr-dict `:` type(operands)
   }];
   let description = [{
-    The sync operation blocks execution of the instruction stream until a task-complete token (TCT) is received on `column`, `row`, channel `channel`, direction `direction` (where `0` is `S2MM` and `1` is `MM2S`).
+    The sync operation blocks execution of the instruction stream until a task-complete token (TCT) is received on `column`, `row`, channel `channel`, direction `direction` (a `DMAChannelDir` value: `0` is `S2MM`, `1` is `MM2S`, `2` is `ControlMM2S` and `3` is `TraceS2MM`).
 
     All parameters are SSA values. Use `arith.constant` for compile-time-known
     values; pass runtime sequence arguments (or values derived from them)

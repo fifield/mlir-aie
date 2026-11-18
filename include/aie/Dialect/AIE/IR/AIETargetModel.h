@@ -692,8 +692,15 @@ public:
   /// channel feeds the stream switch, or the shim mux if the tile has one, so
   /// it is counted by that switch's DMA sources; an S2MM channel by its DMA
   /// destinations. Prefer this to the TileOp connection accessors, which are
-  /// named from the switch's side and so read the other way round.
+  /// named from the switch's side and so read the other way round. Control
+  /// and trace DMAs are counted on their own bundles.
   uint32_t getNumDMAChannels(int col, int row, AIE::DMAChannelDir dir) const;
+
+  bool isDmaChannelSupported(TileID tile, AIE::DMAChannelDir dir,
+                             int channel) const {
+    return channel >= 0 && static_cast<uint32_t>(channel) <
+                               getNumDMAChannels(tile.col, tile.row, dir);
+  }
 
   /// Return the number of packet-rule slots per stream-switch slave port.
   virtual uint32_t getNumSlaveSlots() const = 0;
@@ -1414,8 +1421,6 @@ public:
 ///    queries (getDmaBdAddress(), getDmaControlAddress()) encode this; code
 ///    that open-codes (col << colShift) | (row << rowShift) does not, and
 ///    refuses AIE4 memtile and core tiles.
-///  - Control-MM2S and trace-S2MM shim DMAs: there is no DMAChannelDir for
-///    them, so only their stream-switch ports (DMAControl, DMATrace) exist.
 ///  - The memtile's lock and memory windows reach seven columns either side;
 ///    getLockLocalBaseIndex()/getMemLocalBaseAddress() are not virtual, so the
 ///    memtile cases are refused by their callers.
@@ -1491,9 +1496,8 @@ public:
   uint32_t getNumBDs(AIETileType tileType) const override {
     return tileType == AIETileType::ShimNOCTile ? 32 : 16;
   }
-  /// Physical BDs: a memtile has a private 16-BD pool for each of its 10 MM2S
-  /// and 8 S2MM channels. A shim has, besides the 32 data BDs, 8 BDs for each
-  /// of its two control-MM2S channels and 4 for its trace-S2MM channel.
+  /// Memtile: 16 BDs per each of 10 MM2S + 8 S2MM channels. Shim: 32 data,
+  /// 8 per ControlMM2S channel and 4 for TraceS2MM.
   uint32_t getTotalNumBDs(AIETileType tileType) const override {
     if (tileType == AIETileType::MemTile)
       return 16 * (10 + 8);
@@ -1502,18 +1506,13 @@ public:
     return getNumBDs(tileType);
   }
 
-  /// BD pools, each of 16 BDs:
-  ///  - core tile: one pool;
-  ///  - shim: two banks chosen by channel and direction. MM2S 0-1 and S2MM 0
-  ///    use BDs 0-15; MM2S 2-3 and S2MM 1 use BDs 16-31;
-  ///  - memtile: a private pool per channel and direction, with channel-local
-  ///    ids 0-15.
+  /// Shim: MM2S 0-1 and S2MM 0 use BDs 0-15, MM2S 2-3 and S2MM 1 BDs 16-31;
+  /// ControlMM2S (8) and TraceS2MM (4) have private pools. Memtile: a private
+  /// 16-BD pool per channel and direction.
   uint32_t getBdPoolId(int col, int row, int channel,
                        DMAChannelDir dir) const override;
   uint32_t getBdPoolStartId(int col, int row, uint32_t poolId) const override;
-  uint32_t getNumBDsInPool(int col, int row, uint32_t poolId) const override {
-    return 16;
-  }
+  uint32_t getNumBDsInPool(int col, int row, uint32_t poolId) const override;
   /// Memtile and shim BDs have four addressing dimensions; core BDs three.
   uint32_t getBDMaxDims(AIETileType tileType) const override {
     return tileType == AIETileType::CoreTile ? 3 : 4;

@@ -360,7 +360,7 @@ public:
     }
 
     auto channelDir = infoOp.getChannelDir();
-    bool isMM2S = channelDir == AIE::DMAChannelDir::MM2S;
+    bool isMM2S = AIE::isMM2S(channelDir);
     int tileCol = shimTile.getCol();
     int tileRow = shimTile.getRow();
 
@@ -691,7 +691,7 @@ public:
       return op->emitOpError(
           "shim_dma_allocation op must reference a valid TileOp.");
     auto channelDir = infoOp.getChannelDir();
-    bool isMM2S = channelDir == AIE::DMAChannelDir::MM2S;
+    bool isMM2S = AIE::isMM2S(channelDir);
     int tileCol = shimTile.getCol();
     int tileRow = shimTile.getRow();
 

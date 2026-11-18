@@ -32,8 +32,7 @@ using namespace xilinx::AIEX;
 static ShimDMAAllocationOp getCtrlPktShimAlloc(DeviceOp device, int col) {
   AIEDialect::IsCtrlPktOverlayAttrHelper overlay(device.getContext());
   for (auto alloc : device.getOps<AIE::ShimDMAAllocationOp>())
-    if (overlay.isAttrPresent(alloc) &&
-        alloc.getChannelDir() == AIE::DMAChannelDir::MM2S &&
+    if (overlay.isAttrPresent(alloc) && AIE::isMM2S(alloc.getChannelDir()) &&
         alloc.getTileOp().colIndex() == col)
       return alloc;
   return {};
@@ -204,7 +203,7 @@ struct AIECtrlPacketToDmaPass
             if (multicast) {
               auto source = (*groups)[*multicast].allocation;
               alloc = symbols.lookup<ShimDMAAllocationOp>(source.getSymName());
-              if (!alloc || alloc.getChannelDir() != DMAChannelDir::MM2S ||
+              if (!alloc || !AIE::isMM2S(alloc.getChannelDir()) ||
                   alloc.getTileOp().getTileID() !=
                       source.getTileOp().getTileID() ||
                   alloc.getChannelIndex() != source.getChannelIndex()) {

@@ -628,6 +628,16 @@ mlir::LogicalResult verifyDMAChannel(mlir::Operation *op,
                                      const AIETargetModel &targetModel, int col,
                                      int row, DMAChannelDir dir,
                                      int64_t channel);
+// Check the tile has the ControlMM2S/TraceS2MM channel; data directions pass.
+mlir::LogicalResult
+verifyControlOrTraceDMAChannel(mlir::Operation *op,
+                               const AIETargetModel &targetModel, int col,
+                               int row, DMAChannelDir dir, int64_t channel);
+// As above; an unplaced tile passes.
+mlir::LogicalResult verifyControlOrTraceDMAChannel(mlir::Operation *op,
+                                                   TileLike tile,
+                                                   DMAChannelDir dir,
+                                                   int64_t channel);
 
 // Validate an out-of-order S2MM channel and its receive BDs.
 mlir::LogicalResult

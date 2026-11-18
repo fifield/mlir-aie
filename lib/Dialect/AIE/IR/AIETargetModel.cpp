@@ -1783,12 +1783,13 @@ AIETargetModel::getMemLocalBaseAddress(int localCol, int localRow, int memCol,
 
 uint32_t AIETargetModel::getNumDMAChannels(int col, int row,
                                            AIE::DMAChannelDir dir) const {
-  bool mm2s = dir == AIE::DMAChannelDir::MM2S;
+  bool mm2s = isMM2S(dir);
+  WireBundle bundle = getDMAChannelBundle(dir);
   if (hasShimMux(col, row))
-    return mm2s ? getNumSourceShimMuxConnections(col, row, WireBundle::DMA)
-                : getNumDestShimMuxConnections(col, row, WireBundle::DMA);
-  return mm2s ? getNumSourceSwitchboxConnections(col, row, WireBundle::DMA)
-              : getNumDestSwitchboxConnections(col, row, WireBundle::DMA);
+    return mm2s ? getNumSourceShimMuxConnections(col, row, bundle)
+                : getNumDestShimMuxConnections(col, row, bundle);
+  return mm2s ? getNumSourceSwitchboxConnections(col, row, bundle)
+              : getNumDestSwitchboxConnections(col, row, bundle);
 }
 
 bool AIETargetModel::isSupportedBlockFormat(std::string const &format) const {
@@ -1952,19 +1953,40 @@ bool AIE4TargetModel::isLegalMemAffinity(int coreCol, int coreRow, int memCol,
   return isMemEast(coreCol, coreRow, memCol, memRow);
 }
 
+// Shim pools: 0 and 1 are the data BD banks, then one private pool per
+// ControlMM2S channel and one for the TraceS2MM channel.
+static constexpr uint32_t aie4ShimControlPool = 2;
+static constexpr uint32_t aie4ShimNumControlChannels = 2;
+static constexpr uint32_t aie4ShimTracePool =
+    aie4ShimControlPool + aie4ShimNumControlChannels;
+
 uint32_t AIE4TargetModel::getBdPoolId(int col, int row, int channel,
                                       DMAChannelDir dir) const {
-  bool mm2s = dir == DMAChannelDir::MM2S;
+  bool mm2s = isMM2S(dir);
   if (isMemTile(col, row))
     return 2 * channel + (mm2s ? 0 : 1);
-  if (isShimNOCTile(col, row))
+  if (isShimNOCTile(col, row)) {
+    if (dir == DMAChannelDir::ControlMM2S)
+      return aie4ShimControlPool + channel;
+    if (dir == DMAChannelDir::TraceS2MM)
+      return aie4ShimTracePool + channel;
     return channel >= (mm2s ? 2 : 1) ? 1 : 0;
+  }
   return 0;
 }
 
 uint32_t AIE4TargetModel::getBdPoolStartId(int col, int row,
                                            uint32_t poolId) const {
   return isShimNOCTile(col, row) && poolId == 1 ? 16 : 0;
+}
+
+uint32_t AIE4TargetModel::getNumBDsInPool(int col, int row,
+                                          uint32_t poolId) const {
+  if (isShimNOCTile(col, row) && poolId >= aie4ShimTracePool)
+    return 4;
+  if (isShimNOCTile(col, row) && poolId >= aie4ShimControlPool)
+    return 8;
+  return 16;
 }
 
 static void aie4ChannelOutOfRange(StringRef what, int col, int row,
@@ -1977,7 +1999,7 @@ static void aie4ChannelOutOfRange(StringRef what, int col, int row,
 uint64_t AIE4TargetModel::getDmaBdAddress(int col, int row, uint32_t bd_id,
                                           int channel,
                                           AIE::DMAChannelDir direction) const {
-  bool mm2s = direction == AIE::DMAChannelDir::MM2S;
+  bool mm2s = isMM2S(direction);
   uint64_t offset = 0;
   if (isShimNOCTile(col, row)) {
     if (channel < 0)
@@ -1985,14 +2007,21 @@ uint64_t AIE4TargetModel::getDmaBdAddress(int col, int row, uint32_t bd_id,
                          "depends on its channel and direction");
     if (channel >= static_cast<int>(getNumDMAChannels(col, row, direction)))
       aie4ChannelOutOfRange("getDmaBdAddress", col, row, channel);
-    // bd_id is global across the two 16-BD banks; the register is indexed
-    // bank-locally.
-    bool upper = getBdPoolId(col, row, channel, direction) == 1;
     if (!isBdChannelAccessible(col, row, bd_id, channel, direction))
       report_fatal_error("AIE4TargetModel::getDmaBdAddress: shim BD " +
-                         Twine(bd_id) + " is not in the bank of channel " +
+                         Twine(bd_id) + " is not in the pool of channel " +
                          Twine(channel));
-    offset = (upper ? 0x00058000 : 0x00018000) + (bd_id % 16) * 0x30;
+    if (direction == AIE::DMAChannelDir::ControlMM2S) {
+      // ControlMM2S channel 1 is in the upper application bank.
+      offset = (channel == 0 ? 0x00018300 : 0x00058300) + bd_id * 0x30;
+    } else if (direction == AIE::DMAChannelDir::TraceS2MM) {
+      offset = 0x00018480 + bd_id * 0x30;
+    } else {
+      // bd_id is global across the two 16-BD banks; the register is indexed
+      // bank-locally.
+      bool upper = getBdPoolId(col, row, channel, direction) == 1;
+      offset = (upper ? 0x00058000 : 0x00018000) + (bd_id % 16) * 0x30;
+    }
   } else if (isMemTile(col, row)) {
     if (channel < 0)
       report_fatal_error("AIE4TargetModel::getDmaBdAddress: a memtile BD's "
@@ -2024,7 +2053,7 @@ uint32_t AIE4TargetModel::getDmaBdAddressOffset(int col, int row) const {
 uint32_t
 AIE4TargetModel::getDmaControlAddress(int col, int row, int channel,
                                       AIE::DMAChannelDir direction) const {
-  bool mm2s = direction == AIE::DMAChannelDir::MM2S;
+  bool mm2s = isMM2S(direction);
   if (channel < 0 ||
       channel >= static_cast<int>(getNumDMAChannels(col, row, direction)))
     aie4ChannelOutOfRange("getDmaControlAddress", col, row, channel);
@@ -2033,7 +2062,13 @@ AIE4TargetModel::getDmaControlAddress(int col, int row, int channel,
     static constexpr uint32_t s2mm[] = {0x00018540, 0x00058540};
     static constexpr uint32_t mm2s4[] = {0x00018550, 0x00018558, 0x00058550,
                                          0x00058558};
-    offset = mm2s ? mm2s4[channel] : s2mm[channel];
+    static constexpr uint32_t control[] = {0x00018560, 0x00058560};
+    if (direction == AIE::DMAChannelDir::ControlMM2S)
+      offset = control[channel];
+    else if (direction == AIE::DMAChannelDir::TraceS2MM)
+      offset = 0x00018548;
+    else
+      offset = mm2s ? mm2s4[channel] : s2mm[channel];
   } else if (isMemTile(col, row)) {
     int channelsPerBank = mm2s ? 5 : 4;
     offset = mm2s ? 0x00009E60 : 0x00009E00;

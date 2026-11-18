@@ -415,8 +415,7 @@ inline QueueEffect rawQueueEffect(mlir::Operation *op,
   if (wait)
     return QueueEffect::await(key);
   return QueueEffect::push(key, copy.getIssueToken() ||
-                                    allocation.getChannelDir() ==
-                                        AIE::DMAChannelDir::S2MM);
+                                    AIE::isS2MM(allocation.getChannelDir()));
 }
 
 /// Completion is distinct from queue occupancy: Task_Queue_Size excludes the

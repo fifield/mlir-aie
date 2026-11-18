@@ -11,6 +11,8 @@ add_executable(target_model_rtti  target_model_rtti.cpp)
 add_executable(target_model_npu3  target_model_npu3.cpp)
 add_executable(target_model_bd_pools  target_model_bd_pools.cpp)
 target_link_libraries(target_model_bd_pools PRIVATE AIETransforms)
+add_executable(target_model_dma_channels  target_model_dma_channels.cpp)
+target_link_libraries(target_model_dma_channels PRIVATE AIETransforms)
 add_executable(target_model_unknown_device  target_model_unknown_device.cpp)
 add_executable(dma_channel_capacity  dma_channel_capacity.cpp)
 llvm_update_compile_flags(dma_channel_capacity)
@@ -33,6 +35,7 @@ add_test(NAME TargetModel COMMAND target_model)
 add_test(NAME TargetModelRtti COMMAND target_model_rtti)
 add_test(NAME TargetModelNPU3 COMMAND target_model_npu3)
 add_test(NAME TargetModelBdPools COMMAND target_model_bd_pools)
+add_test(NAME TargetModelDmaChannels COMMAND target_model_dma_channels)
 add_test(NAME TargetModelUnknownDevice COMMAND target_model_unknown_device)
 add_test(NAME DMAChannelCapacity COMMAND dma_channel_capacity)
 add_test(NAME TakenBdsPools COMMAND taken_bds_pools)
@@ -68,7 +71,7 @@ target_link_libraries(stack_size_analysis PRIVATE ${stack_size_analysis_libs})
 get_property(dialect_libs GLOBAL PROPERTY MLIR_DIALECT_LIBS)
 
 set(EXECUTABLES target_model target_model_rtti target_model_npu3
-    target_model_bd_pools
+    target_model_bd_pools target_model_dma_channels
     target_model_unknown_device
     dma_channel_capacity taken_bds_pools register_database device_cache)
 
